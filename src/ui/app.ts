@@ -150,7 +150,9 @@ export class App {
   readonly model: LevelModel = new LevelModel({
     rom: () => this.rom,
     level: () => this.level,
-    edit: (f) => this.editLevel(f),
+    edit: (f, rerender) => this.editLevel(f, rerender),
+    beginEdit: () => this.beginLevelEdit(),
+    selectionChanged: () => this.emit('change'),
     geometry: () => ({ l1: this.images.geom1, l2: this.images.geom2 ?? null, vertical: this.vertical }),
     switchMode: (m) => this.setMode(m),
   });
@@ -1562,14 +1564,6 @@ export class App {
     this.emit('bgtile');
   }
 
-  clampObject(o: { x: number; y: number }): void {
-    this.model.clampObject(o);
-  }
-  // the tiles an object's origin can be on in the mode's layer: 0 to w - 1, 0 to h - 1
-  objectLimits(): { w: number; h: number } {
-    return this.model.objectLimits();
-  }
-
   insertAt(tx: number, ty: number, p: PickedItem | null = this.pickedItem): void {
     if (!p) { toast('Choose an object/sprite in the picker first.'); return; }
     this.model.insertAt(tx, ty, p);
@@ -1914,7 +1908,7 @@ export class App {
   // the picked item chosen in the picker: the level's selection cleared (it would be copied by a right click)
   choosePickedItem(p: PickedItem): void {
     this.pickedItem = p;
-    if (this.selection.size) { this.selection.clear(); this.emit('change'); }
+    this.model.clearSelection();
     this.emit('picked-item');
   }
   // no picked item any more

@@ -472,13 +472,13 @@ function buildUi(app: App): { start: (at: NavLoc | null) => Promise<void> } {
     if (ctrl && k.toLowerCase() === 'c') { app.copy(); return; }
     if (ctrl && k.toLowerCase() === 'v') { const hv = view.hover; if (hv) app.paste(hv.tx, hv.ty); return; }
     if (ctrl && k.toLowerCase() === 'd') { e.preventDefault(); app.duplicateSelection(); return; }
-    if (ctrl && k.toLowerCase() === 'a') { e.preventDefault(); const items = app.mode === 'spr' ? app.level.sprites : app.currentObjects(); app.selection = new Set(items.map((o) => o.uid)); app.emit('change'); return; }
+    if (ctrl && k.toLowerCase() === 'a') { e.preventDefault(); app.model.selectAll(); return; }
     if (picker.key(e)) { e.preventDefault(); return; }
     if (k === 'Delete' || k === 'Backspace') { app.deleteSelection(); return; }
     // Esc: a drag cancelled, else the selection cleared, else the picked item
     if (k === 'Escape') {
       if (view.cancelDrag()) return;
-      if (app.selection.size) { app.selection.clear(); app.emit('change'); } else app.clearPickedItem();
+      if (!app.model.clearSelection()) app.clearPickedItem();
       return;
     }
     if (k === 'ContextMenu' || (k === 'F10' && e.shiftKey)) { e.preventDefault(); view.keyMenu(); return; }

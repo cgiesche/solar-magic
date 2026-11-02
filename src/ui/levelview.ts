@@ -4,7 +4,8 @@ import { App, isBrushMode, type Marker, type LevelEdit, type Brush, type Preview
 import { h, attachPanZoom, toast } from './dom.ts';
 import { paintOverlays, openOverlay, boxLayers, deathsAt, gameViewLabelBox, gameViewIn, BAND_STYLE, type SpriteDraw, MARKER_STYLE, type GameViewFrame } from './leveloverlays.ts';
 import { hex2, hex3 } from '../core/names.ts';
-import { aimResize, grabFor, type Grab, type Drivers } from '../core/objresize.ts';
+import { type Grab } from '../core/objresize.ts';
+import type { MoveDrag, ResizeDrag } from '../core/levelmodel.ts';
 import { probeAt, spriteProbeAt, enterText, collisionText, collisionIn, switchText, SWITCH_STATES, SWITCH_NAME } from '../core/blockprobe.ts';
 import { type LevelObject, type LevelSprite, newUid, serializeLayer1, serializeLayer2, serializeLevelSprites, spriteSizes, spriteId, EXIT_NEW } from '../core/level.ts';
 import { layer3CellAt, layer3WordText } from '../core/layer3map.ts';
@@ -23,8 +24,8 @@ import { projectId } from '../core/projectid.ts';
 import { loadDeaths, killerText, levelVersion, type DeathMark } from './deathmarks.ts';
 
 type Drag =
-  | { kind: 'move'; edit: LevelEdit; startTx: number; startTy: number; lastDx: number; lastDy: number; orig: Map<number, { x: number; y: number }> }
-  | { kind: 'resize'; edit: LevelEdit; handle: Grab; grab: Grab; uid: number; orig: Map<number, { x: number; y: number; size: number; drivers: Drivers }>; last: string; changed: boolean }
+  | { kind: 'move'; move: MoveDrag; startTx: number; startTy: number } // the selection (levelmodel.ts)
+  | { kind: 'resize'; resize: ResizeDrag } // the selected objects by a handle (levelmodel.ts)
   | { kind: 'band'; x0: number; y0: number; x1: number; y1: number; add: boolean; far: boolean } // far: dragged, not a click
   | { kind: 'marker'; edit: LevelEdit | null; marker: Marker; offX: number; offY: number; moved: boolean } // (secondary entrances: not a level edit)
   | { kind: 'paint'; edit: LevelEdit; changed: boolean; x0: number; y0: number; lastX: number; lastY: number } // BG/layer 3 brush, stamped on a grid of cells from (x0, y0)
@@ -99,11 +100,7 @@ export class LevelView {
       // (a resize that started before the sizes were known: its objects' drivers as emulated from now on, the edges
       // grabbed those the grabbed object's drivers move)
       const d = this.drag;
-      if (d?.kind === 'resize') {
-        for (const o of app.selectedObjects()) { const or = d.orig.get(o.uid); if (or) or.drivers = app.resizeDrivers({ ...o, size: or.size }); }
-        const g = d.orig.get(d.uid);
-        if (g) d.grab = grabFor(d.handle, g.drivers);
-      }
+      if (d?.kind === 'resize') d.resize.learned();
       this.requestPaint();
       if (this.hover) this.updateCursor(this.hover.px, this.hover.py, this.hover.top);
     });
@@ -571,10 +568,9 @@ export class LevelView {
     if (ho) {
       const objs = app.selectedObjects().filter((o) => app.resizable(o));
       app.probeSizes(objs);
-      const grab = grabFor(ho.grab, app.resizeDrivers(ho.o));
-      if (grab.hx || grab.hy) {
-        const orig = new Map(objs.map((o) => [o.uid, { x: o.x, y: o.y, size: o.size, drivers: app.resizeDrivers(o) }]));
-        this.drag = { kind: 'resize', edit: app.beginLevelEdit(), handle: ho.grab, grab, uid: ho.o.uid, orig, last: '', changed: false };
+      const resize = app.model.beginResize(objs, ho.o, ho.grab, (o) => app.resizeDrivers(o), (o) => app.sizeBoxes(o));
+      if (resize) {
+        this.drag = { kind: 'resize', resize };
         this.updateCursor(px, py, -1);
         this.resizeStatus();
         return;
@@ -585,10 +581,7 @@ export class LevelView {
       // multi-select stays within the current layer
       const own = hits.find((h) => h.mode === app.mode);
       if (own) {
-        const uid = own.item.uid;
-        if (app.selection.has(uid)) app.selection.delete(uid); else app.selection.add(uid);
-        app.stampSelection = true;
-        app.emit('change');
+        app.model.toggle(own.item.uid);
         return;
       }
     }
@@ -601,16 +594,12 @@ export class LevelView {
         app.setMode(hit.mode, [hit.item.uid]);
         toast(`Mode: ${hit.mode === 'spr' ? 'Sprites' : hit.mode === 'l2' ? 'Layer 2' : 'Layer 1'}`);
       }
-      else if (!app.selection.has(hit.item.uid)) app.selection = new Set([hit.item.uid]);
-      app.stampSelection = true;
-      app.emit('change');
-      const items = app.mode === 'spr' ? app.selectedSprites() : app.selectedObjects();
-      this.drag = { kind: 'move', edit: app.beginLevelEdit(), startTx: tx, startTy: ty, lastDx: 0, lastDy: 0, orig: new Map(items.map((o) => [o.uid, { x: o.x, y: o.y }])) };
+      app.model.pick(hit.item.uid);
+      const move = app.model.beginMove();
+      if (move) this.drag = { kind: 'move', move, startTx: tx, startTy: ty };
     } else {
-      if (!e.ctrlKey) app.selection.clear();
-      app.stampSelection = true;
       this.drag = { kind: 'band', x0: px, y0: py, x1: px, y1: py, add: e.ctrlKey, far: false };
-      app.emit('change');
+      app.model.beginBox(e.ctrlKey);
     }
   }
 
@@ -658,38 +647,12 @@ export class LevelView {
         if (d.marker.kind !== 'sec') app.changed(false); // (a secondary entrance is a ROM edit, shown by its follow-up)
       }
     } else if (d.kind === 'move') {
-      const dx = tx - d.startTx, dy = ty - d.startTy;
-      if (dx === d.lastDx && dy === d.lastDy) return;
-      d.lastDx = dx; d.lastDy = dy;
-      const items = app.mode === 'spr' ? app.selectedSprites() : app.selectedObjects();
-      for (const o of items) {
-        const or = d.orig.get(o.uid);
-        if (!or) continue;
-        o.x = or.x + dx; o.y = or.y + dy;
-        app.clampObject(o);
-      }
+      if (!d.move.to(tx - d.startTx, ty - d.startTy)) return;
       if (app.mode === 'spr') app.changed(false);
       else this.scheduleRefresh();
     } else if (d.kind === 'resize') {
       // the grabbed object aims at the mouse, the others move the same edges by as many tiles
-      const { w, h } = app.objectLimits(), g = d.grab;
-      const objs = app.selectedObjects().filter((o) => d.orig.has(o.uid));
-      const edges = (o: LevelObject) => {
-        const or = d.orig.get(o.uid)!, b = app.sizeBoxes(o)(or.size);
-        return b ? { x: or.x + (g.hx === 1 ? b.x1 : b.x0), y: or.y + (g.hy === 1 ? b.y1 : b.y0) } : null;
-      };
-      const aim = (o: LevelObject, ax: number, ay: number) => { const or = d.orig.get(o.uid)!; return aimResize(or, or.drivers, app.sizeBoxes(o), g, ax, ay, w, h); };
-      const grabbed = objs.find((o) => o.uid === d.uid), ge = grabbed && edges(grabbed), gr = grabbed && aim(grabbed, tx, ty);
-      if (!grabbed || !ge || !gr) return;
-      const dx = (g.hx === 1 ? gr.box.x1 : gr.box.x0) - ge.x, dy = (g.hy === 1 ? gr.box.y1 : gr.box.y0) - ge.y;
-      for (const o of objs) {
-        const e0 = o === grabbed ? ge : edges(o), r = o === grabbed ? gr : e0 && aim(o, e0.x + dx, e0.y + dy);
-        if (r) { o.x = r.x; o.y = r.y; o.size = r.size; }
-      }
-      const key = objs.map((o) => `${o.x},${o.y},${o.size}`).join(' ');
-      if (key === d.last) return;
-      d.last = key;
-      d.changed = objs.some((o) => { const or = d.orig.get(o.uid)!; return o.x !== or.x || o.y !== or.y || o.size !== or.size; });
+      if (!d.resize.aim(tx, ty)) return;
       this.resizeStatus();
       this.scheduleRefresh();
     }
@@ -730,11 +693,12 @@ export class LevelView {
     if (d.kind === 'band') {
       const x0 = Math.floor(Math.min(d.x0, d.x1) / 16), x1 = Math.floor(Math.max(d.x0, d.x1) / 16);
       const y0 = Math.floor(Math.min(d.y0, d.y1) / 16), y1 = Math.floor(Math.max(d.y0, d.y1) / 16);
+      const caught: number[] = [];
       if (app.mode === 'spr') {
         const bx0 = Math.min(d.x0, d.x1), bx1 = Math.max(d.x0, d.x1), by0 = Math.min(d.y0, d.y1), by1 = Math.max(d.y0, d.y1);
         for (const s of app.level.sprites) {
           const b = app.spriteBox(s);
-          if (b.x0 <= bx1 && b.x1 > bx0 && b.y0 <= by1 && b.y1 > by0) app.selection.add(s.uid);
+          if (b.x0 <= bx1 && b.x1 > bx0 && b.y0 <= by1 && b.y1 > by0) caught.push(s.uid);
         }
       } else if (d.far) {
         // an object is caught by its tiles (its outline), not its bounding box: slopes reach far diagonally
@@ -743,16 +707,16 @@ export class LevelView {
             const x = t & 0xffff, y = t >> 16;
             return x >= x0 && x <= x1 && y >= y0 && y <= y1;
           });
-          if (hit) app.selection.add(o.uid);
+          if (hit) caught.push(o.uid);
         }
       }
       // a click into nothing (no item of any shown layer there): nothing placed by a right click any more
       if (!d.far && !d.add) app.clearPickedItem();
-      app.emit('change');
+      app.model.addToSelection(caught);
       return;
     }
-    if (d.kind === 'move') { if (d.lastDx || d.lastDy) d.edit.commit(); else d.edit.cancel(); return; }
-    if (d.kind === 'resize') { if (d.changed) d.edit.commit(); else d.edit.cancel(); return; }
+    if (d.kind === 'move') { d.move.end(); return; }
+    if (d.kind === 'resize') { d.resize.end(); return; }
   }
 
   // Esc while dragging: the drag undone (moving, resizing, painting, a level entrance) or dropped (a selection
@@ -761,7 +725,9 @@ export class LevelView {
     const d = this.drag;
     if (!d || (d.kind === 'marker' && !d.edit)) return false;
     this.drag = null;
-    if (d.kind === 'move' || d.kind === 'resize' || d.kind === 'paint' || d.kind === 'marker') d.edit?.cancel(true);
+    if (d.kind === 'move') d.move.cancel();
+    else if (d.kind === 'resize') d.resize.cancel();
+    else if (d.kind === 'paint' || d.kind === 'marker') d.edit?.cancel(true);
     if (this.hover) this.updateCursor(this.hover.px, this.hover.py, this.hover.top);
     this.paint();
     return true;
@@ -861,7 +827,7 @@ export class LevelView {
     const objs = app.selectedObjects().filter((o) => app.resizable(o));
     if (objs.length <= 32) return objs;
     const d = this.drag, top = this.hover?.top;
-    return objs.filter((o) => (d?.kind === 'resize' ? o.uid === d.uid : o.uid === top));
+    return objs.filter((o) => (d?.kind === 'resize' ? o.uid === d.resize.uid : o.uid === top));
   }
   // The object whose resize handle is at the pixel and the edges it grabs: each edge along its whole length, in a
   // band reaching a little inside the object and more outside (its inside stays for moving), the corners where
@@ -887,7 +853,7 @@ export class LevelView {
   resizeStatus(): void {
     const d = this.drag;
     if (d?.kind !== 'resize') return;
-    const o = this.app.selectedObjects().find((o) => o.uid === d.uid), b = o && this.app.sizeBoxes(o)(o.size);
+    const o = this.app.selectedObjects().find((o) => o.uid === d.resize.uid), b = o && this.app.sizeBoxes(o)(o.size);
     if (!o || !b) return;
     this.status.textContent = `Resizing: size ${hex2(o.size)} · ${b.x1 - b.x0 + 1}×${b.y1 - b.y0 + 1} tiles`;
   }
@@ -895,7 +861,7 @@ export class LevelView {
   updateCursor(px: number, py: number, top: number): void {
     const app = this.app, d = this.drag;
     let c = '', ho: ReturnType<LevelView['handleAt']>;
-    if (d?.kind === 'resize') c = this.resizeCursor(d.grab);
+    if (d?.kind === 'resize') c = this.resizeCursor(d.resize.grab);
     else if (d?.kind === 'marker' || d?.kind === 'move' || d?.kind === 'gameView') c = 'grabbing';
     else if (this.gameViewGrab(px, py)) c = 'grab';
     else if (this.brushMode()) c = 'crosshair';
@@ -919,10 +885,8 @@ export class LevelView {
       const hit = app.hitsAt(px, py)[0];
       if (hit) {
         if (hit.mode !== app.mode) app.setMode(hit.mode, [hit.item.uid]);
-        else app.selection = new Set([hit.item.uid]);
-        app.stampSelection = true;
-        app.emit('change');
-      } else if (app.selection.size) { app.selection.clear(); app.emit('change'); }
+        app.model.pick(hit.item.uid);
+      } else app.model.clearSelection();
     }
     const spr = app.mode === 'spr';
     const items: MenuItem[] = [];
@@ -947,7 +911,7 @@ export class LevelView {
       items.push(
         { label: 'Paste here', shortcut: 'Ctrl+V', disabled: () => !clip?.length, onClick: () => app.paste(tx, ty) },
         { label: 'Insert by number …', shortcut: 'I', onClick: () => openInsertDialog(app, tx, ty) },
-        { label: 'Select all', shortcut: 'Ctrl+A', onClick: () => { app.selection = new Set((spr ? app.level.sprites : app.currentObjects()).map((o) => o.uid)); app.emit('change'); } });
+        { label: 'Select all', shortcut: 'Ctrl+A', onClick: () => app.model.selectAll() });
       const scr = app.vertical ? ty >> 4 : tx >> 4;
       items.push(...this.exitItems(px, py, tx, ty, true),
         { label: 'Insert screen here …', disabled: () => app.level.header.screens >= 32, onClick: () => openScreenDialog(app, 'insert', scr) },

@@ -1,5 +1,6 @@
 // The level editing model (core/levelmodel.ts), headless: placing picked items and copies, copy/paste, delete, move,
-// resize and reorder in each mode, clamped against the level's geometry, each one undoable level edit.
+// resize and reorder in each mode, clamped against the level's geometry, each one undoable level edit; the selection
+// changed by the views, property edits and the level view's move and resize drags.
 import { Rom } from '../src/core/rom.ts';
 import { EditSession } from '../src/core/editsession.ts';
 import { LevelModel, type LevelGeometry, type EditMode } from '../src/core/levelmodel.ts';
@@ -17,14 +18,17 @@ function setup(geom: LevelGeometry = { l1: { width: 64, height: 27 }, l2: null, 
   const s = new EditSession(rom);
   s.open(N);
   const switched: EditMode[] = [];
+  const notes = { selection: 0 };
   const m = new LevelModel({
-    rom: () => rom, level: () => s.level, edit: (f) => s.editLevel(f), geometry: () => geom,
+    rom: () => rom, level: () => s.level, edit: (f, rerender) => s.editLevel(f, rerender), geometry: () => geom,
+    beginEdit: () => s.beginLevelEdit(), selectionChanged: () => notes.selection++,
     switchMode: (mode) => { switched.push(mode); m.mode = mode; },
   });
-  return { rom, s, m, switched };
+  return { rom, s, m, switched, notes };
 }
 const uids = (xs: { uid: number }[]) => xs.map((o) => o.uid);
 const obj = (m: LevelModel, uid: number) => m.currentObjects().find((o) => o.uid === uid)!;
+const spr = (m: LevelModel, uid: number) => m.level.sprites.find((s) => s.uid === uid)!;
 
 // placing the picked item: an object in layer 1, clamped into the level, selected, one undo step
 {
@@ -172,6 +176,118 @@ const obj = (m: LevelModel, uid: number) => m.currentObjects().find((o) => o.uid
   p.x = 10; p.y = 10; p.size = 0x22;
   m.resizeObjects([p], [0x33], () => box, true);
   check(obj(m, p.uid).size === 0x33 && obj(m, p.uid).x === 9 && obj(m, p.uid).y === 9, 'resize far: the right and bottom edges kept');
+}
+
+// the selection changed by the views: each change told to the host (the views show it), no level edit
+{
+  const { s, m, notes } = setup();
+  const [a, b] = s.level.objects;
+  m.pick(a.uid);
+  check(m.selection.size === 1 && m.selection.has(a.uid) && m.stampSelection && notes.selection === 1, 'pick: selected alone, stamped, told');
+  m.selection = new Set([a.uid, b.uid]);
+  m.pick(a.uid);
+  check(m.selection.size === 2, 'pick of a selected item: the selection kept (to drag it)');
+  m.toggle(b.uid);
+  check(m.selection.size === 1 && !m.selection.has(b.uid), 'toggle: out of the selection');
+  m.toggle(b.uid);
+  check(m.selection.has(b.uid), 'toggle: back in');
+  m.beginBox(true);
+  check(m.selection.size === 2, 'box adding: the selection kept');
+  m.beginBox(false);
+  check(m.selection.size === 0, 'box: the selection cleared');
+  m.addToSelection([a.uid]);
+  check(m.selection.has(a.uid), 'box end: the caught items selected');
+  m.selectAll();
+  check(m.selection.size === s.level.objects.length, 'select all: the mode\'s objects');
+  m.mode = 'spr';
+  m.selectAll();
+  check(m.selection.size === s.level.sprites.length && m.selectedSprites().length === s.level.sprites.length, 'select all in mode sprites: the sprites');
+  check(m.clearSelection() && m.selection.size === 0 && !m.clearSelection(), 'clear: true once, then nothing to clear');
+  check(notes.selection === 10 && !s.dirty, 'each change told, no level edit');
+}
+
+// property edits: one level edit each; an object number change fixes the prefab number and flag check
+{
+  const { s, m } = setup();
+  const o = s.level.objects[0];
+  const n = s.lastStep;
+  check(m.setObjectNum(o.uid, 0) && m.setObjectExt(o.uid, 0x04) && obj(m, o.uid).prefab === 0, 'object $00/$04: a prefab number');
+  check(s.lastStep !== n, 'property edit: a level edit');
+  m.setObjectExt(o.uid, 0x05);
+  check(obj(m, o.uid).prefab === undefined, 'Direct Map16: no prefab number');
+  m.updateObject(o.uid, (x) => { x.cond = { flag: 1, always: false }; });
+  m.setObjectNum(o.uid, 0x21);
+  check(obj(m, o.uid).num === 0x21 && obj(m, o.uid).cond === undefined, 'standard object: no flag check');
+  const [a, b] = s.level.objects;
+  m.updateObjects([a.uid, b.uid], (x) => { x.y = 3; });
+  check(obj(m, a.uid).y === 3 && obj(m, b.uid).y === 3, 'update objects: all of them');
+  const last = s.lastStep;
+  check(!m.updateObject(-5, (x) => { x.y = 0; }) && s.lastStep === last, 'update of an object gone: no edit');
+  m.mode = 'spr';
+  const sp = s.level.sprites[0];
+  m.setSpriteExtra(sp.uid, 2);
+  const nb = m.spriteByteCount(spr(m, sp.uid));
+  check(nb === (spr(m, sp.uid).bytes?.length ?? 0), 'custom sprite: its extra bytes as the size table says');
+  m.setSpriteExtra(sp.uid, 0);
+  check(m.spriteByteCount(spr(m, sp.uid)) === 0 && !spr(m, sp.uid).bytes, 'original sprite: no extra bytes');
+  m.setSpriteNum(sp.uid, 0x0e);
+  m.updateSprite(sp.uid, (x) => { x.x = 7; });
+  const x = spr(m, sp.uid);
+  check(x.num === 0x0e && x.x === 7, 'sprite: number and place');
+}
+
+// the move drag: the selection from where it was by the tiles dragged, clamped, one undo step at its end
+{
+  const { s, m } = setup();
+  const o = s.level.objects[0];
+  o.x = 10; o.y = 10;
+  m.selection = new Set([o.uid]);
+  const n = s.lastStep;
+  const d = m.beginMove()!;
+  check(d.to(2, 1) && obj(m, o.uid).x === 12 && obj(m, o.uid).y === 11, 'move drag: by (2, 1)');
+  check(!d.to(2, 1), 'move drag: the same tiles again: nothing');
+  d.to(-100, 0);
+  check(obj(m, o.uid).x === 0, 'move drag: clamped');
+  d.to(3, 0);
+  d.end();
+  check(obj(m, o.uid).x === 13 && s.lastStep !== n, 'move drag: committed');
+  s.undo();
+  check(obj(m, o.uid).x === 10 && obj(m, o.uid).y === 10, 'move drag: one undo step');
+  const last = s.lastStep;
+  const z = m.beginMove()!;
+  z.to(0, 0);
+  z.end();
+  check(s.lastStep === last, 'move drag not moved: no edit');
+  const c = m.beginMove()!;
+  c.to(4, 4);
+  c.cancel();
+  check(obj(m, o.uid).x === 10 && obj(m, o.uid).y === 10 && s.lastStep === last, 'move drag cancelled: undone');
+  m.selection.clear();
+  check(m.beginMove() === null, 'move drag with nothing selected: none');
+}
+
+// the resize drag: the grabbed edges aim at the mouse, the others' edges by as many tiles
+{
+  const { s, m } = setup();
+  const [a, b] = s.level.objects;
+  a.x = 10; a.y = 10; a.size = 0x00;
+  b.x = 20; b.y = 10; b.size = 0x01;
+  m.selection = new Set([a.uid, b.uid]);
+  const box = (size: number) => ({ x0: 0, y0: 0, x1: size & 15, y1: size >> 4 });
+  const drivers = () => ({ x: 'lo' as const, y: 'hi' as const });
+  check(m.beginResize([a, b], a, { hx: 1, hy: 0 }, () => ({ x: null, y: 'hi' }), () => box) === null, 'resize drag: no edge the drivers move, none');
+  const d = m.beginResize([a, b], a, { hx: 1, hy: 0 }, drivers, () => box)!;
+  check(d.uid === a.uid && d.grab.hx === 1 && d.grab.hy === 0, 'resize drag: the right edge grabbed');
+  check(d.aim(13, 10) && obj(m, a.uid).size === 0x03 && obj(m, b.uid).size === 0x04 && d.changed, 'resize drag: grabbed to 4 wide, the other 3 tiles wider');
+  check(obj(m, a.uid).x === 10 && obj(m, b.uid).x === 20, 'resize drag: the left edges stay');
+  check(!d.aim(13, 10), 'resize drag: the same tile again: nothing');
+  d.end();
+  s.undo();
+  check(obj(m, a.uid).size === 0 && obj(m, b.uid).size === 1, 'resize drag: one undo step');
+  const c = m.beginResize([a, b], obj(m, a.uid), { hx: 1, hy: 0 }, drivers, () => box)!;
+  c.aim(15, 10);
+  c.cancel();
+  check(obj(m, a.uid).size === 0, 'resize drag cancelled: undone');
 }
 
 if (bad) { console.log(`${bad} failed`); process.exit(1); }
