@@ -60,7 +60,7 @@ const addr = (a: number) => `$${hx(a, a > 0xffff ? 6 : 4)}`;
 // as in Lunar Magic's help; 8-bit A for a manual frame); null for those without RAM; ow: in an overworld list
 export function triggerRam(t: number, ow = false): { ram: string; what: string; asm?: string; off?: string } | null {
   if (ow && isEventTrigger(t)) {
-    return { ram: addr(EXTRIGGER_RAM.manual + eventManual(t)), what: `the event's number (Manual ${hx(eventManual(t), 1)}, set by Trigger Init); it holds while that event is passed (${addr(RAM.owEvents)}, a bit each)` };
+    return { ram: addr(EXTRIGGER_RAM.manual + eventManual(t)), what: `the event's number (Manual ${hx(eventManual(t), 1)}, set by Trigger Init; without it FF from the overworld's load: never); it holds while that event is passed (${addr(RAM.owEvents)}, a bit each)` };
   }
   if (isManual(t)) {
     const a = addr(EXTRIGGER_RAM.manual + (t - MANUAL));
@@ -206,5 +206,12 @@ export function triggerProblems(level: ExList | null, global: ExList | null, ow 
     }
   }
   for (const [t, refs] of shots) if (refs.length > 1) out.push({ text: `${trigger(t)} is used by ${refs.length} slots (${refs.map(name).join(', ')}): the first to finish turns it off and pauses the others`, slots: refs });
+  // on the overworld manual frames 8-F hold the events of 01-08: a manual trigger 18-1F reads the same byte
+  const using = (t: number): SlotRef[] => ([[false, level], [true, global]] as const).flatMap(([g, l]) =>
+    [...l?.slots ?? []].filter(([, e]) => e.trigger === t && kindOf(e.type)).sort((a, b) => a[0] - b[0]).map(([slot]) => ({ global: g, slot })));
+  if (ow) for (let n = 8; n < 16; n++) {
+    const manual = using(MANUAL + n), event = using(n - 7);
+    if (manual.length && event.length) out.push({ text: `${trigger(MANUAL + n)} (${manual.map(name).join(', ')}) and ${trigger(n - 7)} (${event.map(name).join(', ')}) read the same byte (${addr(EXTRIGGER_RAM.manual + n)}): its value is the frame of the one and the event of the other – choose Manual 0–7 for the manual slots`, slots: [...manual, ...event] });
+  }
   return out;
 }

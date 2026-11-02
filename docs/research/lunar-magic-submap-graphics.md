@@ -185,6 +185,24 @@ main map to Yoshi's Island `$1F11` changes 9 frames before that (the window clos
 until then. Unlike the game, the walk so starts the game's animated tiles from their start (their phase, behind the
 closed window).
 
+### Event Manual 8–F at the load
+
+Research for issue #261. On the overworld the manual frames 8–F hold the events of triggers 01–08, and Lunar Magic's
+load sets only those a list's Trigger Init names: `tools/lmowmanual.ts` sets every manual frame to `$A0`+n (as a level
+might leave them) and loads the overworld again on each submap, in *Journey to Kaizo* and *Bluerio's Adventure* (whose
+lists set no manual frame) and with each submap's list given a Trigger Init of Manual 8 = 01 alone. Lunar Magic's code
+writes Manual 8 then (`$C28106` in *Journey to Kaizo*, `$CFA4C5` in *Bluerio's Adventure*), and nothing else: Manual
+9–F keep `$A9`–`$AF`, and without a Trigger Init all of them keep the last level's. So in Lunar Magic an event trigger
+whose manual frame the Trigger Init leaves out waits for whatever event number the level played before left there
+(in a new game `$00`, event 00).
+
+The editor does better: its load (`ow_setup`, also when Mario walks to another submap) sets Manual 8–F to `$FF` before
+the Trigger Init, and its event code takes `$78`–`$FF` for no event, so such a trigger never holds, whatever was played
+before; Manual 0–7 keep what was left, as in Lunar Magic. A level entered from the overworld finds `$FF` in Manual 8–F
+where its own Trigger Init sets nothing (the engine's "nothing shown yet": a manual trigger 18–1F shows no frame until
+code sets one). Since 18–1F read the bytes of 01–08's events on the overworld, the Animations tab warns when an overworld
+list (the submap's or the global one) uses a manual trigger 18–1F and the event trigger of the same byte.
+
 ### `$7FC00B`
 
 Research for issue #253. The engine keeps the submap the lists were set up for at `$7FC00B` (`$FF` in a level), next to

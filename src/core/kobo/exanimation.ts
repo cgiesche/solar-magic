@@ -859,7 +859,7 @@ condition:
     RTS
 ; On the overworld 01-08 are Lunar Magic's "Event Manual 8-F": they hold
 ; while the event whose number manual frame 8-F has is passed ($1F02, a bit
-; each, the first event the high bit). [Solar Magic]
+; each, the first event the high bit; 78 and up never). [Solar Magic]
 .overworld:
     PLA
     DEC A                       ; 01-08 as 0-7 (none and 09-0F: never)
@@ -870,6 +870,8 @@ condition:
     TAX
     SEP #$20
     LDA.l !Manual+8,x           ; the event
+    CMP #$78                    ; past the overworld's 78 events (FF: none
+    BCS .none                   ; set, ow_setup): never [Solar Magic]
     PHA
     LSR A
     LSR A
@@ -1513,6 +1515,13 @@ ow_setup:
     SEP #$20
     LDA [!List],y
     STA.l !OwSettings
+    REP #$20                    ; Manual 8-F the Trigger Init doesn't set:
+    LDA #$FFFF                  ; no event, so that 01-08 never hold there,
+    LDX #$0006                  ; whatever the last level left (Lunar Magic
+-   STA.l !Manual+8,x           ; keeps that) [Solar Magic]
+    DEX
+    DEX
+    BPL -
     JSR setup_lists
     JSR restore_scratch
     PLP

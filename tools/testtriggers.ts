@@ -170,6 +170,13 @@ check(triggerRam(0x04)?.ram === '$1490' && triggerRam(0x00) === null, 'star: the
   const rm = listOf([0, { type: 0x19, trigger: 0x13, framesLess1: 0, dest: 0x0321, frames: [] }], [1, { type: 0x18, trigger: 0x13, framesLess1: 0, dest: 0x0331, frames: [] }]);
   const pm = triggerProblems(rm, null).map((x) => x.text);
   check(pm.some((x) => x.includes('level 00') && x.includes('always turns')) && pm.some((x) => x.includes('level 01') && x.includes('never turns')), 'a rotation with a manual trigger: 19 always turns, 18 never');
+  // an overworld list (#261): manual 18–1F read the bytes of Event Manual 8–F (triggers 01–08), the submap's and
+  // the overworld's global list alike
+  const os = listOf([2, tiles(T0, 0x19, [1, 2])]), og = listOf([4, tiles(T1, 0x02, [1, 2])]);
+  const po = triggerProblems(os, og, true).filter((x) => x.text.includes('Event Manual 9'));
+  check(po.length === 1 && po[0].slots.length === 2 && po[0].slots.some((r) => !r.global && r.slot === 2) && po[0].slots.some((r) => r.global && r.slot === 4), `overworld: Manual 9 with trigger 02 (Event Manual 9) is a problem (${po.map((x) => x.text).join(' | ')})`);
+  check(!triggerProblems(os, listOf([4, tiles(T1, 0x03, [1, 2])]), true).some((x) => x.text.includes('Event Manual')), 'not with another event trigger (03: Event Manual A)');
+  check(!triggerProblems(os, og, false).some((x) => x.text.includes('Event Manual')), 'not in a level (02 is the silver P-switch there)');
   // as the engine does it
   writeLevelList(rom, LEVEL, rm);
   emu.load(LEVEL);

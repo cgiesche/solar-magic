@@ -12,7 +12,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { Rom } from '../src/core/rom.ts';
 import { LevelEmulator } from '../src/core/levelemu.ts';
 import { OverworldEmulator, l1Index } from '../src/core/overworld.ts';
-import { RAM, PAD, LM_RAM_BLOCK, EXANIM_OWN_RAM, EXANIM_SHARED_RAM } from '../src/core/ram.ts';
+import { RAM, PAD, LM_RAM_BLOCK, EXANIM_OWN_RAM, EXANIM_SHARED_RAM, EXTRIGGER_RAM } from '../src/core/ram.ts';
 import {
   owExanimLayout, readSubmapList, writeSubmapList, readOwGlobalList, writeOwGlobalList, submapAnimSettings, setSubmapAnimSettings,
   writeAltFile, emptyList, listBytes, exanimDataRanges, owExanimDataRanges, SUBMAP_LISTS,
@@ -216,6 +216,28 @@ check(readSubmapList(rom, 3)?.slots.get(1)?.frames.length === 2, 'an overworld l
   const a = seen(late(off), T), b = seen(late(on), T), a2 = seen(late(off), E), b2 = seen(late(on), E);
   check(a.has(0x55) && !a.has(0x66) && b.has(0x66) && !b.has(0x55), `Event Manual 8 = event ${hx(EV)}: the first set (${[...a].map((v) => hx(v)).join(' ')}), once passed the second (${[...b].map((v) => hx(v)).join(' ')})`);
   check(a2.has(0x77) && b2.has(0x88) && !b2.has(0x77), `trigger 06 (Event Manual D, the same event) alike on the overworld (${[...a2].map((v) => hx(v)).join(' ')} / ${[...b2].map((v) => hx(v)).join(' ')})`);
+}
+// Manual 8-F the overworld's Trigger Init doesn't set (#261): FF at the load, so the event triggers on them never
+// hold, whatever the last level left there (Lunar Magic keeps that: tools/lmowmanual.ts); manual 0-7 stay as left
+{
+  const l: ExList = emptyList();
+  l.manual.set(9, EV);
+  l.slots.set(0, { type: 0x01, trigger: 0x01, framesLess1: 0, dest: 0x8000 | T, frames: [0x80, 0xa0] }); // Event Manual 8: 55… / 66…
+  l.slots.set(1, { type: 0x01, trigger: 0x02, framesLess1: 0, dest: 0x8000 | E, frames: [0xc0, 0xe0] }); // Event Manual 9: 77… / 88…
+  writeSubmapList(rom, 3, l);
+  const emu = new LevelEmulator(rom), s = emu.snes, w = s.wram, M = EXTRIGGER_RAM.manual - 0x7e0000;
+  emu.startGame(0);
+  for (let n = 0; n < 16; n++) w[M + n] = EV; // as a level left them
+  const events = w.slice(RAM.owEvents, RAM.owEvents + 15);
+  events[EV >> 3] |= 0x80 >> (EV & 7);
+  w[RAM.submap] = w[RAM.submap + 1] = 3;
+  emu.reloadOverworld(events);
+  const manual = Array.from(w.subarray(M, M + 16));
+  const shots: Shot[] = [];
+  for (let f = 0; f < 24; f++) { s.runFrame(); shots.push({ vram: s.vram.slice(), cgram: s.cgram.slice(), wram: s.wram.slice() }); }
+  const a = seen(shots.slice(8), T), b = seen(shots.slice(8), E);
+  check(manual.every((v, n) => v === (n < 8 || n === 9 ? EV : 0xff)), `the load: Manual 8 and A–F FF, 9 the init's, 0–7 as left (${manual.map((v) => hx(v)).join(' ')})`);
+  check(a.has(0x55) && !a.has(0x66) && b.has(0x88) && !b.has(0x77), `event ${hx(EV)} passed: Event Manual 8 (no init) never holds (${[...a].map((v) => hx(v)).join(' ')}), Event Manual 9 (its init) does (${[...b].map((v) => hx(v)).join(' ')})`);
 }
 writeSubmapList(rom, 3, null);
 
