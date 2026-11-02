@@ -30,7 +30,9 @@ import { bgTileAddr } from '../src/core/bgmap16.ts';
 import { FG_PALS, BACK_AREA } from '../src/core/sharedpal.ts';
 import { setCustomPalette } from '../src/core/patches.ts';
 import { captureSprites, captureSpriteAt, spriteSetJob, spriteSetParts, spriteLoad, spriteLoads, type SpriteLevel } from '../src/core/spritegfx.ts';
-import { storeKey, type CacheEntry } from '../src/core/romdeps.ts';
+import { storeKey, bytePages, type CacheEntry } from '../src/core/romdeps.ts';
+import { loadAsar } from '../src/core/asar.ts';
+import { savePixiProject, parsePixiList, type PixiProject } from '../src/core/pixi.ts';
 import { LevelUses, levelUsesJob, levelTilesKey, levelTilesAll, levelOverride } from '../src/core/levelusage.ts';
 import { layer3Kinds } from '../src/core/layer3.ts';
 import { spriteMemCheckJob, usedSpriteMemory, SpriteGroupResults, type SpriteMemLevel, type SpriteMemResult } from '../src/core/spritemem.ts';
@@ -470,6 +472,85 @@ for (const changeRead of [false, true]) {
   const got = out.find((d) => d.type === 'learned');
   check(out.filter((d) => d.type === 'learning').length === 0 && got?.type === 'learned' && JSON.stringify(got.result) === capture(more) && !got.put.some(([k]) => k.startsWith('spr/')),
     'the editor\'s stored loads: none captured, the same images, not handed back');
+}
+
+// one sprite's entry in a per-sprite table (#231): the tables are found by emulation when the ROM boots
+// (spritetables.ts) and their pages recorded by byte, so a change of one sprite's entry captures only its load again –
+// the game's tweakers, and PIXI's sprite table (16 bytes per number); a PIXI insert again that moves the custom sprites'
+// code captures only their loads again, not those of the game's sprites
+{
+  await loadAsar();
+  // the parts captured again after change (spr/<load>, sent as the bytes it changed), the images as a capture of the whole set
+  const recaptured = (r: Rom, nums: number[], change: (r: Rom) => void) => {
+    const h = new ProbeHost();
+    h.setRom(1, r.data.slice());
+    const lv5 = loadLevel(r, 0x105), level: SpriteLevel = { number: 0x105, header: lv5.header, spriteHeader: lv5.spriteHeader, bgPointer: 0xffd900 };
+    const learn: ProbeMessage = { type: 'learn', lane: 'sprites', key: 'spr', input: inputHash({ set: 'test', nums }), job: { kind: 'sprites', level, nums, input: inputHash({ set: 'test' }) }, replace: true };
+    const run = () => {
+      h.handle(learn);
+      const out: ProbeReply[] = [];
+      while (h.pending) { const d = h.next(); if (d) out.push(d); }
+      const done = out.find((d) => d.type === 'learned');
+      return { result: done?.type === 'learned' ? JSON.stringify(done.result) : '', parts: out.flatMap((d) => ('put' in d ? d.put : [])).map(([k]) => k.split('#')[0]).filter((k) => k.startsWith('spr/')) };
+    };
+    const first = run(), before = r.data.slice();
+    change(r);
+    const edits: [number, Uint8Array][] = [];
+    for (let i = 0; i < r.size; i++) {
+      if (r.data[i] === before[i]) continue;
+      let j = i;
+      while (j < r.size && r.data[j] !== before[j]) j++;
+      edits.push([i, r.data.slice(i, j)]);
+      i = j;
+    }
+    h.handle({ type: 'edit', gen: 2, size: r.size, edits });
+    const again = run();
+    const on = new LevelEmulator(new Rom(r.data.slice()));
+    on.skipMask = () => gfxSkipMask(on.rom);
+    const whole = JSON.stringify([...spriteLoads(nums).values()].flatMap((l) => [...captureSprites(on, 0x105, lv5.header, lv5.spriteHeader, 0xffd900, l)]));
+    return { first: first.parts, again: again.parts, same: again.result === whole };
+  };
+  const flip = (o: number) => (r: Rom) => r.writeAt(o, Uint8Array.of(r.data[o] ^ 0x01));
+  const tablePages = (r: Rom) => { const e = new LevelEmulator(r); e.boot(); return bytePages(r); };
+
+  const vr = new Rom(EDITOR_IMAGE.slice()), tweaker = snesToPc(0x07f26c); // the game's first tweaker table ($1656)
+  const vp = tablePages(vr);
+  check([0, 0x21, 0xc8].every((n) => vp[(tweaker + n) >> 8] === 1), 'the game\'s tweaker table: byte pages, found by emulation');
+  const v = recaptured(new Rom(EDITOR_IMAGE.slice()), [0x00, 0x04, 0x0d, 0x0f, 0x11, 0x1d, 0x21, 0x3e], flip(tweaker + 0x21));
+  check(v.first.length === 5 && v.again.join() === `spr/${spriteLoad(0x21).toString(16)}` && v.same,
+    `a tweaker of sprite 21 changed: only its load captured again (${v.again.join()}), the images as a capture of the whole set`);
+
+  // two custom sprites in loads of their own, told apart in PIXI's table by their extra property bytes
+  const draw = (more: string) => 'print "INIT ",pc\n  RTL\nprint "MAIN ",pc\n  PHB : PHK : PLB\n' + more + '  JSR Gfx\n  PLB\n  RTL\nGfx:\n  %GetDrawInfo()\n'
+    + '  LDA $00 : STA $0300|!addr,y\n  LDA $01 : STA $0301|!addr,y\n  LDA #$8C : STA $0302|!addr,y\n  LDA #$21 : STA $0303|!addr,y\n'
+    + '  TYA : LSR #2 : TAY\n  LDA #$02 : STA $0460|!addr,y\n  RTS\n';
+  const project = (more: string): PixiProject => ({
+    files: new Map(Object.entries({
+      'sprites/a.cfg': '01\n36\n00 00 3B 80 00 00\n12 34\na.asm\n', 'sprites/b.cfg': '01\n36\n00 00 3B 80 00 00\n56 78\nb.asm\n',
+      'sprites/a.asm': draw(''), 'sprites/b.asm': draw(more),
+    }).map(([k, f]) => [k, new TextEncoder().encode(f)])),
+    list: parsePixiList('10 a.cfg\n20 b.cfg\n'),
+  });
+  const pr = new Rom(EDITOR_IMAGE.slice());
+  check(savePixiProject(pr, project('')).ok, 'PIXI: two custom sprites inserted');
+  // their rows in PIXI's sprite table: type, acts like, tweakers, INIT, MAIN, extra property bytes
+  const row = (prop: number[]) => pr.data.findIndex((_, i) => [1, 0x36, 0, 0, 0x3b, 0x80, 0, 0].every((b, j) => pr.data[i + j] === b) && pr.data[i + 14] === prop[0] && pr.data[i + 15] === prop[1]);
+  const rowB = row([0x56, 0x78]);
+  check(rowB > 0 && row([0x12, 0x34]) === rowB - 0x10 * 16, 'PIXI: the sprites\' rows in its table');
+  const pp = tablePages(new Rom(pr.data.slice()));
+  check(pp[(rowB - 0x20 * 16) >> 8] === 1 && pp[rowB >> 8] === 1 && pp[(rowB - 0x20 * 16 + 0xff * 16) >> 8] === 1, 'PIXI\'s sprite table: byte pages, found by emulation');
+  const pnums = [0x00, 0x0d, 0x210, 0x220];
+  const p = recaptured(new Rom(pr.data.slice()), pnums, flip(rowB + 2));
+  check(p.first.length === 4 && p.again.join() === `spr/${spriteLoad(0x220).toString(16)}` && p.same,
+    `PIXI: a tweaker of custom sprite 20 changed: only its load captured again (${p.again.join()}), the images as a capture of the whole set`);
+
+  // inserted again with more code in sprite 20: the editor places every custom sprite's code anew (their INIT/MAIN
+  // pointers change), the runtime and the game's sprites stay
+  const moved = (r: Rom) => [0x10, 0x20].filter((n) => { const o = rowB - (0x20 - n) * 16 + 8; return r.data.subarray(o, o + 6).some((b, i) => b !== pr.data[o + i]); });
+  let movedNow: number[] = [];
+  const re = recaptured(new Rom(pr.data.slice()), pnums, (r) => { savePixiProject(r, project('  NOP #8\n')); movedNow = moved(r); });
+  check(movedNow.length === 2 && re.again.join() === movedNow.map((n) => `spr/${spriteLoad(0x200 | n).toString(16)}`).join() && re.same,
+    `PIXI inserted again, sprites ${movedNow.map((n) => n.toString(16)).join()} moved: only their loads captured again (${re.again.join()}), the images as a capture of the whole set`);
 }
 
 // the levels' uses, the sprite memory check and the animated tiles and colors (learn jobs, #177): results and entries

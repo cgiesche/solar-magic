@@ -60,6 +60,9 @@ export class CPU {
   lastOpPc = 0;
   idle = false; // in a wait loop (see branch()); the system may skip ahead to the next interrupt
   inFetch = false;
+  // told every effective address of an indexed addressing mode (absolute/long,X/Y, (dp),Y, [dp],Y, (sr,s),Y) with
+  // the index register's value: what code reads from tables (see spritetables.ts)
+  onIndexed: ((addr: number, index: number) => void) | null = null;
   // Source tracking (Snes.trackSources): where each byte of A, X and Y was loaded from, carried through
   // the instructions the way the bus carries it through memory. Off, instructions run without it.
   track = false;
@@ -222,16 +225,16 @@ export class CPU {
     return (this.dbr << 16) | this.fetch16();
   }
   aAbsX(): number {
-    return (((this.dbr << 16) | this.fetch16()) + this.x) & 0xffffff;
+    return this.ix((((this.dbr << 16) | this.fetch16()) + this.x) & 0xffffff, this.x);
   }
   aAbsY(): number {
-    return (((this.dbr << 16) | this.fetch16()) + this.y) & 0xffffff;
+    return this.ix((((this.dbr << 16) | this.fetch16()) + this.y) & 0xffffff, this.y);
   }
   aLong(): number {
     return this.fetch24();
   }
   aLongX(): number {
-    return (this.fetch24() + this.x) & 0xffffff;
+    return this.ix((this.fetch24() + this.x) & 0xffffff, this.x);
   }
   aDpInd(): number {
     const p = this.aDp();
@@ -239,7 +242,7 @@ export class CPU {
   }
   aDpIndY(): number {
     const p = this.aDp();
-    return (((this.dbr << 16) | this.rd16bank0(p)) + this.y) & 0xffffff;
+    return this.ix((((this.dbr << 16) | this.rd16bank0(p)) + this.y) & 0xffffff, this.y);
   }
   aDpXInd(): number {
     const p = this.aDpX();
@@ -252,14 +255,19 @@ export class CPU {
   aDpIndLongY(): number {
     const p = this.aDp();
     const base = this.rd16bank0(p) | (this.rd((p + 2) & 0xffff) << 16);
-    return (base + this.y) & 0xffffff;
+    return this.ix((base + this.y) & 0xffffff, this.y);
   }
   aSr(): number {
     return (this.fetch8() + this.s) & 0xffff;
   }
   aSrIndY(): number {
     const p = (this.fetch8() + this.s) & 0xffff;
-    return (((this.dbr << 16) | this.rd16bank0(p)) + this.y) & 0xffffff;
+    return this.ix((((this.dbr << 16) | this.rd16bank0(p)) + this.y) & 0xffffff, this.y);
+  }
+  // an indexed effective address, told to onIndexed
+  private ix(addr: number, index: number): number {
+    if (this.onIndexed !== null) this.onIndexed(addr, index);
+    return addr;
   }
 
   // read operand of size M or X
@@ -906,7 +914,7 @@ export class CPU {
       case 0x4c: this.pc = this.fetch16(); break; // JMP abs
       case 0x5c: v = this.fetch24(); this.pc = v & 0xffff; this.pbr = v >> 16; break; // JML long
       case 0x6c: a = this.fetch16(); this.pc = this.rd16bank0(a); break; // JMP (abs)
-      case 0x7c: a = this.fetch16(); this.pc = this.rd16((this.pbr << 16) | ((a + this.x) & 0xffff)); break; // JMP (abs,X)
+      case 0x7c: a = this.fetch16(); this.pc = this.rd16(this.ix((this.pbr << 16) | ((a + this.x) & 0xffff), this.x)); break; // JMP (abs,X)
       case 0xdc: // JML [abs]
         a = this.fetch16();
         this.pc = this.rd16bank0(a);
@@ -916,7 +924,7 @@ export class CPU {
       case 0xfc: // JSR (abs,X)
         a = this.fetch16();
         this.push16((this.pc - 1) & 0xffff);
-        this.pc = this.rd16((this.pbr << 16) | ((a + this.x) & 0xffff));
+        this.pc = this.rd16(this.ix((this.pbr << 16) | ((a + this.x) & 0xffff), this.x));
         break;
       case 0x22: { // JSL
         const lo = this.fetch16();

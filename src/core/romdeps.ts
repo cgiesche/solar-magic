@@ -16,6 +16,9 @@
 // 1, layer 2 objects, sprites, stored BG tilemaps): the boot loads the title screen's level, which every
 // result counts, and its data shares pages with other levels' – saving one of those only drops what
 // read its bytes.
+// The same for the per-sprite tables (tweakers, INIT/MAIN pointers, PIXI's sprite table), which hold a few bytes of
+// every sprite in each page: found by emulation (spritetables.ts, learnBytePages), so a change of one sprite's entry
+// only drops what loaded that sprite.
 
 import type { Rom } from './rom.ts';
 import type { Snes } from './snes.ts';
@@ -67,7 +70,7 @@ export function perRomState<T>(make: (rom: Rom) => T): (rom: Rom) => T {
 // A recorder (RomReads) looks them up for the ROM it records for. The GFX file pointers and the ExAnimation data
 // aren't recorded at all (see gfxSkipMask), byte pages keep the rest of their pages from counting them (an animation
 // list next to code that is run).
-export const bytePages = perRomState((rom: Rom): Uint8Array => {
+const baseBytePages = perRomState((rom: Rom): Uint8Array => {
   const pages = FIXED_BYTE_PAGES.slice();
   const markPc = (o: number, end: number) => pages.fill(1, o >> PAGE_SHIFT, ((end - 1) >> PAGE_SHIFT) + 1);
   for (const [a, b] of exanimDataRanges(rom)) markPc(a, b);
@@ -90,6 +93,32 @@ export const bytePages = perRomState((rom: Rom): Uint8Array => {
   return pages;
 });
 
+// pages learned by emulation to be recorded by byte for a Rom (learnBytePages), with the byte pages of the ROM state
+// they were last combined with
+const learned = new WeakMap<Rom, { pages: number[]; base: Uint8Array | null; combined: Uint8Array | null }>();
+
+// From now on the reads of these pages of rom are recorded by byte (with those of bytePages), in every ROM state: the
+// per-sprite tables, found by emulation (spritetables.ts). Recorders made before keep the pages they had (a page read
+// whole stays read whole: drops more results, never fewer).
+export function learnBytePages(rom: Rom, pages: number[]): void {
+  learned.set(rom, { pages, base: null, combined: null });
+}
+
+// The pages of this ROM state whose reads are recorded by byte (1): baseBytePages and those learned (learnBytePages).
+export function bytePages(rom: Rom): Uint8Array {
+  const base = baseBytePages(rom), l = learned.get(rom);
+  if (!l?.pages.length) return base;
+  if (l.base !== base || !l.combined) {
+    l.combined = base.slice();
+    for (const p of l.pages) if (p < l.combined.length) l.combined[p] = 1;
+    l.base = base;
+  }
+  return l.combined;
+}
+
+// every page by byte: a fine recorder's (RomReads fine)
+const ALL_PAGES = new Uint8Array(1 << (24 - PAGE_SHIFT)).fill(1); // (pages of a 16 MB ROM)
+
 // what a computation read (the emulated CPU and editor code, see Snes.romReads, Rom.reads)
 export class RomReads {
   pages: Uint8Array; // 1 = read
@@ -97,10 +126,12 @@ export class RomReads {
   private rom: Rom;
   private pagesGen = -1;
   private pagesOf: Uint8Array | null = null;
+  private fine: boolean;
 
-  // a recorder for rom, starting with base's reads
-  constructor(rom: Rom, base?: RomReads | null) {
+  // a recorder for rom, starting with base's reads; fine: every read recorded by byte until coarsen()
+  constructor(rom: Rom, base?: RomReads | null, fine = false) {
     this.rom = rom;
+    this.fine = fine;
     this.pages = new Uint8Array(rom.data.length >> PAGE_SHIFT);
     if (base) this.add(base);
   }
@@ -108,8 +139,24 @@ export class RomReads {
   // the pages recorded by byte: those of the ROM state current at each read (bytePages), also for a recorder kept
   // across ROM edits. A page read whole before it became a byte page stays read whole (drops more results, never fewer)
   get bytePages(): Uint8Array {
+    if (this.fine) return ALL_PAGES;
     if (this.pagesGen !== this.rom.gen || !this.pagesOf) { this.pagesOf = bytePages(this.rom); this.pagesGen = this.rom.gen; }
     return this.pagesOf;
+  }
+
+  // a fine recorder's reads as recorded by a recorder made now: by byte in the byte pages of the current ROM state
+  // (with those learned meanwhile), else by page
+  coarsen(): void {
+    if (!this.fine) return;
+    this.fine = false;
+    this.pagesOf = null;
+    const byte = this.bytePages;
+    for (const b of this.bytes) {
+      const p = b >> PAGE_SHIFT;
+      if (byte[p]) continue;
+      this.bytes.delete(b);
+      if (p < this.pages.length) this.pages[p] = 1;
+    }
   }
 
   read(o: number, len = 1): void {
@@ -165,6 +212,7 @@ export interface RecordOptions {
   base?: RomReads | null; // reads the result counts as its own (a boot's: the state it starts from)
   mask?: (() => Uint8Array | null) | null; // the CPU's reads it leaves out (a skip mask; inside another recording the outer one's mask applies)
   counted?: boolean; // the reads count for the recording around it (default; else only as given to countReads)
+  fine?: boolean; // every read recorded by byte (RomReads fine: coarsened by the caller, before it counts)
 }
 
 // Runs fn, returning its result with what it read: the editor code's reads (Rom.reads) and the CPU's, recorded
@@ -172,7 +220,7 @@ export interface RecordOptions {
 // when it throws, and get its reads (counted).
 export function record<T>(rom: Rom, fn: () => T, o: RecordOptions = {}): Recorded<T> {
   const cpu = o.cpu ?? null, outer = cpu?.romReads ?? null, outerRom = rom.reads, outerMask = cpu?.romSkipMask ?? null;
-  const gen = rom.gen, reads = new RomReads(rom, o.base);
+  const gen = rom.gen, reads = new RomReads(rom, o.base, o.fine);
   rom.reads = reads;
   if (cpu) {
     cpu.romReads = reads;

@@ -196,9 +196,13 @@ const TITLE_BYTE = 0x7fc0; // the internal name: not read while booting
 // test's, the probe worker's copy) has its own, also at the same generation number. A recorder takes its ROM's: no
 // emulator has to set them up first.
 {
-  const rom = fresh(), pages = bytePages(rom);
-  const a = new LevelEmulator(rom), b = new LevelEmulator(rom), ow = new OverworldEmulator(rom);
-  a.load(0x105); b.load(0x105); ow.load(0, 0);
+  // (the first boot finds the per-sprite tables, spritetables.ts: their pages join the ROM's from then on)
+  const rom = fresh(), before = bytePages(rom), a = new LevelEmulator(rom);
+  a.load(0x105);
+  const pages = bytePages(rom);
+  check(pages !== before && before.every((v, i) => !v || pages[i]) && pages.some((v, i) => v && !before[i]), 'the first boot: the per-sprite tables\' pages added');
+  const b = new LevelEmulator(rom), ow = new OverworldEmulator(rom);
+  b.load(0x105); ow.load(0, 0);
   check(bytePages(rom) === pages, 'emulators and loads on the unchanged ROM: its byte pages not computed again');
   rom.writeAt(TITLE_BYTE, Uint8Array.of(0x20));
   const changed = bytePages(rom);

@@ -10,6 +10,7 @@ import { OW_SPRITES, OW_SPRITE_SLOTS, hasOwSpriteSlots } from './owsprites.ts';
 import { editorPatch, musicPatch, BG_HOOK, HEADER_MUSIC_TABLE } from './patches.ts';
 import { lt3Patches, type Lt3Place } from './layer3gfx.ts';
 import { RomReads, record, countReads, PAGE_SHIFT, type Recorded } from './romdeps.ts';
+import { findSpriteTables, spriteTablesHold } from './spritetables.ts';
 import { applyTriggers, type TriggerView } from './extrigger.ts';
 import { inputHash, levelInput } from './inputs.ts';
 import { GM, RAM, SPR, MAP_BASE, MAP_SIZE, MAP_HI, CDM16_FLAGS, getS16, set16, setSpritePos } from './ram.ts';
@@ -126,6 +127,8 @@ export class LevelEmulator {
   // The title screen runs the game's overworld sprite loader ($04F678) and shows none of them (their OAM tiles off
   // the screen, their RAM unused in a level; a load of the overworld runs the loader again): reads of the slot table
   // aren't recorded, so an overworld sprite edit keeps every result and the snapshot.
+  // The per-sprite tables are found from the snapshot (spritetables.ts) when those found for the ROM no longer hold
+  // (or none were): the boot's reads are then recorded by byte, and kept by byte only in the tables' pages.
   boot(): void {
     this.sync();
     const s = this.snes;
@@ -134,14 +137,15 @@ export class LevelEmulator {
     const slots = hasOwSpriteSlots(this.rom) ? snesToPc(OW_SPRITES) : -1, slotsEnd = slots + OW_SPRITE_SLOTS * 5;
     for (let o = slots; o >= 0 && o < slotsEnd; o++) s.romSkip.add(o);
     s.romMasked = masked;
+    const find = !spriteTablesHold(this.rom);
     try {
-      this.bootReads = this.tracked(() => {
+      this.bootReads = record(this.rom, () => {
         let f = 0;
         while (s.wram[RAM.gameMode] !== GM.title) {
           s.runFrame();
           if (++f > 2000) throw new Error('boot did not reach title screen');
         }
-      }).reads;
+      }, { cpu: s, mask: this.skipMask, counted: false, fine: find }).reads;
     } finally {
       s.romMasked = outerMasked;
       for (let o = slots; o >= 0 && o < slotsEnd; o++) s.romSkip.delete(o);
@@ -149,6 +153,8 @@ export class LevelEmulator {
     this.bootMasked = masked;
     this.baseState = s.saveState();
     this.bootRom = this.rom.data.slice();
+    if (find) findSpriteTables(this, this.bootReads);
+    this.count(this.bootReads);
   }
 
   // runs fn with skipMask set to mask (a mask or a function returning one), the previous one restored
