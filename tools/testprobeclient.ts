@@ -317,7 +317,7 @@ function editor(worker: Worker | null) {
 
   const w = new Worker(), e = editor(w);
   const shown: (unknown[] | null)[] = [], done: unknown[] = [];
-  const opts = { input, lane: 'sprites', replace: true, label: 'Sprite graphics', done: (r: unknown) => done.push(r), shown: (i: unknown[] | null) => shown.push(i) };
+  const opts = { input, lane: 'sprites' as const, replace: true, label: 'Sprite graphics', done: (r: unknown) => done.push(r), shown: (i: unknown[] | null) => shown.push(i) };
   check(e.client.learn('spr', job, opts) === undefined && e.busy.get('sprites') === 'Sprite graphics', 'learn: unknown, asked for, busy');
   e.client.learn('spr', job, opts);
   await settle();
@@ -389,7 +389,7 @@ function editor(worker: Worker | null) {
   // latest list; an edit during the scan asks once more for the reply of the generation before, not for every reply
   const usesSent = () => w.sent.filter((m) => m.type === 'learn' && m.key === 'uses');
   shown.length = 0;
-  const usesOpts = { lane: 'uses', label: 'Uses in levels', shown: (l: unknown[] | null) => { if (l) shown.push(...l); }, done: () => usesDone++ };
+  const usesOpts = { lane: 'uses' as const, label: 'Uses in levels', shown: (l: unknown[] | null) => { if (l) shown.push(...l); }, done: () => usesDone++ };
   e.client.learn('uses', { kind: 'uses', levels: [0x107, 0x108, 0x109] }, usesOpts);
   await settle();
   for (let i = 0; i < 1000 && !shown.length && w.host.pending; i++) w.run(1);
@@ -416,7 +416,7 @@ function editor(worker: Worker | null) {
   w.run();
   check(usesDone === 3 && !e.busy.has('uses'), '… its reply done');
 
-  const job: LearnJob = { kind: 'animated', level: 0x105, ov: {} }, opts = { input: { an: 1 }, lane: 'animated', replace: true };
+  const job: LearnJob = { kind: 'animated', level: 0x105, ov: {} }, opts = { input: { an: 1 }, lane: 'animated' as const, replace: true };
   let anDone = 0;
   check(e.client.learn('anim:105', job, { ...opts, done: () => anDone++ }) === undefined, 'animated: unknown, asked for');
   await settle();
@@ -474,11 +474,11 @@ function editor(worker: Worker | null) {
   const w = new Worker(), e2 = editor(w), lv = loadLevel(e2.rom, 0x105);
   const sizes = (size: number): LearnJob => ({ kind: 'sizes', level: { number: 0x105, header: lv.header }, layer2Pointer: lv.layer2Pointer, specs: [{ num: 0x21, ext: 0, size }] });
   let dropped = 0, done = 0;
-  e2.client.learn('sz3', sizes(3), { lane: 'sz', input: 3, done: () => done++, dropped: () => dropped++ });
-  e2.client.unlearn('sz');
+  e2.client.learn('sz3', sizes(3), { lane: 'sizes', input: 3, done: () => done++, dropped: () => dropped++ });
+  e2.client.unlearn('sizes');
   check(dropped === 1 && done === 0, 'unlearn: the dropped job tells its asker');
-  e2.client.learn('sz3', sizes(3), { lane: 'sz', input: 3, done: () => done++, dropped: () => dropped++ });
-  e2.client.learn('sz4', sizes(4), { lane: 'sz', input: 4, replace: true, done: () => done++ });
+  e2.client.learn('sz3', sizes(3), { lane: 'sizes', input: 3, done: () => done++, dropped: () => dropped++ });
+  e2.client.learn('sz4', sizes(4), { lane: 'sizes', input: 4, replace: true, done: () => done++ });
   check(dropped === 2, '… replaced by another: too');
   await settle();
   w.run();
@@ -491,7 +491,7 @@ function editor(worker: Worker | null) {
   const w = new Worker(), e = editor(w), lv = loadLevel(e.rom, 0x105);
   const job: LearnJob = { kind: 'levelTiles', level: lv, ov: levelOverride(e.rom, lv) }, input = { lt: 1 };
   let fails = 0;
-  const opts = { input, lane: 'lt', replace: true, failed: () => fails++ };
+  const opts = { input, lane: 'lt' as const, replace: true, failed: () => fails++ };
   check(e.client.learnOrFailed('lt:105', job, opts) === undefined, 'open level tiles: unknown, asked for');
   await settle();
   w.run(Infinity, (d) => d.type === 'learned' ? { ...d, failed: true, result: null, put: [], memory: undefined } : d);
@@ -523,7 +523,7 @@ function editor(worker: Worker | null) {
   const level: SpriteLevel = { number: 0x105, header: lv.header, spriteHeader: lv.spriteHeader, bgPointer: 0xffd900 };
   const job: LearnJob = { kind: 'sprites', level, nums: [0x0d, 0x1d, 0x21] };
   const w = new Worker(), e = editor(w), shown: (unknown[] | null)[] = [], done: unknown[] = [];
-  const opts = { input: { set: 'gen' }, lane: 'sprites', done: (r: unknown) => done.push(r), shown: (i: unknown[] | null) => shown.push(i) };
+  const opts = { input: { set: 'gen' }, lane: 'sprites' as const, done: (r: unknown) => done.push(r), shown: (i: unknown[] | null) => shown.push(i) };
   e.client.learn('spr', job, opts);
   await settle();
   const before = e.rom.gen;

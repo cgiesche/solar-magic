@@ -6,10 +6,17 @@
 import { Rom, snesToPc } from '../src/core/rom.ts';
 import { LevelEmulator } from '../src/core/levelemu.ts';
 import { ResultCache, RomFingerprint, type RomReads } from '../src/core/romdeps.ts';
-import { JobRunner, type JobRun } from '../src/core/jobrunner.ts';
+import { JobRunner, type JobRun, type JobSpec } from '../src/core/jobrunner.ts';
 import { gfxSkipMask } from '../src/core/gfxpages.ts';
 import { FG_PALS } from '../src/core/sharedpal.ts';
 import { editorImage } from './fixture.ts';
+
+// A job run on the runner to its end at once, its result kept as the job's spec says: the tests comparing what the
+// probe worker learns a step at a time in its lanes learn it so on the main thread
+export function learnAtOnce<T>(runner: JobRunner, spec: JobSpec<T>, lane = 'at-once'): T {
+  const r = runner.run(spec);
+  for (;;) { const d = runner.step(lane, r); if (d) return d.result; }
+}
 
 export async function checkJobRunner(check: (ok: boolean, what: string) => void): Promise<void> {
   const rom = new Rom(await editorImage());

@@ -133,20 +133,30 @@ export const LEARN_KINDS: { [K in LearnJob['kind']]: { keep: Keep; picture: bool
 };
 export const learnKeep = (j: LearnJob): Keep => LEARN_KINDS[j.kind].keep;
 
+// The lanes of learn jobs (lanes.ts): the editor's fixed set, a lane per custom overworld sprite map (owc and the map).
+// Their names are busy keys too (ProbeBusyKey), so none is a task's type.
+export type LearnLane =
+  | 'sprites' | 'variants' | 'bytes' | 'spritemem' | 'animated' | 'layer3' | 'l2' | 'lt' | 'uses' | 'arcs' | 'thumbs'
+  | 'placement' | 'sizes' | 'prefab-suggest' | 'msgr' | 'level-png' | 'level-images'
+  | 'ow' | 'owpick' | 'owpk1' | 'owlw' | 'owps' | 'owv' | 'ows' | 'owl' | `owc${number}`;
+
+// what the probe client shows as busy: the probes, the tasks, the learn jobs' lanes
+export type ProbeBusyKey = 'probe' | TaskType | LearnLane;
+
 // a learn job asked for: its result under key and input (the hash of what it depends on outside the ROM, inputs.ts),
 // learned in a lane (one job at a time, in the order asked); replace drops the lane's other jobs; parts: the editor's
 // stored entries of the result's parts (jobrunner.ts Part, by stored key; checked when first used)
-export interface LearnMessage { type: 'learn'; lane: string; key: string; input?: string; job: LearnJob; replace: boolean; parts?: [string, CacheEntry][] }
+export interface LearnMessage { type: 'learn'; lane: LearnLane; key: string; input?: string; job: LearnJob; replace: boolean; parts?: [string, CacheEntry][] }
 
 // a learn job's result (failed: it threw, result null), with its result cache entry (memory: the entry of one kept in
 // memory only, learnKeep)
 export interface Learned {
-  type: 'learned'; gen: number; lane: string; key: string; input?: string; result: unknown; failed: boolean; put: [string, CacheEntry][]; memory?: CacheEntry;
+  type: 'learned'; gen: number; lane: LearnLane; key: string; input?: string; result: unknown; failed: boolean; put: [string, CacheEntry][]; memory?: CacheEntry;
 }
 // a step of a learn job that didn't finish it: its progress label, what it shows meanwhile (the job's items since the
 // last reply; fresh: it started (over) since then, what it showed before goes) and the entries set meanwhile
 export interface Learning {
-  type: 'learning'; gen: number; lane: string; key: string; input?: string; label: string | null; fresh: boolean; shown: unknown[]; put: [string, CacheEntry][];
+  type: 'learning'; gen: number; lane: LearnLane; key: string; input?: string; label: string | null; fresh: boolean; shown: unknown[]; put: [string, CacheEntry][];
 }
 
 // the longer tasks; those the editor can say it doesn't want any more
@@ -167,6 +177,6 @@ export type ProbeMessage =
   | { type: 'camera'; id: number; key: string; level: ScanLevel; x: number; y: number }
   | { type: 'cancel'; task: CancelableTask }
   | LearnMessage
-  | { type: 'unlearn'; lane: string };
+  | { type: 'unlearn'; lane: LearnLane };
 
 export type TaskMessage = ProbeMessage & { type: TaskType };

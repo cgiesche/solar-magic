@@ -38,7 +38,8 @@ import { owSpritesJob, owCustomJob, owLooksJob } from './owsprites.ts';
 import { progressSaveJob } from './owprogress.ts';
 import { messageRoutineJob } from './messagedraw.ts';
 import { inputHash } from './inputs.ts';
-import { jobId, jobKey, learnKeep, LEARN_KINDS, type ProbeJob, type ProbeMessage, type ProbeReply, type TaskMessage, type TaskType, type LearnJob, type LearnMessage } from './probeprotocol.ts';
+import { Lane, Lanes, laneId } from './lanes.ts';
+import { jobId, jobKey, learnKeep, LEARN_KINDS, type ProbeJob, type ProbeMessage, type ProbeReply, type TaskMessage, type TaskType, type LearnJob, type LearnMessage, type LearnLane } from './probeprotocol.ts';
 
 // a longer task: what was asked (a request asking for the same result may have replaced it) and its job
 interface Task { msg: TaskMessage; run: JobRun<unknown> }
@@ -103,9 +104,9 @@ function learnJob(j: LearnJob, state: LearnState, show: (items: unknown[] | null
 
 // a learn job asked for: the latest request for its result, its job and what it showed since the last reply
 interface Learn { msg: LearnMessage; run: JobRun<unknown>; fresh: boolean; shown: unknown[] }
-// a lane of learn jobs: the first one runs
-interface Lane { learns: Learn[] }
-const laneTurn = (lane: string) => `learn:${lane}`; // (its turn's and its emulator's name: no task type)
+// what takes turns: the tasks and the lanes with jobs (a lane's first job runs; its name is its emulator's, as a task's
+// type is: a lane is named as no task, ProbeBusyKey)
+type Turn = Task | Lane<LearnLane, Learn>;
 
 // the result cache key of a task's result
 const taskKey = (m: TaskMessage) => (m.type === 'kinds' ? kindsKey(m.ts) : m.key);
@@ -118,7 +119,9 @@ export class ProbeHost {
   private gen = -1;
   private asked = new Map<string, ProbeJob>(); // requested directly: first
   private prefetch = new Map<string, ProbeJob>();
-  private turns = new Map<string, Task | Lane>(); // tasks (by type) and lanes of learn jobs (laneTurn), taking turns
+  private tasks = new Map<TaskType, Task>(); // running, by type
+  private lanes = new Lanes<LearnLane, Learn>((l) => laneId(l.msg.key, l.msg.input));
+  private turns = new Set<Turn>(); // the running tasks and the lanes with jobs, in turn (the next first)
   // cancelled tasks, not run: taken up again when the same result is asked for before another task of their type
   // (which would use their emulator)
   private cancelled = new Map<TaskType, Task>();
@@ -132,6 +135,8 @@ export class ProbeHost {
     this.gen = gen;
     this.asked.clear();
     this.prefetch.clear();
+    this.tasks.clear();
+    this.lanes.clearAll();
     this.turns.clear();
     this.cancelled.clear();
     if (!this.rom || !this.prober) {
@@ -187,7 +192,7 @@ export class ProbeHost {
       case 'cancel': this.cancel(m.task); break;
       case 'kinds': case 'scan': case 'camera': this.startTask(m); break;
       case 'learn': this.learn(m); break;
-      case 'unlearn': this.turns.delete(laneTurn(m.lane)); break;
+      case 'unlearn': this.unlearn(m.lane); break;
     }
   }
 
@@ -195,28 +200,36 @@ export class ProbeHost {
   // then); replace drops the lane's other jobs
   private learn(msg: LearnMessage): void {
     if (!this.runner) return;
-    const name = laneTurn(msg.lane), same = (l: Learn) => l.msg.key === msg.key && l.msg.input === msg.input;
-    let lane = this.turns.get(name) as Lane | undefined;
-    if (!lane) this.turns.set(name, (lane = { learns: [] }));
-    if (msg.replace) lane.learns = lane.learns.filter(same);
+    const id = laneId(msg.key, msg.input), runner = this.runner, state = this.state!;
+    if (msg.replace) this.lanes.replace(msg.lane, id);
     if (msg.parts) this.prober!.results.load(msg.parts); // (not handed back: the editor has them)
-    const known = lane.learns.find(same);
-    if (known) { known.msg = msg; return; }
-    const show = (items: unknown[] | null) => { if (items === null) { l.fresh = true; l.shown = []; } else l.shown.push(...items); };
-    // (a job starting over runs for the latest request, the levels' uses take up its list as they run)
-    const state = this.state!, start: JobRun<unknown>['start'] = (emu, p, part) => learnJob(l.msg.job, state, show, () => l.msg.job)(emu, p, part);
-    const run = this.runner.run({ key: msg.key, input: msg.input, ...LEARN_KINDS[msg.job.kind], start });
-    const l: Learn = { msg, fresh: false, shown: [], run };
-    lane.learns.push(l);
+    const { job, added } = this.lanes.join(msg.lane, id, () => {
+      const show = (items: unknown[] | null) => { if (items === null) { l.fresh = true; l.shown = []; } else l.shown.push(...items); };
+      // (a job starting over runs for the latest request, the levels' uses take up its list as they run)
+      const start: JobRun<unknown>['start'] = (emu, p, part) => learnJob(l.msg.job, state, show, () => l.msg.job)(emu, p, part);
+      const l: Learn = { msg, fresh: false, shown: [], run: runner.run({ key: msg.key, input: msg.input, ...LEARN_KINDS[msg.job.kind], start }) };
+      return l;
+    });
+    if (!added) job.msg = msg;
+    const lane = this.lanes.lane(msg.lane);
+    this.turns.add(lane); // (one with jobs keeps its turn)
+  }
+
+  // the jobs of a lane are not wanted any more
+  private unlearn(name: LearnLane): void {
+    const lane = this.lanes.get(name);
+    if (!lane) return;
+    this.lanes.clear(name);
+    this.turns.delete(lane);
   }
 
   // a step of the lane's first job: its result when it ended, else its progress
-  private learnStep(name: string, lane: Lane): ProbeReply {
-    const l = lane.learns[0], m = l.msg;
+  private learnStep(lane: Lane<LearnLane, Learn>, l: Learn): ProbeReply {
+    const m = l.msg;
     let r: { result: unknown } | null, failed = false;
-    try { r = this.runner!.step(name, l.run); } catch (e) { console.error(e); r = { result: null }; failed = true; }
+    try { r = this.runner!.step(lane.name, l.run); } catch (e) { console.error(e); r = { result: null }; failed = true; }
     if (r) {
-      lane.learns.shift();
+      this.lanes.remove(lane.name, l);
       const keep = learnKeep(m.job), memory = failed || keep !== 'memory' ? undefined : this.runner!.memory.entry(m.key, m.input);
       return {
         type: 'learned', gen: this.gen, lane: m.lane, key: m.key, input: m.input, result: failed ? null : r.result, failed,
@@ -239,9 +252,10 @@ export class ProbeHost {
 
   // the task of that type is not wanted any more: it runs no further step (kept, see startTask)
   private cancel(type: TaskType): void {
-    const t = this.turns.get(type) as Task | undefined;
+    const t = this.tasks.get(type);
     if (!t) return;
-    this.turns.delete(type);
+    this.tasks.delete(type);
+    this.turns.delete(t);
     this.cancelled.set(type, t);
   }
 
@@ -249,13 +263,18 @@ export class ProbeHost {
   // (it answers this request then, going on where it stood)
   private startTask(msg: TaskMessage): void {
     if (!this.runner) return;
-    const t = (this.turns.get(msg.type) as Task | undefined) ?? this.cancelled.get(msg.type);
+    const running = this.tasks.get(msg.type), t = running ?? this.cancelled.get(msg.type);
     this.cancelled.delete(msg.type);
-    if (t && taskKey(t.msg) === taskKey(msg)) { t.msg = msg; this.turns.set(msg.type, t); return; }
+    if (t && taskKey(t.msg) === taskKey(msg)) { t.msg = msg; this.setTask(t); return; } // (a running one keeps its turn)
+    if (running) this.turns.delete(running); // (the new one's turn comes last)
     // (a job starting over runs for the latest request)
     const task: Task = { msg, run: this.runner.run({ key: taskKey(msg), keep: true, picture: false, boot: msg.type !== 'kinds', start: (emu, p, part) => taskJob(task.msg)(emu, p, part) }) };
-    this.turns.delete(msg.type);
-    this.turns.set(msg.type, task);
+    this.setTask(task);
+  }
+
+  private setTask(t: Task): void {
+    this.tasks.set(t.msg.type, t);
+    this.turns.add(t);
   }
 
   // a finished task's reply (result null: it failed), answering its latest request
@@ -301,18 +320,20 @@ export class ProbeHost {
   next(): ProbeReply | null {
     this.turned = !this.asked.size && this.turns.size > 0 && !(this.turned && this.prefetch.size);
     if (this.turned) {
-      const [name, turn] = this.turns.entries().next().value!;
-      this.turns.delete(name);
-      if ('learns' in turn) {
-        if (!turn.learns.length) return null; // (all replaced or done)
-        const d = this.learnStep(name, turn);
-        if (turn.learns.length) this.turns.set(name, turn); // (the next turn's next)
+      const [turn] = this.turns;
+      this.turns.delete(turn);
+      if (turn instanceof Lane) {
+        const first = turn.first;
+        if (!first) return null; // (all done)
+        const d = this.learnStep(turn, first);
+        if (turn.first) this.turns.add(turn); // (the next turn's next)
         return d;
       }
+      const type = turn.msg.type;
       let r: { result: unknown } | null;
-      try { r = this.runner!.step(name, turn.run); } catch (e) { console.error(e); r = { result: null }; }
-      if (r) return this.taskDone(turn, r.result ?? null);
-      this.turns.set(name, turn); // (the next turn's next)
+      try { r = this.runner!.step(type, turn.run); } catch (e) { console.error(e); r = { result: null }; }
+      if (r) { this.tasks.delete(type); return this.taskDone(turn, r.result ?? null); }
+      this.turns.add(turn); // (the next turn's next)
       return null;
     }
     const p = this.prober;

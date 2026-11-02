@@ -7,8 +7,8 @@
 // change go with the next reply only if they hold on the new ROM. Jobs keep their result cache keys; only the scan
 // can be cancelled. Learn jobs (the sprite images, the levels' uses, the sprite memory check, the animated tiles, the layer 3
 // kinds, the tiles of the level as edited, the object thumbnails, the placement preview, the jump arcs, the layer 2
-// motions, the path kinds, the prefab suggestions, the object boxes) as learned directly, with the result learner's entries, in lanes; prefetched
-// probes take turns with the tasks.
+// motions, the path kinds, the prefab suggestions, the object boxes) as learned directly, with the entries the job runner on
+// the main thread makes (its jobs learned there at once), in lanes; prefetched probes take turns with the tasks.
 import { readFileSync } from 'node:fs';
 import { Rom, snesToPc } from '../src/core/rom.ts';
 import { BlockProber, blockKey, collisionKey, spriteKey, runsKey, cameraKey } from '../src/core/blockprobe.ts';
@@ -19,10 +19,10 @@ import { LevelEmulator } from '../src/core/levelemu.ts';
 import { ObjKindProbe, kindsKey, type ObjKinds } from '../src/core/objkinds.ts';
 import { levelScanJob, type ScanLevel } from '../src/core/levelscan.ts';
 import { cameraAtJob } from '../src/core/camerareach.ts';
-import { runJob } from '../src/core/jobrunner.ts';
+import { runJob, JobRunner, type JobSpec } from '../src/core/jobrunner.ts';
 import { loadLevel, serializeLayer1, serializeSprites, encodeSecondaryHeader, newUid, L2_PTRS } from '../src/core/level.ts';
 import { editorImage } from './fixture.ts';
-import { checkJobRunner } from './runnercheck.ts';
+import { checkJobRunner, learnAtOnce } from './runnercheck.ts';
 import { gfxSkipMask, gfxDisplaySkipMask } from '../src/core/gfxpages.ts';
 import { tilesetPointers, pointersKey, TILESETS } from '../src/core/tilesets.ts';
 import { setActsLike, extTileWords, setExtTileWords } from '../src/core/map16ext.ts';
@@ -30,13 +30,12 @@ import { bgTileAddr } from '../src/core/bgmap16.ts';
 import { FG_PALS, BACK_AREA } from '../src/core/sharedpal.ts';
 import { setCustomPalette } from '../src/core/patches.ts';
 import { captureSprites, captureSpriteAt, spriteSetJob, spriteLoad, spriteLoads, type SpriteLevel } from '../src/core/spritegfx.ts';
-import { storeKey, type CacheEntry, type RomDeps } from '../src/core/romdeps.ts';
+import { storeKey, type CacheEntry } from '../src/core/romdeps.ts';
 import { LevelUses, levelUsesJob, levelTilesKey, levelTilesAll, levelOverride } from '../src/core/levelusage.ts';
 import { layer3Kinds } from '../src/core/layer3.ts';
 import { spriteMemCheckJob, usedSpriteMemory, SpriteGroupResults, type SpriteMemLevel, type SpriteMemResult } from '../src/core/spritemem.ts';
 import { animatedJob, type Animated } from '../src/core/levelemu.ts';
 import { inputHash } from '../src/core/inputs.ts';
-import { ResultLearner } from '../src/core/learner.ts';
 import { objectThumbsJob, placementPreviewJob, objKey, type ObjSpec, type ObjThumb, type PlacementPreview } from '../src/core/objthumbs.ts';
 import { jumpArcsJob, type JumpArc } from '../src/core/jumparcs.ts';
 import { layer2MotionsJob, type Layer2Motions } from '../src/core/l2scroll.ts';
@@ -112,6 +111,14 @@ const emuRom = new Rom(file), ptrEmu = new LevelEmulator(new Rom(file));
 ptrEmu.skipMask = () => gfxDisplaySkipMask(ptrEmu.rom, []);
 const emuMask = gfxDisplaySkipMask(emuRom, Array.from({ length: TILESETS }, (_, ts) => tilesetPointers(ptrEmu, ts).result));
 emu.skipMask = () => emuMask; // as the host: GFX and ExAnimation data and the display data are no dependency
+
+// the main thread's job runner, as the editor's result learner sets it up: the learn jobs learned there at once
+// (learnAtOnce) give the entries the probe host's are compared with (keys, inputs, bytes read)
+const lr = new Rom(file), main = new LevelEmulator(lr), results = new ResultCache(new RomFingerprint(lr)), mainRunner = new JobRunner({ rom: lr, results, main });
+main.skipMask = () => gfxSkipMask(lr);
+main.boot();
+const atOnce = <T>(spec: JobSpec<T>): T => learnAtOnce(mainRunner, spec);
+const same = (a: CacheEntry | undefined, b: CacheEntry | undefined) => !!a && !!b && JSON.stringify(a) === JSON.stringify(b);
 const kindProbe = new ObjKindProbe(emu, { ...lv, header: { ...lv.header, tileset: 1 } }, l2), kinds = kindProbe.result();
 const scanned = runJob(levelScanJob(emu, scanLevel));
 host.handle({ type: 'kinds', ts: 1, level: { number: lv.number, header: lv.header }, layer2Pointer: l2 });
@@ -342,7 +349,7 @@ for (const changeRead of [false, true]) {
 
 // sprite images (learn jobs, #175): as captured directly, a test level load (six sprites grouped by number, #176) per
 // step with the images as they come;
-// the result cache entries as the result learner on the main thread makes them (key, input, bytes read: a picture,
+// the result cache entries as the job runner on the main thread makes them (key, input, bytes read: a picture,
 // from the main boot snapshot); a lane's jobs one after another, a request for the same result joins it, replace
 // drops the lane's others, unlearn all of them
 {
@@ -369,18 +376,11 @@ for (const changeRead of [false, true]) {
   const entry = done?.type === 'learned' ? done.put.find(([k]) => k === storeKey('spr-set', input))?.[1] : undefined;
   check(entry?.input === input && JSON.stringify(entry.data) === JSON.stringify(direct), 'sprite set: its result cache entry, with its input');
 
-  // the main thread's result learner, as the editor sets it up
-  const lr = new Rom(file), main = new LevelEmulator(lr), results = new ResultCache(new RomFingerprint(lr)), later: (() => void)[] = [];
-  main.skipMask = () => gfxSkipMask(lr);
-  main.boot();
-  const learner = new ResultLearner({ rom: lr, results, cacheReady: Promise.resolve(), main, later: (_k, f) => later.push(f), soon: (f) => later.push(f), setBusy: () => {} });
-  learner.learn('spr-set', (e, _p, part) => spriteSetJob(e, level, nums, () => {}, part), { input: { set: 'test', nums } });
-  for (let i = 0; i < 100 && !results.entry('spr-set', input); i++) { await new Promise((f) => setTimeout(f, 0)); while (later.length) later.shift()!(); }
+  atOnce({ key: 'spr-set', input, keep: true, picture: true, start: (e, _p, part) => spriteSetJob(e, level, nums, () => {}, part) });
   const there = results.entry('spr-set', input);
   check(!!there && !!entry && JSON.stringify(there.deps) === JSON.stringify(entry.deps) && JSON.stringify(there.data) === JSON.stringify(entry.data),
-    'sprite set: the same entry as the result learner on the main thread (bytes read)');
-  check(!!entry && entry.deps.pages.some((p) => gfxDisplaySkipMask(r, Array.from({ length: TILESETS }, (_, ts) => tilesetPointers(ptrEmu, ts).result))[p << 8]),
-    'sprite set: a picture, its reads keep the display data');
+    'sprite set: the same entry as on the main thread (bytes read)');
+  check(!!entry && entry.deps.pages.some((p) => emuMask[p << 8]), 'sprite set: a picture, its reads keep the display data');
 
   // the same set again: the stored result at once
   h.handle({ type: 'learn', lane: 'sprites', key: 'spr-set', input, job: { kind: 'sprites', level, nums }, replace: true });
@@ -470,7 +470,7 @@ for (const changeRead of [false, true]) {
 }
 
 // the levels' uses, the sprite memory check and the animated tiles and colors (learn jobs, #177): results and entries
-// (keys, inputs, bytes read) as the result learner on the main thread makes them: the uses in the levels' entries (the
+// (keys, inputs, bytes read) as the job runner on the main thread makes them: the uses in the levels' entries (the
 // job keeps none), shown a level at a time; the check in the result cache; the animated ones in memory only, handed
 // back with the result
 {
@@ -482,15 +482,6 @@ for (const changeRead of [false, true]) {
     while (h.pending) { const d = h.next(); if (d) out.push(d); }
     return { out, done: out.find((d) => d.type === 'learned'), put: new Map(out.flatMap((d) => ('put' in d ? d.put : []))) };
   };
-  // the main thread's result learner, as the editor set it up
-  const lr = new Rom(file), main = new LevelEmulator(lr), results = new ResultCache(new RomFingerprint(lr)), later: (() => void)[] = [];
-  main.skipMask = () => gfxSkipMask(lr);
-  main.boot();
-  const learner = new ResultLearner({ rom: lr, results, cacheReady: Promise.resolve(), main, later: (_k, f) => later.push(f), soon: (f) => later.push(f), setBusy: () => {} });
-  const drain = async (until: () => boolean) => {
-    for (let i = 0; i < 2000 && !until(); i++) { await new Promise((f) => setTimeout(f, 0)); while (later.length) later.shift()!(); }
-  };
-  const same = (a: CacheEntry | undefined, b: CacheEntry | undefined) => !!a && !!b && JSON.stringify(a) === JSON.stringify(b);
 
   // uses
   const levels = [0x105, 0x106, 0x107];
@@ -498,11 +489,9 @@ for (const changeRead of [false, true]) {
   const shownLevels = uses.out.flatMap((d) => (d.type === 'learning' ? d.shown : []));
   check(shownLevels.join() === levels.join() && uses.done?.type === 'learned' && !uses.done.failed && uses.done.result === undefined, `uses: a level at a time, shown as it comes (${shownLevels.join()})`);
   const idx = new LevelUses(lr, results);
-  let usesDone = false;
-  learner.learn('uses', (emu) => levelUsesJob(idx, emu, () => levels, () => {}), { keep: false, picture: false, done: () => (usesDone = true) });
-  await drain(() => usesDone);
+  atOnce({ key: 'uses', keep: false, picture: false, start: (emu) => levelUsesJob(idx, emu, () => levels, () => {}) });
   const there = levels.map((n) => results.under(levelTilesKey(n))[0]);
-  check(there.every((e) => !!e && same(uses.put.get(e[0]), e[1])) && !uses.put.has('uses'), 'uses: the levels\' entries as the result learner\'s on the main thread (keys, inputs, bytes read: no picture), none of the job\'s');
+  check(there.every((e) => !!e && same(uses.put.get(e[0]), e[1])) && !uses.put.has('uses'), 'uses: the levels\' entries as on the main thread (keys, inputs, bytes read: no picture), none of the job\'s');
   const again = run({ type: 'learn', lane: 'uses', key: 'uses', job: { kind: 'uses', levels }, replace: false });
   check(!again.out.some((d) => d.type === 'learning') && levels.every((n, i) => same(again.put.get(there[i][0]), there[i][1])),
     'uses asked again: the levels known, none loaded, their entries handed back (the editor asked: it has none)');
@@ -521,50 +510,45 @@ for (const changeRead of [false, true]) {
   const sm: SpriteMemLevel = { number: 0xc, header: lvc.header, bgPointer: 0xffd900, mem: lvc.spriteHeader & 0x3f, candidates: usedSpriteMemory(r), sprites };
   const smInput = inputHash({ sm: 'test' });
   const check1 = run({ type: 'learn', lane: 'spritemem', key: 'sm-test', input: smInput, job: { kind: 'spriteMem', level: sm }, replace: true });
-  let smDone: unknown;
-  learner.learn('sm-test', (emu) => spriteMemCheckJob(emu, sm, new SpriteGroupResults(results.fp)), { input: { sm: 'test' }, picture: false, done: (x) => (smDone = x) });
-  await drain(() => smDone !== undefined);
+  const smDone = atOnce({ key: 'sm-test', input: smInput, keep: true, picture: false, start: (emu) => spriteMemCheckJob(emu, sm, new SpriteGroupResults(results.fp)) });
   check(check1.done?.type === 'learned' && JSON.stringify(check1.done.result) === JSON.stringify(smDone) && (smDone as SpriteMemResult).lost.length === 1 && (smDone as SpriteMemResult).suggestion !== null, `sprite memory: the check as on the main thread (${JSON.stringify(smDone)})`);
   check(same(check1.put.get(storeKey('sm-test', smInput)), results.entry('sm-test', smInput) && { ...results.entry('sm-test', smInput)!, input: smInput }),
-    'sprite memory: its entry as the result learner\'s (key, input, bytes read)');
+    'sprite memory: its entry as on the main thread (key, input, bytes read)');
 
   // the animated tiles and colors of level 105: in memory only
   const anInput = inputHash({ an: 'test' });
   const an = run({ type: 'learn', lane: 'animated', key: 'anim:test', input: anInput, job: { kind: 'animated', level: 0x105, ov: {} }, replace: true });
-  let anDone: Animated | undefined;
-  learner.learn('anim:test', (emu) => animatedJob(emu, 0x105, {}), { input: { an: 'test' }, keep: 'memory', done: (x) => (anDone = x) });
-  await drain(() => anDone !== undefined);
+  const anDone = atOnce({ key: 'anim:test', input: anInput, keep: 'memory', picture: true, start: (emu) => animatedJob(emu, 0x105, {}) });
   const res = an.done?.type === 'learned' ? an.done.result as Animated : undefined;
   check(!!res && !!anDone && res.tiles.size > 0 && [...res.tiles].join() === [...anDone.tiles].join() && [...res.colors].join() === [...anDone.colors].join(),
     `animated: the tiles and colors as on the main thread (${res?.tiles.size} tiles, ${res?.colors.size} colors)`);
-  const mem = (learner as unknown as { runner: { memory: { entry(k: string, i: string): { data: unknown; deps: RomDeps } | undefined } } }).runner.memory.entry('anim:test', anInput);
+  const mem = mainRunner.memory.entry('anim:test', anInput);
   check(an.done?.type === 'learned' && !!mem && !an.put.has(storeKey('anim:test', anInput)) && an.done.memory?.input === anInput
-    && JSON.stringify(an.done.memory.deps) === JSON.stringify(mem.deps), 'animated: kept in memory only, its entry handed back as the result learner keeps it (bytes read)');
+    && JSON.stringify(an.done.memory.deps) === JSON.stringify(mem.deps), 'animated: kept in memory only, its entry handed back as the main thread keeps it (bytes read)');
 
   // the layer 3 kinds of level 105 in the castle tileset and the tiles of the level as edited (learn jobs, #178): results and
-  // entries as the result learner's now() on the main thread made them (no pictures; the kinds in the result cache, the
-  // tiles in memory only)
+  // entries as on the main thread (no pictures; the kinds in the result cache, the tiles in memory only)
   const lv5 = loadLevel(r, 0x105), ov5 = levelOverride(r, lv5), l3ov = { layer1: serializeLayer1(r, { ...lv5, header: { ...lv5.header, tileset: 1 } }), secondaryHeader: encodeSecondaryHeader(lv5.secondary) };
   const l3Input = inputHash({ l3: 'test' });
   const l3 = run({ type: 'learn', lane: 'layer3', key: 'l3k-test', input: l3Input, job: { kind: 'layer3', level: 0x105, ov: l3ov }, replace: true });
-  const l3Now = learner.now('l3k-test', (emu) => emu.tracked(() => layer3Kinds(emu, 0x105, l3ov)), { input: { l3: 'test' }, picture: false });
+  const l3Now = atOnce({ key: 'l3k-test', input: l3Input, keep: true, picture: false, start: function* (emu) { return layer3Kinds(emu, 0x105, l3ov); } });
   check(l3.done?.type === 'learned' && !l3.done.failed && (l3.done.result as string[]).join() === l3Now.join() && l3Now.join() === 'none,tide-moving,image,image',
     `layer 3 kinds: as on the main thread (${l3Now.join()})`);
   check(same(l3.put.get(storeKey('l3k-test', l3Input)), results.entry('l3k-test', l3Input) && { ...results.entry('l3k-test', l3Input)!, input: l3Input }),
-    'layer 3 kinds: their entry as the result learner\'s (key, input, bytes read: no picture)');
+    'layer 3 kinds: their entry as on the main thread (key, input, bytes read: no picture)');
   const ltInput = inputHash({ lt: 'test' });
   const lt = run({ type: 'learn', lane: 'lt', key: 'lt-test', input: ltInput, job: { kind: 'levelTiles', level: lv5, ov: ov5 }, replace: true });
-  const ltNow = learner.now('lt-test', (emu) => emu.tracked(() => levelTilesAll(lr, lv5, (o) => emu.load(0x105, o), ov5)), { input: { lt: 'test' }, keep: 'memory', picture: false });
+  const ltNow = atOnce({ key: 'lt-test', input: ltInput, keep: 'memory', picture: false, start: function* (emu) { return levelTilesAll(lr, lv5, (o) => emu.load(0x105, o), ov5); } });
   check(lt.done?.type === 'learned' && !lt.done.failed && JSON.stringify(lt.done.result) === JSON.stringify(ltNow) && ltNow.fg.length > 0,
     `open level's tiles: as on the main thread (${ltNow.fg.length} FG, ${ltNow.bg.length} BG uses)`);
-  const ltMem = (learner as unknown as { runner: { memory: { entry(k: string, i: string): { data: unknown; deps: RomDeps } | undefined } } }).runner.memory.entry('lt-test', ltInput);
+  const ltMem = mainRunner.memory.entry('lt-test', ltInput);
   check(lt.done?.type === 'learned' && !!ltMem && !lt.put.has(storeKey('lt-test', ltInput)) && lt.done.memory?.input === ltInput
-    && JSON.stringify(lt.done.memory.deps) === JSON.stringify(ltMem.deps), 'open level\'s tiles: kept in memory only, their entry handed back as the result learner keeps it (bytes read)');
+    && JSON.stringify(lt.done.memory.deps) === JSON.stringify(ltMem.deps), 'open level\'s tiles: kept in memory only, their entry handed back as the main thread keeps it (bytes read)');
 }
 
 // the object thumbnails, the placement preview, the jump arcs, the layer 2 motions, the overworld path kinds, the prefab
-// suggestions and the object boxes (learn jobs, #179): results and entries (keys, inputs, bytes read) as the result
-// learner on the main thread made them; the placement preview and the arcs in memory only, a request replacing the
+// suggestions and the object boxes (learn jobs, #179): results and entries (keys, inputs, bytes read) as the job
+// runner on the main thread made them; the placement preview and the arcs in memory only, a request replacing the
 // lane's others drops them; the suggestions and the boxes to the editor only (the boxes probed again after a ROM change)
 {
   const r = new Rom(file), h = new ProbeHost();
@@ -576,17 +560,6 @@ for (const changeRead of [false, true]) {
     const learned = out.filter((d) => d.type === 'learned');
     return { out, learned, done: learned[learned.length - 1], put: new Map(out.flatMap((d) => ('put' in d ? d.put : []))) };
   };
-  const lr = new Rom(file), main = new LevelEmulator(lr), results = new ResultCache(new RomFingerprint(lr)), later: (() => void)[] = [];
-  main.skipMask = () => gfxSkipMask(lr);
-  main.boot();
-  const learner = new ResultLearner({ rom: lr, results, cacheReady: Promise.resolve(), main, later: (_k, f) => later.push(f), soon: (f) => later.push(f), setBusy: () => {} });
-  const learned = async <T>(key: string, start: Parameters<ResultLearner['learn']>[1], opts: Parameters<ResultLearner['learn']>[2] = {}): Promise<T> => {
-    let got: T | undefined;
-    learner.learn(key, start, { ...opts, done: (x) => (got = x as T) });
-    for (let i = 0; i < 5000 && got === undefined; i++) { await new Promise((f) => setTimeout(f, 0)); while (later.length) later.shift()!(); }
-    return got!;
-  };
-  const same = (a: CacheEntry | undefined, b: CacheEntry | undefined) => !!a && !!b && JSON.stringify(a) === JSON.stringify(b);
   const json = (x: unknown) => JSON.stringify(x, (_k, v) => (v instanceof Uint32Array ? [...v] : v));
   const lv5 = loadLevel(r, 0x105), ov5 = levelOverride(r, lv5);
 
@@ -594,17 +567,17 @@ for (const changeRead of [false, true]) {
   const specs: ObjSpec[] = [{ num: 0x21, ext: 0, size: 0x13 }, { num: 0, ext: 0x10, size: 0 }, { num: 0x0e, ext: 0, size: 0x02 }];
   const keys = specs.map((q) => objKey(q, null)), thInput = inputHash({ th: 'test' });
   const th = run({ type: 'learn', lane: 'thumbs', key: 'th-test', input: thInput, job: { kind: 'thumbs', level: lv5, specs, keys }, replace: true });
-  const thNow = await learned<ObjThumb[]>('th-test', (emu) => objectThumbsJob(lr, emu, lv5, specs, (q) => keys[specs.indexOf(q)]), { input: { th: 'test' } });
+  const thNow = atOnce<ObjThumb[]>({ key: 'th-test', input: thInput, keep: true, picture: true, start: (emu) => objectThumbsJob(lr, emu, lv5, specs, (q) => keys[specs.indexOf(q)]) });
   check(th.done?.type === 'learned' && !th.done.failed && json(th.done.result) === json(thNow) && thNow.length === 3, `thumbnails: as on the main thread (${thNow.length})`);
   check(same(th.put.get(storeKey('th-test', thInput)), results.entry('th-test', thInput) && { ...results.entry('th-test', thInput)!, input: thInput }),
-    'thumbnails: their entry as the result learner\'s (key, input, bytes read: a picture)');
+    'thumbnails: their entry as on the main thread (key, input, bytes read: a picture)');
 
   // the placement preview: an object placed in level 105 (in memory only); a request replacing it drops it
   const placed = { ...lv5, objects: [...lv5.objects, { uid: 1, num: 0x21, ext: 0, size: 0x13, x: 4, y: 0x14 }] }, ovp = levelOverride(r, placed);
   const pvJob = (i: number): ProbeMessage => ({ type: 'learn', lane: 'placement', key: `pp-test${i}`, input: thInput, job: { kind: 'preview', level: placed, ov: ovp, layer2: false, placed: [placed.objects.length - 1] }, replace: true });
   const started = h.started;
   const pv = run(pvJob(1), pvJob(2));
-  const pvNow = await learned<PlacementPreview | null>('pp-now', (emu) => placementPreviewJob(lr, emu, placed, ovp, false, [placed.objects.length - 1]), { input: 'pp', keep: 'memory' });
+  const pvNow = atOnce<PlacementPreview | null>({ key: 'pp-now', input: 'pp', keep: 'memory', picture: true, start: (emu) => placementPreviewJob(lr, emu, placed, ovp, false, [placed.objects.length - 1]) });
   check(pv.learned.length === 1 && pv.done?.type === 'learned' && pv.done.key === 'pp-test2' && h.started === started + 1, 'placement preview: the replaced request dropped, only the latest learned');
   check(pv.done?.type === 'learned' && !!pvNow && pvNow.w > 0 && json(pv.done.result) === json(pvNow) && !pv.put.has(storeKey('pp-test2', thInput)) && !!pv.done.memory,
     `placement preview: as on the main thread (${pvNow?.w}x${pvNow?.h}), in memory only`);
@@ -613,21 +586,21 @@ for (const changeRead of [false, true]) {
   const runs = direct.runStates(), lvHash = inputHash({ lv: 'test' });
   const arcs = (tx: number): ProbeMessage => ({ type: 'learn', lane: 'arcs', key: `arcs:${tx}`, input: thInput, job: { kind: 'arcs', level: lvHash, load: [0x105, ov5, lv5.spriteHeader, 432], tx, ty: 0x16, runs }, replace: true });
   const ar = run(arcs(3), arcs(5));
-  const arNow = await learned<JumpArc[]>('arcs:now', (emu, prepare) => jumpArcsJob(emu, prepare, lvHash, [0x105, ov5, lv5.spriteHeader, 432], 5, 0x16, runs), { input: 'arcs', keep: 'memory', picture: false });
+  const arNow = atOnce<JumpArc[]>({ key: 'arcs:now', input: 'arcs', keep: 'memory', picture: false, start: (emu, prepare) => jumpArcsJob(emu, prepare, lvHash, [0x105, ov5, lv5.spriteHeader, 432], 5, 0x16, runs) });
   check(ar.learned.length === 1 && ar.done?.type === 'learned' && ar.done.key === 'arcs:5' && !!ar.done.memory, 'jump arcs: the replaced request dropped, the latest in memory only');
   check(ar.done?.type === 'learned' && arNow.length === 8 && JSON.stringify(ar.done.result) === JSON.stringify(arNow), 'jump arcs: as on the main thread');
 
   // the layer 2 motions of level 105 and the overworld path kinds (no pictures, in the result cache)
   const l2Input = inputHash({ l2: 'test' });
   const l2 = run({ type: 'learn', lane: 'l2', key: 'l2m-test', input: l2Input, job: { kind: 'layer2Motions', level: 0x105, ov: ov5 }, replace: true });
-  const l2Now = await learned<Layer2Motions>('l2m-test', function* (emu) { return (yield* layer2MotionsJob(emu, 0x105, ov5)).result; }, { input: { l2: 'test' }, picture: false });
+  const l2Now = atOnce<Layer2Motions>({ key: 'l2m-test', input: l2Input, keep: true, picture: false, start: function* (emu) { return (yield* layer2MotionsJob(emu, 0x105, ov5)).result; } });
   check(l2.done?.type === 'learned' && !l2.done.failed && l2Now.paired.length === 16 && JSON.stringify(l2.done.result) === JSON.stringify(l2Now), 'layer 2 motions: as on the main thread');
   check(same(l2.put.get(storeKey('l2m-test', l2Input)), results.entry('l2m-test', l2Input) && { ...results.entry('l2m-test', l2Input)!, input: l2Input }),
-    'layer 2 motions: their entry as the result learner\'s (key, input, bytes read: no picture)');
-  const pk = run({ type: 'learn', lane: 'owpk', key: 'owpk-test', job: { kind: 'pathKinds' }, replace: true });
-  const pkNow = await learned<PathKind[]>('owpk-test', pathKindsJob, { picture: false });
+    'layer 2 motions: their entry as on the main thread (key, input, bytes read: no picture)');
+  const pk = run({ type: 'learn', lane: 'owpk1', key: 'owpk-test', job: { kind: 'pathKinds' }, replace: true });
+  const pkNow = atOnce<PathKind[]>({ key: 'owpk-test', keep: true, picture: false, start: pathKindsJob });
   check(pk.done?.type === 'learned' && pkNow.length === 0x100 && JSON.stringify(pk.done.result) === JSON.stringify(pkNow), 'path kinds: as on the main thread');
-  check(same(pk.put.get('owpk-test'), results.entry('owpk-test', undefined)), 'path kinds: their entry as the result learner\'s (bytes read: no picture)');
+  check(same(pk.put.get('owpk-test'), results.entry('owpk-test', undefined)), 'path kinds: their entry as on the main thread (bytes read: no picture)');
 
   // the prefab suggestions of some levels, the open one as edited (a 3×3 block of Direct Map16 tiles twice, once in
   // another level): as found directly; the run handed to the editor holds there (KeptSuggestions.held)
@@ -642,7 +615,7 @@ for (const changeRead of [false, true]) {
   edited.objects.push(...block(0x20, 5), ...block(0x30, 8));
   const hp = new ProbeHost();
   hp.setRom(1, pr.data.slice());
-  hp.handle({ type: 'learn', lane: 'suggest', key: 'suggest', input: '1', job: { kind: 'suggest', levels, open: edited }, replace: true });
+  hp.handle({ type: 'learn', lane: 'prefab-suggest', key: 'suggest', input: '1', job: { kind: 'suggest', levels, open: edited }, replace: true });
   const sgOut: ProbeReply[] = [];
   while (hp.pending) { const d = hp.next(); if (d) sgOut.push(d); }
   const sgDone = sgOut.find((d) => d.type === 'learned');

@@ -1,8 +1,8 @@
-// Learning emulated results on the main thread (learner.ts): a result the cache holds comes back without
-// running anything; two requests for one key run its job once; a sliced job during which the ROM bytes it
-// read change keeps nothing and is learned again (it starts over before its next step). A result with an input
-// (inputs.ts) is learned again when the input or a byte it read changes, and reused when neither does; one kept in
-// memory isn't stored.
+// Learning emulated results on the main thread (learner.ts) at once, and jobs a step at a time on the job runner under
+// it (jobrunner.ts, as the probe worker's lanes run them): a result the cache holds comes back without running
+// anything; a job during which the ROM bytes it read change keeps nothing and is learned again (it starts over before
+// its next step). A result with an input (inputs.ts) is learned again when the input or a byte it read changes, and
+// reused when neither does; one kept in memory isn't stored.
 // Memory-only results (#200): a write looks at a key's inputs only, not at all results (counted); a key keeps its latest
 // used inputs, the latest used results stay within the limit, and a round keeps all results it used, also more.
 // A result that is no picture doesn't read what blocks look like (ADR 0008): flipping a standard Map16 tile's
@@ -12,7 +12,7 @@ import { LevelEmulator } from '../src/core/levelemu.ts';
 import { ResultCache, RomFingerprint } from '../src/core/romdeps.ts';
 import { INPUTS_PER_KEY } from '../src/core/keptresults.ts';
 import { ResultLearner } from '../src/core/learner.ts';
-import { memoryResults } from '../src/core/jobrunner.ts';
+import { memoryResults, JobRunner, type Job, type Keep } from '../src/core/jobrunner.ts';
 import { inputHash, levelInput } from '../src/core/inputs.ts';
 import { gfxSkipMask } from '../src/core/gfxpages.ts';
 import { LevelUses, usedLevels } from '../src/core/levelusage.ts';
@@ -22,7 +22,7 @@ import { setSharedColor, sharedColor } from '../src/core/sharedpal.ts';
 import { captureSprites } from '../src/core/spritegfx.ts';
 import { objectThumbsJob, objKey } from '../src/core/objthumbs.ts';
 import { editorImage } from './fixture.ts';
-import { checkJobRunner } from './runnercheck.ts';
+import { checkJobRunner, learnAtOnce } from './runnercheck.ts';
 
 let fail = 0;
 const check = (ok: boolean, what: string) => { console.log((ok ? 'ok   ' : 'FAIL ') + what); if (!ok) fail++; };
@@ -33,15 +33,11 @@ const spare = rom.allocWrite(new Uint8Array(0x300)); // a page of its own no loa
 
 function editor(r = rom, m = main) {
   const results = new ResultCache(new RomFingerprint(r));
-  const steps: (() => void)[] = [];
-  const learner = new ResultLearner({
-    rom: r, results, cacheReady: Promise.resolve(), main: m,
-    later: (_key, step) => steps.push(step), soon: (step) => steps.push(step),
-    setBusy: () => {},
-  });
-  // runs the background slices until none is left (stored results are awaited first)
-  const drain = async () => { for (let i = 0; i < 100; i++) { await new Promise((r) => setTimeout(r, 0)); while (steps.length) steps.shift()!(); } };
-  return { results, learner, drain };
+  const learner = new ResultLearner({ rom: r, results, main: m }), runner = new JobRunner({ rom: r, results, main: m });
+  // a job learned a step at a time to its end (stored as keep says; input: hashed)
+  const learn = <T>(key: string, start: (emu: LevelEmulator) => Job<T>, opts: { input?: unknown; keep?: Keep; picture?: boolean } = {}): T =>
+    learnAtOnce(runner, { key, input: opts.input === undefined ? undefined : inputHash(opts.input), keep: opts.keep ?? true, picture: opts.picture ?? true, start });
+  return { results, learner, runner, learn };
 }
 
 // a job reading the spare page: one step per byte (a slice each), its sum as the result
@@ -55,11 +51,11 @@ function* sum(n: number): Generator<void, number> {
 
 // a cached result: returned without running, at once and sliced
 {
-  const { results, learner } = editor();
+  const { results, learner, learn } = editor();
   results.set('k', 42, results.fp.deps(main.tracked(() => rom.r8(spare)).reads));
   runs = 0;
   check(learner.now('k', (emu) => emu.tracked(() => { runs++; return 7; })) === 42 && runs === 0, 'a cached result comes back at once without running');
-  check(learner.learn('k', () => sum(3)) === 42 && runs === 0, 'and sliced');
+  check(learn('k', () => sum(3)) === 42 && runs === 0, 'and a step at a time');
 }
 
 // learned at once: stored, the next request doesn't run it again
@@ -71,53 +67,34 @@ function* sum(n: number): Generator<void, number> {
   check(a === 1 && b === 1 && runs === 1, 'a result learned at once is kept');
 }
 
-// two requests for one key while its sliced job runs: it runs once, both hear of the result
+// a job learned a step at a time: stored, the next request doesn't run it again
 {
-  const { results, learner, drain } = editor();
+  const { results, learn } = editor();
   runs = 0;
-  const heard: number[] = [];
-  const first = learner.learn('s', () => sum(4), { done: (r) => heard.push(r) });
-  const second = learner.learn('s', () => sum(4), { done: (r) => heard.push(r + 100) });
-  await drain();
-  check(first === undefined && second === undefined, 'undefined while it is learned');
-  check(runs === 1 && heard.join() === '0,100', `two requests for one key run once, both called (${runs} runs, ${heard})`);
-  check(results.get('s') === 0 && learner.learn('s', () => sum(4)) === 0 && runs === 1, 'the result is kept');
-}
-
-// the same callback asked twice for a key in flight: called once
-{
-  const { learner, drain } = editor();
-  let once = 0;
-  const f = () => once++;
-  learner.learn('t', () => sum(2), { done: f });
-  learner.learn('t', () => sum(2), { done: f });
-  await drain();
-  check(once === 1, 'the same callback asked twice is called once');
+  check(learn('s', () => sum(4)) === 0 && runs === 1 && results.get('s') === 0 && learn('s', () => sum(4)) === 0 && runs === 1, 'a job\'s result is kept');
 }
 
 // a ROM write to bytes the job read, while it runs: nothing kept from that run, learned again with the new bytes
 {
-  const { results, learner, drain } = editor();
+  const { results, learn } = editor();
   runs = 0;
-  const heard: number[] = [];
   let wrote = false;
-  learner.learn('w', function* () {
+  const heard = learn('w', function* () {
     const s = yield* sum(4);
     if (!wrote) { wrote = true; rom.w8(spare, 5); } // (after its last read)
     return s;
-  }, { done: (r) => heard.push(r) });
-  await drain();
-  check(runs === 2 && heard.join() === '5', `learned again after a ROM write (${runs} runs, ${heard})`);
+  });
+  check(runs === 2 && heard === 5, `learned again after a ROM write (${runs} runs, ${heard})`);
   check(results.get('w') === 5, 'only the result from the new bytes is kept');
   rom.w8(spare, 0);
 }
 
 // a ROM write to a byte the job read, between two of its steps: it starts over before its next step
 {
-  const { results, learner, drain } = editor();
+  const { results, learn } = editor();
   runs = 0;
   let wrote = false, third = 0;
-  learner.learn('v', function* () {
+  learn('v', function* () {
     runs++;
     const s = rom.r8(spare);
     yield;
@@ -126,22 +103,20 @@ function* sum(n: number): Generator<void, number> {
     third++;
     return s;
   });
-  await drain();
   check(runs === 2 && third === 1 && results.get('v') === 3, `started over before the step after the write (${runs} runs, ${third} third steps)`);
   rom.w8(spare, 0);
 }
 
 // a ROM write to bytes the job didn't read: kept
 {
-  const { results, learner, drain } = editor();
+  const { results, learn } = editor();
   runs = 0;
   let wrote = false;
-  learner.learn('u', function* () {
+  learn('u', function* () {
     const s = yield* sum(4);
     if (!wrote) { wrote = true; rom.w8(spare + 0x200, 9); }
     return s;
   });
-  await drain();
   check(runs === 1 && results.get('u') === 0, 'a write elsewhere keeps the result');
   rom.w8(spare + 0x200, 0);
 }
@@ -159,10 +134,10 @@ function* sum(n: number): Generator<void, number> {
     && inputHash(levelInput(0x106, ov)) !== inputHash(levelInput(0x105, ov)), 'a view setting or another level changes it');
 }
 
-// a result with an input, learned at once and sliced: reused for the same input, learned again for another one
+// a result with an input, learned at once and a step at a time: reused for the same input, learned again for another one
 // or when a byte it read changed
 for (const keep of [true, 'memory'] as const) {
-  const { results, learner, drain } = editor();
+  const { results, learner, runner, learn } = editor();
   const what = keep === true ? 'stored' : 'kept in memory';
   runs = 0;
   const run = (emu: LevelEmulator) => emu.tracked(() => { runs++; return rom.r8(spare) + 1; });
@@ -175,26 +150,12 @@ for (const keep of [true, 'memory'] as const) {
   check(learner.now('i', run, { input: { a: 2 }, keep }) === 5 && runs === 3, `${what}: a changed byte it read learns it again`);
   rom.w8(spare, 0);
   runs = 0;
-  const heard: number[] = [];
-  learner.learn('j', () => sum(2), { input: 'x', keep, done: (r) => heard.push(r) });
-  await drain();
-  check(learner.learn('j', () => sum(2), { input: 'x', keep }) === 0 && runs === 1, `${what}, sliced: the same input reuses it`);
-  check(learner.learn('j', () => sum(2), { input: 'y', keep }) === undefined, `${what}, sliced: another input learns it again`);
-  await drain();
-  check(runs === 2 && learner.learn('j', () => sum(2), { input: 'y', keep }) === 0, `${what}, sliced: learned for the new input`);
+  learn('j', () => sum(2), { input: 'x', keep });
+  check(learn('j', () => sum(2), { input: 'x', keep }) === 0 && runs === 1, `${what}, a step at a time: the same input reuses it`);
+  check(runner.stored('j', inputHash('y'), keep) === undefined && learn('j', () => sum(2), { input: 'y', keep }) === 0 && runs === 2,
+    `${what}, a step at a time: another input learns it again`);
   const stored = results.flush().put.map(([k]) => k.split('#')[0]); // (stored by key and input)
   check(keep === true ? stored.includes('i') && stored.includes('j') : !stored.length, `${what}: ${keep === true ? 'in' : 'not in'} the result cache (${stored})`);
-}
-
-// two inputs asked for in one lane with replace: only the latest is learned
-{
-  const { learner, drain } = editor();
-  runs = 0;
-  const heard: string[] = [];
-  learner.learn('r', () => sum(3), { input: 1, keep: 'memory', lane: 'l', replace: true, done: () => heard.push('1') });
-  learner.learn('r', () => sum(3), { input: 2, keep: 'memory', lane: 'l', replace: true, done: () => heard.push('2') });
-  await drain();
-  check(heard.join() === '2', `replace drops the request for another input (${heard})`);
 }
 
 // Display data (ADR 0008): the levels' uses (picture: false) and, to compare, the same as pictures, each in an editor of
@@ -207,21 +168,18 @@ for (const keep of [true, 'memory'] as const) {
   const levels = [0x105, ...usedLevels(r).slice(0, 12)];
   const scanned = async (picture: boolean) => {
     const e = editor(r, m), uses = new LevelUses(r, e.results);
-    let done = false;
-    e.learner.learn('uses', function* (emu) { for (const n of levels) { uses.scan(n, emu); yield; } }, { keep: false, picture, done: () => (done = true) });
-    while (!done) await e.drain();
+    e.learn('uses', function* (emu) { for (const n of levels) { uses.scan(n, emu); yield; } }, { keep: false, picture });
     return uses;
   };
   const plain = await scanned(false), shown = await scanned(true);
-  const { learner, results, drain } = editor(r, m);
+  const { learner, results, runner, learn } = editor(r, m);
   const lv = loadLevel(r, 0x105), bg = lv.layer2Pointer >> 16 === 0xff ? lv.layer2Pointer : 0xffd900;
   const sprites = () => learner.now('spr', (emu) => emu.tracked(() => captureSprites(emu, 0x105, lv.header, lv.spriteHeader, bg, [0, 1, 2, 3, 4, 5])));
   sprites();
   const specs = [...new Map(lv.objects.map((o) => [`${o.num}:${o.ext}:${o.size}`, { num: o.num, ext: o.ext, size: o.size }])).values()];
   const keyOf = (q: typeof specs[number]) => objKey(q, null);
-  const thumbs = () => learner.learn('thumbs', (emu) => objectThumbsJob(r, emu, lv, specs, keyOf));
-  thumbs();
-  await drain();
+  const thumbs = () => learn('thumbs', (emu) => objectThumbsJob(r, emu, lv, specs, keyOf));
+  const thumbsKept = () => runner.stored('thumbs', undefined, true) !== undefined;
   check(plain.missing(levels).length === 0 && shown.missing(levels).length === 0 && results.get('spr') !== undefined
     && !!thumbs()?.some((t) => t.m16.includes(0x130)), 'display data: uses, sprite images and object thumbnails (one showing tile 130) learned');
 
@@ -232,8 +190,8 @@ for (const keep of [true, 'memory'] as const) {
   setFgWords(r, m.load(0x105), 0x130, [...map16Source(r, m.load(0x105)).fg(0x130)].map((w) => w ^ 0x4000));
   const flipped = shown.missing(levels).length;
   check(plain.missing(levels).length === 0 && flipped > 0, `flipping tile 130's quarters keeps every level's uses (as pictures ${flipped} of ${levels.length} would be learned again)`);
-  check(thumbs() === undefined && redrawn(), 'the object thumbnails are learned again, the open level drawn anew');
-  await drain();
+  check(!thumbsKept() && redrawn(), 'the object thumbnails are learned again, the open level drawn anew');
+  thumbs();
   for (const n of shown.missing(levels)) shown.scan(n, learner.emu());
   sprites();
   redrawn = drawn();
@@ -241,7 +199,7 @@ for (const keep of [true, 'memory'] as const) {
   setSharedColor(r, 0x21, sharedColor(r, 0x21) ^ 1);
   check(plain.missing(levels).length === 0 && shown.missing(levels).length === levels.length,
     'changing a shared color keeps every level\'s uses (as pictures all would be learned again)');
-  check(results.get('spr') === undefined && thumbs() === undefined && redrawn(), 'the sprite images and object thumbnails are learned again, the open level drawn anew');
+  check(results.get('spr') === undefined && !thumbsKept() && redrawn(), 'the sprite images and object thumbnails are learned again, the open level drawn anew');
 }
 
 // memory-only results: the bounds (keys, not inputs, counted for the limit); a round keeps what it used

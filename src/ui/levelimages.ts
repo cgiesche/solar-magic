@@ -20,6 +20,7 @@ import { paintOverlays, levelOverlay, overlayPending, gameViewIn, wholeLevel, ty
 import { renderLevelImages, usedScreens, screensSize, levelImageName, parseLevelList } from '../core/levelimage.ts';
 import type { SpriteImage } from '../core/spritegfx.ts';
 import { incompleteSprites } from './spritemem.ts';
+import type { LearnLane } from '../core/probeprotocol.ts';
 
 // ---------------- a level's image ----------------
 
@@ -100,7 +101,7 @@ const PROBE_WAIT = 30000; // ms a level waits for its probes at most (then: draw
 
 // An export's waits: lane: the learn jobs of its sprites' images (each export its own, dropped when it ends);
 // cancelled, wake: ends the wait it is in; status: tells what it waits for now
-type ExportWait = { lane: string; cancelled: boolean; wake: (() => void) | null; status?: (what: string) => void };
+type ExportWait = { lane: LearnLane; cancelled: boolean; wake: (() => void) | null; status?: (what: string) => void };
 const cancelWait = (w: ExportWait) => { w.cancelled = true; w.wake?.(); };
 
 // what the export waits for, unless it is cancelled before (then: null)

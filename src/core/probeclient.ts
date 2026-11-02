@@ -9,7 +9,8 @@
 // bytes they read are unchanged.
 
 import { ProbeHost, pumpProbes } from './probehost.ts';
-import { jobId, jobKey, learnKeep, learnRetargets, type ProbeJob, type ProbeMessage, type ProbeDone, type ProbeReply, type KindsDone, type ScanDone, type CameraDone, type LearnJob, type LearnMessage, type Learned, type Learning } from './probeprotocol.ts';
+import { jobId, jobKey, learnKeep, learnRetargets, type ProbeJob, type ProbeMessage, type ProbeDone, type ProbeReply, type KindsDone, type ScanDone, type CameraDone, type LearnJob, type LearnMessage, type Learned, type Learning, type LearnLane, type ProbeBusyKey } from './probeprotocol.ts';
+import { Lanes, laneId, type LaneLabel } from './lanes.ts';
 import { inputHash } from './inputs.ts';
 import { partKey, memoryResults, type MemoryResults, type Keep } from './jobrunner.ts';
 import type { ResultCache } from './romdeps.ts';
@@ -37,17 +38,17 @@ export interface ProbeClientDeps {
   connect?(reply: (d: ProbeReply) => void, failed: () => void): Send | null;
   later(key: string, step: () => void): void; // a background slice on the main thread (waits while a dialog is open)
   soon?(step: () => void): void; // a slice that runs while a dialog is open too (default: later's)
-  setBusy(key: string, label: string | null): void; // ('probe', 'kinds', the tasks' types, the learn jobs' lanes)
+  setBusy(key: ProbeBusyKey, label: string | null): void;
   ready(): void; // the asked or the prefetched probes are all done
   kindsReady(): void; // object kinds asked for are known (or failed)
 }
 
 // a learn job asked for (ProbeClient.learn)
 export interface LearnOptions<T> {
-  lane: string; // its lane (one job at a time, in the order asked), also the key of its busy label
+  lane: LearnLane; // its lane (one job at a time, in the order asked, lanes.ts), also the key of its busy label
   input?: unknown; // what the result depends on outside the ROM (inputs.ts)
   replace?: boolean; // drops the lane's other jobs (they are not wanted any more), also when the result is known
-  label?: string | ((queued: number) => string); // busy label (queued: the lane's jobs); the job's progress replaces it
+  label?: LaneLabel; // busy label (queued: the lane's jobs); the job's progress replaces it
   urgent?: boolean; // runs while a dialog is open (one that shows the result): matters without a worker only
   done?: (result: T) => void; // (a callback already waiting for the result isn't added again)
   failed?: () => void; // the job failed (also when it had failed before and isn't run again until the ROM changes)
@@ -57,7 +58,6 @@ export interface LearnOptions<T> {
 
 // (resent: the ROM generation it was last sent again for, a reply from an older one coming: once per generation)
 interface LearnWant { msg: LearnMessage; opts: LearnOptions<unknown>; done: ((r: unknown) => void)[]; failed: (() => void)[]; dropped: (() => void)[]; resent: number }
-interface LearnLane { wants: LearnWant[]; progress: string | null }
 
 export class ProbeClient {
   private send: Send | null = null;
@@ -72,7 +72,7 @@ export class ProbeClient {
   private kindsFailed = new Set<number>(); // tilesets
   // the level scan and the camera at a place asked for, one of each
   private playWant = new Map<Played, { msg: ProbeMessage & { type: Played }; done: (r: unknown) => void }>();
-  private lanes = new Map<string, LearnLane>(); // learn jobs asked for and not done yet, by lane
+  private lanes = new Lanes<LearnLane, LearnWant>((w) => laneId(w.msg.key, w.msg.input)); // learn jobs asked for and not done yet
   private learnFailed = new Set<string>(); // learn jobs (key and input) that failed, forgotten when the ROM changes
   private memory: MemoryResults; // learn jobs' results kept in memory only, as the worker's (checked against the ROM)
   private urges = 0; // waits a dialog shows (urge)
@@ -221,31 +221,26 @@ export class ProbeClient {
   // when it fails later (a caller that redraws on it isn't told again and again)
   learnOrFailed<T>(key: string, job: LearnJob, opts: LearnOptions<T>): T | typeof FAILED | undefined {
     this.sync();
-    const input = opts.input === undefined ? undefined : inputHash(opts.input), id = `${key}#${input}`;
-    const same = (w: LearnWant) => w.msg.key === key && w.msg.input === input;
-    let lane = this.lanes.get(opts.lane);
-    if (!lane) this.lanes.set(opts.lane, (lane = { wants: [], progress: null }));
-    if (opts.replace && lane.wants.some((w) => !same(w))) {
+    const input = opts.input === undefined ? undefined : inputHash(opts.input), id = laneId(key, input), name = opts.lane;
+    const gone = opts.replace ? this.lanes.replace(name, id) : [];
+    if (gone.length) {
       // (the worker drops them too: the job kept answers a replacing request, without one the lane goes)
-      const gone = lane.wants.filter((w) => !same(w));
-      lane.wants = lane.wants.filter(same);
-      lane.progress = null;
-      const kept = lane.wants[0];
-      this.send?.(kept ? { ...kept.msg, replace: true } : { type: 'unlearn', lane: opts.lane });
+      const kept = this.lanes.get(name)?.first;
+      this.send?.(kept ? { ...kept.msg, replace: true } : { type: 'unlearn', lane: name });
       this.drop(gone);
     }
     const keep = learnKeep(job), stored = this.stored<T>(key, input, keep);
     if (stored !== undefined || this.learnFailed.has(id)) {
-      this.learnBusy(opts.lane);
+      this.learnBusy(name);
       return stored === undefined ? FAILED : stored;
     }
-    let want = lane.wants.find(same);
-    if (!want) {
-      const w: LearnWant = want = { msg: { type: 'learn', lane: opts.lane, key, input, job, replace: !!opts.replace }, opts: opts as LearnOptions<unknown>, done: [], failed: [], dropped: [], resent: -1 };
-      lane.wants.push(w);
+    const { job: want, added } = this.lanes.join(name, id, () => (
+      { msg: { type: 'learn', lane: name, key, input, job, replace: !!opts.replace }, opts: opts as LearnOptions<unknown>, done: [], failed: [], dropped: [], resent: -1 }));
+    if (added) {
+      const w = want;
       // (stored results first: the result may be known by then)
       this.d.cacheReady.then(() => {
-        if (!this.lanes.get(w.msg.lane)?.wants.includes(w)) return;
+        if (!this.wanted(w)) return;
         const known = this.stored(key, input, keep);
         // (with the stored parts of the result: the worker learns only the others)
         if (known === undefined) this.send?.(this.withParts(w.msg));
@@ -255,23 +250,23 @@ export class ProbeClient {
       // (the running job takes up the other work, e.g. the levels' uses another list; after the first request, sent
       // once the stored results are loaded)
       const w = want, msg = w.msg = { ...w.msg, job };
-      this.d.cacheReady.then(() => { if (w.msg === msg && this.lanes.get(msg.lane)?.wants.includes(w)) this.send?.(this.withParts(msg)); });
+      this.d.cacheReady.then(() => { if (w.msg === msg && this.wanted(w)) this.send?.(this.withParts(msg)); });
     }
     const done = opts.done as ((r: unknown) => void) | undefined;
     if (done && !want.done.includes(done)) want.done.push(done);
     if (opts.failed && !want.failed.includes(opts.failed)) want.failed.push(opts.failed);
     if (opts.dropped && !want.dropped.includes(opts.dropped)) want.dropped.push(opts.dropped);
-    this.learnBusy(opts.lane);
+    this.learnBusy(name);
     return undefined;
   }
 
+  // (still asked for)
+  private wanted(w: LearnWant): boolean { return this.lanes.get(w.msg.lane)?.jobs.includes(w) ?? false; }
+
   // the jobs of a lane are not wanted any more
-  unlearn(name: string): void {
-    const lane = this.lanes.get(name);
-    if (!lane?.wants.length) return;
-    const gone = lane.wants;
-    lane.wants = [];
-    lane.progress = null;
+  unlearn(name: LearnLane): void {
+    const gone = this.lanes.clear(name);
+    if (!gone.length) return;
     this.send?.({ type: 'unlearn', lane: name });
     this.learnBusy(name);
     this.drop(gone);
@@ -319,7 +314,7 @@ export class ProbeClient {
       if (this.asked.size) this.send({ type: 'ask', jobs: [...this.asked.values()] });
       if (this.kindsWant) this.send(this.kindsWant);
       for (const w of this.playWant.values()) this.send(w.msg);
-      for (const lane of this.lanes.values()) for (const w of lane.wants) { w.resent = this.gen; this.send(this.withParts(w.msg)); }
+      for (const lane of this.lanes.values()) for (const w of lane.jobs) { w.resent = this.gen; this.send(this.withParts(w.msg)); }
     }
     this.d.later('probe-prefetch', () => this.prefetch()); // results that read changed ROM data are redone
   }
@@ -353,7 +348,7 @@ export class ProbeClient {
 
   private urgent(): boolean {
     if (this.urges > 0) return true;
-    for (const lane of this.lanes.values()) if (lane.wants.some((w) => w.opts.urgent)) return true;
+    for (const lane of this.lanes.values()) if (lane.jobs.some((w) => w.opts.urgent)) return true;
     return false;
   }
 
@@ -367,20 +362,17 @@ export class ProbeClient {
     }
   }
 
-  private want(d: Learning | Learned): { lane: LearnLane; want: LearnWant } | null {
-    const lane = this.lanes.get(d.lane), want = lane?.wants.find((w) => w.msg.key === d.key && w.msg.input === d.input);
-    return lane && want ? { lane, want } : null;
-  }
+  private want(d: Learning | Learned): LearnWant | undefined { return this.lanes.find(d.lane, laneId(d.key, d.input)); }
 
   // a learn job's progress: what it shows (not what a step on an older ROM showed: the job runs again where it read
   // a changed byte, the result is checked), its label
   private learning(d: Learning): void {
     this.take(d);
-    const w = this.want(d);
-    if (!w) return;
-    if (d.fresh) w.want.opts.shown?.(null);
-    if (d.shown.length && d.gen === this.gen) w.want.opts.shown?.(d.shown);
-    if (w.lane.wants[0] === w.want) w.lane.progress = d.label;
+    const w = this.want(d), lane = this.lanes.get(d.lane);
+    if (!w || !lane) return;
+    if (d.fresh) w.opts.shown?.(null);
+    if (d.shown.length && d.gen === this.gen) w.opts.shown?.(d.shown);
+    if (lane.first === w) lane.progress = d.label;
     this.learnBusy(d.lane);
   }
 
@@ -389,18 +381,17 @@ export class ProbeClient {
     this.take(d);
     // (one kept in memory: while it holds, also from an older ROM, and also when no longer wanted, as the others)
     if (d.memory && this.d.results.fp.valid(d.memory.deps)) this.memory.set(d.key, d.memory.data, d.memory.deps, d.input);
-    const w = this.want(d);
-    if (!w) return;
-    const { lane, want } = w, keep = learnKeep(want.msg.job);
+    const want = this.want(d);
+    if (!want) return;
+    const keep = learnKeep(want.msg.job);
     if (d.gen !== this.gen && (keep === false || this.stored(d.key, d.input, keep) === undefined)) {
       // (asked again once per generation: the worker has the new ROM by then, its reply comes for it; more replies
       // from older ones, the job finishing before each edit came, are not asked again)
       if (want.resent !== this.gen) { want.resent = this.gen; this.send?.(want.msg); }
       return;
     }
-    if (d.failed) this.learnFailed.add(`${d.key}#${d.input}`);
-    lane.wants.splice(lane.wants.indexOf(want), 1);
-    lane.progress = null;
+    if (d.failed) this.learnFailed.add(laneId(d.key, d.input));
+    this.lanes.remove(d.lane, want);
     this.learnBusy(d.lane);
     if (!d.failed) for (const f of want.done) f(d.result);
     else for (const f of want.failed) f();
@@ -412,9 +403,8 @@ export class ProbeClient {
     return { ...msg, parts: this.d.results.under(partKey(msg.key, '')) };
   }
 
-  private learnBusy(name: string): void {
-    const lane = this.lanes.get(name), first = lane?.wants[0], label = first?.opts.label;
-    this.d.setBusy(name, !first ? null : lane.progress ?? (typeof label === 'function' ? label(lane.wants.length) : label ?? null));
+  private learnBusy(name: LearnLane): void {
+    this.d.setBusy(name, this.lanes.label(name, (w) => w.opts.label));
   }
 
   // Results are kept whatever ROM they ran on: the cache checks them against the ROM bytes they

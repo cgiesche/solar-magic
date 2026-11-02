@@ -50,7 +50,7 @@ import { MARIO_W, MARIO_H, type CameraBands } from '../core/camerabands.ts';
 import { tideLines, type TideLines, type Layer3Kind } from '../core/layer3.ts';
 import { type Layer2Motions } from '../core/l2scroll.ts';
 import { variantOf, blockKey, collisionKey, type BlockProbe, type CollisionProbe, type RunStates, type SwitchState, SWITCH_STATES, SWITCH_TRIGGER } from '../core/blockprobe.ts';
-import type { ProbeReply } from '../core/probeprotocol.ts';
+import type { ProbeReply, ProbeBusyKey, LearnLane } from '../core/probeprotocol.ts';
 import { spriteJobs, spriteInput, layer3Spec, type SpriteInput } from '../core/learnspecs.ts';
 import { ProbeClient, FAILED } from '../core/probeclient.ts';
 import { messageRoutineInput, UNKNOWN_ROUTINE, type MessageRoutine } from '../core/messagedraw.ts';
@@ -79,6 +79,9 @@ export interface Brush { w: number; h: number; tiles: number[] }
 export interface PreviewPart { x: number; y: number; img: HTMLCanvasElement | null }
 
 type Listener = () => void;
+
+// what the busy indicator shows: the probes, their tasks and learn lanes, the animations, the wait for the jump arcs
+export type BusyKey = ProbeBusyKey | 'anim' | 'arcs-wait';
 
 export type { LevelEdit };
 
@@ -255,12 +258,7 @@ export class App {
     // the rows of earlier versions of the result cache go; the loaded results are checked in the background
     kvKeys(CACHE_NAME).then((k) => kvWrite([], oldStoreKeys(k, CACHE_NAME, CACHE_VERSION))).catch((e) => console.error(e));
     void this.cacheReady.then(() => this.sweepResults());
-    this.learner = new ResultLearner({
-      rom, results: this.results, cacheReady: this.cacheReady, main: this.emu,
-      later: (key, step) => this.scheduler.later(key, step),
-      soon: (step) => setTimeout(step, 0),
-      setBusy: (key, label) => this.setBusy(key, label),
-    });
+    this.learner = new ResultLearner({ rom, results: this.results, main: this.emu });
     // the levels' arrangements and places of earlier runs kept (only changed levels are taken apart again)
     this.suggestions = new SuggestionList(new SuggestRuns(this.results.fp), {
       rom: () => this.rom,
@@ -330,8 +328,8 @@ export class App {
   }
 
   // background jobs currently running (key -> label), shown by the busy indicator
-  busy = new Map<string, string>();
-  setBusy(key: string, label: string | null): void {
+  busy = new Map<BusyKey, string>();
+  setBusy(key: BusyKey, label: string | null): void {
     if (label === null ? !this.busy.delete(key) : this.busy.get(key) === label) return;
     if (label !== null) this.busy.set(key, label);
     this.emit('busy');
@@ -1105,7 +1103,7 @@ export class App {
   // at a map and progress (a new request drops the one still waiting). The maps' requests replace those of their
   // lane only: a dialog's (the exit dialog's map picker) asks in its own, urgent (runs while it is open), told when
   // the load failed
-  overworldMap(map: number, progress: number, done: (r: OwRender) => void, dialog?: { lane: string; failed: () => void }): OwRender | undefined {
+  overworldMap(map: number, progress: number, done: (r: OwRender) => void, dialog?: { lane: LearnLane; failed: () => void }): OwRender | undefined {
     return this.probes.learn<OwRender>(`owm1:${map}`, { kind: 'owMap', map, progress },
       { lane: dialog?.lane ?? 'ow', urgent: !!dialog, failed: dialog?.failed, input: { progress }, replace: true, label: 'Overworld', done });
   }

@@ -6,7 +6,9 @@ import { loadLevel, serializeLayer1, serializeSprites, encodeSecondaryHeader, is
 import { layer2MotionsJob } from '../src/core/l2scroll.ts';
 import { layer3Kinds, layer3KindsJob } from '../src/core/layer3.ts';
 import { levelScanJob, scanKey } from '../src/core/levelscan.ts';
-import { runJob } from '../src/core/jobrunner.ts';
+import { runJob, JobRunner, type Job, type Part } from '../src/core/jobrunner.ts';
+import { LEARN_KINDS, type LearnJob } from '../src/core/probeprotocol.ts';
+import { learnAtOnce } from './runnercheck.ts';
 import { cameraAtKey } from '../src/core/camerareach.ts';
 import { emptyTriggerView } from '../src/core/extrigger.ts';
 import { assignSlot, levelSlots, layerSlots } from '../src/core/gfxslots.ts';
@@ -20,7 +22,7 @@ import { ResultCache, RomFingerprint, RomReads, oldStoreKeys, type CacheEntry } 
 import { INPUTS_PER_KEY } from '../src/core/keptresults.ts';
 import { ResultLearner } from '../src/core/learner.ts';
 import { inputHash, levelInput } from '../src/core/inputs.ts';
-import { captureSprites, spriteAtJob, spriteBytesJob } from '../src/core/spritegfx.ts';
+import { spriteSetJob, spriteAtJob, spriteBytesJob } from '../src/core/spritegfx.ts';
 import { spriteJobs, spriteInput, layer3Spec, type LearnSpec } from '../src/core/learnspecs.ts';
 import { renderObjectThumbs, thumbsKey, thumbsInput, previewInput, objKey, type ObjSpec } from '../src/core/objthumbs.ts';
 import { layerGeom, renderLayerTiles } from '../src/core/render.ts';
@@ -32,12 +34,24 @@ const check = (ok: boolean, what: string) => { console.log((ok ? 'ok   ' : 'FAIL
 const rom = new Rom(await editorImage());
 const emu = new LevelEmulator(rom); emu.boot();
 const results = new ResultCache(new RomFingerprint(rom));
-const steps: (() => void)[] = [];
-const learner = new ResultLearner({
-  rom, results, cacheReady: Promise.resolve(), main: emu,
-  later: (_key, step) => steps.push(step), soon: (step) => steps.push(step), setBusy: () => {},
-});
-const drain = async () => { for (let i = 0; i < 1000; i++) { await new Promise((r) => setTimeout(r, 0)); while (steps.length) steps.shift()!(); } };
+const learner = new ResultLearner({ rom, results, main: emu });
+// a learn job as the probe worker runs it (probehost.ts learnJob), of the kinds asked for here
+function jobOf(e: LevelEmulator, j: LearnJob, part: Part): Job<unknown> {
+  switch (j.kind) {
+    case 'sprites': return spriteSetJob(e, j.level, j.nums, () => {}, part, j.input);
+    case 'spriteAt': return spriteAtJob(e, j.level, j.id, j.x, j.y);
+    case 'spriteBytes': return spriteBytesJob(e, j.level, j.id, j.bytes);
+    case 'layer3': return layer3KindsJob(e, j.level, j.ov);
+    case 'layer2Motions': return (function* () { return (yield* layer2MotionsJob(e, j.level, j.ov)).result; })();
+    default: throw new Error(`no ${j.kind} here`);
+  }
+}
+// learns spec at once on a job runner of the main thread, kept as its kind says (probeprotocol.ts LEARN_KINDS): its
+// stored result, else its job's (started: counted)
+const runner = new JobRunner({ rom, results, main: emu });
+let started = 0;
+const learn = (s: LearnSpec): unknown =>
+  learnAtOnce(runner, { key: s.key, input: inputHash(s.input), ...LEARN_KINDS[s.job.kind], start: (e, _p, part) => { started++; return jobOf(e, s.job, part); } });
 const ovOf = (lv: Level, r = rom): LevelOverride => ({ layer1: serializeLayer1(r, lv), secondaryHeader: encodeSecondaryHeader(lv.secondary), layer2Pointer: lv.layer2Pointer });
 const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
 
@@ -45,12 +59,7 @@ const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b)
 {
   const N = 0x105, lv = loadLevel(rom, N), edited = structuredClone(lv);
   edited.secondary.entranceAction = 1;
-  const learned: unknown[] = [];
-  for (const l of [lv, edited]) {
-    const ov = ovOf(l);
-    learner.learn(`l2m2:${N}`, function* (e) { return (yield* layer2MotionsJob(e, N, ov)).result; }, { input: levelInput(N, ov), done: (r) => learned.push(r) });
-    await drain();
-  }
+  const learned = [lv, edited].map((l) => { const ov = ovOf(l); return learn({ key: `l2m2:${N}`, job: { kind: 'layer2Motions', level: N, ov }, input: levelInput(N, ov) }); });
   check(learned.length === 2 && !same(learned[0], learned[1]), 'layer 2 motions: an unsaved edit changes them, learned again for the edited level');
 }
 
@@ -100,25 +109,15 @@ const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b)
   const r = new Rom(await editorImage()), e = new LevelEmulator(r);
   e.skipMask = () => gfxSkipMask(r);
   e.boot();
-  const queue: (() => void)[] = [];
-  const lr = new ResultLearner({
-    rom: r, results: new ResultCache(new RomFingerprint(r)), cacheReady: Promise.resolve(), main: e,
-    later: (_key, step) => queue.push(step), soon: (step) => queue.push(step), setBusy: () => {},
-  });
-  const run = async () => { for (let i = 0; i < 1000; i++) { await new Promise((res) => setTimeout(res, 0)); while (queue.length) queue.shift()!(); } };
+  const lr = new JobRunner({ rom: r, results: new ResultCache(new RomFingerprint(r)), main: e });
   const N = 0x105, saved = loadLevel(r, N);
   const lv = { ...saved, objects: [...saved.objects, { ...saved.objects[0], x: 2, y: 20 }] }, ov = ovOf(lv, r);
   const g = layerGeom(r, 0, lv.header.mode, lv.header.screens), tiles = Array.from({ length: 16 * 27 }, (_, i) => ((i >> 4) << 16) | (i & 15));
   let runs = 0;
   const key = `pp1:${N.toString(16)}:1`;
-  const preview = async () => {
-    const opts = { input: previewInput(r, lv, ov), lane: 'placement', replace: true, keep: 'memory' as const };
-    const job = function* (em: LevelEmulator) { runs++; const res = em.load(N, ov); return res.ok ? renderLayerTiles(r, res, g, false, tiles) : null; };
-    const pic = lr.learn(key, job, opts);
-    if (pic !== undefined) return pic;
-    await run();
-    return lr.learn(key, job, opts);
-  };
+  // (as the probe worker learns it: kept in memory, a picture)
+  const preview = () => learnAtOnce(lr, { key, input: inputHash(previewInput(r, lv, ov)), ...LEARN_KINDS.preview,
+    start: function* (em) { runs++; const res = em.load(N, ov); return res.ok ? renderLayerTiles(r, res, g, false, tiles) : null; } });
   const a = await preview(), pixels = (p: typeof a) => p ? inputHash(p.px) : '';
   const files = layerSlots(levelSlots(r, N, lv.header)).map((s) => s.file);
   // pixels drawn in a file, as the graphics tab does (all of them: those of the tiles in the preview among them)
@@ -141,12 +140,7 @@ const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b)
   const r = new Rom(await editorImage()), e = new LevelEmulator(r);
   e.skipMask = () => gfxSkipMask(r);
   e.boot();
-  const queue: (() => void)[] = [];
-  const lr = new ResultLearner({
-    rom: r, results: new ResultCache(new RomFingerprint(r)), cacheReady: Promise.resolve(), main: e,
-    later: (_key, step) => queue.push(step), soon: (step) => queue.push(step), setBusy: () => {},
-  });
-  const run = async () => { for (let i = 0; i < 1000; i++) { await new Promise((res) => setTimeout(res, 0)); while (queue.length) queue.shift()!(); } };
+  const lr = new JobRunner({ rom: r, results: new ResultCache(new RomFingerprint(r)), main: e });
   const N = 0x105;
   // Anim graphic A: its first 32 tiles over all of the layers' 512 tiles (16 slots of 32 tiles, one frame), the
   // other 96 read by no frame; Anim graphic B: no list reads it
@@ -159,14 +153,9 @@ const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b)
   const g = layerGeom(r, 0, lv.header.mode, lv.header.screens), tiles = Array.from({ length: 16 * 27 }, (_, i) => ((i >> 4) << 16) | (i & 15));
   let runs = 0;
   const key = `pp1:${N.toString(16)}:1`;
-  const preview = async () => {
-    const opts = { input: previewInput(r, lv, ov), lane: 'placement', replace: true, keep: 'memory' as const };
-    const job = function* (em: LevelEmulator) { runs++; const res = em.load(N, ov); return res.ok ? renderLayerTiles(r, res, g, false, tiles) : null; };
-    const pic = lr.learn(key, job, opts);
-    if (pic !== undefined) return pic;
-    await run();
-    return lr.learn(key, job, opts);
-  };
+  // (as the probe worker learns it: kept in memory, a picture)
+  const preview = () => learnAtOnce(lr, { key, input: inputHash(previewInput(r, lv, ov)), ...LEARN_KINDS.preview,
+    start: function* (em) { runs++; const res = em.load(N, ov); return res.ok ? renderLayerTiles(r, res, g, false, tiles) : null; } });
   const pixels = (p: Awaited<ReturnType<typeof preview>>) => p ? inputHash(p.px) : '';
   // pixels drawn in tiles [from, to) of a file, as the graphics tab does
   const draw = (file: number, from: number, to: number) => { const f = readGfx(r, file); for (let i = from * 64; i < to * 64; i++) f.pix[i] = (f.pix[i] + 5) & 15; writeGfx(r, f); };
@@ -222,38 +211,22 @@ const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b)
   const jobsOf = (lv: Level) => spriteJobs(lv, [0x0d], spriteInput(rom, lv, []));
   check(jobsOf(a).all.key === jobsOf(b).all.key && inputHash(jobsOf(a).all.input) !== inputHash(jobsOf(b).all.input), 'sprite images: one key, two inputs');
   // learns spec (as the probe worker runs its job) for each level in turn: the levels whose result was learned
-  const inTurn = async (what: string, spec: (lv: Level) => LearnSpec, run: (e: LevelEmulator, s: LearnSpec) => unknown) => {
-    let runs = 0;
-    for (const lv of [a, b, a]) {
-      const s = spec(lv);
-      learner.learn(s.key, function* (e) { runs++; return run(e, s); }, { input: s.input, lane: what, replace: true });
-      await drain();
-    }
-    check(runs === 2, `${what}: 001, 11E, 001 learns 001's once (${runs} runs)`);
+  const inTurn = (what: string, spec: (lv: Level) => LearnSpec) => {
+    const before = started;
+    for (const lv of [a, b, a]) learn(spec(lv));
+    check(started - before === 2, `${what}: 001, 11E, 001 learns 001's once (${started - before} runs)`);
   };
-  await inTurn('sprite images', (lv) => jobsOf(lv).all, (e, s) => {
-    const j = s.job as Extract<LearnSpec['job'], { kind: 'sprites' }>;
-    return [...captureSprites(e, j.level.number, j.level.header, j.level.spriteHeader, j.level.bgPointer, j.nums)];
-  });
-  await inTurn('sprite variants', (lv) => jobsOf(lv).at(0x0d, 0x20, 0x10), (e, s) => {
-    const j = s.job as Extract<LearnSpec['job'], { kind: 'spriteAt' }>;
-    return runJob(spriteAtJob(e, j.level, j.id, j.x, j.y));
-  });
-  await inTurn('extra-byte images', (lv) => jobsOf(lv).bytes(0x0d, [1, 2]), (e, s) => {
-    const j = s.job as Extract<LearnSpec['job'], { kind: 'spriteBytes' }>;
-    return runJob(spriteBytesJob(e, j.level, j.id, j.bytes));
-  });
+  inTurn('sprite images', (lv) => jobsOf(lv).all);
+  inTurn('sprite variants', (lv) => jobsOf(lv).at(0x0d, 0x20, 0x10));
+  inTurn('extra-byte images', (lv) => jobsOf(lv).bytes(0x0d, [1, 2]));
   // layer 3 kinds: level 105 as saved and as edited (an object moved)
   const lv = loadLevel(rom, 0x105), edited = structuredClone(lv);
   edited.objects[0].x++;
   const l3 = (l: Level) => layer3Spec(rom, l, ovOf(l), l.header.tileset);
   check(l3(lv).key === l3(edited).key && inputHash(l3(lv).input) !== inputHash(l3(edited).input), 'layer 3 kinds: one key, two inputs');
-  let runs = 0;
-  for (const l of [lv, edited, lv, edited]) {
-    const s = l3(l), j = s.job as Extract<LearnSpec['job'], { kind: 'layer3' }>;
-    learner.learn(s.key, function* (e) { runs++; return runJob(layer3KindsJob(e, j.level, j.ov)); }, { input: s.input, lane: 'layer3', replace: true });
-    await drain();
-  }
+  const before = started;
+  for (const l of [lv, edited, lv, edited]) learn(l3(l));
+  const runs = started - before;
   check(runs === 2, `layer 3 kinds: an edit, its undo and redo load twice (${runs} loads)`);
 }
 
