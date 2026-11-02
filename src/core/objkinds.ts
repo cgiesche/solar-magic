@@ -7,7 +7,7 @@
 //   Types that only repeat an earlier one end the list too.
 
 import type { LevelEmulator, ObjectTrace } from './levelemu.ts';
-import { OV_L1, MAP_BASE } from './levelemu.ts';
+import { OV_L1, MAP_BASE, readOffset } from './levelemu.ts';
 import { layerGeom } from './render.ts';
 import { encodePrimaryHeader, serializeObjects, newUid, type LevelObject, type Level } from './level.ts';
 import { RomReads } from './romdeps.ts';
@@ -164,10 +164,10 @@ function typeCount(runs: Run[], code: Set<number>): number {
     if (!r.shape || sigs.has(r.shape.sig)) return t;
     for (const key of r.reads) {
       if (pairs.has(key)) continue;
-      const ro = key % 0x800000;
+      const ro = readOffset(key);
       if (code.has(ro) || readers.has(ro)) return t;
     }
-    for (const key of r.reads) { pairs.add(key); readers.add(key % 0x800000); }
+    for (const key of r.reads) { pairs.add(key); readers.add(readOffset(key)); }
     sigs.add(r.shape.sig);
   }
   return 16;

@@ -180,7 +180,7 @@ export class Picker {
   thumbs = new Map<string, HTMLCanvasElement>();
   thumbTiles = new Map<string, number[]>(); // Map16 tiles per object key
   effects = new Map<string, string>(); // objects that draw nothing but change RAM: what (thumbs.ts)
-  unhandled = new Set<string>(); // custom extended objects without a handler: a box, as Lunar Magic's placeholder (objthumbs.ts)
+  unhandled = new Set<string>(); // custom extended objects without a handler: their box as well (objthumbs.ts)
   boxes = new Map<string, HTMLCanvasElement>(); // their thumbnails, the box of the level view (made when shown)
   thumbsFrom: ObjThumb[] | undefined; // the thumbnails shown (undefined: placeholders while they are learned)
   tabs: HTMLDivElement;
@@ -588,7 +588,7 @@ export class Picker {
     this.boxes = new Map();
     for (const t of thumbs ?? []) {
       if (t.effect) { this.effects.set(t.key, t.effect); continue; }
-      if (t.placeholder) { this.unhandled.add(t.key); continue; }
+      if (t.unhandled) { this.unhandled.add(t.key); continue; }
       const c = thumbCanvas(t);
       this.thumbs.set(t.key, c);
       // its copies in the picker, the search and the hover preview follow the animation
@@ -620,7 +620,7 @@ export class Picker {
       const marks = blockMarks(app, tiles), switches = blockSwitches(app, tiles);
       const info = (tiles.length ? `\nMap16 ${tiles.slice(0, 8).map(hex3).join(' ')}${tiles.length > 8 ? ' …' : ''}` : '')
         + (tip ? '\n' + tip : effect ? `\nDraws nothing; when the level loads, it ${effect}` : '')
-        + (unhandled ? '\nNo custom object handler for this number (ObjecTool): the game runs a leftover routine that draws stray tiles' : '')
+        + (unhandled ? '\nNo handler of its own: the game\'s pointer table sends it to the routine of one of its own extended objects, which draws stray tiles' : '')
         + (sum === undefined ? '\n(determining behavior …)' : sum.map((x) => '\n' + x).join(''));
       if ((effect || unhandled) && !this.boxes.has(key)) this.boxes.set(key, objectBoxCanvas(boxLabel(s)));
       const th = this.thumbs.get(key) ?? this.boxes.get(key);

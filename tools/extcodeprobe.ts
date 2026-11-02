@@ -4,11 +4,10 @@
 // load, and over all loads together.
 //   node tools/extcodeprobe.ts [rom ...]   (default: the editor's ROM: the clean game with the editor patches)
 import { readFileSync } from 'node:fs';
-import { Rom } from '../src/core/rom.ts';
-import { LevelEmulator, OV_L1 } from '../src/core/levelemu.ts';
-import { loadLevel, encodePrimaryHeader, serializeObjects, newUid } from '../src/core/level.ts';
-import { levelBgPointer } from '../src/core/levelheader.ts';
-import { pcToSnes } from '../src/core/rom.ts';
+import { Rom, pcToSnes } from '../src/core/rom.ts';
+import { LevelEmulator, readOffset } from '../src/core/levelemu.ts';
+import { loadLevel, newUid } from '../src/core/level.ts';
+import { effectLoad } from '../src/core/objeffects.ts';
 import { editorImage } from './fixture.ts';
 
 const hx = (v: number, n = 2) => v.toString(16).toUpperCase().padStart(n, '0');
@@ -29,16 +28,9 @@ function probe(name: string, rom: Rom): void {
   const reads = new Map<number, Set<number>>(), own = new Map<number, Set<number>>();
   const all = new Set<number>();
   for (let n = 0x10; n < 0x100; n++) {
-    const owners: number[] = [-1, -1, -1, -1, -1];
-    const body = serializeObjects([{ uid: newUid(), num: 0, ext: n, size: 0, x: 3, y: 12 }], [], false, owners);
-    const l1 = new Uint8Array(5 + body.length);
-    l1.set(encodePrimaryHeader({ ...level.header, screens: 32, mode: 0 }));
-    l1.set(body, 5);
-    const byteOwner = new Int32Array(0x10000).fill(-1);
-    owners.slice(0, -1).forEach((o, i) => (byteOwner[OV_L1 + i] = o));
-    const r = emu.load(level.number, { layer1: l1, layer2Pointer: levelBgPointer(rom, level), sprites: new Uint8Array([0, 0xff]), byteOwner, trace: true });
+    const r = effectLoad(emu, level, [{ uid: newUid(), num: 0, ext: n, size: 0, x: 0, y: 0 }], true, true);
     if (!r.ok || !r.trace) continue;
-    reads.set(n, new Set([...(r.trace.reads.get(0) ?? [])].map((v) => v % 0x800000)));
+    reads.set(n, new Set([...(r.trace.reads.get(0) ?? [])].map(readOffset)));
     own.set(n, r.trace.code);
     for (const c of r.trace.code) all.add(c);
   }
@@ -58,7 +50,4 @@ function probe(name: string, rom: Rom): void {
 
 const files = process.argv.slice(2);
 if (files.length) for (const f of files) probe(f.split('/').pop()!, new Rom(new Uint8Array(readFileSync(f))));
-else {
-
-  probe('editor ROM', new Rom(await editorImage()));
-}
+else probe('editor ROM', new Rom(await editorImage()));

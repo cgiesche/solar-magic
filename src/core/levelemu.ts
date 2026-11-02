@@ -70,6 +70,8 @@ export interface ObjectTrace {
   writes: Map<number, Map<number, number>>; // object key → map offset → Map16 tile as written by the object
   rom: Set<number>; // every ROM offset read (code and data)
 }
+// the ROM offset of one of ObjectTrace.reads
+export const readOffset = (key: number): number => key % 0x800000;
 
 export interface LevelRender {
   wram: Uint8Array;

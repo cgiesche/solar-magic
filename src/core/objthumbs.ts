@@ -3,7 +3,7 @@
 // the same graphics files and animations.
 
 import type { Rom } from './rom.ts';
-import type { LevelEmulator, LevelRender, LevelOverride } from './levelemu.ts';
+import { readOffset, type LevelEmulator, type LevelRender, type LevelOverride } from './levelemu.ts';
 import { type Level, type LevelObject, newUid, levelRows } from './level.ts';
 import { renderLevel, layerGeom, renderLayerTiles } from './render.ts';
 import { MAP_BASE, map16Tile } from './ram.ts';
@@ -31,17 +31,20 @@ export function objKey(s: { num: number; ext: number; size: number; extension?: 
 // a rendered object: its pixels, the distinct Map16 tiles it produced and where (cells: x, y of a tile's top left
 // pixel and its number, one after the other – for the animation, pickeranim.ts); effect: of an extended object or one
 // of object 2D's custom numbers that draws no tile, what its load changes in RAM (objeffects.ts ramEffect),
-// without pixels (w = h = 0); placeholder: a custom extended object (CUSTOM_EXT on) without a handler, without
-// pixels as well (see objectThumbsJob)
-export interface ObjThumb { key: string; w: number; h: number; px: Uint32Array; m16: number[]; cells: number[]; effect?: string; placeholder?: true }
+// without pixels (w = h = 0); unhandled: a custom extended object without a handler of its own (it runs one of
+// the game's own extended objects' routines), without pixels as well, shown as its object box (see objectThumbsJob)
+export interface ObjThumb { key: string; w: number; h: number; px: Uint32Array; m16: number[]; cells: number[]; effect?: string; unhandled?: true }
 
-// the first of the custom extended objects (98–FF): ObjecTool's and Lunar Magic's, the numbers after the game's own
+// the first of the custom extended objects (98–FF): ObjecTool's and Lunar Magic's, the numbers after the game's own.
+// A bound of the numbering both use, not a property of a ROM: emulation can't tell where the game's own numbers end
+// (its entries past 97 lead to 47/48's routine, #110)
 export const CUSTOM_EXT = 0x98;
+const isCustomExt = (s: ObjSpec): boolean => s.num === 0 && s.ext >= CUSTOM_EXT;
 
 // their result cache key: the tileset and palettes (kept side by side) and the objects
 export function thumbsKey(level: Level, specs: ObjSpec[], keyOf: (s: ObjSpec) => string): string {
   const h = level.header;
-  // (o4: effects as what they change, extended objects' too; o5: with cells; o6: placeholders)
+  // (o4: effects as what they change, extended objects' too; o5: with cells; o6: custom extended objects without a handler)
   return `o6${h.tileset}-${h.fgPalette}-${h.bgPalette}:${inputHash(specs.map((s) => `${s.num}.${s.ext}.${s.size}=${keyOf(s)}`))}`;
 }
 
@@ -88,20 +91,27 @@ export function renderObjectThumbs(rom: Rom, emu: LevelEmulator, level: Level, s
 // (#104's rule: listed are the objects that draw tiles or do something): it may draw alone what it didn't among
 // the others (Retry's midway bars: only so many per level), else it is listed for what its load changes in RAM
 // (objeffects.ts). A custom extended object (CUSTOM_EXT on) whose load reads its entry of the game's own pointer
-// table has no handler of its own (ObjecTool's goes around the table, a hook at $0DA106): on the clean game these
-// entries all lead to the routine of 47/48, which draws door parts from past the end of its table (#110). It gets a
-// placeholder instead, as Lunar Magic shows for unused extended objects; never left out of the list. (Told apart from
-// 47/48 by "reads its data from code" doesn't work: C2–D7 read another routine's table, tools/extcodeprobe.ts)
+// table, and the entry leads to the routine of one of the game's own numbers, has no handler of its own (ObjecTool's
+// goes around the table, a hook at $0DA106; a patch that repoints the entry gives it a routine of its own): on the
+// clean game these entries all lead to the routine of 47/48, which draws door parts from past the end of its table
+// (#110). It is shown as its object box instead, as Lunar Magic shows a placeholder for unused extended objects;
+// never left out of the list. (Told apart from 47/48 by "reads its data from code" doesn't work: C2–D7 read another
+// routine's table, tools/extcodeprobe.ts)
 export function* objectThumbsJob(rom: Rom, emu: LevelEmulator, level: Level, specs: ObjSpec[], keyOf: (s: ObjSpec) => string): Generator<void, ObjThumb[]> {
   const out: ObjThumb[] = [];
   const PER = 32;
   const objOf = (s: ObjSpec, i: number): LevelObject => ({ uid: newUid(), num: s.num, ext: s.ext, size: s.size, x: i * 16 + 3, y: 12, ...(s.extension ? { extension: s.extension } : {}) });
+  // the routines of the game's own extended numbers, by its pointer table (read once needed), as ROM offsets (FastROM
+  // moves some of the pointers to the fast banks)
+  let own: Set<number> | null = null;
+  const routine = (n: number): number => snesToPc(rom.r24(EXT_OBJ_TABLE + n * 3));
+  const ownRoutine = (n: number): boolean => (own ??= new Set(Array.from({ length: CUSTOM_EXT }, (_, k) => routine(k)))).has(routine(n));
   // the thumbnails of a load's objects that wrote tiles
   const collect = (r: LevelRender, batch: ObjSpec[]): void => {
     const unhandled = (s: ObjSpec, i: number): boolean => {
-      if (s.num !== 0 || s.ext < CUSTOM_EXT || !r.trace) return false;
+      if (!isCustomExt(s) || !r.trace) return false;
       const entry = snesToPc(EXT_OBJ_TABLE + s.ext * 3);
-      for (const v of r.trace.reads.get(i) ?? []) if (v % 0x800000 === entry) return true;
+      for (const v of r.trace.reads.get(i) ?? []) if (readOffset(v) === entry) return ownRoutine(s.ext);
       return false;
     };
     const im = renderLevel(rom, r, 0, 32);
@@ -109,7 +119,7 @@ export function* objectThumbsJob(rom: Rom, emu: LevelEmulator, level: Level, spe
     const inv = new Map<number, number>();
     for (let y = 0; y < g.height; y++) for (let x = 0; x < g.width; x++) inv.set(g.addr(x, y) - MAP_BASE, (y << 16) | x);
     batch.forEach((s, i) => {
-      if (unhandled(s, i)) { out.push({ key: keyOf(s), w: 0, h: 0, px: new Uint32Array(0), m16: [], cells: [], placeholder: true }); return; }
+      if (unhandled(s, i)) { out.push({ key: keyOf(s), w: 0, h: 0, px: new Uint32Array(0), m16: [], cells: [], unhandled: true }); return; }
       const set = r.touched.get(i);
       const tiles: number[] = [];
       if (set) for (const off of set) { const t = inv.get(off); if (t !== undefined) tiles.push(t); }
@@ -136,7 +146,7 @@ export function* objectThumbsJob(rom: Rom, emu: LevelEmulator, level: Level, spe
   };
   const render = (batch: ObjSpec[]): void => {
     // (traced where a custom extended object is among them: whether it has a handler)
-    const r = effectLoad(emu, level, batch.map(objOf), true, batch.some((s) => s.num === 0 && s.ext >= CUSTOM_EXT));
+    const r = effectLoad(emu, level, batch.map(objOf), true, batch.some(isCustomExt));
     if (!r.ok) {
       if (batch.length > 1) { render(batch.slice(0, batch.length >> 1)); render(batch.slice(batch.length >> 1)); }
       return;
@@ -151,7 +161,7 @@ export function* objectThumbsJob(rom: Rom, emu: LevelEmulator, level: Level, spe
   yield;
   if (!base.ok) return out;
   for (const s of quiet) {
-    const r = effectLoad(emu, level, [objOf(s, 0)], true, s.num === 0 && s.ext >= CUSTOM_EXT);
+    const r = effectLoad(emu, level, [objOf(s, 0)], true, isCustomExt(s));
     const had = out.length;
     if (r.ok) collect(r, [s]);
     const effect = r.ok && out.length === had ? ramEffect(base.wram, r.wram) : null;

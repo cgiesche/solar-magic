@@ -13,7 +13,7 @@
 import { pcToSnes, type Rom } from './rom.ts';
 import type { RomReads } from './romdeps.ts';
 import { L1_PTRS, serializeObjects, newUid, type LevelObject } from './level.ts';
-import { OV_L1, type LevelEmulator } from './levelemu.ts';
+import { OV_L1, readOffset, type LevelEmulator } from './levelemu.ts';
 import { objectUserName } from './usernames.ts';
 import { packageObjectName } from './objtext.ts';
 
@@ -62,7 +62,7 @@ export function objectTable(emu: LevelEmulator, ts: number): { result: number | 
   return emu.tracked(() => {
     const r = emu.load(PROBE_LEVEL, { layer1, sprites: Uint8Array.of(0, 0xff), byteOwner, trace: true });
     // per object the ROM offsets it read, less 3 × (n − 1): the table's start is in all of them
-    const starts = Array.from({ length: PROBE_OBJECTS }, (_, i) => new Set([...r.trace?.reads.get(i) ?? []].map((v) => (v % 0x800000) - 3 * i)));
+    const starts = Array.from({ length: PROBE_OBJECTS }, (_, i) => new Set([...r.trace?.reads.get(i) ?? []].map((v) => readOffset(v) - 3 * i)));
     const common = [...starts[0]].filter((o) => starts.every((s) => s.has(o)));
     return common.length ? pcToSnes(Math.min(...common)) & 0x7fffff : null;
   });
