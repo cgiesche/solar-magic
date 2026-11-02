@@ -22,7 +22,7 @@ import { findPrefabPlaces, tileKey, type Layer, type LevelPlaces, type PrefabPla
 import { runJob } from './jobrunner.ts';
 import { KeptResults } from './keptresults.ts';
 import { inputHash } from './inputs.ts';
-import { RomReads, record, byFingerprint, type RomDeps, type RomFingerprint } from './romdeps.ts';
+import { RomReads, record, byFingerprint, always, type RomDeps, type RomFingerprint } from './romdeps.ts';
 import { objectLength2D } from './obj2d.ts';
 
 export interface PrefabSuggestion {
@@ -52,8 +52,8 @@ export interface SuggestRun { deps: RomDeps; levels: string; edited: number | nu
 // tiles it has (tileKey)
 interface Arrangements { list: [string, Prefab][]; tiles: Set<string> }
 
-const PLACES = 4096; // place searches kept (a level and an arrangement each), the latest used; a run keeps all it used, also more
-const CONTENTS = 0x200; // levels' contents as saved kept (every level's)
+const PLACES = 4096; // place searches kept (a level and an arrangement each, with its latest used contents), the latest used; a run keeps all it used, also more
+const CONTENTS = 0x200; // levels whose contents as saved are kept (every level's, by object 2D's length)
 
 // The latest finished run and whether it holds (the editor's, SuggestionList): a level's content as saved is kept
 // while the ROM bytes its load read are unchanged (and object 2D's length, which the load takes from emulation), so
@@ -109,7 +109,7 @@ export class SuggestRuns {
 // of a place). Both keep a level's latest used INPUTS_PER_KEY contents, so undoing an edit finds them. With the
 // levels' contents as saved (SuggestRuns) a run loads only the levels a ROM change touched.
 export class KeptSuggestions extends SuggestRuns {
-  private arrangements = new KeptResults<null>({ validity: { stamp: () => 0, holds: () => true } }); // by level and content
+  private arrangements = new KeptResults({ validity: always }); // by level and content
   private places: KeptResults<RomDeps>;
   private run: { read: RomReads; levels: string; edited: number | null; len2d: number } | null = null; // the running run's (what it read: its levels' loads, its places' searches)
 

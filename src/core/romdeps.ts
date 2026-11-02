@@ -306,13 +306,16 @@ export const byFingerprint = (fp: RomFingerprint): Validity<RomDeps> => ({ stamp
 export type Since = { gen: number; reads: RomReads };
 export const bySince = (rom: Rom): Validity<Since> => ({ stamp: () => rom.gen, holds: (d) => holds(rom, d), current: (d) => d.gen === rom.gen });
 
+// results that read no ROM byte: they always hold
+export const always: Validity<null> = { stamp: () => 0, holds: () => true };
+
 // The result cache: results by key and input kept while the bytes they read are unchanged (KeptResults, checked
 // against the fingerprint), persisted: changed and dropped entries are collected for storing (see flush()). A key keeps
 // the results of its latest used INPUTS_PER_KEY inputs, the least recently used one dropped (also from storage).
 export class ResultCache {
   fp: RomFingerprint;
   private kept: KeptResults<RomDeps>;
-  private dirty = new Map<string, string>(); // stored keys of changed results: their key
+  private dirty = new Map<string, [string, string | undefined]>(); // stored keys of changed results: their key and input
   private dropped = new Set<string>(); // stored keys of dropped results
   private reordered = new Set<string>(); // keys whose inputs' order changed
   onChange: (() => void) | null = null;
@@ -323,7 +326,7 @@ export class ResultCache {
     this.kept = new KeptResults({
       validity: byFingerprint(fp),
       hooks: {
-        put: (key, input) => { const k = storeKey(key, input); this.dropped.delete(k); this.dirty.set(k, key); changed(); },
+        put: (key, input) => { const k = storeKey(key, input); this.dropped.delete(k); this.dirty.set(k, [key, input]); changed(); },
         drop: (key, input) => { const k = storeKey(key, input); this.dirty.delete(k); this.dropped.add(k); changed(); },
         order: (key) => { this.reordered.add(key); changed(); },
       },
@@ -384,8 +387,8 @@ export class ResultCache {
   // changed entries to store (with the changed orders of keys' inputs) and dropped ones to delete since the last call
   flush(): { put: [string, CacheEntry][]; order: [string, string[]][]; del: string[] } {
     const put: [string, CacheEntry][] = [], order: [string, string[]][] = [], del = [...this.dropped];
-    for (const [k, key] of this.dirty) {
-      const input = k === key ? undefined : k.slice(key.length + 1), e = this.kept.peek(key, input);
+    for (const [k, [key, input]] of this.dirty) {
+      const e = this.kept.peek(key, input);
       if (e) put.push([k, { deps: e.deps, data: e.data, input }]);
     }
     for (const key of this.reordered) {

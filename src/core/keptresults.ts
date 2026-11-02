@@ -117,7 +117,8 @@ export class KeptResults<D> {
   }
 
   // keeps data for the input as the key's least recently used, if the key keeps nothing for it and has room (results
-  // read from storage, checked when first used; false: not kept)
+  // read from storage, checked when first used; false: not kept). Not bounded by the limit (a store without one: the
+  // result cache's)
   setOlder(key: string, data: unknown, deps: D, input?: string): boolean {
     let k = this.keys.get(key);
     if (k?.slots.some((s) => s.input === input)) return true;

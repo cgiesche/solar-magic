@@ -19,18 +19,21 @@ export function spriteGfxFiles(rom: Rom, lv: Level): number[] {
   return [0, 1, 2, 3].map((k) => (set[k] !== 0xff ? set[k] : def[k]));
 }
 
+// what sprite images depend on besides the ROM bytes they read (spriteInput)
+export type SpriteInput = { custom: number[] } & Record<string, unknown>;
+
 // What sprite images depend on besides the ROM bytes they read: the level's sprite settings (sprite memory: a sprite
 // whose OAM range is too small is captured as the game shows it), the content of its sprite graphics files (graphics
 // data isn't among the bytes read, see gfxSkipMask; filesHash: gfxFilesHash, or a kept one) and the custom sprites'
 // ids (pixi.ts)
-export function spriteInput(rom: Rom, lv: Level, custom: number[], filesHash = (files: number[]) => gfxFilesHash(rom, files)): { custom: number[] } & Record<string, unknown> {
+export function spriteInput(rom: Rom, lv: Level, custom: number[], filesHash = (files: number[]) => gfxFilesHash(rom, files)): SpriteInput {
   const hd = lv.header;
   return { gfx: hd.spriteGfx, palette: hd.spritePalette, memory: lv.spriteHeader & SPRITE_MEMORY, files: filesHash(spriteGfxFiles(rom, lv)), custom };
 }
 
 // What the images of level lv's sprites are learned with: all sprites (nums: the ids the picker lists), a custom sprite
 // with extra bytes, a sprite's variant at a place; input: spriteInput's
-export function spriteJobs(lv: Level, nums: number[], input: { custom: number[] } & Record<string, unknown>): { all: LearnSpec; bytes: (id: number, bytes: number[]) => LearnSpec; at: (id: number, x: number, y: number) => LearnSpec } {
+export function spriteJobs(lv: Level, nums: number[], input: SpriteInput): { all: LearnSpec; bytes: (id: number, bytes: number[]) => LearnSpec; at: (id: number, x: number, y: number) => LearnSpec } {
   const hd = lv.header, set = `${hd.spriteGfx}-${hd.spritePalette}`;
   // (the level as sprite images are captured in it)
   const level: SpriteLevel = { number: lv.number, header: { ...hd }, spriteHeader: lv.spriteHeader, bgPointer: lv.layer2Pointer >> 16 === 0xff ? lv.layer2Pointer : 0xffd900 };

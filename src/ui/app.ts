@@ -51,7 +51,7 @@ import { tideLines, type TideLines, type Layer3Kind } from '../core/layer3.ts';
 import { type Layer2Motions } from '../core/l2scroll.ts';
 import { variantOf, blockKey, collisionKey, type BlockProbe, type CollisionProbe, type RunStates, type SwitchState, SWITCH_STATES, SWITCH_TRIGGER } from '../core/blockprobe.ts';
 import type { ProbeReply } from '../core/probeprotocol.ts';
-import { spriteJobs, spriteInput, layer3Spec } from '../core/learnspecs.ts';
+import { spriteJobs, spriteInput, layer3Spec, type SpriteInput } from '../core/learnspecs.ts';
 import { ProbeClient, FAILED } from '../core/probeclient.ts';
 import { messageRoutineInput, UNKNOWN_ROUTINE, type MessageRoutine } from '../core/messagedraw.ts';
 import { ResultLearner } from '../core/learner.ts';
@@ -706,7 +706,7 @@ export class App {
   };
 
   // What sprite images depend on besides the ROM bytes they read (learnspecs.ts spriteInput; the files' hash kept)
-  private spriteInput(lv: Level): { custom: number[] } & Record<string, unknown> {
+  private spriteInput(lv: Level): SpriteInput {
     const m = this.spriteFiles;
     return spriteInput(this.rom, lv, this.customSprites().map((c) => c.id), (files) => {
       if (m.gen !== this.rom.gen || m.files !== files.join()) { m.gen = this.rom.gen; m.files = files.join(); m.hash = gfxFilesHash(this.rom, files); }
