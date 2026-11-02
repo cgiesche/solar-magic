@@ -546,8 +546,10 @@ export function owExanimDataRanges(rom: Rom): [number, number][] {
 // result reads without recording them (exanimDataRanges): the level's settings and, per list in effect (the
 // level's, the global one), its slots and the parts of its Anim graphic their frames read – every frame, which
 // one shows at the load depends on the triggers. Frames from RAM aren't in it: the game's graphics there
-// (GFX33, loaded by its own pointer, not the file table) are read as recorded. Anim graphics no list in effect
-// reads aren't in it either.
+// (GFX33, loaded by its own pointer, not the file table) are read as recorded. No frame reads a graphics file of
+// the file table there: after the load their data is only in the decompression buffer ($7EAD00, where Lunar Magic keeps AN2),
+// which neither the game's animations nor a slot reads – AN2 frames are copied into an Anim graphic when imported
+// (testramframes.ts). Anim graphics no list in effect reads aren't in it either.
 export function levelAnimHash(rom: Rom, level: number): number {
   if (!exanimInstalled(rom)) return 0;
   const settings = levelSettings(rom, level), parts: Uint8Array[] = [Uint8Array.of(settings)];

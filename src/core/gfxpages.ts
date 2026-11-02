@@ -23,7 +23,7 @@ import { submapPaletteRanges } from './submapgfx.ts';
 import { unrecorded } from './romdeps.ts';
 
 // [start, end) ROM offsets of a file's data
-function fileRange(rom: Rom, i: number): [number, number] | null {
+export function gfxFileRange(rom: Rom, i: number): [number, number] | null {
   const e = gfxEntry(rom, i);
   if (!e) return null;
   const pc = snesToPc(e.addr);
@@ -37,7 +37,7 @@ function gfxFileMask(rom: Rom): Uint8Array {
   return unrecorded(rom, () => {
     const mask = new Uint8Array(rom.data.length);
     for (let i = 0; i < GFX_FILES; i++) {
-      const r = fileRange(rom, i);
+      const r = gfxFileRange(rom, i);
       if (r) mask.fill(1, r[0], r[1]);
     }
     const p = editorPatch(rom);
@@ -107,11 +107,11 @@ export function gfxDisplaySkipMask(rom: Rom, ptrs: number[][]): Uint8Array {
 // content hash of some GFX files (0FF = none): their data and their flags entry (how the data is stored), not
 // their place
 export function gfxFilesHash(rom: Rom, files: number[]): number {
-  const p = editorPatch(rom)!; // (fileRange needs it too)
+  const p = editorPatch(rom)!; // (gfxFileRange needs it too)
   let h = 0x811c9dc5;
   for (const f of files) {
     h = Math.imul(h ^ f, 0x01000193);
-    const r = f === GFX_NONE ? null : fileRange(rom, f);
+    const r = f === GFX_NONE ? null : gfxFileRange(rom, f);
     if (!r) continue;
     h = Math.imul(h ^ rom.r8(p.gfxFlags + f), 0x01000193);
     for (let o = r[0]; o < r[1]; o++) h = Math.imul(h ^ rom.data[o], 0x01000193);
