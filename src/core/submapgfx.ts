@@ -135,7 +135,8 @@ export function installSubmapPalettePatch(rom: Rom): void {
 // A submap's graphics slots: FG1–FG4 (the overworld's tileset, $04DC02 per submap, as the game loads it into the
 // level's FG1/FG2/BG1/FG3 places) and SP1–SP4 (its sprite set, $04DC1D); FF the default. Kept in the editor patch's
 // bypass (patches.ts, entries 200–206), which the overworld's load reads for the submap Mario is on. Lunar Magic's
-// "Submap GFX" has the same slots (its FG5/FG6 only with its option to merge FG1/FG2 into SP3/SP4); its table and
+// "Submap GFX" has these slots, and FG5/FG6 (only with its option to merge FG1/FG2 into SP3/SP4) and AN2, which the
+// editor doesn't offer (docs/research/lunar-magic-submap-graphics.md, "FG5/FG6 and AN2"); its table and
 // code are its own (the editor's bypass differs from Lunar Magic's for levels too), the place where the game changes
 // the submap is its: when Mario walks to another submap the game loads only its palette ($04DBAE), so a JSL at
 // $04DBB9 (Lunar Magic's place) loads the new submap's graphics there – the game's own routine ($00A9DA, which

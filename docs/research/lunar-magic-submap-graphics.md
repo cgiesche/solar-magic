@@ -63,6 +63,23 @@ takes Lunar Magic's place at `$04DBB9`: its code turns the screen off (the windo
 runs the game's upload routine `$00A9DA` – which reads the submap's files and uploads only those that changed – and
 turns them on again.
 
+### FG5/FG6 and AN2
+
+Decision for issue #263, after #283 kept the editor's bypass: the editor offers neither.
+
+- **FG5/FG6** come in Lunar Magic only with its option to merge FG1/FG2 into SP3/SP4 (an Extra Option, not among those #86 made editor patches). The
+  game's overworld has no files there (every submap's tileset has 1C 1D 08 1E, its sprite set `$11`), and no community
+  content at hand uses the merge (the packages and baseroms in "The editor's bypass instead of Lunar Magic's lists"
+  below). They come when content that asks for them turns up; were the submaps' files ever to move to Lunar Magic's
+  lists, they would come with that layout.
+- **AN2** is in Lunar Magic the 4 KB file an animation list's slots take frames from in RAM (in a level at `$7EAD00`,
+  `src/core/exanim.ts`; where it goes on the overworld is not checked, a decision not to offer it needs no more). The editor's
+  animations take their frames only from the Anim graphics (ADR 0003, which removed the levels' AN2), and a submap's
+  animation list has an Anim graphic of its own as a level's has: an AN2 per submap would bring back the second source ADR 0003
+  removed, for no source of submap frames (the editor opens only the clean game and its own ROMs, and nothing it imports
+  brings a submap's animations). Should an import ever bring one, the frames its slots take from AN2 are copied into
+  the submap's Anim graphic, as a level's are.
+
 ### The editor's bypass instead of Lunar Magic's lists
 
 Research for issue #283: does the editor's own bypass break ADR 0005 – does a tool or community content read Lunar

@@ -849,8 +849,9 @@ layout ([research](research/lunar-magic-submap-graphics.md)):
   after the levels'), which the overworld's load reads for the submap Mario is on (`$1F11` of the player). When Mario
   walks to another submap the game loads only its palette; a JSL at `$04DBB9` (Lunar Magic's place) runs the game's
   upload routine (`$00A9DA`, which uploads only the files that changed) with the screen off, the window closed over
-  it. Lunar Magic's FG5/FG6 (with its option to merge FG1/FG2 into SP3/SP4) and AN2 are not offered: the editor's
-  animations take their frames from the Anim graphics (ADR 0003).
+  it. Lunar Magic's FG5/FG6 (with its option to merge FG1/FG2 into SP3/SP4) are not offered until community content
+  asks for them, AN2 not at all: the editor's animations take their frames from the Anim graphics (ADR 0003; research
+  "FG5/FG6 and AN2", #263).
 - **layer 3** (Lunar Magic's "Submap Layer 3 GFX/Tilemap Bypass"): LG1–LG4 and LT3 as a level's (SMWL's table,
   entries 200–206 after the levels'); LG1–LG4 are uploaded with the other files, so also when Mario walks to another
   submap; an LT3 file replaces the game's border while the overworld loads (a JSL at `$00A153`, Lunar Magic's place,
