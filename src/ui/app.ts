@@ -99,6 +99,7 @@ export type AppEvent =
   | 'render' // the level was emulated and drawn again
   | 'rom-change' // the ROM was written (a ROM edit, undo/redo, a level save)
   | 'probes' // the asked or the prefetched probes are done (block, collision, sprite, run speeds)
+  | 'probe-progress' // one of the asked or prefetched probes is done (more may follow)
   | 'objkinds' // object kinds asked for are known (or failed)
   | 'level-scan' // the level scan of the level as edited is known
   | 'game-view' // the camera at Mario's place for the game view frame is known (or asked for)
@@ -298,6 +299,7 @@ export class App {
       soon: (step) => setTimeout(step, 0),
       setBusy: (key, label) => this.setBusy(key, label),
       ready: () => this.emit('probes'),
+      progress: () => this.emit('probe-progress'),
       kindsReady: () => this.emit('objkinds'),
     });
     this.results.onChange = () => {

@@ -1,14 +1,17 @@
 // The tile search on the Map16 sheets (tilesearch.ts): by number, and by part of a tile's texts (custom
 // block file, the user's tile name, its emulated behavior), case-insensitive; the tiles still being determined
-// are counted. An extended tile without a custom block is told by the tile it acts like: checked by emulation
-// (its probe says the same as that tile's).
+// are counted. The central search's Map16 tiles (Ctrl+F). The probes asked for and the search again as they are
+// done (tilebehaviors.ts). An extended tile without a custom block is told by the tile it acts like: checked by
+// emulation (its probe says the same as that tile's); without the extension by itself (as the tooltip).
 import { Rom } from '../src/core/rom.ts';
 import { BlockProber, probeText } from '../src/core/blockprobe.ts';
 import { installEditorPatch } from '../src/core/patches.ts';
 import { setActsLike, setExtTileWords, enableBlocks, setBlock, DEFAULT_ACTS } from '../src/core/map16ext.ts';
 import { LevelEmulator } from '../src/core/levelemu.ts';
 import { map16Source } from '../src/core/render.ts';
-import { tileMatches, behaviorTexts, behaviorTile, pendingHint } from '../src/ui/tilesearch.ts';
+import { tileMatches, behaviorTexts, behaviorTile, pendingHint, map16Matches } from '../src/ui/tilesearch.ts';
+import { tileBehaviors, onBehaviorProgress } from '../src/ui/tilebehaviors.ts';
+import type { BlockProbe } from '../src/core/blockprobe.ts';
 import { editorImage, cleanImage } from './fixture.ts';
 
 let bad = 0;
@@ -38,6 +41,15 @@ check(how.texts.get(0x1f0) === '+1 coin' && !how.texts.has(7) && !how.texts.has(
 check(eq(tileMatches('coin', 0x200, [names, how.texts]), [0x2b, 0x1f0]), 'part of the behavior text matches the tiles');
 check(eq(tileMatches('SOLID', 0x200, [how.texts]), [0x130]), 'behavior in any case');
 check(eq(tileMatches('solid', 0x200, [files, names]), []), 'without behavior texts no tile matches by behavior');
+
+// the central search (Ctrl+F): every term in the tile's number, behavior or block file
+const m16 = (terms: string[]) => map16Matches(terms, 0x400, how.texts, files).map((m) => m.tile);
+check(eq(m16(['coin']), [0x2b, 0x130, 0x1f0]), 'Ctrl+F: by behavior and by block file');
+check(eq(m16(['coin', 'door']), [0x130]), 'Ctrl+F: every term (behavior or file)');
+check(eq(m16(['1f', 'coin']), [0x1f0]), 'Ctrl+F: a number and a behavior');
+check(eq(m16(['2b']).slice(0, 1), [0x2b]) && !m16(['zzz']).length, 'Ctrl+F: by number; nothing for no match');
+const one = map16Matches(['130'], 0x400, how.texts, files);
+check(one.length === 1 && one[0].text === 'from below: solid, no effect' && one[0].file === 'blocks/coin_door.asm', 'Ctrl+F: a match has its behavior and block file');
 check(pendingHint(0) === '' && pendingHint(1) === '1 tile still being determined …' && pendingHint(12) === '12 tiles still being determined …', 'the hint while not final');
 
 // by emulation: an extended tile without a custom block does what the tile it acts like does
@@ -56,7 +68,46 @@ for (const [i, ref] of refs.entries()) {
 check(behaviorTile(rom, 0x130) === 0x130 && behaviorTile(rom, 0x1ff) === 0x1ff, 'a tile below 200 is told by itself');
 setBlock(rom, 0x2b0, 0x108000, false);
 check(behaviorTile(rom, 0x2b0) === 0x2b0, 'a tile with a custom block is told by itself');
-check(behaviorTile(new Rom(cleanImage()), 0x2a0) === -1 && behaviorTile(new Rom(cleanImage()), 0x2b) === 0x2b, 'without the extension an extended tile has no behavior');
+check(behaviorTile(new Rom(cleanImage()), 0x2a0) === 0x2a0 && behaviorTile(new Rom(cleanImage()), 0x2b) === 0x2b, 'without the extension an extended tile is told by itself (as the tooltip)');
+
+// the probes a search asks for: those of the tiles' behaviorTile, none for an empty input; the ones not done yet
+// are counted
+{
+  const asked = new Set<number>(), done = new Map<number, BlockProbe>([[0x2b, prober.probe(0x2b)]]);
+  const probes = { block: (t: number) => { asked.add(t); return done.get(t); } };
+  check(tileBehaviors({ rom, probes }, '  ', 0x400).texts.size === 0 && asked.size === 0, 'an empty search asks for no probe');
+  const b = tileBehaviors({ rom, probes }, 'coin', 0x2a6);
+  check(asked.size === 0x200 && !asked.has(0x2a0) && b.pending === 0x1ff, 'a search asks for the probes of the tiles that tell the others');
+  check(b.texts.get(0x2a0) === probeText(done.get(0x2b)!) && b.texts.get(0x2b) === b.texts.get(0x2a0), 'a tile acting like a probed one has its text');
+  const clean = new Rom(cleanImage()); asked.clear();
+  tileBehaviors({ rom: clean, probes }, 'coin', 0x2a1);
+  check(asked.has(0x2a0), 'without the extension the search asks for the extended tile itself');
+}
+
+// searched again: at once when the probes are done, while they go on at most once a second (a probe done), not on
+// other busy changes (a modal), not after it is stopped
+{
+  const listeners = new Map<string, Set<() => void>>();
+  const app = { on: (ev: string, fn: () => void) => { const s = listeners.get(ev) ?? new Set(); listeners.set(ev, s); s.add(fn); return () => { s.delete(fn); }; } };
+  const emit = (ev: string) => listeners.get(ev)?.forEach((f) => f());
+  let runs = 0;
+  const off = onBehaviorProgress(app, () => runs++);
+  emit('busy');
+  check(runs === 0 && !listeners.get('busy')?.size, 'a busy change (modal, music) does not search again');
+  emit('probes');
+  check(runs === 1, 'the probes done: searched again at once');
+  for (let i = 0; i < 20; i++) emit('probe-progress');
+  check(runs === 1, 'probes done one by one: not at once');
+  await new Promise((r) => setTimeout(r, 1100));
+  check(runs === 2, 'probes done one by one: searched again once within a second');
+  emit('probe-progress'); emit('probes');
+  check(runs === 3, 'the probes done while waiting: searched again at once');
+  await new Promise((r) => setTimeout(r, 1100));
+  check(runs === 3, '(the wait dropped)');
+  emit('probe-progress'); off(); emit('probes');
+  await new Promise((r) => setTimeout(r, 1100));
+  check(runs === 3 && !listeners.get('probes')?.size && !listeners.get('probe-progress')?.size, 'stopped: not searched again');
+}
 
 if (bad) { console.log(`${bad} failed`); process.exit(1); }
 console.log('all ok');

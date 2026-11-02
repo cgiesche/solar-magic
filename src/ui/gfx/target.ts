@@ -17,7 +17,8 @@ import { MAP_NAMES, overworldReplacement, OW_L1_TILES, owTileAddr, owTileWords, 
 import { namesOf, type NameKind } from '../../core/usernames.ts';
 import { fgTileUsers, bgTileUsers, tileLinks, isTilesetTile, TILE_SOURCES } from '../../core/levelusage.ts';
 import type { ExListRef } from '../../core/exanim.ts';
-import { tileMatches, tileBehaviors } from '../tilesearch.ts';
+import { tileMatches } from '../tilesearch.ts';
+import { tileBehaviors } from '../tilebehaviors.ts';
 import { blockFilesByTile } from '../blockdialog.ts';
 import { usedInList } from '../usedin.ts';
 

@@ -14,7 +14,7 @@ import { exportLevelPng, openLevelImages } from './ui/levelimages.ts';
 import { LevelList, Picker, Properties } from './ui/panels.ts';
 import { sideSplitter } from './ui/pickerview.ts';
 import { openSearch } from './ui/search.ts';
-import { onBehaviorProgress } from './ui/tilesearch.ts';
+import { onBehaviorProgress } from './ui/tilebehaviors.ts';
 import { openHeaderDialog } from './ui/headerdialog.ts';
 import { hex } from './core/names.ts';
 import { GfxWorkspace, type WsTab, type WsTarget } from './ui/gfxworkspace.ts';

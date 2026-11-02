@@ -40,6 +40,7 @@ export interface ProbeClientDeps {
   soon?(step: () => void): void; // a slice that runs while a dialog is open too (default: later's)
   setBusy(key: ProbeBusyKey, label: string | null): void;
   ready(): void; // the asked or the prefetched probes are all done
+  progress?(): void; // an asked or prefetched probe is done (more may follow)
   kindsReady(): void; // object kinds asked for are known (or failed)
 }
 
@@ -465,6 +466,7 @@ export class ProbeClient {
     if (d.failed && d.gen === this.gen) this.failed.add(id);
     const asked = this.asked.delete(id), prefetched = this.prefetched.delete(id);
     this.busy();
+    if (asked || prefetched) this.d.progress?.();
     if ((asked && !this.asked.size) || (prefetched && !this.prefetched.size)) this.d.ready();
   }
 

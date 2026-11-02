@@ -65,7 +65,7 @@ function editor(worker: Worker | null) {
   const rom = new Rom(file.slice()), emu = new LevelEmulator(rom);
   const steps: [string, () => void][] = [];
   const e = {
-    rom, emu, ts: 0, ready: 0, kindsReady: 0, busy: new Map<string, string>(), steps, soon: [] as (() => void)[],
+    rom, emu, ts: 0, ready: 0, progress: 0, kindsReady: 0, busy: new Map<string, string>(), steps, soon: [] as (() => void)[],
     results: new ResultCache(new RomFingerprint(rom)),
     client: null as unknown as ProbeClient,
     // background slices on the main thread (the prefetch after a ROM change only when asked)
@@ -84,6 +84,7 @@ function editor(worker: Worker | null) {
     soon: (step) => e.soon.push(step),
     setBusy: (key, label) => { if (label === null) e.busy.delete(key); else e.busy.set(key, label); },
     ready: () => e.ready++,
+    progress: () => e.progress++,
     kindLevel: () => {
       const lv = loadLevel(rom, 0x105);
       return { level: { number: lv.number, header: lv.header }, layer2Pointer: rom.r24(L2_PTRS + 0x105 * 3) };
@@ -124,6 +125,7 @@ function editor(worker: Worker | null) {
   w.reply(old!);
   check(JSON.stringify(e.client.block(0x130)) === JSON.stringify(direct.probe(0x130)), 'its result is kept: still valid');
   check(e.ready === 1 && !e.busy.has('probe'), "job done: 'ready' told, nothing busy");
+  check(e.progress === 1, "job done: 'progress' told once");
 }
 
 // a reply from before a ROM change that changed what the probe read: not taken (though the cache is already synced

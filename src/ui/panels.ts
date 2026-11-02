@@ -29,7 +29,8 @@ import { lt3UserText } from '../core/owlayer3.ts';
 import { layer3Picker } from './l3picker.ts';
 import { LT3_DESTS } from '../core/layer3gfx.ts';
 import { probeable, probeText, spritesOf, spriteProbeAt, enterText, enterSuffix, switchText, switchedText, SWITCH_NAME, type SwitchState } from '../core/blockprobe.ts';
-import { tileMatches, drawTileMatches, tileBehaviors, behaviorTile, pendingHint } from './tilesearch.ts';
+import { drawTileMatches, behaviorTile, pendingHint, map16Matches } from './tilesearch.ts';
+import { tileBehaviors } from './tilebehaviors.ts';
 import { animateTiles, noteCopy } from './pickeranim.ts';
 import { matchesAll, type SearchProvider, type SearchResult } from './search.ts';
 import { blockFilesByTile } from './blockdialog.ts';
@@ -314,7 +315,7 @@ export class Picker {
     }
     // tooltip: tile number, name, behaviour when hit from below (as the tile search finds it) and how it treats Mario
     let hoverTile = -1, hoverCanvas: HTMLCanvasElement | null = null;
-    const behavior = (t: number) => { const b = behaviorTile(app.rom, t); return app.probes.block(b < 0 ? t : b); };
+    const behavior = (t: number) => app.probes.block(behaviorTile(app.rom, t));
     const tip = () => {
       const p = behavior(hoverTile), name = nameOf(app.rom, 'fg', hoverTile);
       const c = app.probes.collision(hoverTile), o = c && switchedText(c);
@@ -680,17 +681,12 @@ export class Picker {
       id: 'm16', label: 'Map16',
       note: () => pendingHint(pending),
       search: (terms) => {
-        const nums = terms.map((t) => new Set(tileMatches(t, EXT_TILES) ?? []));
         const sheets = new Map<number, HTMLCanvasElement>();
         const files = blockFilesByTile(app.rom);
         const behaviors = tileBehaviors(app, terms.join(' '), EXT_TILES);
         pending = behaviors.pending;
         const out: SearchResult[] = named(terms);
-        for (let t = 0; t < EXT_TILES; t++) {
-          const text = behaviors.texts.get(t) ?? '';
-          const file = files.get(t);
-          const low = `${text} ${file ?? ''}`.toLowerCase();
-          if (!terms.every((x, i) => nums[i].has(t) || low.includes(x))) continue;
+        for (const { tile: t, text, file } of map16Matches(terms, EXT_TILES, behaviors.texts, files)) {
           out.push({
             label: hex3(t), name: text, detail: file ?? undefined, title: `Tile ${hex3(t)}${text ? `: ${text}` : ''}${file ? `\nCustom block: ${file}` : ''}`,
             thumb: () => {

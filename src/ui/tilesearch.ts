@@ -4,9 +4,7 @@
 
 import { hex } from '../core/names.ts';
 import { EXT_FIRST, map16Ext, actsLike, blockOf } from '../core/map16ext.ts';
-import { probeText } from '../core/blockprobe.ts';
 import type { Rom } from '../core/rom.ts';
-import type { App } from './app.ts';
 
 // tiles 0..count-1 matching the typed number, null for an empty input. A leading zero or all digits compare
 // from the left of the full number, otherwise the number as typed is the start ("25" is 025 and 250–25F,
@@ -26,14 +24,14 @@ export function tileMatches(input: string, count: number, texts: Map<number, str
   return out;
 }
 
-// the tile whose block probe tells what FG tile t does: t itself below 200 or with a custom block, else the
-// tile it acts like (the game runs that tile's code for it, so they share one probe instead of one for each of
-// the 3584 extended tiles; testtilesearch.ts checks by emulation that both say the same); -1 for an extended tile
-// without the extension
+// the tile whose block probe tells what FG tile t does (the tooltips and the searches): t itself below 200, with a
+// custom block or without the extension, else the tile it acts like (the game runs that tile's code for it, so they
+// share one probe instead of one for each of the 3584 extended tiles; testtilesearch.ts checks by emulation that
+// both say the same)
 export function behaviorTile(rom: Rom, t: number): number {
   if (t < EXT_FIRST) return t;
   const e = map16Ext(rom);
-  if (!e) return -1;
+  if (!e) return t;
   return e.blocks && blockOf(rom, t) ? t : actsLike(rom, t);
 }
 
@@ -41,7 +39,7 @@ export interface Behaviors {
   texts: Map<number, string>; // what each tile does, of those already determined
   pending: number; // how many tiles are still being determined (those whose probes tell the others: the work left)
 }
-const NONE: Behaviors = { texts: new Map(), pending: 0 };
+export const NO_BEHAVIORS: Behaviors = { texts: new Map(), pending: 0 };
 
 // the behavior texts of tiles 0..count-1: `probeOf` a tile, the tile whose probe tells it (-1: none), `text` of that
 // probe, undefined while it is still being determined
@@ -57,21 +55,19 @@ export function behaviorTexts(count: number, probeOf: (t: number) => number, tex
   return { texts, pending: [...byProbe.values()].filter((x) => x === undefined).length };
 }
 
-// what FG tiles 0..count-1 do, as the tooltips say it (the emulation's block probes, behaviorTile's), for a typed
-// search (none for an empty one); the probes not done yet are asked for, onBehaviorProgress says when more are
-export function tileBehaviors(app: App, input: string, count: number): Behaviors {
-  if (!input.trim()) return NONE;
-  return behaviorTexts(count, (t) => behaviorTile(app.rom, t), (b) => { const p = app.probes.block(b); return p && probeText(p); });
-}
+export interface Map16Match { tile: number; text: string; file: string | undefined }
 
-// fn whenever more tiles' behavior may be known: when the probes are done, and as they go on (the busy count of
-// the block probes) at most once a second; returns what stops it
-export function onBehaviorProgress(app: App, fn: () => void): () => void {
-  let timer = 0;
-  const now = () => { clearTimeout(timer); timer = 0; fn(); };
-  const offDone = app.on('probes', now);
-  const offBusy = app.on('busy', () => { if (!timer) timer = window.setTimeout(now, 1000); });
-  return () => { clearTimeout(timer); offDone(); offBusy(); };
+// the central search's Map16 tiles 0..count-1 (Ctrl+F): those where every term is part of the tile's number (as
+// tileMatches has it), of what it does (`behaviors`) or of the file of its custom block (`files`), with those texts
+export function map16Matches(terms: string[], count: number, behaviors: Map<number, string>, files: Map<number, string>): Map16Match[] {
+  const nums = terms.map((t) => new Set(tileMatches(t, count) ?? []));
+  const out: Map16Match[] = [];
+  for (let t = 0; t < count; t++) {
+    const text = behaviors.get(t) ?? '', file = files.get(t);
+    const low = `${text} ${file ?? ''}`.toLowerCase();
+    if (terms.every((x, i) => nums[i].has(t) || low.includes(x))) out.push({ tile: t, text, file });
+  }
+  return out;
 }
 
 // the hint while a search by behavior is not final yet ('' once it is)
