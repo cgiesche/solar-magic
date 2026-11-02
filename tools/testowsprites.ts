@@ -119,5 +119,25 @@ const rom = new Rom(await editorImage());
   check(v3 !== v2 && owSpriteImages(loads, 0, 0) !== v2, 'another map: made for it, the first map\'s made again (one kept)');
 }
 
+// ---- not read by what plays a level ----
+// the boot runs the slots' loader on the title screen (nothing of it shown): the table isn't among the boot's reads,
+// so a level load (every block, sprite and path probe starts from the boot) doesn't depend on it; an edit of a slot
+// keeps the boot snapshot, and a level loads from it as on a ROM booted with the slot (WRAM from $1000: below are the
+// title screen's leftovers, OAM tiles off the screen and the overworld sprites' RAM)
+{
+  const r = new Rom(rom.data.slice()), emu = new LevelEmulator(r), lo = snesToPc(OW_SPRITES), hi = lo + OW_SPRITE_SLOTS * 5;
+  const inTable = (reads: RomReads) => [...reads.bytes].filter((o) => o >= lo && o < hi).length;
+  emu.boot();
+  check(inTable(emu.bootReads!) === 0, `the boot: no byte of the slot table read (${inTable(emu.bootReads!)})`);
+  const reads = emu.tracked(() => emu.load(0x105)).reads;
+  check(inTable(reads) === 0, `a level load: no byte of the slot table read (${inTable(reads)})`);
+  const boot = emu.baseState;
+  const boo = readOwSprite(r, 10);
+  writeOwSprite(r, 10, { ...boo, num: 1, x: boo.x + 0x30 });
+  const kept = emu.load(0x105), fresh = new LevelEmulator(new Rom(r.data.slice())).load(0x105);
+  check(emu.baseState === boot && Buffer.compare(kept.vram, fresh.vram) === 0 && Buffer.compare(kept.wram.subarray(0x1000), fresh.wram.subarray(0x1000)) === 0,
+    'a slot edited: the boot snapshot kept, level 105 loads as on a ROM booted with the slot');
+}
+
 if (bad) { console.log(`${bad} FAILED`); process.exit(1); }
 console.log('all ok');

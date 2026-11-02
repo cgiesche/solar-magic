@@ -6,6 +6,7 @@ import { Snes, type SnesState, type MemHook } from './snes.ts';
 import { Rom, snesToPc } from './rom.ts';
 import { L1_PTRS, L2_PTRS, SPR_PTRS, SEC_HDR, LEVEL_SIZE_TABLE, mainTranslevel } from './level.ts';
 import { translevelToLevel, l1XY } from './overworld.ts';
+import { OW_SPRITES, OW_SPRITE_SLOTS, hasOwSpriteSlots } from './owsprites.ts';
 import { editorPatch, musicPatch, BG_HOOK, HEADER_MUSIC_TABLE } from './patches.ts';
 import { lt3Patches, type Lt3Place } from './layer3gfx.ts';
 import { RomReads, record, countReads, PAGE_SHIFT, type Recorded } from './romdeps.ts';
@@ -122,11 +123,16 @@ export class LevelEmulator {
   }
 
   // Power on and boot to the title screen once; all level loads start from this snapshot.
+  // The title screen runs the game's overworld sprite loader ($04F678) and shows none of them (their OAM tiles off
+  // the screen, their RAM unused in a level; a load of the overworld runs the loader again): reads of the slot table
+  // aren't recorded, so an overworld sprite edit keeps every result and the snapshot.
   boot(): void {
     this.sync();
     const s = this.snes;
     s.powerOn();
     const masked = new RomReads(this.rom), outerMasked = s.romMasked;
+    const slots = hasOwSpriteSlots(this.rom) ? snesToPc(OW_SPRITES) : -1, slotsEnd = slots + OW_SPRITE_SLOTS * 5;
+    for (let o = slots; o >= 0 && o < slotsEnd; o++) s.romSkip.add(o);
     s.romMasked = masked;
     try {
       this.bootReads = this.tracked(() => {
@@ -136,7 +142,10 @@ export class LevelEmulator {
           if (++f > 2000) throw new Error('boot did not reach title screen');
         }
       }).reads;
-    } finally { s.romMasked = outerMasked; }
+    } finally {
+      s.romMasked = outerMasked;
+      for (let o = slots; o >= 0 && o < slotsEnd; o++) s.romSkip.delete(o);
+    }
     this.bootMasked = masked;
     this.baseState = s.saveState();
     this.bootRom = this.rom.data.slice();
