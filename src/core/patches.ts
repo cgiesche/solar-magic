@@ -561,8 +561,9 @@ export function setGfxEntry(rom: Rom, i: number, addr: number, raw: boolean, siz
 export const GFX_SLOT_NAMES = ['SP4', 'SP3', 'SP2', 'SP1', 'FG3', 'BG1', 'FG2', 'FG1'];
 // the bypass's entries: levels 000–1FF, then submaps 0–6 (submapGfxEntry)
 export const SUBMAPS = 7;
-export const GFX_BYPASS_ENTRIES = 0x200 + SUBMAPS;
-export const submapGfxEntry = (map: number): number => 0x200 + map;
+export const LEVEL_GFX_ENTRIES = 0x200;
+export const GFX_BYPASS_ENTRIES = LEVEL_GFX_ENTRIES + SUBMAPS;
+export const submapGfxEntry = (map: number): number => LEVEL_GFX_ENTRIES + map;
 export function levelGfx(rom: Rom, n: number): number[] {
   const p = editor(rom);
   return Array.from({ length: 8 }, (_, k) => rom.r8(p.levelGfx + n * 8 + k) | (rom.r8(p.levelGfxHi + n * 8 + k) << 8));

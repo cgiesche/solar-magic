@@ -126,7 +126,9 @@ stripe image) as the place Lunar Magic skips the border when a submap has an LT3
 The editor keeps them in its layer 3 table (SMWL, entries 200–206 after the levels'): its graphics upload, which the
 overworld's load and the editor's code at `$04DBB9` run, takes the submap's LG files; a JSL at `$00A153` copies the
 LT3 file instead of setting the border's stripe image. The level name's stripe (`$508B`) and the lives are written
-over the file as over the border.
+over the file as over the border: row 4, its columns 8–9 (the lives) and 11–29 (the name), emulated in
+`tools/testowlayer3.ts`. The overworld editor's "Layer 3 (border)" mode paints the file in 8x8 tiles
+(`core/owlayer3.ts`, #264); a new file is 0x800 bytes at the start of layer 3, as Lunar Magic's.
 
 ## Animations
 

@@ -25,6 +25,7 @@ import { EXT_TILES } from '../core/map16ext.ts';
 import { COND_FLAGS, COND_ADD, condByte, flagRam, isDm16, type Dm16Cond } from '../core/cdm16.ts';
 import { TileCache, map16Source, drawMap16, sheetCells } from '../core/render.ts';
 import { lt3Target, lt3Users, layer3CharBase } from '../core/layer3map.ts';
+import { lt3UserText } from '../core/owlayer3.ts';
 import { layer3Picker } from './l3picker.ts';
 import { LT3_DESTS } from '../core/layer3gfx.ts';
 import { probeable, probeText, spritesOf, spriteProbeAt, enterText, enterSuffix, switchText, switchedText, SWITCH_NAME, type SwitchState } from '../core/blockprobe.ts';
@@ -501,7 +502,7 @@ export class Picker {
     const others = t.file === null ? [] : lt3Users(app.rom, t.file).filter((n) => n !== app.level.number);
     const where = t.file === null
       ? 'Saved with the level into a new layer 3 tilemap file (ExGFX, LT3 in the Graphics tab), under the status bar.'
-      : `Saved with the level into its layer 3 tilemap file, ExGFX ${hex2(t.file)} (LT3: ${LT3_DESTS[t.place.dest].toLowerCase()})${others.length ? ` – also used by level${others.length > 1 ? 's' : ''} ${others.map((n) => hex3(n)).join(', ')}` : ''}.`;
+      : `Saved with the level into its layer 3 tilemap file, ExGFX ${hex2(t.file)} (LT3: ${LT3_DESTS[t.place.dest].toLowerCase()})${others.length ? ` – also used by ${lt3UserText(others)}` : ''}.`;
     layer3Picker(this.body, { vram: r.vram, cgram: r.cgram, charBase: layer3CharBase(r.ppuRegs) }, app.l3Brush, (nb) => { app.l3Brush = nb; this.build(); }, {
       pixels: this.builtPixels = this.sheetPixels(), shown: this.sheetShown(), from: 'the level',
       hint: `click tiles here or in the level (drag: block). ${where} Layer 3 shows where it is when the level starts.`,

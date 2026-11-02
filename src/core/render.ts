@@ -287,7 +287,7 @@ export function levelColorUsers(rom: Rom, r: LevelRender, im: LevelImages, color
 // drawn at level pixel (tx * 8 - dx, ty * 8 - dy), repeated every mw pixels horizontally
 export interface Layer3Geometry { base: number; wide: number; mw: number; mh: number; dx: number; dy: number }
 export const LAYER3_STATUS_ROWS = 5; // the status bar's tile rows (not drawn)
-export function layer3Geometry(r: LevelRender): Layer3Geometry {
+export function layer3Geometry(r: Pick<LevelRender, 'wram' | 'ppuRegs'>): Layer3Geometry {
   const w = r.wram, sc = r.ppuRegs[0x09], wide = sc & 1, tall = (sc >> 1) & 1;
   return { base: (sc & 0xfc) << 9, wide, mw: 256 << wide, mh: 256 << tall, dx: get16(w, RAM.layer3X) - cameraX(w), dy: get16(w, RAM.layer3Y) - cameraY(w) };
 }

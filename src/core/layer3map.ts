@@ -11,7 +11,7 @@ import type { Level } from './level.ts';
 import type { LevelRender } from './levelemu.ts';
 import { layer3TileAddr, LAYER3_STATUS_ROWS, type Layer3Geometry } from './render.ts';
 import { levelLayer3, setLevelLayer3, fitsLayer3Slot, lt3Copy, LT3_SIZES, LT3_SLOT, L3_MAP_START, L3_MAP_END, type Lt3Place } from './layer3gfx.ts';
-import { freeGfx, gfxRangeFor } from './patches.ts';
+import { freeGfx, gfxRangeFor, GFX_BYPASS_ENTRIES } from './patches.ts';
 import { gfxBytes, importGfxFile } from './gfxfiles.ts';
 
 export const L3_MAP_VRAM = L3_MAP_START, L3_MAP_WORDS = L3_MAP_END - L3_MAP_START;
@@ -39,8 +39,8 @@ export function lt3Covers(place: Lt3Place, i: number): boolean {
 }
 
 // the LT3 file with the tilemap's words where they are copied from; its other bytes those of `base` (the
-// file as stored; a new one: zeros)
-export function lt3File(map: Uint16Array, place: Lt3Place, base: Uint8Array = new Uint8Array(NEW_SIZE)): Uint8Array {
+// file as stored; a new one: zeros, as long as its place's size)
+export function lt3File(map: Uint16Array, place: Lt3Place, base: Uint8Array = new Uint8Array(LT3_SIZES[place.size])): Uint8Array {
   const out = base.slice(), c = lt3Copy(place);
   for (let k = 0; k * 2 < c.len; k++) {
     const w = map[c.vram - L3_MAP_VRAM + k];
@@ -49,12 +49,19 @@ export function lt3File(map: Uint16Array, place: Lt3Place, base: Uint8Array = ne
   }
   return out;
 }
+// lt3File's inverse: the tilemap `map` with the words of the LT3 file `file` placed `place` where they are copied to
+export function lt3Read(map: Uint16Array, place: Lt3Place, file: Uint8Array): Uint16Array {
+  const out = map.slice(), c = lt3Copy(place);
+  for (let k = 0; k * 2 < c.len; k++) out[c.vram - L3_MAP_VRAM + k] = file[c.skip + k * 2] | (file[c.skip + k * 2 + 1] << 8);
+  return out;
+}
 
-// the level's LT3 file an edit goes into (null: a new one) and its place
-export function lt3Target(rom: Rom, n: number): { file: number | null; place: Lt3Place } {
+// the LT3 file an edit of entry n (a level, or a submap's entry 200–206) goes into (null: a new one, placed `fresh`)
+// and its place
+export function lt3Target(rom: Rom, n: number, fresh: Lt3Place = NEW_LT3): { file: number | null; place: Lt3Place } {
   const g = levelLayer3(rom, n);
   if (g.lt3 !== 0xff && fitsLayer3Slot(rom, LT3_SLOT, g.lt3, LT3_SIZES[g.size])) return { file: g.lt3, place: { dest: g.dest, size: g.size } };
-  return { file: null, place: NEW_LT3 };
+  return { file: null, place: fresh };
 }
 
 // the level's LT3 file with its edited tilemap, for the emulator (levelemu.ts; padded to 0x2000 bytes)
@@ -66,23 +73,23 @@ export function lt3Override(rom: Rom, lv: Level): { data: Uint8Array; place: Lt3
   return { data: lt3File(lv.layer3, t.place, base), place: t.place };
 }
 
-// writes the level's edited tilemap into its LT3 file (in place), or a new file it then uses
-export function saveLayer3(rom: Rom, n: number, map: Uint16Array): string {
-  const t = lt3Target(rom, n);
+// writes the edited tilemap of entry n into its LT3 file (in place), or a new file (placed `fresh`) it then uses
+export function saveLayer3(rom: Rom, n: number, map: Uint16Array, fresh: Lt3Place = NEW_LT3): string {
+  const t = lt3Target(rom, n, fresh);
   if (t.file !== null) {
     importGfxFile(rom, t.file, lt3File(map, t.place, gfxBytes(rom, t.file)!.data));
     return `Layer 3: ExGFX ${hx(t.file)}`;
   }
   const num = freeGfx(rom, new Set(), gfxRangeFor({ slot: LT3_SLOT }));
   if (num < 0) throw new Error('No free ExGFX number left for the layer 3 tilemap');
-  importGfxFile(rom, num, lt3File(map, NEW_LT3));
-  setLevelLayer3(rom, n, { ...levelLayer3(rom, n), lt3: num, ...NEW_LT3 });
+  importGfxFile(rom, num, lt3File(map, fresh));
+  setLevelLayer3(rom, n, { ...levelLayer3(rom, n), lt3: num, ...fresh });
   return `Layer 3: new ExGFX ${hx(num)}`;
 }
 
-// the levels whose LT3 is the file `num`
+// the entries whose LT3 is the file `num`: levels 000–1FF, then the submaps' 200–206 (submapGfxEntry)
 export function lt3Users(rom: Rom, num: number): number[] {
-  return Array.from({ length: 0x200 }, (_, i) => i).filter((i) => levelLayer3(rom, i).lt3 === num);
+  return Array.from({ length: GFX_BYPASS_ENTRIES }, (_, i) => i).filter((i) => levelLayer3(rom, i).lt3 === num);
 }
 
 // The tilemap over the level (render.ts layer3Geometry): cell (cx, cy) is the 8x8 tile at level pixel
