@@ -22,7 +22,7 @@ import {
 import { readEvents, writeEvents } from './owevents.ts';
 import { teleportDataRanges } from './owteleport.ts';
 import { koopaTeleport, setKoopaTeleport, KOOPAS } from './owlinks.ts';
-import { START, hasOwSpriteSlots, readOwSprite, writeOwSprite, OW_SPRITE_SLOTS, koopaKidPos, setKoopaKidPos, KOOPA_KIDS } from './owsprites.ts';
+import { START, hasOwSpriteSlots, readOwSprite, writeOwSprite, OW_SPRITE_SLOTS, koopaKidPos, setKoopaKidPos, KOOPA_KIDS, hasKoopaKidTable } from './owsprites.ts';
 import { readCustomSprites } from './owcustom.ts';
 import { syncBowsieMaxTile } from './bowsie.ts';
 import { OW_OPTIONS, owOptionValue, setOwOption, revealSpeed, setRevealSpeed, submapLightning, setSubmapLightning } from './owoptions.ts';
@@ -89,7 +89,6 @@ export function importOverworld(dst: Rom, src: Rom): OverworldImport {
   teleportDataRanges(src).forEach(([a, b], k) => dst.writeAt(to[k][0], src.data.subarray(a, b)));
   for (let k = 0; k < KOOPAS; k++) setKoopaTeleport(dst, k, koopaTeleport(src, k));
   dst.writeBytes(START, src.bytes(START, START_SIZE));
-  for (let k = 0; k < KOOPA_KIDS; k++) setKoopaKidPos(dst, k, koopaKidPos(src, k));
   if (hasOwSpriteSlots(src) && hasOwSpriteSlots(dst)) for (let k = 0; k < OW_SPRITE_SLOTS; k++) writeOwSprite(dst, k, readOwSprite(src, k));
   else if (hasOwSpriteSlots(src) !== hasOwSpriteSlots(dst)) warn(`The game's overworld sprites are not copied: ${hasOwSpriteSlots(dst) ? 'the other ROM' : 'this ROM'} has BOWSIE, whose loader takes their table's place`);
   const custom = (r: Rom) => readCustomSprites(r).reduce((n, l) => n + l.length, 0);
@@ -106,6 +105,9 @@ export function importOverworld(dst: Rom, src: Rom): OverworldImport {
   }
   // (BOWSIE with MaxTile only while the fade is off: re-inserted when the fade changed; throws when that fails)
   syncBowsieMaxTile(dst).forEach(warn);
+  // (the Koopa Kids after it: MaxTile's code is where their table is)
+  if (hasKoopaKidTable(src) && hasKoopaKidTable(dst)) for (let k = 0; k < KOOPA_KIDS; k++) setKoopaKidPos(dst, k, koopaKidPos(src, k));
+  else warn(`Where the Koopa Kids jump out is not copied: ${hasKoopaKidTable(dst) ? 'the other ROM' : 'this ROM'} has BOWSIE with MaxTile, whose code takes their table's place`);
   const speed = revealSpeed(src);
   if (speed !== null && revealSpeed(dst) !== null) setRevealSpeed(dst, speed);
   const lightning = (r: Rom) => submapLightning(r, 0) !== null;

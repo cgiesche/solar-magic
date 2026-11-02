@@ -8,7 +8,7 @@ import { unzipSync, zipSync } from 'fflate';
 import { inspectUpload, installPackage, type ReadyPreview } from '../src/core/packages.ts';
 import { packageSummary } from '../src/core/pkgreg.ts';
 import { readFileSync } from 'node:fs';
-import { Rom } from '../src/core/rom.ts';
+import { Rom, snesToPc } from '../src/core/rom.ts';
 import { loadAsar } from '../src/core/asar.ts';
 import { OverworldEmulator, OverworldLoads } from '../src/core/overworld.ts';
 import { customSpriteImages, customSpriteLooks } from '../src/core/owsprites.ts';
@@ -16,6 +16,7 @@ import { readPpuOam } from '../src/core/spritegfx.ts';
 import { RAM, get16, getS16 } from '../src/core/ram.ts';
 import { saveBowsieProject, loadBowsieProject, removeBowsie, bowsieInstalled, bowsieSprites, bowsieMaxTile, syncBowsieMaxTile, type BowsieProject } from '../src/core/bowsie.ts';
 import { setOwOption, owOptionValue } from '../src/core/owoptions.ts';
+import { hasKoopaKidTable, koopaKidPos, setKoopaKidPos } from '../src/core/owsprites.ts';
 import { importOverworld } from '../src/core/owimport.ts';
 import { readCustomSprites, writeCustomSprites, customSizeTable, customSpriteRanges, customEntryAddrs, type CustomOwSprite } from '../src/core/owcustom.ts';
 import { editorImage, romDiff } from './fixture.ts';
@@ -186,12 +187,30 @@ const slots = (w: Uint8Array) => Array.from({ length: 24 }, (_, k) => ({ num: ge
   setOwOption(r2, 'pathFade', false);
   syncBowsieMaxTile(r2);
   check(bowsieMaxTile(r2) && shows(r2), 'fade switched off again: re-inserted with MaxTile');
-  // an overworld imported from a ROM with the fade on: BOWSIE re-inserted without MaxTile
+  // MaxTile's code is where the Koopa Kids' table was: no table, moving one refused; without MaxTile it is there
   {
-    const r4 = new Rom(r2.data.slice());
+    let threw = false;
+    try { setKoopaKidPos(r2, 0, { x: 0x10, y: 0x10 }); } catch { threw = true; }
+    check(!hasKoopaKidTable(r2) && threw && hasKoopaKidTable(rom), 'with MaxTile: no Koopa Kid table, moving one refused; without it, there');
+  }
+  // an overworld imported from a ROM with the fade on: BOWSIE re-inserted without MaxTile, the Koopa Kids copied
+  {
+    const r4 = new Rom(r2.data.slice()), src = new Rom(clean.slice());
     r4.extra = new Map(r2.extra);
-    const { warnings } = importOverworld(r4, new Rom(clean.slice()));
-    check(owOptionValue(r4, 'pathFade') === true && !bowsieMaxTile(r4) && bowsieInstalled(r4), `overworld imported with the fade on: BOWSIE without MaxTile (${warnings.filter((w) => /BOWSIE/.test(w)).join(' | ') || 'no BOWSIE warning'})`);
+    setKoopaKidPos(src, 1, { x: 0x123, y: 0x45 });
+    const { warnings } = importOverworld(r4, src);
+    check(owOptionValue(r4, 'pathFade') === true && !bowsieMaxTile(r4) && bowsieInstalled(r4) && koopaKidPos(r4, 1).x === 0x123,
+      `overworld imported with the fade on: BOWSIE without MaxTile, the Koopa Kids copied (${warnings.filter((w) => /BOWSIE/.test(w)).join(' | ') || 'no BOWSIE warning'})`);
+  }
+  // … from a ROM with the fade off into one with MaxTile: MaxTile's code kept, the Koopa Kids not copied
+  {
+    const r4 = new Rom(r2.data.slice()), src = new Rom(clean.slice());
+    r4.extra = new Map(r2.extra);
+    setOwOption(src, 'pathFade', false);
+    const code = (r: Rom) => r.data.slice(snesToPc(0x04f8a6), snesToPc(0x04ffb1)).join();
+    const { warnings } = importOverworld(r4, src);
+    check(bowsieMaxTile(r4) && warnings.some((w) => /Koopa Kids jump out is not copied/.test(w)) && code(r4) === code(r2),
+      'imported with the fade off: MaxTile kept, its code unchanged, the Koopa Kids not copied (warned)');
   }
   // without its sources (a ROM exported without the editor data): left as it is, with a warning
   {

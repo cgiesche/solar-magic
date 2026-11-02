@@ -26,6 +26,10 @@ const DEFAULT_SIZE = 4, MIN_SIZE = 3, MAX_SIZE = 0x0f;
 export const BOWSIE_PTR = 0x04ef3e;
 const BOWSIE_SIGNATURE = [0x00, 0xca, 0xc7, 0x05];
 export const bowsieInstalled = (rom: Rom): boolean => BOWSIE_SIGNATURE.every((b, k) => rom.r8(BOWSIE_PTR + k) === b);
+// BOWSIE with MaxTile (bowsie.ts): its setup called at $009AA4 (a JSL; without MaxTile BOWSIE writes a BRA there).
+// MaxTile's code is at $04F8A6–$04FFB0, over the game's overworld sprite code and the Koopa Kids' table (owsprites.ts).
+const MAXTILE_HOOK = 0x009aa4, JSL = 0x22;
+export const bowsieMaxTile = (rom: Rom): boolean => bowsieInstalled(rom) && rom.r8(MAXTILE_HOOK) === JSL;
 
 // a sprite on a submap: x, y and z in 8px steps; extra: its extra bytes (as many as its size takes)
 export interface CustomOwSprite { id: number; x: number; y: number; z: number; extra: number[] }

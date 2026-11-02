@@ -20,7 +20,7 @@ import { KOOPA_TILE } from '../core/owlinks.ts';
 import { l1Index, MAP_NAMES } from '../core/overworld.ts';
 import { hex } from '../core/names.ts';
 import { toast } from './dom.ts';
-import { hasOwSpriteSlots } from '../core/owsprites.ts';
+import { hasOwSpriteSlots, hasKoopaKidTable } from '../core/owsprites.ts';
 import {
   readCustomSprites, writeCustomSprites, customSpritesProblem, customSizeTable, customExtraBytes, bowsieInstalled,
   OW_CUSTOM_POS_MAX, OW_CUSTOM_Z_MAX, OW_CUSTOM_SUBMAPS, type CustomOwSprite,
@@ -111,7 +111,7 @@ export class SpriteLayer {
     return [
       ...(hasOwSpriteSlots(this.rom) ? Array.from({ length: OW_SPRITE_SLOTS }, (_, k): Item => ({ kind: 'sprite', k })) : []),
       ...this.maps().flatMap((map) => (lists[map] ?? []).map((_, k): Item => ({ kind: 'custom', map, k }))),
-      ...Array.from({ length: KOOPA_KIDS }, (_, k): Item => ({ kind: 'koopa', k })),
+      ...(hasKoopaKidTable(this.rom) ? Array.from({ length: KOOPA_KIDS }, (_, k): Item => ({ kind: 'koopa', k })) : []),
       { kind: 'start', player: 1 }, { kind: 'start', player: 0 },
     ];
   }
@@ -338,6 +338,7 @@ export class SpriteLayer {
   // ---- properties ----
   props(): HTMLElement {
     if (this.sel?.kind === 'custom' && !this.lists()[this.sel.map]?.[this.sel.k]) this.sel = null; // (gone: undone, deleted)
+    if (this.sel?.kind === 'koopa' && !hasKoopaKidTable(this.rom)) this.sel = null; // (gone: BOWSIE's MaxTile)
     const s = this.sel, rom = this.rom;
     if (!s) return h('div', { class: 'ow-info' }, emptyState('Click a sprite, a start position (M, L) or where a Koopa Kid jumps out (K1–K3) to select it – again for the next one under it; drag to move it (8 pixels, 1 with Shift). ' +
       (hasOwSpriteSlots(rom) ? 'The sprite slots are the same on every submap: each sprite shows where its code lets it. ' : '') + 'Custom sprites: pick one in the palette and click on the map to place it; Ctrl+C / Ctrl+V copy one, Delete removes it.'));

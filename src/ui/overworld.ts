@@ -1253,7 +1253,7 @@ export class OverworldView {
       // (the path fade: BOWSIE re-inserted with or without MaxTile; refused when that fails)
       const c = checkbox(o.label, o.title, v, (on) => {
         try {
-          const warnings = this.app.romEdit(`${o.label}: ${on ? 'on' : 'off'}`, () => { setOwOption(rom, o.id, on); return syncBowsieMaxTile(rom); });
+          const warnings = this.app.romEdit(`${o.label}: ${on ? 'on' : 'off'}`, () => { setOwOption(rom, o.id, on); return o.id === 'pathFade' ? syncBowsieMaxTile(rom) : []; });
           if (warnings.length) toast(warnings.join(' '));
         } catch (e) { toast(`Not changed: ${e instanceof Error ? e.message : e}`, 'error'); this.buildProps(); }
       });

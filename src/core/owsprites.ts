@@ -9,6 +9,7 @@
 // What the sprites look like at an event progress is learned by emulation (owSpriteImages): the overworld loaded,
 // each slot shown alone with the camera on it (on the main map it follows Mario), its OAM tiles those the game adds.
 // With BOWSIE installed (owcustom.ts) its loader has taken the place of the slots' table and load: there are none.
+// With BOWSIE's MaxTile its code is where the Koopa Kids' table was: there is none (they don't jump out).
 // The custom sprites (BOWSIE's, Lunar Magic's table) are drawn the same way (customSpriteImages, customSpriteLooks).
 
 import type { Rom } from './rom.ts';
@@ -16,7 +17,7 @@ import { loadKey, type OverworldLoads } from './overworld.ts';
 import type { Job } from './jobrunner.ts';
 import { RAM, set16, getS16 } from './ram.ts';
 import { readPpuOam, drawTiles, tileKey, type SpriteImage } from './spritegfx.ts';
-import { bowsieInstalled, readCustomSprites, customEntryAddrs, type CustomOwSprite } from './owcustom.ts';
+import { bowsieInstalled, bowsieMaxTile, readCustomSprites, customEntryAddrs, type CustomOwSprite } from './owcustom.ts';
 
 export const START = 0x009ef0;
 const START_X = 6, START_Y = 8, START_TX = 0x0e, START_TY = 0x10; // offsets of player 1's words, player 2's + 4
@@ -55,10 +56,13 @@ export const readOwSprites = (rom: Rom): OwSprite[] => Array.from({ length: OW_S
 export const hasOwSpriteSlots = (rom: Rom): boolean => !bowsieInstalled(rom);
 
 // ---- Koopa Kids ----
+// the Koopa Kids' table is there (not with BOWSIE's MaxTile, whose code is where it was)
+export const hasKoopaKidTable = (rom: Rom): boolean => !bowsieMaxTile(rom);
 export function koopaKidPos(rom: Rom, k: number): { x: number; y: number } {
   return { x: rom.r8(KOOPA_KID.xlo + k) | (rom.r8(KOOPA_KID.xhi + k) << 8), y: rom.r8(KOOPA_KID.ylo + k) | (rom.r8(KOOPA_KID.yhi + k) << 8) };
 }
 export function setKoopaKidPos(rom: Rom, k: number, p: { x: number; y: number }): void {
+  if (!hasKoopaKidTable(rom)) throw new Error('With BOWSIE\'s MaxTile there is no Koopa Kid table: its code is there');
   rom.w8(KOOPA_KID.xlo + k, p.x & 0xff); rom.w8(KOOPA_KID.xhi + k, (p.x >> 8) & 0xff);
   rom.w8(KOOPA_KID.ylo + k, p.y & 0xff); rom.w8(KOOPA_KID.yhi + k, (p.y >> 8) & 0xff);
 }

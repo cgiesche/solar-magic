@@ -9,20 +9,20 @@
 //     the game's overworld sprite load (at $04F625, so the game's 13 sprite slots are gone while it is installed),
 //     the size table for Lunar Magic's custom sprite table ($0DE18C, $42) and bit 3 of $0FFFE0 cleared
 // BOWSIE's settings as it runs by default, except MaxTile: on (its default) only while the event path fade is off
-// (Lunar Magic's "disable event path fade effect", owoptions.ts – MaxTile needs it), BOWSIE re-inserted when the fade is
-// switched (syncBowsieMaxTile); with the fade on, without MaxTile (#246). What its meOWmeOW does – rewriting the sprite table when the sizes change – is done after the
-// patch (the table in Lunar Magic's format, owcustom.ts). Its Lunar Magic display files (.s16ov/.sscov) are not made:
-// the editor draws the sprites by emulation.
+// (Lunar Magic's "disable event path fade effect", owoptions.ts – MaxTile needs it), without it with the fade on;
+// re-inserted when the fade is switched (syncBowsieMaxTile, #246). What its meOWmeOW does – rewriting the sprite
+// table when the sizes change – is done after the patch (the table in Lunar Magic's format, owcustom.ts). Its Lunar
+// Magic display files (.s16ov/.sscov) are not made: the editor draws the sprites by emulation.
 
 import type { Rom } from './rom.ts';
 import type { ApplyResult, PatchSource } from './patchapply.ts';
 import { toolStore, type ToolFormat, type ToolProject } from './toolproject.ts';
 import { BOWSIE_ASM, BOWSIE_ROUTINES, BOWSIE_VERSION } from '../vendor/bowsie/bowsie.ts';
-import { readCustomSprites, writeCustomSprites, customSizeTable, OW_CUSTOM_IDS, BOWSIE_PTR, bowsieInstalled } from './owcustom.ts';
+import { readCustomSprites, writeCustomSprites, customSizeTable, OW_CUSTOM_IDS, BOWSIE_PTR, bowsieInstalled, bowsieMaxTile } from './owcustom.ts';
 import { owOptionValue } from './owoptions.ts';
 
 export const BOWSIE_NAME = 'Overworld Sprites (BOWSIE)';
-export { BOWSIE_PTR, bowsieInstalled } from './owcustom.ts';
+export { BOWSIE_PTR, bowsieInstalled, bowsieMaxTile } from './owcustom.ts';
 export const BOWSIE_SLOTS = 24; // sprites at a time (BOWSIE's default for a vanilla overworld)
 export const BOWSIE_FIRST = 0x01, BOWSIE_LAST = 0x7e; // numbers (its pointer tables have 0x7E entries)
 const LM_VERSION = 371; // the Lunar Magic whose formats the editor writes (BOWSIE reads it from the ROM)
@@ -88,11 +88,8 @@ export const bowsieSprites = (p: BowsieProject): BowsieSpriteInfo[] => [...p.lis
 
 const DIR = '__bowsie/';
 
-// MaxTile: wanted with the event path fade off; in the ROM, its setup called at $009AA4 (a JSL; without it BOWSIE
-// writes a BRA there)
-const MAXTILE_HOOK = 0x009aa4;
+// MaxTile: wanted with the event path fade off (whether the ROM has it: owcustom.ts bowsieMaxTile)
 const wantsMaxTile = (rom: Rom) => owOptionValue(rom, 'pathFade') === false;
-export const bowsieMaxTile = (rom: Rom): boolean => bowsieInstalled(rom) && rom.r8(MAXTILE_HOOK) === 0x22;
 
 // bowsie_defines.asm as BOWSIE generates it for its settings
 function defines(maxtile: boolean): string {
@@ -146,7 +143,7 @@ bank auto
 // a sprite's label as BOWSIE makes it: its file name and number (decimal), without what can't be in a label
 const spriteLabel = (e: BowsieEntry) => (base(e.file).replace(/\..*$/, '') + '_' + e.num).toLowerCase().replace(/[^a-z0-9_]/g, '');
 
-export function buildBowsiePatch(p: BowsieProject, maxtile = false): { src: PatchSource; sizes: () => Uint8Array } {
+export function buildBowsiePatch(p: BowsieProject, maxtile: boolean): { src: PatchSource; sizes: () => Uint8Array } {
   for (const e of p.list) if (!p.files.has(e.file)) throw new Error(`Overworld sprite ${hx(e.num)}: file “${e.file}” is missing`);
   const files = new Map<string, Uint8Array | string>(p.files);
   for (const [f, t] of Object.entries(BOWSIE_ASM)) files.set(DIR + f, t);
@@ -274,14 +271,15 @@ export const {
 
 // after the event path fade was switched: the ROM's BOWSIE re-inserted when it has MaxTile and the fade is on, or the
 // other way round; its warnings. Throws when it fails (the ROM then changed: run it in an edit session, romedit.ts);
-// BOWSIE not installed by the editor is left as it is, without its sources with a warning.
+// a BOWSIE without its sources here (not inserted by the editor, or exported without its data) is left as it is,
+// with a warning.
 export function syncBowsieMaxTile(rom: Rom): string[] {
   const want = wantsMaxTile(rom);
   if (!bowsieInstalled(rom) || bowsieMaxTile(rom) === want) return [];
   const what = `Overworld sprites (BOWSIE) ${want ? 'with' : 'without'} MaxTile`;
   let p: BowsieProject | null;
   try { p = loadBowsieProject(rom); } catch (e) { return [`${what} not re-inserted: ${e instanceof Error ? e.message : e}`]; }
-  if (!p) return [];
+  if (!p) return [`${what} not re-inserted: it was not inserted by the editor`];
   const r = saveBowsieProject(rom, p);
   if (!r.ok) throw new Error(`${what}: ${r.errors.join(' ')}`);
   return r.warnings;

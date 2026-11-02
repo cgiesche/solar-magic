@@ -18,7 +18,7 @@ import { submapPaletteRanges } from './submapgfx.ts';
 import { eventDataRanges } from './owevents.ts';
 import { teleportDataRanges } from './owteleport.ts';
 import { KOOPA_X, KOOPA_Y, KOOPAS } from './owlinks.ts';
-import { START, OW_SPRITES, OW_SPRITE_SLOTS, KOOPA_KID, KOOPA_KIDS, hasOwSpriteSlots } from './owsprites.ts';
+import { START, OW_SPRITES, OW_SPRITE_SLOTS, KOOPA_KID, KOOPA_KIDS, hasOwSpriteSlots, hasKoopaKidTable } from './owsprites.ts';
 import { customSpriteRanges } from './owcustom.ts';
 import { LF_SAVE_SWITCH } from './owoptions.ts';
 import type { Job } from './jobrunner.ts';
@@ -693,7 +693,7 @@ export function overworldDataRanges(rom: Rom): [number, number][] {
   out.push(at(revealTable(rom), revealEventCount(rom) * 2), at(REVEAL_FROM, REVEALS), at(REVEAL_TO, REVEALS), ...eventDataRanges(rom));
   if (hasDestroyPatch(rom)) out.push(at(rom.r24(DESTROY_EV_OP), DESTROYS), at(rom.r24(DESTROY_LOC_OP), DESTROYS * 2));
   out.push(...teleportDataRanges(rom), at(KOOPA_X, KOOPAS * 2), at(KOOPA_Y, KOOPAS * 2));
-  out.push(at(START, 0x16), ...(hasOwSpriteSlots(rom) ? [at(OW_SPRITES, OW_SPRITE_SLOTS * 5)] : []), ...Object.values(KOOPA_KID).map((t) => at(t, KOOPA_KIDS)));
+  out.push(at(START, 0x16), ...(hasOwSpriteSlots(rom) ? [at(OW_SPRITES, OW_SPRITE_SLOTS * 5)] : []), ...(hasKoopaKidTable(rom) ? Object.values(KOOPA_KID).map((t) => at(t, KOOPA_KIDS)) : []));
   out.push(...customSpriteRanges(rom), ...owExanimDataRanges(rom));
   return out;
 }
