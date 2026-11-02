@@ -9,9 +9,10 @@
 // quarters or changing a shared color keeps the levels' uses, sprite images and object thumbnails are learned again.
 import { Rom } from '../src/core/rom.ts';
 import { LevelEmulator } from '../src/core/levelemu.ts';
-import { ResultCache, RomFingerprint, INPUTS_PER_KEY } from '../src/core/romdeps.ts';
+import { ResultCache, RomFingerprint } from '../src/core/romdeps.ts';
+import { INPUTS_PER_KEY } from '../src/core/keptresults.ts';
 import { ResultLearner } from '../src/core/learner.ts';
-import { MemoryResults } from '../src/core/jobrunner.ts';
+import { memoryResults } from '../src/core/jobrunner.ts';
 import { inputHash, levelInput } from '../src/core/inputs.ts';
 import { gfxSkipMask } from '../src/core/gfxpages.ts';
 import { LevelUses, usedLevels } from '../src/core/levelusage.ts';
@@ -243,18 +244,24 @@ for (const keep of [true, 'memory'] as const) {
   check(results.get('spr') === undefined && thumbs() === undefined && redrawn(), 'the sprite images and object thumbnails are learned again, the open level drawn anew');
 }
 
-// memory-only results: writes look at a key's inputs only; the bounds; a round keeps what it used
+// memory-only results: the bounds (keys, not inputs, counted for the limit); a round keeps what it used
 {
   const fp = new RomFingerprint(rom), deps = fp.deps(main.tracked(() => rom.r8(spare)).reads);
-  const mem = new MemoryResults(fp, 256);
+  const mem = memoryResults(fp, 256);
   for (let i = 0; i < 20000; i++) mem.set(`k${i % 5000}`, i, deps, `${i}`);
-  check(mem.looked <= 20000 * 2 * (INPUTS_PER_KEY + 1), `20000 writes look at ${mem.looked} entries (not all results each)`);
   check(mem.get('k4999', '19999') === 19999 && mem.get('k0', '0') === undefined, 'the latest used results stay within the limit');
-  const one = new MemoryResults(fp, 256);
+  const wide = memoryResults(fp, 16);
+  for (let k = 0; k < 16; k++) for (let i = 0; i < INPUTS_PER_KEY; i++) wide.set(`w${k}`, i, deps, `${i}`);
+  let all = 0;
+  for (let k = 0; k < 16; k++) for (let i = 0; i < INPUTS_PER_KEY; i++) if (wide.get(`w${k}`, `${i}`) === i) all++;
+  check(all === 16 * INPUTS_PER_KEY, `a limit of 16 keeps 16 keys with ${INPUTS_PER_KEY} inputs each (${all} results)`);
+  wide.set('w16', 0, deps, '0');
+  check(wide.get('w0', '0') === undefined && wide.get('w1', '0') === 0 && wide.get('w16', '0') === 0, 'one key more drops the least recently used key');
+  const one = memoryResults(fp, 256);
   for (let i = 0; i < 10; i++) one.set('k', i, deps, `${i}`);
   check(one.get('k', '9') === 9 && one.get('k', `${9 - INPUTS_PER_KEY + 1}`) !== undefined && one.get('k', `${9 - INPUTS_PER_KEY}`) === undefined,
     `a key keeps its latest used ${INPUTS_PER_KEY} inputs`);
-  const round = new MemoryResults(fp, 16);
+  const round = memoryResults(fp, 16);
   round.startRound();
   for (let i = 0; i < 1000; i++) round.set(`r${i}`, i, deps, undefined);
   round.endRound();

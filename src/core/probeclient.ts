@@ -11,7 +11,7 @@
 import { ProbeHost, pumpProbes } from './probehost.ts';
 import { jobId, jobKey, learnKeep, learnRetargets, type ProbeJob, type ProbeMessage, type ProbeDone, type ProbeReply, type KindsDone, type ScanDone, type CameraDone, type LearnJob, type LearnMessage, type Learned, type Learning } from './probeprotocol.ts';
 import { inputHash } from './inputs.ts';
-import { partKey, MemoryResults, MEMORY, type Keep } from './jobrunner.ts';
+import { partKey, memoryResults, type MemoryResults, type Keep } from './jobrunner.ts';
 import type { ResultCache } from './romdeps.ts';
 import type { Rom } from './rom.ts';
 import { SPRITE_PROBE_END, probeable, type BlockProbe, type CollisionProbe, type SpriteProbe, type RunStates } from './blockprobe.ts';
@@ -81,7 +81,7 @@ export class ProbeClient {
 
   constructor(deps: ProbeClientDeps) {
     this.d = deps;
-    this.memory = new MemoryResults(deps.results.fp, MEMORY);
+    this.memory = memoryResults(deps.results.fp);
   }
 
   // What a Map16 tile does when hit from below, how Mario collides with it, what a sprite id does

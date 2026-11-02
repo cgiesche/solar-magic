@@ -307,7 +307,7 @@ The ROM bytes that only say what tiles and colors look like: the Map16 quarters 
 _Avoid_: graphics data, GFX (those are graphics files)
 
 **Input**:
-State outside the ROM that an emulated result depends on: the level as edited (one input for everything learned from it, with the view settings – switches, conditional Direct Map16 flags, animation triggers), the content of graphics files (their bytes don't count as read), for pictures of a level also what its animations copy at its load (the animation lists and the parts of their Anim graphics the frames read, which don't count as read either). Given next to the result's key and compared by its hash (core/inputs.ts), never by object identity. A key keeps the results of its latest used few inputs (core/romdeps.ts INPUTS_PER_KEY), the least recently used dropped first.
+State outside the ROM that an emulated result depends on: the level as edited (one input for everything learned from it, with the view settings – switches, conditional Direct Map16 flags, animation triggers), the content of graphics files (their bytes don't count as read), for pictures of a level also what its animations copy at its load (the animation lists and the parts of their Anim graphics the frames read, which don't count as read either). Given next to the result's key and compared by its hash (core/inputs.ts), never by object identity. A key keeps the results of its latest used few inputs (core/keptresults.ts INPUTS_PER_KEY), the least recently used dropped first.
 _Avoid_: cache key (for what belongs in the input), dependency (that is a ROM byte read)
 
 **Derived ROM data**:

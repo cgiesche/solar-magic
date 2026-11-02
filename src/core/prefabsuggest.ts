@@ -8,7 +8,7 @@
 // Each level's arrangements and places can be kept between runs (KeptSuggestions), with the level (as saved, or
 // as edited) as their input and the places with the ROM bytes their search read: a run takes apart only the
 // levels that changed, and loads only those whose load read a changed byte (#201). A change none of the latest
-// run's bytes and levels takes part in keeps its suggestions (KeptSuggestions.held), also one that brings back its
+// run's bytes and levels takes part in keeps its suggestions (SuggestRuns.held), also one that brings back its
 // state (an undo) or opens another level without edits (#212).
 
 import type { Rom } from './rom.ts';
@@ -19,9 +19,10 @@ import type { Prefab } from './prefabs.ts';
 import { prefabCost } from './prefabcost.ts';
 import { dm16Prefab, arrangementKey } from './pastehint.ts';
 import { findPrefabPlaces, tileKey, type Layer, type LevelPlaces, type PrefabPlace } from './prefabplaces.ts';
-import { MemoryResults, runJob } from './jobrunner.ts';
+import { runJob } from './jobrunner.ts';
+import { KeptResults } from './keptresults.ts';
 import { inputHash } from './inputs.ts';
-import { INPUTS_PER_KEY, RomReads, record, type RomDeps, type RomFingerprint } from './romdeps.ts';
+import { RomReads, record, byFingerprint, type RomDeps, type RomFingerprint } from './romdeps.ts';
 import { objectLength2D } from './obj2d.ts';
 
 export interface PrefabSuggestion {
@@ -54,38 +55,17 @@ interface Arrangements { list: [string, Prefab][]; tiles: Set<string> }
 const PLACES = 4096; // place searches kept (a level and an arrangement each), the latest used; a run keeps all it used, also more
 const CONTENTS = 0x200; // levels' contents as saved kept (every level's)
 
-// The results of single levels kept between runs. A level's arrangements are kept by the level's content (they
-// read no ROM byte), an arrangement's places in a level by the level's content and while the ROM bytes their
-// search read are unchanged (the tables, the emulated load where objects lie between those of a place). Both keep
-// a level's latest used INPUTS_PER_KEY contents, so undoing an edit finds them. A level's content as saved is kept
-// while the ROM bytes its load read are unchanged (and object 2D's length, which the load takes from emulation): a
-// run loads only the levels a ROM change touched.
-export class KeptSuggestions {
-  private fp: RomFingerprint;
-  private arrangements = new Map<number, { input: string; a: Arrangements }[]>(); // a level's latest used inputs first
-  private places: MemoryResults;
-  private contents: MemoryResults; // a level's content as saved, by object 2D's length
-  private run: { read: RomReads; levels: string; edited: number | null; len2d: number } | null = null; // the running run's (what it read: its levels' loads, its places' searches)
-  private last: SuggestRun | null = null; // the latest finished run's
+// The latest finished run and whether it holds (the editor's, SuggestionList): a level's content as saved is kept
+// while the ROM bytes its load read are unchanged (and object 2D's length, which the load takes from emulation), so
+// another level opened loads the one edited before only once.
+export class SuggestRuns {
+  protected fp: RomFingerprint;
+  protected contents: KeptResults<RomDeps>; // a level's content as saved, by object 2D's length
+  protected last: SuggestRun | null = null; // the latest finished run's
 
-  constructor(fp: RomFingerprint, limit = PLACES) {
+  constructor(fp: RomFingerprint) {
     this.fp = fp;
-    this.places = new MemoryResults(fp, limit);
-    this.contents = new MemoryResults(fp, CONTENTS);
-  }
-
-  // a run starts or is finished: the places a finished run used are all kept for the next one
-  startRun(rom: Rom, src: SuggestLevels, len2d: number): void {
-    this.places.startRound();
-    this.contents.startRound();
-    this.run = { read: new RomReads(rom), levels: src.levels.join(), edited: editedOf(src), len2d };
-  }
-  endRun(inputs: Map<number, string>, list: PrefabSuggestion[]): void {
-    this.places.endRound();
-    this.contents.endRound();
-    const { read, ...run } = this.run!;
-    this.last = { deps: this.fp.deps(read), ...run, inputs, list };
-    this.run = null;
+    this.contents = new KeptResults({ validity: byFingerprint(fp), limit: CONTENTS });
   }
 
   // the latest finished run; one finished elsewhere (in the probe worker, on the same ROM: its bytes read are checked
@@ -120,26 +100,48 @@ export class KeptSuggestions {
     return l.list;
   }
 
+  protected savedEntry(n: number, len2d: number) { return this.contents.entry<string>(`${n}`, `${len2d}`); }
+}
+
+// The results of single levels kept between runs (the probe worker's, where the runs are): a level's arrangements are
+// kept by the level's content (they read no ROM byte), an arrangement's places in a level by the level's content and
+// while the ROM bytes their search read are unchanged (the tables, the emulated load where objects lie between those
+// of a place). Both keep a level's latest used INPUTS_PER_KEY contents, so undoing an edit finds them. With the
+// levels' contents as saved (SuggestRuns) a run loads only the levels a ROM change touched.
+export class KeptSuggestions extends SuggestRuns {
+  private arrangements = new KeptResults<null>({ validity: { stamp: () => 0, holds: () => true } }); // by level and content
+  private places: KeptResults<RomDeps>;
+  private run: { read: RomReads; levels: string; edited: number | null; len2d: number } | null = null; // the running run's (what it read: its levels' loads, its places' searches)
+
+  constructor(fp: RomFingerprint, limit = PLACES) {
+    super(fp);
+    this.places = new KeptResults({ validity: byFingerprint(fp), limit });
+  }
+
+  // a run starts or is finished: the places a finished run used are all kept for the next one
+  startRun(rom: Rom, src: SuggestLevels, len2d: number): void {
+    this.places.startRound();
+    this.contents.startRound();
+    this.run = { read: new RomReads(rom), levels: src.levels.join(), edited: editedOf(src), len2d };
+  }
+  endRun(inputs: Map<number, string>, list: PrefabSuggestion[]): void {
+    this.places.endRound();
+    this.contents.endRound();
+    const { read, ...run } = this.run!;
+    this.last = { deps: this.fp.deps(read), ...run, inputs, list };
+    this.run = null;
+  }
+
   savedContent(n: number, len2d: number): string | undefined {
     return this.used(this.savedEntry(n, len2d));
   }
-  private savedEntry(n: number, len2d: number) { return this.contents.entry<string>(`${n}`, `${len2d}`); }
   setSavedContent(n: number, len2d: number, input: string, reads: RomReads): void {
     this.contents.set(`${n}`, input, this.fp.deps(reads), `${len2d}`);
     this.run?.read.add(reads);
   }
 
-  arrangementsOf(n: number, input: string): Arrangements | undefined {
-    const l = this.arrangements.get(n), i = l?.findIndex((e) => e.input === input) ?? -1;
-    if (i < 0) return undefined;
-    const [e] = l!.splice(i, 1);
-    l!.unshift(e);
-    return e.a;
-  }
-  setArrangements(n: number, input: string, a: Arrangements): void {
-    const l = [{ input, a }, ...(this.arrangements.get(n) ?? []).filter((e) => e.input !== input)];
-    this.arrangements.set(n, l.slice(0, INPUTS_PER_KEY));
-  }
+  arrangementsOf(n: number, input: string): Arrangements | undefined { return this.arrangements.get<Arrangements>(`${n}`, input); }
+  setArrangements(n: number, input: string, a: Arrangements): void { this.arrangements.set(`${n}`, a, null, input); }
 
   placesOf(n: number, key: string, input: string): PrefabPlace[] | undefined {
     return this.used(this.places.entry<PrefabPlace[]>(`${n}:${key}`, input));
@@ -156,7 +158,7 @@ export class KeptSuggestions {
 }
 
 // The suggestions the editor shows and whether they are current (of the levels and the ROM as they are now: their
-// places can be taken). check() after every change: the latest run's list held (KeptSuggestions.held) is current at
+// places can be taken). check() after every change: the latest run's list held (SuggestRuns.held) is current at
 // once, else the list stays shown, not current, and a run is started (start; stop cancels one). While an edit is
 // under way (editing: a ROM edit with its follow-ups, the open level not yet loaded again) nothing is checked and the
 // list is not current: the edit session's settled checks once it is done, whatever the order of its follow-ups (#220).
@@ -172,10 +174,10 @@ export interface SuggestionHooks {
 export class SuggestionList {
   private shown: PrefabSuggestion[] | null = null;
   private held = false; // current as of the latest check
-  private kept: KeptSuggestions;
+  private kept: SuggestRuns;
   private hooks: SuggestionHooks;
 
-  constructor(kept: KeptSuggestions, hooks: SuggestionHooks) {
+  constructor(kept: SuggestRuns, hooks: SuggestionHooks) {
     this.kept = kept;
     this.hooks = hooks;
   }
@@ -229,6 +231,11 @@ const levelContent = (rom: Rom, lv: Level) => inputHash({
 });
 // the level a run on src takes as edited: the open level, if it is among the levels
 const editedOf = (src: SuggestLevels) => (src.open && src.levels.includes(src.open.number) ? src.open.number : null);
+// what a run on src depends on besides the ROM (its job's input): its levels, the one it takes as edited and its content
+export function suggestInput(rom: Rom, src: SuggestLevels): string {
+  const edited = editedOf(src);
+  return inputHash({ levels: src.levels.join(), edited, content: edited === null ? null : levelContent(rom, src.open!) });
+}
 
 // level n as saved with its content and the ROM bytes loading it read; null: unreadable
 function loadSaved(rom: Rom, n: number): { lv: Level; input: string; reads: RomReads } | null {

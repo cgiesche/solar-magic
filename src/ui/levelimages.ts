@@ -6,7 +6,8 @@
 // level uses (Lunar Magic's "Auto-Set Number of Screens") leaves the level as it is.
 
 import { zipSync } from 'fflate';
-import type { App, SpriteJob } from './app.ts';
+import type { App } from './app.ts';
+import type { LearnSpec } from '../core/learnspecs.ts';
 import { h, modal, toast, log } from './dom.ts';
 import { downloadBytes } from './platform.ts';
 import { levelNameOf } from './panels.ts';
@@ -124,7 +125,7 @@ async function probed(app: App, cancel: ExportWait, what: string, pending: () =>
 }
 
 // a sprite image learned (null: it failed, or its job was dropped)
-function learned(app: App, cancel: ExportWait, j: SpriteJob): Promise<unknown> {
+function learned(app: App, cancel: ExportWait, j: LearnSpec): Promise<unknown> {
   return new Promise((ok) => {
     const r = app.probes.learn(j.key, j.job, { input: j.input, lane: cancel.lane, urgent: true, label: 'Level images: sprite graphics', done: ok, failed: () => ok(null), dropped: () => ok(null) });
     if (r !== undefined) ok(r);

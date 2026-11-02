@@ -10,9 +10,10 @@
 import { LevelEmulator } from './levelemu.ts';
 import { loadLevel, spriteSizes, SPRITE_MEMORY, type LevelSprite, type PrimaryHeader } from './level.ts';
 import { record, rootSlot, sortPlaced, SlotTracker, testLevel, testSpriteData } from './spritegfx.ts';
-import { MemoryResults, runJob } from './jobrunner.ts';
+import { runJob } from './jobrunner.ts';
+import { KeptResults } from './keptresults.ts';
 import { inputHash } from './inputs.ts';
-import { RomReads, type RomDeps, type RomFingerprint } from './romdeps.ts';
+import { RomReads, byFingerprint, type RomDeps, type RomFingerprint } from './romdeps.ts';
 import type { Rom } from './rom.ts';
 import { SPR, SPRITE_SLOTS, spriteX, spriteY, cameraX, cameraY } from './ram.ts';
 import { GAME_VIEW_W, GAME_VIEW_H } from './camerabands.ts';
@@ -42,22 +43,22 @@ const KEPT_GROUPS = 1024;
 // takes over a kept group's dependencies (a stored check depends on them as if it had run the group)
 export class SpriteGroupResults {
   private fp: RomFingerprint;
-  private kept: MemoryResults;
+  private kept: KeptResults<RomDeps>;
 
   constructor(fp: RomFingerprint, limit = KEPT_GROUPS) {
     this.fp = fp;
-    this.kept = new MemoryResults(fp, limit);
+    this.kept = new KeptResults({ validity: byFingerprint(fp), limit });
   }
 
   // a check starts or is finished: the results a finished check used are all kept for the next one
   startCheck(): void { this.kept.startRound(); }
   endCheck(): void { this.kept.endRound(); }
 
-  get(key: string): GroupResult | undefined { return this.kept.get<GroupResult>(key, undefined); }
-  set(key: string, check: GroupResult['check'], reads: RomReads): void {
-    const deps = this.fp.deps(reads);
-    this.kept.set(key, { check, deps }, deps, undefined);
+  get(key: string): GroupResult | undefined {
+    const e = this.kept.entry<GroupResult['check']>(key);
+    return e && { check: e.data, deps: e.deps };
   }
+  set(key: string, check: GroupResult['check'], reads: RomReads): void { this.kept.set(key, check, this.fp.deps(reads)); }
 }
 
 // lost: indices in the group; null: the load failed

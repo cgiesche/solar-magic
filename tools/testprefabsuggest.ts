@@ -188,8 +188,12 @@ const tile104 = (lv: Level) => { lv.objects = lv.objects.filter((o) => !(o.ext =
   holds(open, true, 'a graphics file edited');
   same(undefined, 'a graphics file edited');
   only([], 'a graphics file edited');
-  // another level saved: only it is taken apart again, and loaded (no other level's data is read)
-  const other = usedLevels(rom).find((n) => n !== H1 && n !== H2 && n !== 0x107)!;
+  // another level saved, with no emulator run since (nothing but the run's recorders takes the ROM state's byte pages):
+  // only it is taken apart again, and loaded – not the levels whose data shares a page with its data (no other level's
+  // data is read)
+  const l1Page = (n: number) => snesToPc(rom.r24(L1_PTRS + n * 3)) >> 8;
+  const other = usedLevels(rom).find((n) => n !== H1 && n !== H2 && n !== 0x107 && usedLevels(rom).some((m) => m !== n && l1Page(m) === l1Page(n)))!;
+  check(other !== undefined, 'a level whose data shares a page with another level\'s');
   const lv = loadLevel(rom, other);
   lv.objects.push(dm(0x70, 4, 0x190));
   saveLevel(rom, lv);

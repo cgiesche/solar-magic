@@ -6,7 +6,7 @@ import { ViewSettings } from '../core/viewsettings.ts';
 import { Rom } from '../core/rom.ts';
 import { LevelEmulator, type LevelRender, type LevelOverride, type Animated } from '../core/levelemu.ts';
 import {
-  type Level, type LevelObject, type LevelSprite, type ScreenExit, loadLevel, spriteLoadOrder, serializeLayer1, serializeSprites, serializeLevelSprites, spriteId,
+  type Level, type LevelObject, type LevelSprite, type ScreenExit, loadLevel, spriteLoadOrder, serializeSprites, serializeLevelSprites, spriteId,
   isL1Vertical, hasLayer2Objects, hasObjects, SEC_HDR,
   nearestEntrance, encodeSecondaryHeader, mainSpot, sameSpot, placeMain, midwaySpot, nearestMidway, placeMidway, exitLandsAtMidway, isSized, SPRITE_MEMORY, levelRows, TIME_TABLE,
 } from '../core/level.ts';
@@ -17,16 +17,16 @@ import { layerBoxes, boxAt, objectKey } from '../core/objboxes.ts';
 import { objectUserNames } from '../core/usernames.ts';
 import { loadPixiProject, customSpriteList, type CustomSprite } from '../core/pixi.ts';
 import { renderLevel, type LevelImages, composite, animatedPixels, TileAnimation, type AnimStep } from '../core/render.ts';
-import type { SpriteImage, SpriteLevel } from '../core/spritegfx.ts';
+import type { SpriteImage } from '../core/spritegfx.ts';
 import { usedSpriteMemory, type SpriteMemLevel, type SpriteMemResult } from '../core/spritemem.ts';
-import { DM16_EXT, levelGfx, levelExtGfx, customPalette, levelMusic, defaultGfx } from '../core/patches.ts';
+import { DM16_EXT, levelGfx, levelExtGfx, customPalette, levelMusic } from '../core/patches.ts';
 import { gfxSkipMask, gfxFilesHash } from '../core/gfxpages.ts';
 import { flagBytes, usedFlags, isDm16, dm16Tiles } from '../core/cdm16.ts';
 import { RenderQuery, type TileCut } from '../core/renderquery.ts';
 import { PREFAB_EXT, listPrefabs, writePrefab, type Prefab } from '../core/prefabs.ts';
 import { breakUpPrefab, replaced, setPrefabSources } from '../core/prefabsources.ts';
 import { PasteCounter, findPasted, arrangementKey, type PasteHint } from '../core/pastehint.ts';
-import { KeptSuggestions, SuggestionList, type PrefabSuggestion, type SuggestLevels, type SuggestRun } from '../core/prefabsuggest.ts';
+import { SuggestRuns, SuggestionList, suggestInput, type PrefabSuggestion, type SuggestLevels, type SuggestRun } from '../core/prefabsuggest.ts';
 import { planPrefabPlaces, applyPrefabPlaces, deletePrefab, prefabObjectCount, replaceWithPrefab, type LevelPlaces, type LevelGroups, type PrefabGroup } from '../core/prefabplaces.ts';
 import type { Package } from '../core/pkgreg.ts';
 import { kvEntries, kvKeys, kvWrite, saveRom } from './storage.ts';
@@ -50,7 +50,8 @@ import { MARIO_W, MARIO_H, type CameraBands } from '../core/camerabands.ts';
 import { tideLines, type TideLines, type Layer3Kind } from '../core/layer3.ts';
 import { type Layer2Motions } from '../core/l2scroll.ts';
 import { variantOf, blockKey, collisionKey, type BlockProbe, type CollisionProbe, type RunStates, type SwitchState, SWITCH_STATES, SWITCH_TRIGGER } from '../core/blockprobe.ts';
-import type { ProbeReply, LearnJob } from '../core/probeprotocol.ts';
+import type { ProbeReply } from '../core/probeprotocol.ts';
+import { spriteJobs, spriteInput, layer3Spec } from '../core/learnspecs.ts';
 import { ProbeClient, FAILED } from '../core/probeclient.ts';
 import { messageRoutineInput, UNKNOWN_ROUTINE, type MessageRoutine } from '../core/messagedraw.ts';
 import { ResultLearner } from '../core/learner.ts';
@@ -126,8 +127,6 @@ export type PasteHintAt = PasteHint & { level: number; layer: 'l1' | 'l2'; objec
 const CACHE_NAME = 'rc', CACHE_VERSION = 4, CACHE_PREFIX = `${CACHE_NAME}${CACHE_VERSION}:`;
 const SWEEP_SLICE = 64; // stored results checked against the ROM per background slice (ResultCache.sweep)
 
-// a learn job for sprite images (App.spriteJobs)
-export interface SpriteJob { key: string; job: LearnJob; input: unknown }
 
 // result of the sprite memory check (see App.checkSpriteMem); gen: the edit session's levelGen when it started
 export interface SpriteMemState { key: string; level: number; mem: number; gen: number; conflicts: Set<number>; suggestion: number | null }
@@ -263,7 +262,7 @@ export class App {
       setBusy: (key, label) => this.setBusy(key, label),
     });
     // the levels' arrangements and places of earlier runs kept (only changed levels are taken apart again)
-    this.suggestions = new SuggestionList(new KeptSuggestions(this.results.fp), {
+    this.suggestions = new SuggestionList(new SuggestRuns(this.results.fp), {
       rom: () => this.rom,
       source: () => this.suggestSource(),
       editing: () => this.edits.running,
@@ -688,22 +687,10 @@ export class App {
     if (stored && stored !== this.spritesFrom) this.spritesLearned(stored);
   }
   // What the images of level lv's sprites are learned with (the open level's; another level's for its image file):
-  // all sprites (the ids the picker lists), a custom sprite with extra bytes, a sprite's variant at a place
-  spriteJobs(lv: Level = this.level): { all: SpriteJob; bytes: (id: number, bytes: number[]) => SpriteJob; at: (id: number, x: number, y: number) => SpriteJob } {
-    const hd = lv.header, set = `${hd.spriteGfx}-${hd.spritePalette}`;
-    // (the level as sprite images are captured in it)
-    const level: SpriteLevel = { number: lv.number, header: { ...hd }, spriteHeader: lv.spriteHeader, bgPointer: lv.layer2Pointer >> 16 === 0xff ? lv.layer2Pointer : 0xffd900 };
+  // learnspecs.ts spriteJobs, with the ids the picker lists
+  spriteJobs(lv: Level = this.level): ReturnType<typeof spriteJobs> {
     const nums = [...Array.from({ length: 0xe7 }, (_, i) => i), ...this.customSprites().map((c) => c.id)]; // as listed in the picker
-    // i6: with the input; sprites from $C9 on (shells, groups), failed batches retried one by one, sprites
-    // that draw nothing shown by what they spawn, sprites erasing themselves at once by what they drew
-    // (each test level load is kept on its own, with what spriteInput gives but the custom sprites: a custom sprite
-    // added or changed captures only its load again)
-    const input = this.spriteInput(lv), { custom: _, ...loadInput } = input;
-    return {
-      all: { key: `i6${set}`, job: { kind: 'sprites', level, nums, input: inputHash(loadInput) }, input },
-      bytes: (id, b) => ({ key: `b3${set}:${id}:${b.join(',')}`, job: { kind: 'spriteBytes', level, id, bytes: b }, input }),
-      at: (id, x, y) => ({ key: `v5${set}:${id}:${x}:${y}`, job: { kind: 'spriteAt', level, id, x, y }, input }),
-    };
+    return spriteJobs(lv, nums, this.spriteInput(lv));
   }
   private spritesFrom: [number, SpriteImage][] | null = null; // the images spriteThumbs shows
   private spritesLearned = (images: [number, SpriteImage][]) => {
@@ -718,14 +705,13 @@ export class App {
     for (const [n, img] of images) this.spriteThumbs.set(n, this.spriteCanvas(img));
   };
 
-  // What sprite images depend on besides the ROM bytes they read: the level's sprite settings (sprite memory:
-  // a sprite whose OAM range is too small is captured as the game shows it), the content of its sprite
-  // graphics files (graphics data isn't among the bytes read, see gfxSkipMask) and the custom sprites
+  // What sprite images depend on besides the ROM bytes they read (learnspecs.ts spriteInput; the files' hash kept)
   private spriteInput(lv: Level): { custom: number[] } & Record<string, unknown> {
-    const hd = lv.header, files = this.spriteGfxFiles(lv);
     const m = this.spriteFiles;
-    if (m.gen !== this.rom.gen || m.files !== files.join()) { m.gen = this.rom.gen; m.files = files.join(); m.hash = gfxFilesHash(this.rom, files); }
-    return { gfx: hd.spriteGfx, palette: hd.spritePalette, memory: lv.spriteHeader & SPRITE_MEMORY, files: m.hash, custom: this.customSprites().map((c) => c.id) };
+    return spriteInput(this.rom, lv, this.customSprites().map((c) => c.id), (files) => {
+      if (m.gen !== this.rom.gen || m.files !== files.join()) { m.gen = this.rom.gen; m.files = files.join(); m.hash = gfxFilesHash(this.rom, files); }
+      return m.hash;
+    });
   }
   private spriteFiles = { gen: -1, files: '', hash: 0 }; // the hash of the sprite graphics files
 
@@ -780,11 +766,6 @@ export class App {
   private maskedMemo = { gen: -1, hash: 0 };
 
   // GFX files in the level's sprite slots (sprite images depend on these only)
-  private spriteGfxFiles(lv: Level): number[] {
-    const hd = lv.header;
-    const set = levelGfx(this.rom, lv.number), def = defaultGfx(this.rom, hd.tileset, hd.spriteGfx);
-    return [0, 1, 2, 3].map((k) => (set[k] !== 0xff ? set[k] : def[k]));
-  }
 
   spriteCanvas(img: SpriteImage): HTMLCanvasElement {
     let c = this.canvases.get(img);
@@ -1045,11 +1026,8 @@ export class App {
   // with each of them in the probe worker; kept per tileset while the level as edited and the ROM it read
   // are unchanged. null while that runs, then `done` is called (the latest tileset asked for only).
   layer3Kinds(tileset: number, done: () => void): Layer3Kind[] | null {
-    const lv = this.level, ov = this.buildOverrides(), input = this.levelInput(ov);
-    if (tileset !== lv.header.tileset) ov.layer1 = serializeLayer1(this.rom, { ...lv, header: { ...lv.header, tileset } });
-    // (the load leaves out the sprites and the owners of level bytes: not sent)
-    return this.probes.learn<Layer3Kind[]>(`l3k2:${tileset}`, { kind: 'layer3', level: lv.number, ov: { ...ov, sprites: undefined, byteOwner: undefined } },
-      { input, lane: 'layer3', replace: true, label: 'Layer 3 settings', done }) ?? null;
+    const j = layer3Spec(this.rom, this.level, this.buildOverrides(), tileset);
+    return this.probes.learn<Layer3Kind[]>(j.key, j.job, { input: j.input, lane: 'layer3', replace: true, label: 'Layer 3 settings', done }) ?? null;
   }
 
   // Water line of a layer 3 tide in level pixels (layer3.ts tideLines), its range once the level scan measured it
@@ -1608,9 +1586,9 @@ export class App {
     const run = this.suggestRun;
     this.suggestTimer = window.setTimeout(() => {
       if (run !== this.suggestRun || this.closed) return;
-      const { levels, open } = this.suggestSource();
-      // (the run's number as its input: a new one replaces the one running)
-      this.probes.learn<SuggestRun>('suggest', { kind: 'suggest', levels, open }, { lane: 'prefab-suggest', input: run, replace: true, done: (r) => {
+      const src = this.suggestSource(), { levels, open } = src;
+      // (a run on other levels or contents replaces the one running)
+      this.probes.learn<SuggestRun>('suggest', { kind: 'suggest', levels, open }, { lane: 'prefab-suggest', input: suggestInput(this.rom, src), replace: true, done: (r) => {
         if (run === this.suggestRun) this.suggestions.done(r);
       } });
     }, 1500);

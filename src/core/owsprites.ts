@@ -12,7 +12,7 @@
 // The custom sprites (BOWSIE's, Lunar Magic's table) are drawn the same way (customSpriteImages, customSpriteLooks).
 
 import type { Rom } from './rom.ts';
-import type { OverworldLoads } from './overworld.ts';
+import { loadKey, type OverworldLoads } from './overworld.ts';
 import type { Job } from './jobrunner.ts';
 import { RAM, set16, getS16 } from './ram.ts';
 import { readPpuOam, drawTiles, tileKey, type SpriteImage } from './spritegfx.ts';
@@ -71,7 +71,7 @@ const SHOW_FRAMES = 3;
 // every slot of map `map` at event progress `progress`, as the game shows it (run on from the kept load); kept for
 // one map and progress while the ROM edits since changed no byte it read (OverworldLoads.derive)
 export function owSpriteImages(loads: OverworldLoads, map: number, progress: number): OwSpriteView[] {
-  return loads.derive('owSpriteImages', () => runSprites(loads, map, progress), `${map}-${progress}`);
+  return loads.derive('owSpriteImages', () => runSprites(loads, map, progress), loadKey(map, progress));
 }
 // owSpriteImages as a job of the result learner (probe worker), one step (overworldMapJob)
 export function* owSpritesJob(loads: OverworldLoads, map: number, progress: number): Job<OwSpriteView[]> {
@@ -139,7 +139,7 @@ export function customSpriteImages(loads: OverworldLoads, map: number, progress:
   return loads.derive('customSpriteImages', () => {
     const rom = loads.emu.rom, list = readCustomSprites(rom)[map] ?? [], at = customEntryAddrs(rom, map);
     return runCustom(loads, map, progress, list.map((s, k) => ({ s, extraAt: (at[k] ?? 0) + 3 })));
-  }, `${map}-${progress}`);
+  }, loadKey(map, progress));
 }
 export function* owCustomJob(loads: OverworldLoads, map: number, progress: number): Job<OwSpriteView[]> {
   return customSpriteImages(loads, map, progress);

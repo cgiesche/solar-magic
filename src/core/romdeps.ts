@@ -24,6 +24,7 @@ import { editorPatch, customPalettePatch, bgPatch, GFX_FILES, GFX_BYPASS_ENTRIES
 import { exanimDataRanges } from './exanim.ts';
 import { overworldDataRanges } from './overworld.ts';
 import { levelDataRanges } from './level.ts';
+import { KeptResults, type Validity } from './keptresults.ts';
 
 export const PAGE_SHIFT = 8;
 
@@ -93,22 +94,29 @@ export const bytePages = perRomState((rom: Rom): Uint8Array => {
 export class RomReads {
   pages: Uint8Array; // 1 = read
   bytes = new Set<number>();
-  // the pages recorded by byte: those of the ROM state it was made for (bytePages). A recorder kept across ROM edits
-  // keeps them (only add() what newer recorders read): a page that became a byte page since counts as a whole, which
-  // drops more results, never fewer
-  readonly bytePages: Uint8Array;
+  private rom: Rom;
+  private pagesGen = -1;
+  private pagesOf: Uint8Array | null = null;
 
-  // a recorder for rom as it is now, starting with base's reads
+  // a recorder for rom, starting with base's reads
   constructor(rom: Rom, base?: RomReads | null) {
+    this.rom = rom;
     this.pages = new Uint8Array(rom.data.length >> PAGE_SHIFT);
-    this.bytePages = bytePages(rom);
     if (base) this.add(base);
   }
 
+  // the pages recorded by byte: those of the ROM state current at each read (bytePages), also for a recorder kept
+  // across ROM edits. A page read whole before it became a byte page stays read whole (drops more results, never fewer)
+  get bytePages(): Uint8Array {
+    if (this.pagesGen !== this.rom.gen || !this.pagesOf) { this.pagesOf = bytePages(this.rom); this.pagesGen = this.rom.gen; }
+    return this.pagesOf;
+  }
+
   read(o: number, len = 1): void {
+    const byte = this.bytePages;
     for (let i = o; i < o + len; i++) {
       const p = i >> PAGE_SHIFT;
-      if (this.bytePages[p]) this.bytes.add(i);
+      if (byte[p]) this.bytes.add(i);
       else if (p < this.pages.length) this.pages[p] = 1;
     }
   }
@@ -275,8 +283,6 @@ export interface CacheEntry {
   input?: string; // the hash of the result's input (inputs.ts), if it has one
 }
 
-export const INPUTS_PER_KEY = 4; // inputs a key keeps results for (the latest used)
-
 // where an entry is stored: its key, with the input's hash; a key's inputs in the order last used under the key
 // with an empty input (the inputs' hashes, '' for none; written when they change, not the entries)
 export const storeKey = (key: string, input: string | undefined) => input === undefined ? key : `${key}#${input}`;
@@ -292,105 +298,60 @@ export function oldStoreKeys(keys: string[], name: string, version: number): str
   });
 }
 
-type Slot = CacheEntry & { gen: number };
+// results checked against the ROM's fingerprint (once per fingerprint generation)
+export const byFingerprint = (fp: RomFingerprint): Validity<RomDeps> => ({ stamp: () => { fp.sync(); return fp.gen; }, holds: (d) => fp.valid(d) });
 
-// results by key, checked against the ROM once per fingerprint generation; changed and dropped
-// entries are collected for storing (see flush()). A result with an input holds for that input only; a key
-// keeps the results of its latest used INPUTS_PER_KEY inputs (switching between levels whose sprite memory differs
-// doesn't learn their sprite images again), the least recently used one dropped.
+// results checked against the ROM edits since they were recorded (holds; recorded on an older generation: checked
+// when first used)
+export type Since = { gen: number; reads: RomReads };
+export const bySince = (rom: Rom): Validity<Since> => ({ stamp: () => rom.gen, holds: (d) => holds(rom, d), current: (d) => d.gen === rom.gen });
+
+// The result cache: results by key and input kept while the bytes they read are unchanged (KeptResults, checked
+// against the fingerprint), persisted: changed and dropped entries are collected for storing (see flush()). A key keeps
+// the results of its latest used INPUTS_PER_KEY inputs, the least recently used one dropped (also from storage).
 export class ResultCache {
   fp: RomFingerprint;
-  private entries = new Map<string, Slot[]>(); // a key's results, the latest used first
+  private kept: KeptResults<RomDeps>;
   private dirty = new Map<string, string>(); // stored keys of changed results: their key
   private dropped = new Set<string>(); // stored keys of dropped results
   private reordered = new Set<string>(); // keys whose inputs' order changed
-  private unchecked: [string, Slot][] = []; // results sweep() checks next, for fingerprint generation sweepGen
-  private sweepGen = -1;
   onChange: (() => void) | null = null;
 
   constructor(fp: RomFingerprint) {
     this.fp = fp;
+    const changed = () => this.onChange?.();
+    this.kept = new KeptResults({
+      validity: byFingerprint(fp),
+      hooks: {
+        put: (key, input) => { const k = storeKey(key, input); this.dropped.delete(k); this.dirty.set(k, key); changed(); },
+        drop: (key, input) => { const k = storeKey(key, input); this.dirty.delete(k); this.dropped.add(k); changed(); },
+        order: (key) => { this.reordered.add(key); changed(); },
+      },
+    });
   }
 
-  get<T>(key: string, input?: string): T | undefined {
-    const slots = this.entries.get(key), i = slots?.findIndex((e) => e.input === input) ?? -1;
-    if (i < 0) return undefined;
-    const e = slots![i];
-    this.fp.sync();
-    if (e.gen !== this.fp.gen) {
-      if (!this.fp.valid(e.deps)) {
-        this.remove(key, slots!, i);
-        this.onChange?.();
-        return undefined;
-      }
-      e.gen = this.fp.gen;
-    }
-    if (i > 0) {
-      slots!.splice(i, 1);
-      slots!.unshift(e);
-      this.reordered.add(key);
-      this.onChange?.();
-    }
-    return e.data as T;
-  }
+  get<T>(key: string, input?: string): T | undefined { return this.kept.get<T>(key, input); }
 
   // the entry under key for the input, if it holds for the current ROM
   entry(key: string, input?: string): CacheEntry | undefined {
-    if (this.get(key, input) === undefined) return undefined;
-    const e = this.entries.get(key)![0];
-    return { deps: e.deps, data: e.data, input: e.input };
+    const e = this.kept.entry(key, input);
+    return e && { deps: e.deps, data: e.data, input };
   }
 
   // (current: deps were hashed on the current ROM; else on an older one, and the result is checked when first used)
   set(key: string, data: unknown, deps: RomDeps, input?: string, current = true): void {
-    if (current) this.fp.sync();
-    let slots = this.entries.get(key);
-    if (!slots) this.entries.set(key, (slots = []));
-    const i = slots.findIndex((e) => e.input === input);
-    if (i >= 0) slots.splice(i, 1);
-    slots.unshift({ deps, data, input, gen: current ? this.fp.gen : -1 });
-    const k = storeKey(key, input);
-    this.dropped.delete(k);
-    this.dirty.set(k, key);
-    if (slots.length > 1 || input !== undefined) this.reordered.add(key);
-    while (slots.length > INPUTS_PER_KEY) this.remove(key, slots, slots.length - 1);
-    this.onChange?.();
+    this.kept.set(key, data, deps, input, current);
   }
 
   // checks up to count results not checked against the current ROM yet (of any input, used or not) and drops those
   // that no longer hold, so storage loses them without them being asked for; false once all are checked. A changed
   // ROM starts again with the results not checked since.
-  sweep(count: number): boolean {
-    this.fp.sync();
-    if (this.sweepGen !== this.fp.gen) {
-      this.sweepGen = this.fp.gen;
-      this.unchecked = [];
-      for (const [key, slots] of this.entries) for (const s of slots) if (s.gen !== this.fp.gen) this.unchecked.push([key, s]);
-    }
-    let dropped = false;
-    for (; count > 0 && this.unchecked.length; count--) {
-      const [key, s] = this.unchecked.pop()!, slots = this.entries.get(key), i = slots?.indexOf(s) ?? -1;
-      if (i < 0 || s.gen === this.fp.gen) continue; // (replaced, dropped or checked since)
-      if (this.fp.valid(s.deps)) s.gen = this.fp.gen;
-      else { this.remove(key, slots!, i); dropped = true; }
-    }
-    if (dropped) this.onChange?.();
-    return this.unchecked.length > 0;
-  }
+  sweep(count: number): boolean { return this.kept.sweep(count); }
 
   // entries flushed by another cache (the probe worker's), by stored key; current: hashed on the current ROM (else
   // on an older one, whose bytes they read may have changed since)
   setAll(put: [string, CacheEntry][], current: boolean): void {
     for (const [k, e] of put) this.set(keyOf(k, e), e.data, e.deps, e.input, current);
-  }
-
-  private remove(key: string, slots: Slot[], i: number): void {
-    const input = slots[i].input, k = storeKey(key, input);
-    slots.splice(i, 1);
-    if (!slots.length) this.entries.delete(key);
-    this.dirty.delete(k);
-    this.dropped.add(k);
-    if (input !== undefined || slots.length) this.reordered.add(key);
   }
 
   // entries read from storage (checked when first used): results by stored key, and the keys' inputs' order
@@ -405,18 +366,18 @@ export class ResultCache {
     }
     for (const [key, l] of loaded) {
       const o = order.get(key) ?? [], rank = (e: CacheEntry) => { const r = o.indexOf(e.input ?? ''); return r < 0 ? o.length : r; };
-      let slots = this.entries.get(key);
-      if (!slots) this.entries.set(key, (slots = []));
-      for (const e of l.sort((a, b) => rank(a) - rank(b))) if (!slots.some((s) => s.input === e.input)) slots.push({ ...e, gen: -1 });
-      while (slots.length > INPUTS_PER_KEY) this.remove(key, slots, slots.length - 1);
+      for (const e of l.sort((a, b) => rank(a) - rank(b))) {
+        if (this.kept.setOlder(key, e.data, e.deps, e.input)) continue;
+        this.dropped.add(storeKey(key, e.input)); // (beyond the inputs a key keeps)
+        this.reordered.add(key);
+      }
     }
-    this.sweepGen = -1; // (the next sweep checks them)
   }
 
   // the entries of the keys starting with prefix, by stored key (also those not checked against the current ROM yet)
   under(prefix: string): [string, CacheEntry][] {
     const out: [string, CacheEntry][] = [];
-    for (const [key, slots] of this.entries) if (key.startsWith(prefix)) for (const s of slots) out.push([storeKey(key, s.input), { deps: s.deps, data: s.data, input: s.input }]);
+    for (const [key, input, e] of this.kept.all()) if (key.startsWith(prefix)) out.push([storeKey(key, input), { deps: e.deps, data: e.data, input }]);
     return out;
   }
 
@@ -424,12 +385,12 @@ export class ResultCache {
   flush(): { put: [string, CacheEntry][]; order: [string, string[]][]; del: string[] } {
     const put: [string, CacheEntry][] = [], order: [string, string[]][] = [], del = [...this.dropped];
     for (const [k, key] of this.dirty) {
-      const e = this.entries.get(key)?.find((s) => storeKey(key, s.input) === k);
-      if (e) put.push([k, { deps: e.deps, data: e.data, input: e.input }]);
+      const input = k === key ? undefined : k.slice(key.length + 1), e = this.kept.peek(key, input);
+      if (e) put.push([k, { deps: e.deps, data: e.data, input }]);
     }
     for (const key of this.reordered) {
-      const slots = this.entries.get(key);
-      if (slots?.some((s) => s.input !== undefined)) order.push([orderKey(key), slots.map((s) => s.input ?? '')]);
+      const inputs = this.kept.inputs(key);
+      if (inputs.some((i) => i !== undefined)) order.push([orderKey(key), inputs.map((i) => i ?? '')]);
       else del.push(orderKey(key));
     }
     this.dirty.clear();

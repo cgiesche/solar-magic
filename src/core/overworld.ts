@@ -2,7 +2,8 @@
 
 import { Rom, snesToPc } from './rom.ts';
 import { Snes, type SnesState } from './snes.ts';
-import { RomReads, record, countReads, holds } from './romdeps.ts';
+import { RomReads, record, countReads, bySince, type Since } from './romdeps.ts';
+import { KeptResults } from './keptresults.ts';
 import { rleDecode, rleEncode } from './rle.ts';
 import { GM, RAM } from './ram.ts';
 import { assemble } from './asar.ts';
@@ -796,10 +797,10 @@ export class OverworldEmulator {
   }
 }
 
-// a result kept while the ROM edits since its generation `gen` changed no byte it read
-interface Kept { gen: number; reads: RomReads }
 // a kept load: what it shows and the console right after it (saved when first asked for: restore)
-interface KeptLoad extends Kept { r: OwRender; state: SnesState | null }
+interface KeptLoad { r: OwRender; state: SnesState | null }
+// the key of a map at an event progress (a load's, what is derived from one)
+export const loadKey = (map: number, progress: number) => `${map}-${progress}`;
 
 // emulated overworlds by map and event progress, the latest used `max` (a slider moved through every progress): each
 // kept while the ROM edits since its load changed no byte the load read (painting the map or its events loads it
@@ -807,12 +808,12 @@ interface KeptLoad extends Kept { r: OwRender; state: SnesState | null }
 // them (derive), kept while none of the loads it used would load again and the frames run on from them read the same
 export class OverworldLoads {
   emu: OverworldEmulator;
-  private max: number;
-  private kept = new Map<string, KeptLoad>();
-  private derived = new Map<string, Kept & { of: string; v: unknown }>();
+  private kept: KeptResults<Since>;
+  private derived: KeptResults<Since>; // by key, for one `of` each
   constructor(emu: OverworldEmulator, max: number) {
     this.emu = emu;
-    this.max = max;
+    this.kept = new KeptResults({ validity: bySince(emu.rom), limit: max, inputsPerKey: 1 });
+    this.derived = new KeptResults({ validity: bySince(emu.rom), inputsPerKey: 1 });
   }
   get(map: number, progress: number): OwRender {
     return this.load(map, progress).r;
@@ -829,37 +830,31 @@ export class OverworldLoads {
   // (one per key) while the ROM edits since changed no byte it read: the loads', the frames it runs on from them
   // and the editor code's; a load not kept yet isn't kept for `load` (the slider's stay)
   derive<T>(key: string, make: (load: (map: number, progress: number) => OwRender) => T, of = ''): T {
-    let d = this.derived.get(key);
-    if (!d || d.of !== of || !holds(this.emu.rom, d)) {
+    let d = this.derived.entry<T>(key, of);
+    if (!d) {
       // (the emulated CPU's reads and the editor code's)
       const { result, reads, gen } = record(this.emu.rom, () => make((map, progress) => this.load(map, progress, false).r), { cpu: this.emu.snes, counted: false });
-      d = { v: result, of, gen, reads };
-      this.derived.set(key, d);
+      d = { data: result, deps: { gen, reads } };
+      this.derived.set(key, d.data, d.deps, of);
     }
-    this.count(d.reads);
-    return d.v as T;
+    this.count(d.deps.reads);
+    return d.data;
   }
   // reads (of a kept result) count for the recorders running (a derive's, an outer one) as if read now
   private count(reads: RomReads): void {
     countReads(this.emu.rom, this.emu.snes, reads);
   }
-  // the kept load, else a new one (kept when `keep`)
+  // the kept load, else a new one (kept when `keep`; one kept is kept as the latest used)
   private load(map: number, progress: number, keep = true): KeptLoad {
-    const key = `${map}-${progress}`;
-    let k = this.kept.get(key);
-    if (k) {
-      this.kept.delete(key);
-      if (!holds(this.emu.rom, k)) k = undefined;
-      else keep = true;
-    }
+    const key = loadKey(map, progress);
+    let k = this.kept.entry<KeptLoad>(key);
     if (!k) {
       const gen = this.emu.rom.gen, { result, reads } = this.emu.loadRecorded(map, progress);
-      k = { r: result, gen, reads, state: null };
-      if (keep && this.kept.size >= this.max) this.kept.delete(this.kept.keys().next().value!);
+      k = { data: { r: result, state: null }, deps: { gen, reads } };
+      if (keep) this.kept.set(key, k.data, k.deps);
     }
-    if (keep) this.kept.set(key, k);
-    this.count(k.reads);
-    return k;
+    this.count(k.deps.reads);
+    return k.data;
   }
 }
 

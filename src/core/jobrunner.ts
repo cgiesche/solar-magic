@@ -10,11 +10,12 @@
 
 import type { Rom } from './rom.ts';
 import { LevelEmulator } from './levelemu.ts';
-import { RomReads, INPUTS_PER_KEY, holds, perRomState, type ResultCache, type RomDeps, type RomFingerprint } from './romdeps.ts';
+import { RomReads, holds, perRomState, byFingerprint, type ResultCache, type RomDeps, type RomFingerprint } from './romdeps.ts';
+import { KeptResults } from './keptresults.ts';
 import { gfxSkipMask, gfxDisplaySkipMask } from './gfxpages.ts';
 import { TILESETS, tilesetPointers, pointersKey } from './tilesets.ts';
 
-export const MEMORY = 256; // results kept in memory only (keep: 'memory'), the latest used
+export const MEMORY = 256; // keys whose results are kept in memory only (keep: 'memory'), the latest used
 
 // a job: a step per next(), the result as its return value (undefined: none, nothing kept); a yielded string is its
 // label from then on. It doesn't write the ROM: a write to a byte it read starts it over (also one written back)
@@ -82,7 +83,7 @@ export class JobRunner {
 
   constructor(deps: RunnerDeps) {
     this.d = deps;
-    this.memory = new MemoryResults(deps.results.fp, MEMORY);
+    this.memory = memoryResults(deps.results.fp);
     if (deps.noDisplay) deps.noDisplay.skipMask = this.displayMask;
   }
 
@@ -214,82 +215,7 @@ export class JobRunner {
   }
 }
 
-// results kept in memory only (keep: 'memory'), the latest used; checked against the ROM like the result
-// cache's, a key keeping the results of its latest used INPUTS_PER_KEY inputs as there (also the sprite
-// memory check's group results, spritemem.ts, and the prefab suggestions' places, prefabsuggest.ts). A round
-// (a check, a run over all levels) keeps all results it used, also more than the limit, and so does the latest
-// finished round while the next one runs (a round left unfinished doesn't replace it): the next round over the same
-// finds them. Getting and setting take constant time (a key's inputs are looked through, not all results).
-type Entry = { key: string; data: unknown; deps: RomDeps; gen: number; round: number };
-
-export class MemoryResults {
-  private fp: RomFingerprint;
-  private limit: number;
-  private entries = new Map<string, Entry>(); // by key and input
-  private inputs = new Map<string, string[]>(); // a key's entries, the least recently used first
-  private round = 0; // 0: none started (only the limit bounds)
-  private used = 0; // results used in the round
-  private finished = 0; // results used in the latest finished round
-  looked = 0; // entries looked at to keep the bounds (counted for tests)
-
-  constructor(fp: RomFingerprint, limit: number) {
-    this.fp = fp;
-    this.limit = limit;
-  }
-
-  // starts a round: from now on the results used are kept (with those of the latest finished round)
-  startRound(): void {
-    this.round++;
-    this.used = 0;
-  }
-  // the round is finished: its results are kept until the next one finishes
-  endRound(): void { this.finished = this.used; }
-
-  get<T>(key: string, input: string | undefined): T | undefined { return this.entry<T>(key, input)?.data; }
-
-  // the result with the bytes it read, if it holds for the current ROM
-  entry<T>(key: string, input: string | undefined): { data: T; deps: RomDeps } | undefined {
-    const id = `${key}#${input}`, e = this.entries.get(id);
-    if (!e) return undefined;
-    this.fp.sync();
-    if (e.gen !== this.fp.gen) {
-      if (!this.fp.valid(e.deps)) { this.remove(id, key); return undefined; }
-      e.gen = this.fp.gen;
-    }
-    this.touch(id, e);
-    return { data: e.data as T, deps: e.deps };
-  }
-
-  set(key: string, data: unknown, deps: RomDeps, input: string | undefined): void {
-    const id = `${key}#${input}`, old = this.entries.get(id);
-    this.touch(id, { key, data, deps, gen: this.fp.gen, round: old?.round ?? -1 });
-    const of = this.inputs.get(key)!;
-    if (of.length > INPUTS_PER_KEY) this.remove(of[0], key);
-    while (this.entries.size > Math.max(this.limit, this.finished + this.used)) {
-      const [first, e] = this.entries.entries().next().value!;
-      this.remove(first, e.key);
-    }
-  }
-
-  // e becomes the latest used result
-  private touch(id: string, e: Entry): void {
-    if (this.round && e.round !== this.round) { e.round = this.round; this.used++; }
-    this.entries.delete(id);
-    this.entries.set(id, e);
-    const of = this.inputs.get(e.key);
-    if (!of) { this.inputs.set(e.key, [id]); return; }
-    const i = of.indexOf(id);
-    this.looked += of.length;
-    if (i >= 0) of.splice(i, 1);
-    of.push(id);
-  }
-
-  private remove(id: string, key: string): void {
-    if (this.round && this.entries.get(id)?.round === this.round) this.used--;
-    this.entries.delete(id);
-    const of = this.inputs.get(key)!, i = of.indexOf(id);
-    this.looked += of.length;
-    of.splice(i, 1);
-    if (!of.length) this.inputs.delete(key);
-  }
-}
+// results kept in memory only (keep: 'memory'), the latest used keys (MEMORY); checked against the ROM like the result
+// cache's, a key keeping the results of its latest used INPUTS_PER_KEY inputs as there
+export type MemoryResults = KeptResults<RomDeps>;
+export const memoryResults = (fp: RomFingerprint, limit = MEMORY): MemoryResults => new KeptResults({ validity: byFingerprint(fp), limit });

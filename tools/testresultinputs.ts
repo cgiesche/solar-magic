@@ -4,7 +4,7 @@
 import { LevelEmulator, type LevelOverride } from '../src/core/levelemu.ts';
 import { loadLevel, serializeLayer1, serializeSprites, encodeSecondaryHeader, isL1Vertical, SPRITE_MEMORY, type Level } from '../src/core/level.ts';
 import { layer2MotionsJob } from '../src/core/l2scroll.ts';
-import { layer3Kinds } from '../src/core/layer3.ts';
+import { layer3Kinds, layer3KindsJob } from '../src/core/layer3.ts';
 import { levelScanJob, scanKey } from '../src/core/levelscan.ts';
 import { runJob } from '../src/core/jobrunner.ts';
 import { cameraAtKey } from '../src/core/camerareach.ts';
@@ -16,10 +16,12 @@ import { lz2Decompress } from '../src/core/lz2.ts';
 import { readGfx, writeGfx, createGfx, ANIM_FILE } from '../src/core/gfxfiles.ts';
 import { emptyList, writeLevelList, writeGlobalList, setLevelSettings, NO_LEVEL_LIST } from '../src/core/exanim.ts';
 import { Rom, snesToPc } from '../src/core/rom.ts';
-import { ResultCache, RomFingerprint, RomReads, INPUTS_PER_KEY, oldStoreKeys, type CacheEntry } from '../src/core/romdeps.ts';
+import { ResultCache, RomFingerprint, RomReads, oldStoreKeys, type CacheEntry } from '../src/core/romdeps.ts';
+import { INPUTS_PER_KEY } from '../src/core/keptresults.ts';
 import { ResultLearner } from '../src/core/learner.ts';
 import { inputHash, levelInput } from '../src/core/inputs.ts';
-import { captureSprites } from '../src/core/spritegfx.ts';
+import { captureSprites, spriteAtJob, spriteBytesJob } from '../src/core/spritegfx.ts';
+import { spriteJobs, spriteInput, layer3Spec, type LearnSpec } from '../src/core/learnspecs.ts';
 import { renderObjectThumbs, thumbsKey, thumbsInput, previewInput, objKey, type ObjSpec } from '../src/core/objthumbs.ts';
 import { layerGeom, renderLayerTiles } from '../src/core/render.ts';
 import { editorImage } from './fixture.ts';
@@ -209,24 +211,50 @@ const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b)
   check(cameraAtKey(N, ov, 0x40, 0x100) !== cameraAtKey(N, on, 0x40, 0x100), 'camera at Mario: the view\'s triggers are in its key');
 }
 
-// several inputs per key: sprite images (App.ensureSpriteImages) are keyed by sprite set and palette, the level's
-// sprite memory is in their input – 001 and 11E share the key, switching back to 001 doesn't capture again
+// several inputs per key (inputs and keys from learnspecs.ts, as App asks): sprite images are keyed by sprite set and
+// palette, the level's sprite memory is in their input – 001 and 11E share the keys, switching back to 001 doesn't
+// capture again; the same for a sprite's variant at a place and a sprite with extra bytes. Layer 3 kinds are keyed by
+// tileset, the level as edited is their input: an edit and its undo don't load again.
 {
   const a = loadLevel(rom, 0x001), b = loadLevel(rom, 0x11e);
   check(a.header.spriteGfx === b.header.spriteGfx && a.header.spritePalette === b.header.spritePalette && (a.spriteHeader & SPRITE_MEMORY) !== (b.spriteHeader & SPRITE_MEMORY),
     '001 and 11E: the same sprite set, another sprite memory');
-  let captured = 0;
-  const learned: number[] = [];
-  for (const lv of [a, b, a]) {
-    const hd = lv.header, sh = lv.spriteHeader;
-    const stored = learner.learn(`i6${hd.spriteGfx}-${hd.spritePalette}`, function* (e) {
-      captured++;
-      return [...captureSprites(e, lv.number, hd, sh, 0xffd900, [0x0d])];
-    }, { input: { gfx: hd.spriteGfx, palette: hd.spritePalette, memory: sh & SPRITE_MEMORY }, lane: 'sprites', replace: true, done: () => learned.push(lv.number) });
+  const jobsOf = (lv: Level) => spriteJobs(lv, [0x0d], spriteInput(rom, lv, []));
+  check(jobsOf(a).all.key === jobsOf(b).all.key && inputHash(jobsOf(a).all.input) !== inputHash(jobsOf(b).all.input), 'sprite images: one key, two inputs');
+  // learns spec (as the probe worker runs its job) for each level in turn: the levels whose result was learned
+  const inTurn = async (what: string, spec: (lv: Level) => LearnSpec, run: (e: LevelEmulator, s: LearnSpec) => unknown) => {
+    let runs = 0;
+    for (const lv of [a, b, a]) {
+      const s = spec(lv);
+      learner.learn(s.key, function* (e) { runs++; return run(e, s); }, { input: s.input, lane: what, replace: true });
+      await drain();
+    }
+    check(runs === 2, `${what}: 001, 11E, 001 learns 001's once (${runs} runs)`);
+  };
+  await inTurn('sprite images', (lv) => jobsOf(lv).all, (e, s) => {
+    const j = s.job as Extract<LearnSpec['job'], { kind: 'sprites' }>;
+    return [...captureSprites(e, j.level.number, j.level.header, j.level.spriteHeader, j.level.bgPointer, j.nums)];
+  });
+  await inTurn('sprite variants', (lv) => jobsOf(lv).at(0x0d, 0x20, 0x10), (e, s) => {
+    const j = s.job as Extract<LearnSpec['job'], { kind: 'spriteAt' }>;
+    return runJob(spriteAtJob(e, j.level, j.id, j.x, j.y));
+  });
+  await inTurn('extra-byte images', (lv) => jobsOf(lv).bytes(0x0d, [1, 2]), (e, s) => {
+    const j = s.job as Extract<LearnSpec['job'], { kind: 'spriteBytes' }>;
+    return runJob(spriteBytesJob(e, j.level, j.id, j.bytes));
+  });
+  // layer 3 kinds: level 105 as saved and as edited (an object moved)
+  const lv = loadLevel(rom, 0x105), edited = structuredClone(lv);
+  edited.objects[0].x++;
+  const l3 = (l: Level) => layer3Spec(rom, l, ovOf(l), l.header.tileset);
+  check(l3(lv).key === l3(edited).key && inputHash(l3(lv).input) !== inputHash(l3(edited).input), 'layer 3 kinds: one key, two inputs');
+  let runs = 0;
+  for (const l of [lv, edited, lv, edited]) {
+    const s = l3(l), j = s.job as Extract<LearnSpec['job'], { kind: 'layer3' }>;
+    learner.learn(s.key, function* (e) { runs++; return runJob(layer3KindsJob(e, j.level, j.ov)); }, { input: s.input, lane: 'layer3', replace: true });
     await drain();
-    if (stored) learned.push(lv.number);
   }
-  check(captured === 2 && learned.join() === '1,286,1', `sprite images: 001, 11E, 001 captures 001's once (${captured} captures)`);
+  check(runs === 2, `layer 3 kinds: an edit, its undo and redo load twice (${runs} loads)`);
 }
 
 // the result cache keeps the latest used INPUTS_PER_KEY inputs of a key, also as stored; a result is still dropped when

@@ -227,6 +227,14 @@ const TITLE_BYTE = 0x7fc0; // the internal name: not read while booting
   check(own(rom, tv.reads) && own(other, tp.reads) && own(rom, tv2.reads), 'level loads on two ROMs in turns: each recorded against its ROM\'s byte pages');
   const differ = [...tp.reads.bytes].some((o) => !vanilla[o >> PAGE_SHIFT] && tv.reads.pages[o >> PAGE_SHIFT]);
   check(differ, 'a page read by both loads is recorded by byte on the patched ROM, by page on the vanilla one');
+  // a recorder kept across ROM edits records against the ROM state current at each read: a page that became a byte
+  // page since (the editor patch installed: a level's data) is recorded by byte from then on, its reads before stay
+  const k = fresh(), kept = new RomReads(k), [s0] = levelDataRanges(other)[0], p0 = s0 >> PAGE_SHIFT;
+  kept.read(s0 + 1);
+  installEditorPatch(k);
+  const [s1] = levelDataRanges(k)[0], p1 = s1 >> PAGE_SHIFT;
+  kept.read(s1);
+  check(kept.pages[p0] === 1 && kept.bytes.has(s1) && (p1 === p0 || !kept.pages[p1]), `a recorder kept across the editor patch's install: the read before by page, the one after by byte (${s1.toString(16)})`);
 }
 
 // the fingerprint follows the ROM without an emulator
