@@ -46,7 +46,7 @@ export function drawLevelImage(app: App, p: LevelPicture, zoom = 1, screens = p.
   // (lines one image pixel wide, labels as in the level view at 100%)
   paintOverlays(ctx, app, p.overlay, {
     show, lw: 1 / zoom, px: 1, area: wholeLevel(im.geom1), width, height, screens,
-    exits: show.exits, chosenExit: -1, layer2: app.mode === 'l2', tideLabelX: 8, spriteAlpha: 1,
+    exits: show.exits, chosenExit: -1, layer2: app.model.mode === 'l2', tideLabelX: 8, spriteAlpha: 1,
     // (the sprites as outside sprite mode, their images opaque; drawn incompletely: the open level's, the only one
     // whose sprite memory is checked)
     sprites: { image: p.sprite, imageAlpha: 1, active: false, selected: () => false, incomplete: new Set(lv === app.level ? incompleteSprites(app) : []) },

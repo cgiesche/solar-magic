@@ -200,16 +200,16 @@ export class Picker {
     for (const ev of ['objkinds', 'level-header', 'render', 'rom-change', 'thumbs'] as const) app.on(ev, () => { if (this.ensureThumbs() && this.tab === 'obj') this.build(); });
     let t = 0;
     app.on('sprites', () => { if (this.tab !== 'm16' && !t) t = window.setTimeout(() => { t = 0; this.build(); }, 300); });
-    app.on('bgtile', () => { if (isBrushMode(app.mode)) this.build(); });
+    app.on('bgtile', () => { if (isBrushMode(app.model.mode)) this.build(); });
     app.on('probes', () => { if (this.tab === 'm16') this.m16Tip(); else this.build(); });
-    app.on('render', () => { if (isBrushMode(app.mode)) this.build(); });
+    app.on('render', () => { if (isBrushMode(app.model.mode)) this.build(); });
     app.on('change', () => this.followSelection());
     app.on('picked-item', () => this.build());
     app.on('prefabs', () => { if (this.tab === 'obj') this.build(); });
     app.on('object-names', () => { if (this.tab === 'obj') this.build(); });
     app.on('prefab-suggestions', () => { if (this.tab === 'obj') this.build(); });
     app.on('mode', () => {
-      if (app.mode === 'spr') this.tab = 'spr';
+      if (app.model.mode === 'spr') this.tab = 'spr';
       else if (this.tab === 'spr') this.tab = 'obj';
       this.build();
     });
@@ -219,18 +219,18 @@ export class Picker {
   followed = -1;
   followSelection(): void {
     const app = this.app;
-    const uid = app.selection.size === 1 ? [...app.selection][0] : -1;
+    const uid = app.model.selection.size === 1 ? [...app.model.selection][0] : -1;
     if (uid === this.followed) return;
     this.followed = uid;
-    if (uid < 0 || app.mode === 'bg' || app.mode === 'exit') return;
+    if (uid < 0 || app.model.mode === 'bg' || app.model.mode === 'exit') return;
     let item: PickedItem;
-    if (app.mode === 'spr') {
-      const s = app.selectedSprites()[0];
+    if (app.model.mode === 'spr') {
+      const s = app.model.selectedSprites()[0];
       if (!s) return;
       item = { kind: 'spr', num: s.num, extra: s.extra };
       this.tab = 'spr';
     } else {
-      const o = app.selectedObjects()[0];
+      const o = app.model.selectedObjects()[0];
       if (!o) return;
       if (o.num === 0 && o.ext === DM16_EXT) {
         item = { kind: 'obj', num: 0, ext: DM16_EXT, size: 0, tile: o.tile ?? 0 };
@@ -247,9 +247,9 @@ export class Picker {
         this.tab = 'obj';
       }
     }
-    const cur = app.pickedItem;
+    const cur = app.model.pickedItem;
     if (cur && JSON.stringify(cur) === JSON.stringify(item) && this.body.querySelector('.selected')) return; // e.g. just inserted
-    app.pickedItem = item;
+    app.model.pickedItem = item;
     this.build();
     requestAnimationFrame(() => this.scrollToSelected()); // after the properties panel below has updated
   }
@@ -257,7 +257,7 @@ export class Picker {
   scrollToSelected(): void {
     const el = this.body.querySelector<HTMLElement>('.selected');
     if (el) { el.scrollIntoView({ block: 'nearest' }); return; }
-    const cur = this.app.pickedItem;
+    const cur = this.app.model.pickedItem;
     if (cur?.kind !== 'obj' || cur.tile === undefined) return;
     this.scrollToM16Tile(cur.tile);
   }
@@ -286,7 +286,7 @@ export class Picker {
   }
   // marks the page at the top of the list in the bar
   m16Scrolled(): void {
-    if (this.tab !== 'm16' || this.app.mode === 'bg') return;
+    if (this.tab !== 'm16' || this.app.model.mode === 'bg') return;
     let page = 0;
     for (const head of this.body.querySelectorAll<HTMLElement>('.m16-page-head')) {
       if (head.offsetTop - this.body.offsetTop > this.body.scrollTop + 4) break;
@@ -297,7 +297,7 @@ export class Picker {
   }
   buildMap16(): void {
     const app = this.app;
-    const cur = app.pickedItem;
+    const cur = app.model.pickedItem;
     const curTile = cur?.kind === 'obj' && cur.num === 0 && cur.ext === DM16_EXT ? cur.tile ?? -1 : -1;
     const bw = cur?.kind === 'obj' && cur.block ? cur.block.w : 1, bh = cur?.kind === 'obj' && cur.block ? cur.block.h : 1;
     const pages = EXT_TILES / 256;
@@ -355,7 +355,7 @@ export class Picker {
       // click picks a tile, dragging picks a rectangle of tiles
       attachRectPick(c, 16, 16, (r) => draw(r.x, r.y, r.w, r.h), (r) => {
         this.m16Match = null;
-        if (app.mode !== 'l1' && app.mode !== 'l2') app.setMode('l1');
+        if (app.model.mode !== 'l1' && app.model.mode !== 'l2') app.setMode('l1');
         app.choosePickedItem({ kind: 'obj', num: 0, ext: DM16_EXT, size: 0, tile: base + r.y * 16 + r.x, ...(r.w * r.h > 1 ? { block: { w: r.w, h: r.h } } : {}) });
       }, (x, y) => app.editTile(base + y * 16 + x));
       previewSheet(c, pageSheet, 16, 16, 16, scale, (r) => {
@@ -395,7 +395,7 @@ export class Picker {
   buildPrefabs(): void {
     const app = this.app, box = this.prefabBox;
     clear(box);
-    const cur = app.pickedItem;
+    const cur = app.model.pickedItem;
     const curN = cur?.kind === 'obj' && cur.num === 0 && cur.ext === PREFAB_EXT ? cur.prefab ?? -1 : -1;
     box.append(h('div', { class: 'picker-head' }, 'Prefabs'), h('div', { class: 'hint' }, 'A prefab is a stamp of Map16 tiles, placed as one object; editing it changes every copy.'));
     const all = app.prefabs();
@@ -412,7 +412,7 @@ export class Picker {
             { label: 'Rename …', shortcut: 'F2', onClick: () => renamePrefab(app, n, st) },
             { label: 'Delete …', shortcut: 'Del', onClick: () => deletePrefab(app, n, st) }]);
         },
-        onclick: () => { if (app.mode !== 'l1' && app.mode !== 'l2') app.setMode('l1'); app.choosePickedItem({ kind: 'obj', num: 0, ext: PREFAB_EXT, size: 0, prefab: n }); },
+        onclick: () => { if (app.model.mode !== 'l1' && app.model.mode !== 'l2') app.setMode('l1'); app.choosePickedItem({ kind: 'obj', num: 0, ext: PREFAB_EXT, size: 0, prefab: n }); },
       }, h('div', { class: 'picker-img' }, th.c),
         h('div', { class: 'picker-label' }, hex2(n)), h('div', { class: 'picker-name' }, st.name || '(unnamed)')));
       this.keysOn(cell, () => renamePrefab(app, n, st), () => deletePrefab(app, n, st));
@@ -654,7 +654,7 @@ export class Picker {
   // shows an item in its tab, chosen as the picked item (from the central search)
   choose(tab: PickerTab, item: PickedItem): void {
     const app = this.app;
-    if (tab === 'spr' ? app.mode !== 'spr' : app.mode !== 'l1' && app.mode !== 'l2') app.setMode(tab === 'spr' ? 'spr' : 'l1');
+    if (tab === 'spr' ? app.model.mode !== 'spr' : app.model.mode !== 'l1' && app.model.mode !== 'l2') app.setMode(tab === 'spr' ? 'spr' : 'l1');
     this.tab = tab;
     this.m16Match = null;
     app.choosePickedItem(item);
@@ -672,8 +672,8 @@ export class Picker {
       this.build();
       return;
     }
-    if (app.mode !== 'bg') app.setMode('bg'); // (says why not when the level has no BG tilemap)
-    if (app.mode !== 'bg') return;
+    if (app.model.mode !== 'bg') app.setMode('bg'); // (says why not when the level has no BG tilemap)
+    if (app.model.mode !== 'bg') return;
     this.bgBase = r.first & ~0x1ff;
     app.bgBrush = { w: r.w, h: r.h, tiles: Array.from({ length: r.w * r.h }, (_, i) => r.first + Math.floor(i / r.w) * 16 + (i % r.w)) };
     this.build();
@@ -775,10 +775,10 @@ export class Picker {
   // the sheet of the current tab or brush mode fills the picker's width (layer 3's 8x8 tiles: half as wide as
   // the Map16 pages): the screen pixels per pixel it is drawn at, the size it is shown at
   sheetPixels(): number {
-    return fillPixels(this.body.clientWidth, this.app.mode === 'l3' ? 128 : 256);
+    return fillPixels(this.body.clientWidth, this.app.model.mode === 'l3' ? 128 : 256);
   }
   sheetShown(): number {
-    return this.body.clientWidth / (this.app.mode === 'l3' ? 128 : 256);
+    return this.body.clientWidth / (this.app.model.mode === 'l3' ? 128 : 256);
   }
 
   build(): void {
@@ -786,13 +786,13 @@ export class Picker {
     hidePickerPreview(this.body);
     this.builtPixels = 0;
     clear(this.tabs);
-    const brush = isBrushMode(app.mode);
+    const brush = isBrushMode(app.model.mode);
     this.m16Bar.style.display = !brush && this.tab === 'm16' ? '' : 'none';
     // the list being left keeps its scroll position (read here: the scroll event may still be pending)
     if (this.builtTab) this.scrolls[this.builtTab] = this.body.scrollTop;
     this.builtTab = brush ? undefined : this.tab;
-    if (app.mode === 'bg') { clear(this.body); this.buildBg(); return; }
-    if (app.mode === 'l3') { clear(this.body); this.buildL3(); return; }
+    if (app.model.mode === 'bg') { clear(this.body); this.buildBg(); return; }
+    if (app.model.mode === 'l3') { clear(this.body); this.buildL3(); return; }
     const tabDefs: [typeof this.tab, string][] = [['obj', 'Objects'], ['m16', 'Map16'], ['spr', 'Sprites']];
     for (const [t, l] of tabDefs) this.tabs.appendChild(h('button', { class: this.tab === t ? 'active' : '', onclick: () => { this.tab = t; this.build(); } }, l));
     clear(this.body);
@@ -803,7 +803,7 @@ export class Picker {
 
   buildSprites(): void {
     const app = this.app;
-    const cur = app.pickedItem;
+    const cur = app.model.pickedItem;
     let grid = this.body.appendChild(h('div', { class: 'picker-grid' }));
     for (const e of this.spriteEntries()) {
       if (e.id >= 0x200 && !grid.dataset.custom) {
@@ -816,7 +816,7 @@ export class Picker {
       const unused = e.id >= 0x200 && app.customSprite(e.id) && !app.spriteUsers(e.id).length;
       const cell = grid.appendChild(h('div', {
         class: `picker-cell${sel ? ' selected' : ''}`, title: e.title,
-        onclick: () => { if (app.mode !== 'spr') app.setMode('spr'); app.choosePickedItem(e.item); },
+        onclick: () => { if (app.model.mode !== 'spr') app.setMode('spr'); app.choosePickedItem(e.item); },
       }, h('div', { class: 'picker-img' }, th?.c ?? h('span', { class: 'none' }, '–'),
         h('div', { class: 'picker-corner' }, itemBadge(app, e.items), unused ? h('span', { class: 'gt-unused', title: 'Inserted, but in no level' }, 'unused') : '')),
         h('div', { class: 'picker-label' }, e.num), h('div', { class: 'picker-name' }, e.name)));
@@ -845,7 +845,7 @@ export class Picker {
   // custom numbers); a section without entries is left out (Prefabs keeps its button and hint)
   buildObjects(): void {
     const app = this.app;
-    const cur = app.pickedItem;
+    const cur = app.model.pickedItem;
     this.body.append(this.prefabBox);
     this.buildPrefabs();
     for (const [section, title] of [['obj', 'Resizable'], ['ext', 'Fixed size'], ['custom', 'Custom']] as const) {
@@ -864,7 +864,7 @@ export class Picker {
             if (renames) contextMenu(ev.clientX, ev.clientY, [{ heading: app.objectName(s.num, s.ext) }, { label: 'Rename …', shortcut: 'F2', onClick: () => renameObject(app, s.num, s.ext) }]);
           },
           onclick: () => {
-            if (app.mode !== 'l1' && app.mode !== 'l2') app.setMode('l1');
+            if (app.model.mode !== 'l1' && app.model.mode !== 'l2') app.setMode('l1');
             app.choosePickedItem(e.item);
           },
         }, h('div', { class: 'picker-img' }, th?.c ?? h('span', { class: 'none' }, '–'),
@@ -1101,8 +1101,8 @@ export class Properties {
     app.on('objkinds', () => this.build());
     app.on('object-names', () => this.build());
     app.on('probes', () => { if (this.probePending) this.build(); });
-    app.on('rom-change', () => { if (app.mode === 'exit') this.build(); });
-    app.on('picked-item', () => { if (app.mode === 'spr' && !app.selectedSprites().length) this.build(); });
+    app.on('rom-change', () => { if (app.model.mode === 'exit') this.build(); });
+    app.on('picked-item', () => { if (app.model.mode === 'spr' && !app.model.selectedSprites().length) this.build(); });
   }
 
   probePending = false; // the shown object's block behaviour is still being probed
@@ -1147,17 +1147,17 @@ export class Properties {
     clear(this.body);
     this.probePending = false;
     if (!app.level) return;
-    if (app.mode === 'exit') return this.buildExit();
-    if (app.mode === 'bg') {
+    if (app.model.mode === 'exit') return this.buildExit();
+    if (app.model.mode === 'bg') {
       this.body.appendChild(h('div', { class: 'hint' }, `Edit the background (BG tilemap). ${app.level.bg ? 'Changed – written to free ROM space on save (BG patch).' : 'Unchanged.'}`));
       return;
     }
-    if (app.mode === 'spr') {
-      const sel = app.selectedSprites();
+    if (app.model.mode === 'spr') {
+      const sel = app.model.selectedSprites();
       if (!sel.length) {
         this.body.appendChild(emptyState(`${app.level.sprites.length} sprites – none selected.`));
         // the sprite chosen in the picker
-        const p = app.pickedItem;
+        const p = app.model.pickedItem;
         if (p?.kind === 'spr') {
           const id = spriteId(p);
           this.body.append(spriteUses(app, id, `Sprite ${hex2(p.num)} (${app.spriteLabel(id)}) used in levels`));
@@ -1192,23 +1192,23 @@ export class Properties {
       } else if (this.probePending) this.body.append(h('div', { class: 'hint' }, 'Determining behavior …'));
       return;
     }
-    const sel = app.selectedObjects();
+    const sel = app.model.selectedObjects();
     if (!sel.length) {
-      this.body.appendChild(emptyState(`${app.currentObjects().length} objects on ${app.mode === 'l2' ? 'layer 2' : 'layer 1'} – none selected.`));
+      this.body.appendChild(emptyState(`${app.model.currentObjects().length} objects on ${app.model.mode === 'l2' ? 'layer 2' : 'layer 1'} – none selected.`));
       return;
     }
     if (sel.length > 1) { this.body.append(h('div', { class: 'prop-title' }, `${sel.length} objects selected`), ...this.condFields(sel.filter(isDm16))); return; }
     const o = sel[0];
     // changes the object in the open level (see the sprite's)
     const m = app.model, upd = (f: (o: LevelObject) => void) => m.updateObject(o.uid, f);
-    const idx = app.currentObjects().indexOf(o);
+    const idx = app.model.currentObjects().indexOf(o);
     const ov = app.objectKind(o.num);
     const pf = isPlacedPrefab(o) ? readPrefab(app.rom, o.prefab!) : null;
     this.body.append(
       h('div', { class: 'prop-title' }, isPlacedPrefab(o)
         ? `Prefab ${hex2(o.prefab!)}: ${pf ? pf.name || '(unnamed)' : '(missing)'}`
         : `${o.num ? 'Object ' + hex2(o.num) : 'Ext. object ' + hex2(o.ext)}: ${app.objectName(o.num, o.ext)}`),
-      h('div', { class: 'hint' }, `No. ${idx + 1} of ${app.currentObjects().length} (drawing order)`),
+      h('div', { class: 'hint' }, `No. ${idx + 1} of ${app.model.currentObjects().length} (drawing order)`),
       this.field('Object', hexInput(o.num, 2, (v) => m.setObjectNum(o.uid, v), 0x3f)),
       o.num === 0 ? this.field('Ext. object', hexInput(o.ext, 2, (v) => m.setObjectExt(o.uid, v), 0xff)) : '',
       o.num === 0 && o.ext === PREFAB_EXT && o.prefab !== undefined ? this.field('Prefab', hexInput(o.prefab, 2, (v) => upd((o) => (o.prefab = v)), 0xff)) : '',

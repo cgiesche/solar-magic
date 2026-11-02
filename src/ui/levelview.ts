@@ -164,28 +164,28 @@ export class LevelView {
   // BG and layer 3 are painted with a brush on a grid of cells: BG tiles (16 px), layer 3's 8x8 tiles where
   // layer 3 is drawn (layer3map.ts)
   brushMode(): boolean {
-    return isBrushMode(this.app.mode);
+    return isBrushMode(this.app.model.mode);
   }
   cellAt(px: number, py: number): { x: number; y: number } {
-    if (this.app.mode !== 'l3') return { x: Math.floor(px / 16), y: Math.floor(py / 16) };
+    if (this.app.model.mode !== 'l3') return { x: Math.floor(px / 16), y: Math.floor(py / 16) };
     const c = layer3CellAt(this.app.l3Grid(), px, py);
     return { x: c.cx, y: c.cy };
   }
   // the pixel rectangle of w x h cells from (x, y)
   cellBox(x: number, y: number, w: number, h: number): [number, number, number, number] {
-    if (this.app.mode !== 'l3') return [x * 16, y * 16, w * 16, h * 16];
+    if (this.app.model.mode !== 'l3') return [x * 16, y * 16, w * 16, h * 16];
     const g = this.app.l3Grid();
     return [x * 8 - g.dx, y * 8 - g.dy, w * 8, h * 8];
   }
   brush(): Brush {
-    return this.app.mode === 'l3' ? this.app.l3Brush : this.app.bgBrush;
+    return this.app.model.mode === 'l3' ? this.app.l3Brush : this.app.bgBrush;
   }
   paintCell(x: number, y: number): boolean {
-    return this.app.mode === 'l3' ? this.app.paintL3Brush(x, y) : this.app.paintBrush(x, y);
+    return this.app.model.mode === 'l3' ? this.app.paintL3Brush(x, y) : this.app.paintBrush(x, y);
   }
   // the largest brush picked from the level
   brushMax(): { w: number; h: number } {
-    return this.app.mode === 'l3' ? { w: 32, h: 32 } : { w: 32, h: 27 };
+    return this.app.model.mode === 'l3' ? { w: 32, h: 32 } : { w: 32, h: 27 };
   }
 
   // the sprite under the mouse, when it is one
@@ -225,20 +225,20 @@ export class LevelView {
     ctx.drawImage(this.levelCanvas, 0, 0);
     const im = app.images;
     const lw = 1 / z;
-    const choosing = app.mode === 'exit' && !app.exitMarker;
+    const choosing = app.model.mode === 'exit' && !app.exitMarker;
     paintOverlays(ctx, app, openOverlay(app), {
       show: app.view.show, lw, px: 1 / app.view.zoom, area: this.visibleTiles(), width: im.width, height: im.height, screens: app.level.header.screens,
-      exits: app.view.show.exits || app.mode === 'exit', chosenExit: choosing ? app.exitScreen : -1,
+      exits: app.view.show.exits || app.model.mode === 'exit', chosenExit: choosing ? app.exitScreen : -1,
       marker: (m) => ({
         big: this.drag?.kind === 'marker' && this.drag.marker.kind === m.kind && this.drag.marker.index === m.index,
-        ring: app.mode === 'exit' && app.exitMarker?.kind === m.kind && app.exitMarker.index === m.index,
+        ring: app.model.mode === 'exit' && app.exitMarker?.kind === m.kind && app.exitMarker.index === m.index,
       }),
-      layer2: app.mode === 'l2', tideLabelX: this.scroller.scrollLeft / app.view.zoom + 8 / app.view.zoom, spriteAlpha: this.spriteAlpha(),
+      layer2: app.model.mode === 'l2', tideLabelX: this.scroller.scrollLeft / app.view.zoom + 8 / app.view.zoom, spriteAlpha: this.spriteAlpha(),
       sprites: this.spriteDraw(), arcs: () => this.paintArcs(ctx), gameView: app.view.show.gameView ? this.gameViewFrame() : undefined,
     });
     // selection
-    if (app.mode === 'l1' || app.mode === 'l2') {
-      const sel = app.selectedObjects();
+    if (app.model.mode === 'l1' || app.model.mode === 'l2') {
+      const sel = app.model.selectedObjects();
       for (const o of sel) this.outlineObject(ctx, o, '#4cc2ff', lw);
       for (const o of this.handleObjects()) this.paintHandles(ctx, o, lw);
     }
@@ -247,8 +247,8 @@ export class LevelView {
       const { tx, ty } = this.hover;
       if (app.view.show.preview && !this.onSelection(this.hover.px, this.hover.py)) this.paintPreview(ctx, tx, ty);
       const hits = this.brushMode() ? [] : app.hitsAt(this.hover.px, this.hover.py);
-      const hit = hits.find((h) => h.mode === app.mode && app.selection.has(h.item.uid)) ?? hits[0];
-      if (hit && !app.selection.has(hit.item.uid)) {
+      const hit = hits.find((h) => h.mode === app.model.mode && app.model.selection.has(h.item.uid)) ?? hits[0];
+      if (hit && !app.model.selection.has(hit.item.uid)) {
         if (hit.mode === 'spr') {
           const b = app.spriteBox(hit.item as LevelSprite);
           ctx.strokeStyle = 'rgba(255,255,255,0.8)';
@@ -301,7 +301,7 @@ export class LevelView {
     const app = this.app;
     const hovered = this.hover && !this.drag && !this.brushMode() ? app.hitsAt(this.hover.px, this.hover.py).map((h) => h.item) : [];
     for (const l2 of boxLayers(app.view.show, app.level)) for (const o of app.boxedObjects(l2)) {
-      if (!app.selection.has(o.uid) && !hovered.includes(o)) continue;
+      if (!app.model.selection.has(o.uid) && !hovered.includes(o)) continue;
       const name = app.boxName(o);
       if (name) paintBoxName(ctx, o.x * 16, o.y * 16, name, app.view.zoom);
     }
@@ -484,7 +484,7 @@ export class LevelView {
 
   // sprites are translucent like the ghosted layers while the background or layer 3 is edited
   spriteAlpha(): number {
-    return this.app.view.show.ghost && isBrushMode(this.app.mode) ? 0.35 : 1;
+    return this.app.view.show.ghost && isBrushMode(this.app.model.mode) ? 0.35 : 1;
   }
 
   // The placement preview: what a right click at tile (tx, ty) would place, translucent. While the one at the tile
@@ -505,8 +505,8 @@ export class LevelView {
 
   // the sprites as the level view draws them (leveloverlays.ts paintSprites)
   spriteDraw(): SpriteDraw {
-    const app = this.app, active = app.mode === 'spr';
-    return { image: (s) => app.spriteImageOf(s), imageAlpha: active ? 1 : 0.85, active, selected: (s) => app.selection.has(s.uid), incomplete: new Set(incompleteSprites(app)) };
+    const app = this.app, active = app.model.mode === 'spr';
+    return { image: (s) => app.spriteImageOf(s), imageAlpha: active ? 1 : 0.85, active, selected: (s) => app.model.selection.has(s.uid), incomplete: new Set(incompleteSprites(app)) };
   }
 
   // ---------------- interactions ----------------
@@ -522,15 +522,15 @@ export class LevelView {
     if (e.button === 1) return;
     if (e.button === 2 || (e.button === 0 && e.shiftKey && !e.ctrlKey)) {
       // insert picked item (BG: paint with the brush, dragging keeps painting)
-      if (app.mode === 'exit') { if (e.button === 2) this.exitMenu(e, px, py, tx, ty); return; }
+      if (app.model.mode === 'exit') { if (e.button === 2) this.exitMenu(e, px, py, tx, ty); return; }
       if (this.brushMode()) {
-        const edit = app.mode === 'l3' ? app.beginLayer3Edit() : app.beginLevelEdit(), c = this.cellAt(px, py);
+        const edit = app.model.mode === 'l3' ? app.beginLayer3Edit() : app.beginLevelEdit(), c = this.cellAt(px, py);
         this.drag = { kind: 'paint', edit, changed: this.paintCell(c.x, c.y), x0: c.x, y0: c.y, lastX: c.x, lastY: c.y };
         if (this.drag.changed) this.scheduleRefresh();
         return;
       }
       // on the selection, or with nothing to place: the context menu
-      if (e.button === 2 && (this.onSelection(px, py) || !app.placement(tx, ty))) { this.levelMenu(e.clientX, e.clientY, px, py, tx, ty); return; }
+      if (e.button === 2 && (this.onSelection(px, py) || !app.model.placement(tx, ty))) { this.levelMenu(e.clientX, e.clientY, px, py, tx, ty); return; }
       app.placeAt(tx, ty);
       return;
     }
@@ -546,7 +546,7 @@ export class LevelView {
     }
     const mk = this.markerAt(px, py);
     if (mk && !e.ctrlKey) {
-      if (app.mode === 'exit') app.selectEntrance(mk);
+      if (app.model.mode === 'exit') app.selectEntrance(mk);
       this.drag = { kind: 'marker', edit: mk.kind !== 'sec' ? app.beginLevelEdit() : null, marker: mk, offX: px - mk.x, offY: py - mk.y, moved: false };
       this.paint();
       return;
@@ -558,14 +558,14 @@ export class LevelView {
       this.paint();
       return;
     }
-    if (app.mode === 'exit') {
+    if (app.model.mode === 'exit') {
       app.selectScreen(app.vertical ? ty >> 4 : tx >> 4);
       return;
     }
     // resize handle? (all selected objects resized on the grabbed edges, their sizes emulated first)
     const ho = this.handleAt(px, py);
     if (ho) {
-      const objs = app.selectedObjects().filter((o) => app.resizable(o));
+      const objs = app.model.selectedObjects().filter((o) => app.resizable(o));
       app.probeSizes(objs);
       const resize = app.model.beginResize(objs, ho.o, ho.grab, (o) => app.resizeDrivers(o), (o) => app.sizeBoxes(o));
       if (resize) {
@@ -578,7 +578,7 @@ export class LevelView {
     const hits = app.hitsAt(px, py);
     if (e.ctrlKey) {
       // multi-select stays within the current layer
-      const own = hits.find((h) => h.mode === app.mode);
+      const own = hits.find((h) => h.mode === app.model.mode);
       if (own) {
         app.model.toggle(own.item.uid);
         return;
@@ -586,10 +586,10 @@ export class LevelView {
     }
     // plain click: an already selected item keeps priority (so selections can be dragged), else the topmost.
     // Alt+click: the next item below the selected one (wrapping around)
-    const selIdx = hits.findIndex((h) => h.mode === app.mode && app.selection.has(h.item.uid));
+    const selIdx = hits.findIndex((h) => h.mode === app.model.mode && app.model.selection.has(h.item.uid));
     const hit = e.altKey ? hits[(selIdx + 1) % hits.length] : hits[Math.max(0, selIdx)];
     if (hit && !e.ctrlKey) {
-      if (hit.mode !== app.mode) {
+      if (hit.mode !== app.model.mode) {
         app.setMode(hit.mode, [hit.item.uid]);
         toast(`Mode: ${hit.mode === 'spr' ? 'Sprites' : hit.mode === 'l2' ? 'Layer 2' : 'Layer 1'}`);
       }
@@ -647,7 +647,7 @@ export class LevelView {
       }
     } else if (d.kind === 'move') {
       if (!d.move.to(tx - d.startTx, ty - d.startTy)) return;
-      if (app.mode === 'spr') app.changed(false);
+      if (app.model.mode === 'spr') app.changed(false);
       else this.scheduleRefresh();
     } else if (d.kind === 'resize') {
       // the grabbed object aims at the mouse, the others move the same edges by as many tiles
@@ -678,7 +678,7 @@ export class LevelView {
     }
     if (d.kind === 'gameView') { this.paint(); return; }
     if (d.kind === 'pick') {
-      if (app.mode === 'l3') app.pickL3(d.x0, d.y0, d.x1, d.y1); else app.pickBg(d.x0, d.y0, d.x1, d.y1);
+      if (app.model.mode === 'l3') app.pickL3(d.x0, d.y0, d.x1, d.y1); else app.pickBg(d.x0, d.y0, d.x1, d.y1);
       if (this.hover) this.updateStatus(this.hover.tx, this.hover.ty);
       this.paint();
       return;
@@ -693,7 +693,7 @@ export class LevelView {
       const x0 = Math.floor(Math.min(d.x0, d.x1) / 16), x1 = Math.floor(Math.max(d.x0, d.x1) / 16);
       const y0 = Math.floor(Math.min(d.y0, d.y1) / 16), y1 = Math.floor(Math.max(d.y0, d.y1) / 16);
       const caught: number[] = [];
-      if (app.mode === 'spr') {
+      if (app.model.mode === 'spr') {
         const bx0 = Math.min(d.x0, d.x1), bx1 = Math.max(d.x0, d.x1), by0 = Math.min(d.y0, d.y1), by1 = Math.max(d.y0, d.y1);
         for (const s of app.level.sprites) {
           const b = app.spriteBox(s);
@@ -730,11 +730,11 @@ export class LevelView {
   // item) or the middle of the view
   keyMenu(): void {
     const app = this.app;
-    if (app.mode !== 'l1' && app.mode !== 'l2' && app.mode !== 'spr') return;
+    if (app.model.mode !== 'l1' && app.model.mode !== 'l2' && app.model.mode !== 'spr') return;
     let px: number, py: number;
     if (this.hover) ({ px, py } = this.hover);
     else {
-      const it = (app.mode === 'spr' ? app.selectedSprites() : app.selectedObjects())[0], c = this.centerTile();
+      const it = (app.model.mode === 'spr' ? app.model.selectedSprites() : app.model.selectedObjects())[0], c = this.centerTile();
       px = (it ? it.x : c.tx) * 16 + 8; py = (it ? it.y : c.ty) * 16 + 8;
     }
     const r = this.scroller.getBoundingClientRect(), z = app.view.zoom;
@@ -743,7 +743,7 @@ export class LevelView {
 
   // status bar without the mouse over the level: what the mouse does in this mode
   idleStatus(): void {
-    const m = this.app.mode;
+    const m = this.app.model.mode;
     this.pos.textContent = '';
     this.status.textContent = isBrushMode(m) ? 'Click/drag picks up tiles as brush · Right click/Shift+click paints'
       : m === 'exit' ? 'Click an entrance (M, Z, S) or screen to select it – edit it on the right under “Properties” · Drag moves entrances · Right click: new entrance, create exit …'
@@ -754,7 +754,7 @@ export class LevelView {
     const app = this.app;
     this.pos.textContent = `X ${hex3(tx)}  Y ${hex3(ty)}  Screen ${hex2(app.vertical ? ty >> 4 : tx >> 4)}`;
     if (this.drag?.kind === 'resize') { this.resizeStatus(); return; }
-    if (app.mode === 'l3') {
+    if (app.model.mode === 'l3') {
       const c = this.hover ? this.cellAt(this.hover.px, this.hover.py) : { x: 0, y: 0 }, t = app.l3At(c.x, c.y), b = app.l3Brush;
       const tile = layer3WordText;
       this.status.textContent = `${t < 0 ? 'Status bar (not editable)' : `Layer 3 tile ${tile(t)}${app.l3Editable(c.x, c.y) ? '' : ' (outside the level\'s layer 3 tilemap file)'}`}  ·  Brush ${b.tiles.length > 1 ? `${b.w}×${b.h}` : tile(b.tiles[0])}`;
@@ -764,10 +764,10 @@ export class LevelView {
     const t = app.query.tileAt(tx, ty);
     if (t >= 0) {
       txt += `Map16 ${hex3(t)}`;
-      const p = app.mode === 'bg' ? undefined : app.probes.block(t); // result arrives via 'probes'
+      const p = app.model.mode === 'bg' ? undefined : app.probes.block(t); // result arrives via 'probes'
       const sum = [p && probeAt(p, tx).summary, p && enterText(p.enter)].filter(Boolean).join(', ');
       if (sum) txt += ` (${sum})`;
-      const c = app.view.show.collision && app.mode !== 'bg' ? app.probes.collision(t) : undefined;
+      const c = app.view.show.collision && app.model.mode !== 'bg' ? app.probes.collision(t) : undefined;
       if (c) {
         // in the view's switch states; the others, and without a switch when the view's change it
         const on = app.viewSwitches(), shown = collisionIn(c, on);
@@ -775,10 +775,10 @@ export class LevelView {
           ...(shown !== c ? [`without switches: ${collisionText(c)}`] : [])];
         txt += ` · ${collisionText(shown)}${other.length ? ` (${other.join(' · ')})` : ''}`;
       }
-      const tide = app.view.show.collision && app.mode !== 'bg' ? app.tide() : null;
+      const tide = app.view.show.collision && app.model.mode !== 'bg' ? app.tide() : null;
       if (tide && ty * 16 + 8 >= tide.high) txt += ty * 16 + 8 >= tide.low ? ' · water (tide)' : ' · water at high tide';
     }
-    if (app.mode === 'bg') {
+    if (app.model.mode === 'bg') {
       const b = app.bgBrush;
       txt += `  ·  BG-Tile ${hex3(app.bgAt(tx, ty))}  ·  Brush ${b.tiles.length > 1 ? `${b.w}×${b.h}` : hex3(b.tiles[0])}`;
       this.status.textContent = txt.replace(/^\s*·\s*/, '');
@@ -814,8 +814,8 @@ export class LevelView {
   // the selected objects that show resize handles: all up to 32 selected, else the one under the mouse
   handleObjects(): LevelObject[] {
     const app = this.app;
-    if (app.mode !== 'l1' && app.mode !== 'l2') return [];
-    const objs = app.selectedObjects().filter((o) => app.resizable(o));
+    if (app.model.mode !== 'l1' && app.model.mode !== 'l2') return [];
+    const objs = app.model.selectedObjects().filter((o) => app.resizable(o));
     if (objs.length <= 32) return objs;
     const d = this.drag, top = this.hover?.top;
     return objs.filter((o) => (d?.kind === 'resize' ? o.uid === d.resize.uid : o.uid === top));
@@ -844,7 +844,7 @@ export class LevelView {
   resizeStatus(): void {
     const d = this.drag;
     if (d?.kind !== 'resize') return;
-    const o = this.app.selectedObjects().find((o) => o.uid === d.resize.uid), b = o && this.app.sizeBoxes(o)(o.size);
+    const o = this.app.model.selectedObjects().find((o) => o.uid === d.resize.uid), b = o && this.app.sizeBoxes(o)(o.size);
     if (!o || !b) return;
     this.status.textContent = `Resizing: size ${hex2(o.size)} · ${b.x1 - b.x0 + 1}×${b.y1 - b.y0 + 1} tiles`;
   }
@@ -857,15 +857,15 @@ export class LevelView {
     else if (this.gameViewGrab(px, py)) c = 'grab';
     else if (this.brushMode()) c = 'crosshair';
     else if (this.markerAt(px, py)) c = 'grab';
-    else if (app.mode === 'exit') c = 'pointer';
+    else if (app.model.mode === 'exit') c = 'pointer';
     else if ((ho = this.handleAt(px, py))) c = this.resizeCursor(ho.grab);
-    else if (top >= 0 && app.selection.has(top)) c = 'move';
+    else if (top >= 0 && app.model.selection.has(top)) c = 'move';
     this.scroller.style.cursor = c;
   }
 
   // whether the pixel is on a selected item of the current mode
   onSelection(px: number, py: number): boolean {
-    return this.app.hitsAt(px, py).some((h) => h.mode === this.app.mode && this.app.selection.has(h.item.uid));
+    return this.app.hitsAt(px, py).some((h) => h.mode === this.app.model.mode && this.app.model.selection.has(h.item.uid));
   }
 
   // The context menu of layer 1/2 and sprites at the pixel (client position x, y): of the selection when on it –
@@ -875,30 +875,30 @@ export class LevelView {
     if (!this.onSelection(px, py)) {
       const hit = app.hitsAt(px, py)[0];
       if (hit) {
-        if (hit.mode !== app.mode) app.setMode(hit.mode, [hit.item.uid]);
+        if (hit.mode !== app.model.mode) app.setMode(hit.mode, [hit.item.uid]);
         app.model.pick(hit.item.uid);
       } else app.model.clearSelection();
     }
-    const spr = app.mode === 'spr';
+    const spr = app.model.mode === 'spr';
     const items: MenuItem[] = [];
-    if (app.selection.size) {
-      const objs = app.selectedObjects(), sprs = app.selectedSprites(), n = spr ? sprs.length : objs.length;
+    if (app.model.selection.size) {
+      const objs = app.model.selectedObjects(), sprs = app.model.selectedSprites(), n = spr ? sprs.length : objs.length;
       const one = spr ? sprs[0] : objs[0];
       items.push({ heading: n > 1 ? `${n} ${spr ? 'sprites' : 'objects'}` : spr ? `Sprite ${hex2(one.num)} ${app.spriteLabel(spriteId(one as LevelSprite))}` : app.objectName(one.num, (one as LevelObject).ext) },
-        { label: 'Cut', onClick: () => { app.copy(); app.deleteSelection(); } },
-        { label: 'Copy', shortcut: 'Ctrl+C', onClick: () => app.copy() },
+        { label: 'Cut', onClick: () => { app.model.copy(); app.model.deleteSelection(); } },
+        { label: 'Copy', shortcut: 'Ctrl+C', onClick: () => app.model.copy() },
         { label: 'Duplicate', shortcut: 'Ctrl+D', onClick: () => app.duplicateSelection() },
-        { label: 'Delete', shortcut: 'Del', onClick: () => app.deleteSelection() });
+        { label: 'Delete', shortcut: 'Del', onClick: () => app.model.deleteSelection() });
       if (!spr) items.push('sep',
-        { label: 'Bring to front', shortcut: 'PgUp', title: 'Drawn after all other objects', onClick: () => app.reorderSelection('front') },
-        { label: 'Send to back', shortcut: 'PgDn', title: 'Drawn before all other objects', onClick: () => app.reorderSelection('back') },
+        { label: 'Bring to front', shortcut: 'PgUp', title: 'Drawn after all other objects', onClick: () => app.model.reorderSelection('front') },
+        { label: 'Send to back', shortcut: 'PgDn', title: 'Drawn before all other objects', onClick: () => app.model.reorderSelection('back') },
         // a placed prefab alone is one already: it can only be broken up
         'sep', n === 1 && isPlacedPrefab(one as LevelObject)
           ? { label: 'Break up', title: 'Replace the prefab here with the objects it was made from, or single Direct Map16 objects where those would look different (to edit it, then “Save as prefab …” again)', onClick: () => app.explodePrefab(one as LevelObject) }
           : { label: 'Save as prefab …', onClick: () => openSavePrefab(app) });
       items.push('sep', { label: 'Properties', onClick: () => app.emit('properties') });
     } else {
-      const clip = spr ? app.clipboard.sprites : app.clipboard.objects;
+      const clip = spr ? app.model.clipboard.sprites : app.model.clipboard.objects;
       items.push(
         { label: 'Paste here', shortcut: 'Ctrl+V', disabled: () => !clip?.length, onClick: () => app.paste(tx, ty) },
         { label: 'Insert by number …', shortcut: 'I', onClick: () => openInsertDialog(app, tx, ty) },
@@ -937,7 +937,7 @@ export class LevelView {
     } else {
       items.push({ label: 'Create exit', onClick: () => { app.selectScreen(scr); app.editLevel(() => { app.level.exits.push({ uid: newUid(), screen: scr, dest: app.level.number, secondary: false, flags: EXIT_NEW }); }, false); } });
     }
-    if (toExits) for (const it of items) if (typeof it === 'object' && 'onClick' in it) { const f = it.onClick; it.onClick = () => { if (app.mode !== 'exit') app.setMode('exit'); f(); }; }
+    if (toExits) for (const it of items) if (typeof it === 'object' && 'onClick' in it) { const f = it.onClick; it.onClick = () => { if (app.model.mode !== 'exit') app.setMode('exit'); f(); }; }
     return items;
   }
 

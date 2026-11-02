@@ -239,6 +239,12 @@ export class LevelModel {
     }));
   }
 
+  // a level edit remaking the level (screens inserted or deleted, the level cleared): f changes the open level, the
+  // selection cleared with it; when f throws, the level and the selection are as before and the error passed on
+  remake(f: (lv: Level) => void): boolean {
+    return this.host.edit((lv) => { f(lv); this.selection.clear(); });
+  }
+
   // the selected objects drawn last (front) or first (back), in their order
   reorderSelection(dir: 'front' | 'back'): void {
     if (this.mode === 'spr' || !this.selection.size) return;

@@ -246,7 +246,7 @@ function buildUi(app: App): { start: (at: NavLoc | null) => Promise<void> } {
   );
 
   const updateToolbar = () => {
-    for (const b of modes.querySelectorAll('button')) b.classList.toggle('active', b.dataset.mode === app.mode);
+    for (const b of modes.querySelectorAll('button')) b.classList.toggle('active', b.dataset.mode === app.model.mode);
     const btnL2 = modes.querySelector('[data-mode="l2"]') as HTMLButtonElement;
     btnL2.disabled = !app.level?.layer2Objects;
     (modes.querySelector('[data-mode="bg"]') as HTMLButtonElement).disabled = !app.level || !app.canEditBg();
@@ -388,7 +388,7 @@ function buildUi(app: App): { start: (at: NavLoc | null) => Promise<void> } {
     }
     // the view is only laid out while the level workspace is shown
     const c = workspace === 'level' ? view.centerTile() : null;
-    return { w: 'level', level: app.level.number, mode: app.mode, ...(c ? { cx: c.tx, cy: c.ty } : {}) };
+    return { w: 'level', level: app.level.number, mode: app.model.mode, ...(c ? { cx: c.tx, cy: c.ty } : {}) };
   };
   const restore = async (l: NavLoc): Promise<boolean> => {
     if (!(await setWorkspace(l.w))) return false;
@@ -403,7 +403,7 @@ function buildUi(app: App): { start: (at: NavLoc | null) => Promise<void> } {
     } else {
       if (l.level !== app.level.number) app.openLevel(l.level);
       const m = l.mode;
-      if (m && m !== app.mode && (m !== 'l2' || app.level.layer2Objects) && (m !== 'bg' || app.canEditBg())) app.setMode(m);
+      if (m && m !== app.model.mode && (m !== 'l2' || app.level.layer2Objects) && (m !== 'bg' || app.canEditBg())) app.setMode(m);
       if (l.cx !== undefined && l.cy !== undefined) {
         // after the level image is laid out
         await new Promise((r) => requestAnimationFrame(r));
@@ -422,7 +422,7 @@ function buildUi(app: App): { start: (at: NavLoc | null) => Promise<void> } {
     window.addEventListener('keydown', (e) => {
       if (!e.altKey || e.ctrlKey || e.metaKey || e.shiftKey || document.querySelector('.modal-back')) return;
       if (fieldTakesKey(e)) return;
-      if (workspace === 'level' && app.selection.size) return; // resizes the selection
+      if (workspace === 'level' && app.model.selection.size) return; // resizes the selection
       if (e.key === 'ArrowLeft') { e.preventDefault(); history.back(); } else if (e.key === 'ArrowRight') { e.preventDefault(); history.forward(); }
     });
     window.addEventListener('mouseup', (e) => {
@@ -468,12 +468,12 @@ function buildUi(app: App): { start: (at: NavLoc | null) => Promise<void> } {
       else if (k === 'Escape') void setWorkspace('level');
       return;
     }
-    if (ctrl && k.toLowerCase() === 'c') { app.copy(); return; }
+    if (ctrl && k.toLowerCase() === 'c') { app.model.copy(); return; }
     if (ctrl && k.toLowerCase() === 'v') { const hv = view.hover; if (hv) app.paste(hv.tx, hv.ty); return; }
     if (ctrl && k.toLowerCase() === 'd') { e.preventDefault(); app.duplicateSelection(); return; }
     if (ctrl && k.toLowerCase() === 'a') { e.preventDefault(); app.model.selectAll(); return; }
     if (picker.key(e)) { e.preventDefault(); return; }
-    if (k === 'Delete' || k === 'Backspace') { app.deleteSelection(); return; }
+    if (k === 'Delete' || k === 'Backspace') { app.model.deleteSelection(); return; }
     // Esc: a drag cancelled, else the selection cleared, else the picked item
     if (k === 'Escape') {
       if (view.cancelDrag()) return;
@@ -492,17 +492,17 @@ function buildUi(app: App): { start: (at: NavLoc | null) => Promise<void> } {
     else if (k === 't' || k === 'T') openTestPlay(app);
     else if (k === 'Insert' || k === 'i' || k === 'I') { e.preventDefault(); insertHere(); }
     else if (k === 'ArrowLeft' || k === 'ArrowRight' || k === 'ArrowUp' || k === 'ArrowDown') {
-      if (!app.selection.size) return;
+      if (!app.model.selection.size) return;
       e.preventDefault();
       const dx = k === 'ArrowLeft' ? -1 : k === 'ArrowRight' ? 1 : 0, dy = k === 'ArrowUp' ? -1 : k === 'ArrowDown' ? 1 : 0;
       if (e.altKey) app.resizeSelection(e.shiftKey ? -dx : dx, e.shiftKey ? -dy : dy, e.shiftKey); // (Shift: the left/top edges)
-      else app.moveSelection(dx, dy);
+      else app.model.moveSelection(dx, dy);
     } else if (k === '+' || k === '=') app.resizeSelection(1, 0);
     else if (k === '-' || k === '_') app.resizeSelection(-1, 0);
     else if (k === '*') app.resizeSelection(0, 1);
     else if (k === '/') app.resizeSelection(0, -1);
-    else if (k === 'PageUp') app.reorderSelection('front');
-    else if (k === 'PageDown') app.reorderSelection('back');
+    else if (k === 'PageUp') app.model.reorderSelection('front');
+    else if (k === 'PageDown') app.model.reorderSelection('back');
     else if (k === 'g' || k === 'G') { app.view.show.grid = !app.view.show.grid; view.paint(); }
     else if (k === 'c' || k === 'C') { app.view.show.collision = !app.view.show.collision; view.paint(); }
     else if ((k === 'v' || k === 'V') && e.shiftKey) view.placeGameViewByMario();

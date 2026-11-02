@@ -41,7 +41,7 @@ import { SecondaryEntrances, NO_FREE_ENTRANCE, entranceTables, entranceMarkers, 
 import type { RomHistory } from '../core/romhistory.ts';
 import type { EditOptions } from '../core/romedit.ts';
 import { EditSession, type LevelEdit, type StepResult } from '../core/editsession.ts';
-import { LevelModel, isBrushMode, type EditMode, type PickedItem, type Placement, type Clipboard } from '../core/levelmodel.ts';
+import { LevelModel, isBrushMode, type EditMode, type PickedItem, type Placement } from '../core/levelmodel.ts';
 import { resizeObjectSize, type ObjKind, type ObjKinds, type KindLevel } from '../core/objkinds.ts';
 import { sizeKey, sizeParts, partSizes, namedDrivers, ObjectBoxes, StepQueue, type Box, type Drivers, type SizeSpec } from '../core/objresize.ts';
 import { type JumpArc } from '../core/jumparcs.ts';
@@ -151,7 +151,8 @@ export class App {
   query!: RenderQuery;
   images!: LevelImages;
   compositeImg!: Uint32Array;
-  // the level editing model (levelmodel.ts): the edit mode, selection, picked item, clipboard and the object/sprite edits
+  // the level editing model (levelmodel.ts): the edit mode (changed through setMode, which checks and shows it),
+  // selection, picked item, clipboard and the object/sprite edits
   readonly model: LevelModel = new LevelModel({
     rom: () => this.rom,
     level: () => this.level,
@@ -161,15 +162,6 @@ export class App {
     geometry: () => ({ l1: this.images.geom1, l2: this.images.geom2 ?? null, vertical: this.vertical }),
     switchMode: (m) => this.setMode(m),
   });
-  // the edit mode: changed through setMode (or App's own level opening and exit jumps)
-  get mode(): EditMode { return this.model.mode; }
-  get selection(): Set<number> { return this.model.selection; }
-  set selection(s: Set<number>) { this.model.selection = s; }
-  // what a right click in the level places: the picked item, or – picked in the level after it – a copy of the selection
-  get pickedItem(): PickedItem | null { return this.model.pickedItem; }
-  set pickedItem(p: PickedItem | null) { this.model.pickedItem = p; }
-  get stampSelection(): boolean { return this.model.stampSelection; }
-  set stampSelection(b: boolean) { this.model.stampSelection = b; }
   // BG mode brush: a w×h block of BG Map16 tiles (row-major), picked from the picker sheet or the level
   bgBrush: Brush = { w: 1, h: 1, tiles: [0] };
   l3Brush: Brush = { w: 1, h: 1, tiles: [0] }; // layer 3 tilemap words
@@ -184,7 +176,6 @@ export class App {
   holdRender = false; // while drawing: the debounced re-emulation waits (it would stall the stroke)
   private quietUntil = 0; // and after a stroke until then (the next one often follows quickly)
   private persistTimer = 0;
-  get clipboard(): Clipboard { return this.model.clipboard; }
   // the arrangements of Direct Map16 objects pasted in the session (pastehint.ts); the hint to save the last
   // paste (its objects as placed in level/layer) as prefab, until it is dismissed or another level is opened
   private pastes = new PasteCounter();
@@ -356,7 +347,7 @@ export class App {
   // opens level n (the open one saved first, or its unsaved changes dropped with discard)
   openLevel(n: number, discard = false): void {
     this.edits.open(n, discard);
-    this.selection.clear();
+    this.model.selection.clear();
     this.exitScreen = 0;
     this.exitMarker = null;
     if (this.layerGone()) this.model.mode = 'l1';
@@ -403,7 +394,7 @@ export class App {
   // (a ROM edit elsewhere: the overworld, another level's data)
   refresh(): void {
     const lv = this.level, ov = this.buildOverrides();
-    const key = inputHash({ level: lv.number, ov, header: lv.header, secondary: lv.secondary, show: this.view.show, mode: this.mode });
+    const key = inputHash({ level: lv.number, ov, header: lv.header, secondary: lv.secondary, show: this.view.show, mode: this.model.mode });
     const was = this.rendered;
     if (was?.key === key && holds(this.rom, was)) {
       this.scheduleScan();
@@ -441,7 +432,7 @@ export class App {
 
   // the object layer not being edited is ghosted (only in levels with two object layers), editing layer 3 both
   compose(images = this.images): Uint32Array {
-    const ghost = !this.view.show.ghost ? 0 : this.mode === 'l3' ? 3 : this.mode === 'bg' ? 1 : this.level.layer2Objects ? (this.mode === 'l1' ? 2 : this.mode === 'l2' ? 1 : 0) : 0;
+    const ghost = !this.view.show.ghost ? 0 : this.model.mode === 'l3' ? 3 : this.model.mode === 'bg' ? 1 : this.level.layer2Objects ? (this.model.mode === 'l1' ? 2 : this.model.mode === 'l2' ? 1 : 0) : 0;
     return composite(images, this.view.show.layer1, this.view.show.layer2, ghost, this.view.show.layer3);
   }
 
@@ -576,14 +567,14 @@ export class App {
   // mode 'exit': chooses an entrance marker (null: the screen exitScreen)
   selectEntrance(m: { kind: Marker['kind']; index: number } | null): void {
     this.exitMarker = m && { kind: m.kind, index: m.index };
-    if (m) this.selection.clear();
+    if (m) this.model.selection.clear();
     this.emit('change');
   }
 
   // mode 'exit': chooses a screen (and its exit)
   selectScreen(scr: number): void {
     const ex = this.level.exits.find((x) => x.screen === scr);
-    this.selection = new Set(ex ? [ex.uid] : []);
+    this.model.selection = new Set(ex ? [ex.uid] : []);
     this.exitScreen = scr;
     this.exitMarker = null;
     this.emit('change');
@@ -901,16 +892,12 @@ export class App {
   }
 
   // ------------- queries -------------
-  currentObjects(): LevelObject[] {
-    return this.model.currentObjects();
-  }
-
   objectKey(layer2: boolean, idx: number): number {
     return objectKey(layer2, idx);
   }
 
   // grab area = every tile the object wrote (same as its outline), topmost first
-  objectAt(tx: number, ty: number, l2 = this.mode === 'l2'): LevelObject | null {
+  objectAt(tx: number, ty: number, l2 = this.model.mode === 'l2'): LevelObject | null {
     const g = l2 ? this.images.geom2 : this.images.geom1;
     const objs = l2 ? this.level.layer2Objects : this.level.objects;
     if (!g || !objs) return null;
@@ -934,22 +921,22 @@ export class App {
 
   // tiles covered by an object: array of packed (y<<16|x)
   objectTiles(o: LevelObject): number[] {
-    const objs = this.currentObjects();
-    return this.query.objectTiles(this.mode === 'l2', o, objs.indexOf(o));
+    const objs = this.model.currentObjects();
+    return this.query.objectTiles(this.model.mode === 'l2', o, objs.indexOf(o));
   }
 
   // the objects of the mode's layer with a tile (objectTiles) in the tile rectangle x0..x1, y0..y1
   objectsInBox(x0: number, y0: number, x1: number, y1: number): LevelObject[] {
-    return this.query.objectsInBox(this.mode === 'l2', this.currentObjects(), x0, y0, x1, y1);
+    return this.query.objectsInBox(this.model.mode === 'l2', this.model.currentObjects(), x0, y0, x1, y1);
   }
 
   // whether the object wrote a tile in the level's load
   objectDrawn(o: LevelObject): boolean {
-    return this.query.drawn(this.mode === 'l2', this.currentObjects().indexOf(o));
+    return this.query.drawn(this.model.mode === 'l2', this.model.currentObjects().indexOf(o));
   }
 
   // the objects of layer 1 (or 2) that wrote no tile in the level's load: shown as boxes (objboxes.ts)
-  boxedObjects(l2 = this.mode === 'l2'): LevelObject[] {
+  boxedObjects(l2 = this.model.mode === 'l2'): LevelObject[] {
     return layerBoxes(this.level, this.render.touched, l2);
   }
 
@@ -962,7 +949,7 @@ export class App {
 
   // Map16 tile numbers an object left in the level (tiles overwritten by later objects excluded)
   objectMap16(o: LevelObject): number[] {
-    return this.query.objectMap16(this.mode === 'l2', this.currentObjects().indexOf(o));
+    return this.query.objectMap16(this.model.mode === 'l2', this.model.currentObjects().indexOf(o));
   }
 
   // finished probes only (nothing is queued)
@@ -1344,13 +1331,6 @@ export class App {
     return out;
   }
 
-  selectedObjects(): LevelObject[] {
-    return this.model.selectedObjects();
-  }
-  selectedSprites(): LevelSprite[] {
-    return this.model.selectedSprites();
-  }
-
   levelWidthTiles(): number {
     return this.images.geom1.width;
   }
@@ -1371,7 +1351,7 @@ export class App {
   // A level edit putting lv in place of the open level (a level import, a package's sample level): one
   // undo step, the selection cleared
   replaceLevel(lv: Level): boolean {
-    this.selection.clear();
+    this.model.selection.clear();
     return this.edits.replaceLevel(lv);
   }
   // the level changed (outside a level edit too: as part of the latest step, or while dragging)
@@ -1387,7 +1367,7 @@ export class App {
   }
   // the open level has no layer for the edit mode (layer 2 objects, BG tilemap)
   private layerGone(): boolean {
-    return (this.mode === 'l2' && !this.level.layer2Objects) || (this.mode === 'bg' && !this.canEditBg());
+    return (this.model.mode === 'l2' && !this.level.layer2Objects) || (this.model.mode === 'bg' && !this.canEditBg());
   }
   // undoes the latest level or ROM edit
   undo(): void {
@@ -1414,11 +1394,11 @@ export class App {
       return;
     }
     // editing layer 3 shows it
-    const ghosts = this.level.layer2Objects || isBrushMode(m) || isBrushMode(this.mode);
-    const recompose = m !== this.mode && ((ghosts && this.view.show.ghost) || (m === 'l3' && !this.view.show.layer3));
+    const ghosts = this.level.layer2Objects || isBrushMode(m) || isBrushMode(this.model.mode);
+    const recompose = m !== this.model.mode && ((ghosts && this.view.show.ghost) || (m === 'l3' && !this.view.show.layer3));
     if (m === 'l3') this.view.show.layer3 = true;
     this.model.mode = m;
-    this.selection = new Set(selection);
+    this.model.selection = new Set(selection);
     if (recompose) this.recomposite();
     this.emit('mode');
     this.emit('change');
@@ -1500,7 +1480,7 @@ export class App {
     this.emit('bgtile');
   }
 
-  insertAt(tx: number, ty: number, p: PickedItem | null = this.pickedItem): void {
+  insertAt(tx: number, ty: number, p: PickedItem | null = this.model.pickedItem): void {
     if (!p) { toast('Choose an object/sprite in the picker first.'); return; }
     this.model.insertAt(tx, ty, p);
   }
@@ -1539,14 +1519,14 @@ export class App {
 
   // what the selected objects left in the level as a block of tiles (RenderQuery.tileCut)
   prefabFromSelection(): TileCut | string {
-    if (!this.selectedObjects().length || (this.mode !== 'l1' && this.mode !== 'l2')) return 'Select objects in the level first (layer 1 or 2).';
-    return this.query.tileCut(this.mode === 'l2', this.currentObjects(), (o) => this.selection.has(o.uid));
+    if (!this.model.selectedObjects().length || (this.model.mode !== 'l1' && this.model.mode !== 'l2')) return 'Select objects in the level first (layer 1 or 2).';
+    return this.query.tileCut(this.model.mode === 'l2', this.model.currentObjects(), (o) => this.model.selection.has(o.uid));
   }
 
   // where the arrangement of prefab s already is as Direct Map16 objects (prefabplaces.ts): the open level as
   // edited (not its selected objects, unless all) and all other levels as saved
   prefabPlaces(s: Prefab, all = false): LevelPlaces[] {
-    const open = this.level.number, layer = this.mode === 'l2' ? 2 : 1, sel = new Set(all ? [] : this.selectedIndices());
+    const open = this.level.number, layer = this.model.mode === 'l2' ? 2 : 1, sel = new Set(all ? [] : this.selectedIndices());
     return planPrefabPlaces(this.rom, s, {
       levels: usedLevels(this.rom),
       level: (n) => (n === open ? this.level : loadLevel(this.rom, n)),
@@ -1555,7 +1535,7 @@ export class App {
     });
   }
   private selectedIndices(): number[] {
-    return this.currentObjects().flatMap((o, i) => (this.selection.has(o.uid) ? [i] : []));
+    return this.model.currentObjects().flatMap((o, i) => (this.model.selection.has(o.uid) ? [i] : []));
   }
 
   // stores the selection as prefab n; replace: the selected objects become one prefab object (at the place of
@@ -1564,9 +1544,9 @@ export class App {
   saveSelectionAsPrefab(n: number, name: string, replace: boolean, places: LevelPlaces[] = []): boolean {
     const r = this.prefabFromSelection();
     if (typeof r === 'string') { toast(r, 'error'); return false; }
-    const open = this.level.number, layer = this.mode === 'l2' ? 2 : 1;
+    const open = this.level.number, layer = this.model.mode === 'l2' ? 2 : 1;
     const selection: PrefabGroup = { layer, x: r.x, y: r.y, objects: this.selectedIndices() };
-    const sources = { objects: this.currentObjects().filter((o) => this.selection.has(o.uid)), x: r.x, y: r.y };
+    const sources = { objects: this.model.currentObjects().filter((o) => this.model.selection.has(o.uid)), x: r.x, y: r.y };
     const plan: LevelGroups[] = places.map((p) => ({ level: p.level, places: [...p.places] }));
     if (replace && plan.length) {
       let here = plan.find((p) => p.level === open);
@@ -1579,12 +1559,12 @@ export class App {
       // objects replaced before it
       const last = Math.max(...selection.objects), gs = plan.find((p) => p.level === open)!.places.filter((g) => g.layer === layer);
       const at = last + 1 - gs.flatMap((g) => g.objects).filter((i) => i <= last).length + gs.filter((g) => Math.max(...g.objects) < last).length;
-      const o = this.currentObjects()[at];
-      if (o) { this.selection = new Set([o.uid]); this.emit('change'); }
+      const o = this.model.currentObjects()[at];
+      if (o) { this.model.selection = new Set([o.uid]); this.emit('change'); }
     } else if (replace) {
-      this.editLevel((lv) => { this.selection = new Set(replaceWithPrefab(lv, n, [selection]).map((o) => o.uid)); });
+      this.editLevel((lv) => { this.model.selection = new Set(replaceWithPrefab(lv, n, [selection]).map((o) => o.uid)); });
     }
-    this.pickedItem = { kind: 'obj', num: 0, ext: PREFAB_EXT, size: 0, prefab: n };
+    this.model.pickedItem = { kind: 'obj', num: 0, ext: PREFAB_EXT, size: 0, prefab: n };
     return true;
   }
 
@@ -1593,7 +1573,7 @@ export class App {
     if (!this.storePrefab(n, s, places, places)) return false;
     // its places replaced: not offered any more (the next background run doesn't find it either)
     if (places.length) this.suggestions.drop(arrangementKey(s));
-    this.pickedItem = { kind: 'obj', num: 0, ext: PREFAB_EXT, size: 0, prefab: n };
+    this.model.pickedItem = { kind: 'obj', num: 0, ext: PREFAB_EXT, size: 0, prefab: n };
     return true;
   }
 
@@ -1670,17 +1650,9 @@ export class App {
       const { objects, layer2Objects } = replaced(lv, o, r.parts);
       lv.objects = objects;
       if (layer2Objects) lv.layer2Objects = layer2Objects;
-      this.selection = new Set(r.parts.map((p) => p.uid));
+      this.model.selection = new Set(r.parts.map((p) => p.uid));
     });
     if (r.differs) toast('Its objects would look different here: broken up into single tiles.', 'info');
-  }
-
-  deleteSelection(): void {
-    this.model.deleteSelection();
-  }
-
-  moveSelection(dx: number, dy: number): void {
-    this.model.moveSelection(dx, dy);
   }
 
   // resize: width/height nibbles of settings byte by one step each; the left and top edges stay where they
@@ -1691,7 +1663,7 @@ export class App {
   }
   private keyResizes = new StepQueue();
   private resizeStep(dw: number, dh: number, far: boolean, retry: () => void): boolean {
-    const objs = this.selectedObjects().filter((o) => this.resizable(o));
+    const objs = this.model.selectedObjects().filter((o) => this.resizable(o));
     if (!objs.length) return true;
     const sized = objs.map((o) => resizeObjectSize(this.objectKind(o.num), o.size, dw, dh));
     if (!this.askSizes(objs.flatMap((o, i) => [this.sizeSpec(o, o.size), this.sizeSpec(o, sized[i])]), retry)) return false;
@@ -1749,7 +1721,7 @@ export class App {
   }
   private sizesAsked: string | null = null; // the sizes' key (sizeLevel) and the selection whose sizes are asked for
   private prefetchSizes(): void {
-    const objs = this.mode === 'l1' || this.mode === 'l2' ? this.selectedObjects().filter((o) => this.resizable(o)).slice(0, 32) : [];
+    const objs = this.model.mode === 'l1' || this.model.mode === 'l2' ? this.model.selectedObjects().filter((o) => this.resizable(o)).slice(0, 32) : [];
     if (!objs.length) return;
     const key = `${this.sizeLevel().key}/${objs.map((o) => `${o.uid}.${o.size}`).join()}`;
     if (this.sizesAsked === key) return;
@@ -1759,18 +1731,11 @@ export class App {
 
   // copies the selection and pastes it one tile down-right (Ctrl+D)
   duplicateSelection(): void {
-    this.copy();
+    this.model.copy();
     const s = this.model.selectedItems();
     if (s[0]) this.paste(s[0].x + 1, s[0].y + 1);
   }
 
-  reorderSelection(dir: 'front' | 'back'): void {
-    this.model.reorderSelection(dir);
-  }
-
-  copy(): void {
-    this.model.copy();
-  }
   paste(tx: number, ty: number): void {
     this.placeCopy(this.model.clipboardItems(), tx, ty);
   }
@@ -1779,14 +1744,10 @@ export class App {
     if (this.model.copiesSelection()) this.placeCopy(this.model.selectedItems(), tx, ty);
     else this.insertAt(tx, ty);
   }
-  // what a right click at tile (tx, ty) places (placeAt); null: nothing (only layer 1/2 and sprites place)
-  placement(tx: number, ty: number): Placement | null {
-    return this.model.placement(tx, ty);
-  }
   // The placement preview at tile (tx, ty): the placement as the level shows it once placed – objects drawn by
   // the level's load with them added (learned in the background: undefined until known), sprites with their images
   placementPreview(tx: number, ty: number): PreviewPart[] | undefined {
-    const pl = this.placement(tx, ty);
+    const pl = this.model.placement(tx, ty);
     if (!pl) return [];
     const parts: PreviewPart[] = pl.sprites.map((s) => {
       const img = this.spriteImageOf(s) ?? null;
@@ -1799,9 +1760,9 @@ export class App {
   // (the latest asked for, also while it is learned)
   private previewMemo: { render: LevelRender | null; sig: string; part: PreviewPart | null | undefined } = { render: null, sig: '', part: undefined };
   private objectsPreview(objects: LevelObject[]): PreviewPart | null | undefined {
-    const sig = JSON.stringify([this.mode, objects.map((o) => ({ ...o, uid: 0 }))]), m = this.previewMemo;
+    const sig = JSON.stringify([this.model.mode, objects.map((o) => ({ ...o, uid: 0 }))]), m = this.previewMemo;
     if (m.render === this.render && m.sig === sig) return m.part;
-    const l2 = this.mode === 'l2', rom = this.rom, base = this.currentObjects();
+    const l2 = this.model.mode === 'l2', rom = this.rom, base = this.model.currentObjects();
     const lv: Level = l2 ? { ...this.level, layer2Objects: [...base, ...objects] } : { ...this.level, objects: [...base, ...objects] };
     const ov = this.buildOverrides(lv), g = l2 ? this.images.geom2 : this.images.geom1;
     if (!g) return null;
@@ -1816,24 +1777,24 @@ export class App {
 
   // the picked item chosen in the picker: the level's selection cleared (it would be copied by a right click)
   choosePickedItem(p: PickedItem): void {
-    this.pickedItem = p;
+    this.model.pickedItem = p;
     this.model.clearSelection();
     this.emit('picked-item');
   }
   // no picked item any more
   clearPickedItem(): void {
-    if (!this.pickedItem) return;
-    this.pickedItem = null;
+    if (!this.model.pickedItem) return;
+    this.model.pickedItem = null;
     this.emit('picked-item');
   }
 
   // copies of the items with their upper left at tile (tx, ty), selected
   private placeCopy(items: (LevelObject | LevelSprite)[], tx: number, ty: number): void {
     if (!this.model.placeCopy(items, tx, ty)) return;
-    if (this.mode !== 'l1' && this.mode !== 'l2') return;
-    const pasted = this.selectedObjects();
+    if (this.model.mode !== 'l1' && this.model.mode !== 'l2') return;
+    const pasted = this.model.selectedObjects();
     const hint = this.pastes.paste(pasted);
-    if (hint) this.setPasteHint({ ...hint, level: this.level.number, layer: this.mode, objects: structuredClone(pasted) });
+    if (hint) this.setPasteHint({ ...hint, level: this.level.number, layer: this.model.mode, objects: structuredClone(pasted) });
   }
   setPasteHint(h: PasteHintAt | null): void {
     this.pasteHint = h;
@@ -1854,8 +1815,8 @@ export class App {
   selectPasteHint(): boolean {
     const p = this.pasteHint, uids = this.pasteHintObjects();
     if (!p || !uids) return false;
-    if (this.mode !== p.layer) this.setMode(p.layer, uids);
-    else { this.selection = new Set(uids); this.emit('change'); }
+    if (this.model.mode !== p.layer) this.setMode(p.layer, uids);
+    else { this.model.selection = new Set(uids); this.emit('change'); }
     return true;
   }
 

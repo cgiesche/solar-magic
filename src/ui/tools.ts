@@ -95,7 +95,7 @@ export function openEntrancesDialog(app: App): void {
   const openTarget = (to: number) => {
     const idx = sel;
     if (to !== app.level.number) app.openLevel(to);
-    if (app.mode !== 'exit') app.setMode('exit');
+    if (app.model.mode !== 'exit') app.setMode('exit');
     app.exitMarker = { kind: 'sec', index: idx };
     app.revealMarker();
   };
@@ -145,7 +145,7 @@ export function openExpandDialog(app: App): void {
 
 // one undoable structural edit of the current level
 function levelEdit(app: App, f: () => void): boolean {
-  try { app.editLevel(() => { f(); app.selection.clear(); }); } catch (e) { toast(String(e instanceof Error ? e.message : e), 'error'); return false; }
+  try { app.model.remake(f); } catch (e) { toast(String(e instanceof Error ? e.message : e), 'error'); return false; }
   app.emit('level-header');
   return true;
 }
@@ -227,8 +227,8 @@ export async function importLevel(app: App): Promise<boolean> {
 
 // Insert by number (like Lunar Magic's manual insert): object, extended object or sprite at tile (tx, ty)
 export function openInsertDialog(app: App, tx: number, ty: number): void {
-  const p = app.pickedItem;
-  let kind: 0 | 1 | 2 = app.mode === 'spr' ? 2 : p?.kind === 'obj' && p.num === 0 ? 1 : 0;
+  const p = app.model.pickedItem;
+  let kind: 0 | 1 | 2 = app.model.mode === 'spr' ? 2 : p?.kind === 'obj' && p.num === 0 ? 1 : 0;
   let num = p?.kind === 'spr' ? (kind === 2 ? p.num : 1) : p ? (p.num || p.ext) : 1;
   let size = p?.kind === 'obj' ? p.size : 0;
   let extra = p?.kind === 'spr' ? p.extra : 0;
@@ -262,7 +262,7 @@ export function openInsertDialog(app: App, tx: number, ty: number): void {
     if (kind === 2) {
       app.insertAt(tx, ty, { kind: 'spr', num, extra });
     } else {
-      if (app.mode !== 'l1' && app.mode !== 'l2') app.setMode('l1');
+      if (app.model.mode !== 'l1' && app.model.mode !== 'l2') app.setMode('l1');
       if (kind === 0 && num === 0) { toast('There is no object 00 – use “Extended object” for extended objects.', 'error'); return false; }
       if (kind === 1 && num === DM16_EXT) { toast('Please place Direct Map16 via the picker\'s Map16 tab.', 'error'); return false; }
       if (kind === 1 && num === PREFAB_EXT) { toast('Please place prefabs via the picker\'s Objects tab (Prefabs).', 'error'); return false; }

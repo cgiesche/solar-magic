@@ -1,6 +1,6 @@
 // The level editing model (core/levelmodel.ts), headless: placing picked items and copies, copy/paste, delete, move,
 // resize and reorder in each mode, clamped against the level's geometry, each one undoable level edit; the selection
-// changed by the views, property edits and the level view's move and resize drags.
+// changed by the views, property edits, the level view's move and resize drags and edits remaking the level.
 import { Rom } from '../src/core/rom.ts';
 import { EditSession } from '../src/core/editsession.ts';
 import { LevelModel, type LevelGeometry, type EditMode } from '../src/core/levelmodel.ts';
@@ -288,6 +288,22 @@ const spr = (m: LevelModel, uid: number) => m.level.sprites.find((s) => s.uid ==
   c.aim(15, 10);
   c.cancel();
   check(obj(m, a.uid).size === 0, 'resize drag cancelled: undone');
+}
+
+// a level edit remaking the level (screens inserted or deleted, the level cleared): the selection cleared with it,
+// one undo step
+{
+  const { s, m } = setup();
+  m.selectAll();
+  const n0 = s.level.objects.length;
+  check(m.remake((lv) => { lv.objects = []; }), 'remake: done');
+  check(s.level.objects.length === 0 && m.selection.size === 0, 'remake: changed, the selection cleared');
+  s.undo();
+  check(s.level.objects.length === n0, 'remake: undone in one step');
+  m.selectAll();
+  let thrown = false;
+  try { m.remake(() => { throw new Error('no room'); }); } catch { thrown = true; }
+  check(thrown && m.selection.size === n0 && s.level.objects.length === n0, 'remake failing: the error passed on, level and selection kept');
 }
 
 if (bad) { console.log(`${bad} failed`); process.exit(1); }
