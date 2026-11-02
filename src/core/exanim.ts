@@ -145,6 +145,7 @@ export function frameWords(type: number, trigger: number, framesLess1: number, o
 // an overworld event trigger (01-08: Lunar Magic's "Event Manual 8-F") and the manual frame holding its event
 export const isEventTrigger = (t: number) => t >= 1 && t <= 8;
 export const eventManual = (t: number) => t + 7;
+export const eventTriggerOf = (manual: number) => manual - 7; // (manual frame 8-F)
 
 export const TYPE_NAMES: Record<number, string> = {
   0x01: '1 tile', 0x02: '2 tiles side by side', 0x03: '3 tiles', 0x04: '4 tiles side by side', 0x05: '5 tiles', 0x06: '6 tiles', 0x07: '7 tiles', 0x08: '8 tiles',

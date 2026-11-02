@@ -200,7 +200,9 @@ The editor does better: its load (`ow_setup`, also when Mario walks to another s
 the Trigger Init, and its event code takes `$78`–`$FF` for no event, so such a trigger never holds, whatever was played
 before; Manual 0–7 keep what was left, as in Lunar Magic. A level entered from the overworld finds `$FF` in Manual 8–F
 where its own Trigger Init sets nothing (the engine's "nothing shown yet": a manual trigger 18–1F shows no frame until
-code sets one). Since 18–1F read the bytes of 01–08's events on the overworld, the Animations tab warns when an overworld
+code sets one). Code that sets an event number there for the overworld has to do it after the load's hook
+(`$048086`): what a level or code before it wrote is gone, where Lunar Magic keeps it. Only ROMs Lunar Magic 3.31 and
+3.40 saved were traced. Since 18–1F read the bytes of 01–08's events on the overworld, the Animations tab warns when an overworld
 list (the submap's or the global one) uses a manual trigger 18–1F and the event trigger of the same byte.
 
 ### `$7FC00B`

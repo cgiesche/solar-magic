@@ -9,7 +9,7 @@
 // The view switches triggers after the level's load (applyTriggers, LevelOverride.exTriggers): the engine
 // then runs as in the game.
 
-import { kindOf, secondSet, triggerName, reversesOnTrigger, isEventTrigger, eventManual, type ExList, type SlotKind } from './exanim.ts';
+import { kindOf, secondSet, triggerName, reversesOnTrigger, isEventTrigger, eventManual, eventTriggerOf, type ExList, type SlotKind } from './exanim.ts';
 import { RAM, EXTRIGGER_RAM } from './ram.ts';
 
 export { EXTRIGGER_RAM };
@@ -60,7 +60,7 @@ const addr = (a: number) => `$${hx(a, a > 0xffff ? 6 : 4)}`;
 // as in Lunar Magic's help; 8-bit A for a manual frame); null for those without RAM; ow: in an overworld list
 export function triggerRam(t: number, ow = false): { ram: string; what: string; asm?: string; off?: string } | null {
   if (ow && isEventTrigger(t)) {
-    return { ram: addr(EXTRIGGER_RAM.manual + eventManual(t)), what: `the event's number (Manual ${hx(eventManual(t), 1)}, set by Trigger Init; without it FF from the overworld's load: never); it holds while that event is passed (${addr(RAM.owEvents)}, a bit each)` };
+    return { ram: addr(EXTRIGGER_RAM.manual + eventManual(t)), what: `the event's number (Manual ${hx(eventManual(t), 1)}, set by Trigger Init – without it the trigger never holds); it holds while that event is passed (${addr(RAM.owEvents)}, a bit each)` };
   }
   if (isManual(t)) {
     const a = addr(EXTRIGGER_RAM.manual + (t - MANUAL));
@@ -194,7 +194,7 @@ export function triggerProblems(level: ExList | null, global: ExList | null, ow 
     }
     const own = g ? 'Global' : ow ? 'Submap' : 'Level';
     for (const [n, f] of l.manual) if (f !== 0xff && f >= (manualFrames.get(n) ?? 0x100)) out.push({ text: `${own} Trigger Init: Manual ${hx(n, 1)} starts at frame ${hx(f, 2)}, but a slot using it has only ${manualFrames.get(n)} frames – it shows frame 00 there`, slots: [] });
-    for (const [n, f] of l.manual) if (ow && n >= 8 && f >= OW_EVENTS) out.push({ text: `${own} Trigger Init: the event of ${trigger(n - 7)} is ${hx(f, 2)} – the overworld has events 00–${hx(OW_EVENTS - 1, 2)}; the trigger never holds`, slots: [] });
+    for (const [n, f] of l.manual) if (ow && n >= 8 && f >= OW_EVENTS) out.push({ text: `${own} Trigger Init: the event of ${trigger(eventTriggerOf(n))} is ${hx(f, 2)} – the overworld has events 00–${hx(OW_EVENTS - 1, 2)}; the trigger never holds`, slots: [] });
     for (const [n, f] of l.manual) if (f === 0xff && !(ow && n >= 8)) out.push({ text: `${own} Trigger Init: Manual ${hx(n, 1)} starts at frame FF – the engine takes FF for “nothing shown yet”, so the frame never shows; choose 00–FE`, slots: [] });
     // the precision timer: its slots and the first of their 8 move one counter on, each at the frames it
     // has (from 0 again past its last), so with different frame counts they skip frames
@@ -210,8 +210,8 @@ export function triggerProblems(level: ExList | null, global: ExList | null, ow 
   const using = (t: number): SlotRef[] => ([[false, level], [true, global]] as const).flatMap(([g, l]) =>
     [...l?.slots ?? []].filter(([, e]) => e.trigger === t && kindOf(e.type)).sort((a, b) => a[0] - b[0]).map(([slot]) => ({ global: g, slot })));
   if (ow) for (let n = 8; n < 16; n++) {
-    const manual = using(MANUAL + n), event = using(n - 7);
-    if (manual.length && event.length) out.push({ text: `${trigger(MANUAL + n)} (${manual.map(name).join(', ')}) and ${trigger(n - 7)} (${event.map(name).join(', ')}) read the same byte (${addr(EXTRIGGER_RAM.manual + n)}): its value is the frame of the one and the event of the other – choose Manual 0–7 for the manual slots`, slots: [...manual, ...event] });
+    const manual = using(MANUAL + n), event = using(eventTriggerOf(n));
+    if (manual.length && event.length) out.push({ text: `${trigger(MANUAL + n)} (${manual.map(name).join(', ')}) and ${trigger(eventTriggerOf(n))} (${event.map(name).join(', ')}) read the same byte (${addr(EXTRIGGER_RAM.manual + n)}): its value is the frame of the one and the event of the other – choose Manual 0–7 for the manual slots`, slots: [...manual, ...event] });
   }
   return out;
 }

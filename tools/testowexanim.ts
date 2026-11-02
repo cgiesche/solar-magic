@@ -109,15 +109,15 @@ const tiles = (shots: Shot[], word: number) => new Set(shots.map((x) => tile(x.v
 // the game's tile animation: the tiles it uploads from $0AF6 to VRAM $0750 on
 const gameTiles = (x: Shot) => x.vram.slice(0x0ea0, 0x0ea0 + 0x160).join();
 // first: the frame the game loaded the new submap's palette (the window closed, the tileset $1931 changed); vram:
-// changes VRAM before
-function walk(rom: Rom, frames: number, vram?: (v: Uint8Array) => void): { shots: Shot[]; submap: number; main: Shot[]; first: Shot | null } {
+// changes VRAM (and WRAM) before
+function walk(rom: Rom, frames: number, vram?: (v: Uint8Array, w: Uint8Array) => void): { shots: Shot[]; submap: number; main: Shot[]; first: Shot | null } {
   const emu = new LevelEmulator(rom), s = emu.snes, w = s.wram;
   const i = l1Index(0, 2, 0x13);
   emu.startGameAt(i);
   w[RAM.submap] = w[RAM.submap + 1] = 0;
   emu.reloadOverworld();
   w[RAM.owTranslevels + i] = 1; w[RAM.levelFlags + 1] = 0x0f;
-  vram?.(s.vram);
+  vram?.(s.vram, w);
   const mainShots: Shot[] = [];
   for (let f = 0; f < 16; f++) { s.runFrame(); mainShots.push({ vram: s.vram.slice(), cgram: s.cgram.slice(), wram: s.wram.slice() }); }
   let walked = false, first: Shot | null = null;
@@ -134,8 +134,12 @@ function walk(rom: Rom, frames: number, vram?: (v: Uint8Array) => void): { shots
   return { shots, submap: w[RAM.submap], main: mainShots, first };
 }
 {
-  const wk = walk(rom, 24), t = seen(wk.shots, T);
+  // (Manual 8-F set on the main map: the walk's setup gives them FF again, as the load, #261)
+  const M = EXTRIGGER_RAM.manual - 0x7e0000;
+  const wk = walk(rom, 24, (_, w) => w.fill(0x0b, M + 8, M + 16)), t = seen(wk.shots, T);
   check(wk.submap === 1 && tiles(wk.main, T).size === 1 && t.has(0x11) && t.has(0x22), `walked from the main map (not animated there) onto Yoshi's Island: its tile animates (${[...t].map((v) => hx(v)).join(' ')})`);
+  const m = wk.shots[0].wram.subarray(M + 8, M + 16);
+  check(m.every((v) => v === 0xff), `and Manual 8–F are FF there (${[...m].map((v) => hx(v)).join(' ')})`);
 }
 {
   // set up where the game loads the new submap's palette, the screen off, as at the load: once the window has closed
