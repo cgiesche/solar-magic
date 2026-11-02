@@ -46,6 +46,12 @@ export function customEntrySize(sizes: Uint8Array | null, id: number): number {
   return Math.max(MIN_SIZE, Math.min(MAX_SIZE, n));
 }
 export const customExtraBytes = (sizes: Uint8Array | null, id: number): number => customEntrySize(sizes, id) - 3;
+// a sprite as it can be placed: its position kept on the submap, as many extra bytes as its sprite takes (those it had
+// kept, the others 0)
+export function fitCustomSprite(sizes: Uint8Array | null, s: CustomOwSprite): CustomOwSprite {
+  const c = (v: number) => Math.max(0, Math.min(OW_CUSTOM_POS_MAX, v));
+  return { ...s, x: c(s.x), y: c(s.y), extra: Array.from({ length: customExtraBytes(sizes, s.id) }, (_, k) => s.extra[k] ?? 0) };
+}
 
 // the table's address, null when there is none
 export function customTable(rom: Rom): number | null {

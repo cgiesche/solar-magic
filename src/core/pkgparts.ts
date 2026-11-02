@@ -22,7 +22,7 @@ import { suggestCalls, placed, type PkgRules } from './pkgmap.ts';
 import { isSongText, songsFromFiles, loadMusicProject, emptyMusicProject, addSongs, addSfx, nextFreeSong, folders as musicFolders, saveMusicProject, hasAmk, musicEntry } from './music.ts';
 import { pixiParts, planPixiUpload, applyPixiUpload, spriteFiles, linkedDefines, hexNum, type PixiPlan } from './pixipkg.ts';
 import { parseCfg, parseJsonCfg, readPixiList, FOLDER, type PixiLevelEntry } from './pixi.ts';
-import { bowsieUploadSprites, applyBowsieUpload } from './bowsie.ts';
+import { bowsieSpriteFiles, applyBowsieUpload } from './bowsie.ts';
 import { detectBlocks, applyBlocks, applyGraphics, routinesCalled, planPackage, plannedFgTiles, type DetectedBlock, type DetectedGraphics, type PackagePlan } from './pkgplan.ts';
 import { loadProject, saveProject, emptyProject, projectFromFiles, addCall, isUberList, type UberProject } from './uberproject.ts';
 import { setLevelMusic } from './patches.ts';
@@ -373,7 +373,7 @@ const owsprite: PartAdapter<'owsprite'> = {
   claims(d) {
     if (!d.code || d.callisto) return [];
     const out: FileClaim[] = [];
-    for (const f of bowsieUploadSprites(d.files)) {
+    for (const f of bowsieSpriteFiles(d.files)) {
       out.push({ file: f, rank: RANK.content, part: { kind: 'owsprite', name: base(f).replace(/\.asm$/i, ''), file: f } });
       const dir = dirOf(f);
       for (const p of d.paths) if (p !== f && dirOf(p) === dir && !d.docs.includes(p)) out.push({ file: p, rank: RANK.content, of: f });

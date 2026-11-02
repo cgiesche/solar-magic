@@ -118,7 +118,7 @@ const slots = (w: Uint8Array) => Array.from({ length: 24 }, (_, k) => ({ num: ge
   check(main.length === 1 && !!i && i.ox === 0xa0 && i.oy === 0x60 && i.w >= 16, `main map: drawn at ${i && `${hx(i.ox)},${hx(i.oy)} ${i.w}x${i.h}`}`);
   check(yi.length === 1 && !!j && j.ox === 0x50 && j.oy === 0x70 - 0x10 && yi[0].z === 0x10, `Yoshi's Island: drawn at ${j && `${hx(j.ox)},${hx(j.oy)}`}, height ${yi[0]?.z}`);
   const looks = customSpriteLooks(loads, [4, 0x0c, 0x30]);
-  check(!!looks[0] && looks[0].w === 16 && !looks[2], `the palette: 04 ${looks[0] && `${looks[0].w}x${looks[0].h} at ${looks[0].ox},${looks[0].oy}`}, 0C ${looks[1] ? 'drawn' : 'none'}, 30 (no sprite) none`);
+  check(!!looks[0] && looks[0].w === 16 && !!i && looks[0].ox === i.ox - 0xa0 && looks[0].oy === i.oy - 0x60 && !looks[2], `the palette (offsets from the sprite's position as on the map): 04 ${looks[0] && `${looks[0].w}x${looks[0].h} at ${looks[0].ox},${looks[0].oy}`}, 0C ${looks[1] ? 'drawn' : 'none'}, 30 (no sprite) none`);
 }
 
 // removed: the ROM as before but the table (now with 3-byte entries… back to 4) and its pointer
@@ -143,7 +143,7 @@ const slots = (w: Uint8Array) => Array.from({ length: 24 }, (_, k) => ({ num: ge
   const parts = pv.status === 'ready' ? pv.parts : [];
   check(parts.length === 18 && parts.every((p) => p.kind === 'owsprite') && pv.status === 'ready' && !pv.unclaimed.length, `the originals: ${parts.length} overworld sprites, ${pv.status === 'ready' ? pv.unclaimed.length : '?'} files unclaimed`);
   const pick = Object.fromEntries(Object.entries(zip).filter(([k]) => /PiranhaPlant|Cloud\.|OriginalSMWSpriteDefines/.test(k)));
-  pick['list.txt'] = new TextEncoder().encode('20 OWSpr05_Cloud.asm\n');
+  pick['list.txt'] = new TextEncoder().encode('; numbers\nnot an entry\n80 OWSpr04_PiranhaPlant.asm\n20 OWSpr05_Cloud.asm\n'); // (the bad lines left out)
   const r2 = new Rom(clean.slice());
   const up = inspectUpload('Two.zip', zipSync(pick)) as ReadyPreview;
   const res = await installPackage(r2, up, { level: 0x105, blank: [0, 0, 0, 0], tileWords: () => [0, 0, 0, 0] });

@@ -37,16 +37,18 @@ const base = (f: string) => f.slice(f.lastIndexOf('/') + 1);
 
 // ---------------------------------------------------------------- list.txt
 
-export function parseBowsieList(text: string): BowsieEntry[] {
+// list.txt's entries (files below sprites/); a line that is no entry, a number outside 01–7E or twice throws – or,
+// with `bad`, is left out after telling it
+export function parseBowsieList(text: string, bad: (why: string) => void = (why) => { throw new Error(why); }): BowsieEntry[] {
   const out: BowsieEntry[] = [];
   text.split(/\r?\n/).forEach((raw, i) => {
     const line = raw.trim();
     if (!line || line.startsWith(';')) return;
     const m = /^([0-9a-f]{1,2})\s+(.+\.asm)"?$/i.exec(line.replace(/"/g, ''));
-    if (!m) throw new Error(`list.txt line ${i + 1}: unrecognized entry “${line}”`);
+    if (!m) { bad(`list.txt line ${i + 1}: unrecognized entry “${line}”`); return; }
     const num = parseInt(m[1], 16);
-    if (num < BOWSIE_FIRST || num > BOWSIE_LAST) throw new Error(`list.txt line ${i + 1}: number ${m[1]} is outside 01–7E`);
-    if (out.some((e) => e.num === num)) throw new Error(`list.txt line ${i + 1}: number ${m[1]} twice`);
+    if (num < BOWSIE_FIRST || num > BOWSIE_LAST) { bad(`list.txt line ${i + 1}: number ${m[1]} is outside 01–7E`); return; }
+    if (out.some((e) => e.num === num)) { bad(`list.txt line ${i + 1}: number ${m[1]} twice`); return; }
     out.push({ num, file: 'sprites/' + m[2].trim().replace(/\\/g, '/') });
   });
   return out;
@@ -287,9 +289,8 @@ export function syncBowsieMaxTile(rom: Rom): string[] {
 
 // ---------------------------------------------------------------- packages
 
-// the sprites of an upload (their .asm files) and, per sprite, the files going with it: its folder's (the .json next
-// to it, what it includes), without other sprites' own files
-export function bowsieUploadSprites(files: Map<string, Uint8Array>): string[] {
+// the sprites among files (an upload's, a project's): their .asm files, sorted
+export function bowsieSpriteFiles(files: Map<string, Uint8Array>): string[] {
   return [...files.keys()].filter((f) => /\.asm$/i.test(f) && isBowsieSprite(dec.decode(files.get(f)!))).sort();
 }
 
@@ -300,17 +301,15 @@ function destOf(f: string): string {
   return 'sprites/' + (i >= 0 ? parts.slice(i + 1) : parts.slice(Math.max(0, parts.length - 2))).join('/');
 }
 
-// the numbers a BOWSIE list.txt of the upload gives its sprites (by the sprite's file)
+// the numbers a BOWSIE list.txt of the upload gives its sprites (by the sprite's file; what isn't an entry is left out)
 function listedNumbers(files: Map<string, Uint8Array>, sprites: string[]): Map<string, number> {
   const out = new Map<string, number>();
   for (const [f, data] of files) {
     if (!/(^|\/)list\.txt$/i.test(f)) continue;
-    for (const line of dec.decode(data).split(/\r?\n/)) {
-      const m = /^\s*([0-9a-f]{1,2})\s+"?([^"]+\.asm)"?\s*$/i.exec(line);
-      if (!m) continue;
-      const file = sprites.find((s) => s.toLowerCase().endsWith('/' + m[2].replace(/\\/g, '/').toLowerCase()) || s.toLowerCase() === m[2].toLowerCase());
-      const n = parseInt(m[1], 16);
-      if (file && !out.has(file) && n >= BOWSIE_FIRST && n <= BOWSIE_LAST) out.set(file, n);
+    for (const e of parseBowsieList(dec.decode(data), () => {})) {
+      const rel = e.file.replace(/^sprites\//, '').toLowerCase();
+      const file = sprites.find((s) => s.toLowerCase().endsWith('/' + rel) || s.toLowerCase() === rel);
+      if (file && !out.has(file)) out.set(file, e.num);
     }
   }
   return out;

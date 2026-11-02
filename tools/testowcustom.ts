@@ -4,7 +4,7 @@
 // the pointer is $FFFFFF as in the clean game (0 with BOWSIE: testbowsie.ts); Lunar Magic's limits are kept.
 import { Rom, snesToPc } from '../src/core/rom.ts';
 import {
-  readCustomSprites, writeCustomSprites, customTable, customTableBytes, customSizeTable, customSpritesProblem, customSpriteRanges,
+  readCustomSprites, writeCustomSprites, fitCustomSprite, customTable, customTableBytes, customSizeTable, customSpritesProblem, customSpriteRanges,
   OW_CUSTOM_PTR, OW_CUSTOM_SIZES, OW_CUSTOM_MAX, type CustomOwSprite,
 } from '../src/core/owcustom.ts';
 import { overworldDataRanges } from '../src/core/overworld.ts';
@@ -17,6 +17,14 @@ const rom = new Rom(await editorImage());
 const none = (): CustomOwSprite[][] => Array.from({ length: 7 }, () => []);
 
 check(customTable(rom) === null && readCustomSprites(rom).every((l) => !l.length), 'the clean game: no table, 7 empty lists');
+
+// a sprite as placed: on the submap, its sprite's extra bytes (kept, cut, padded with 0)
+{
+  const sizes = new Uint8Array(0x7f).fill(3); sizes[0x11] = 6;
+  const f = (x: number, y: number, id: number, extra: number[]) => JSON.stringify(fitCustomSprite(sizes, { id, x, y, z: 2, extra }));
+  check(f(-1, 0x40, 0x12, [1, 2]) === JSON.stringify({ id: 0x12, x: 0, y: 0x3f, z: 2, extra: [1, 2, 0] }) && f(5, 6, 1, [7]) === JSON.stringify({ id: 1, x: 5, y: 6, z: 2, extra: [] })
+    && JSON.stringify(fitCustomSprite(null, { id: 1, x: 1, y: 1, z: 0, extra: [] }).extra) === '[0]', 'placed: position kept on the submap, extra bytes as the sprite takes');
+}
 
 // Lunar Magic's macro: db id|((x&1)<<7) : db (x>>1)|((y&7)<<5) : db (y>>3)|(z<<3) : db extra
 const spr = (id: number, x: number, y: number, z: number, extra: number) => [id | ((x & 1) << 7), (x >> 1) | ((y & 7) << 5), (y >> 3) | (z << 3), extra];

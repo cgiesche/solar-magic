@@ -8,15 +8,14 @@ import { projectPane, type Pane } from './projectpane.ts';
 import { hex } from '../core/names.ts';
 import { definesButton } from './defineedit.ts';
 import {
-  loadBowsieProject, saveBowsieProject, bowsieToZip, bowsieSpriteInfo, assignOwSprite, isBowsieSprite, BOWSIE_FIRST, BOWSIE_LAST, type BowsieProject,
+  loadBowsieProject, saveBowsieProject, bowsieToZip, bowsieSpriteInfo, assignOwSprite, bowsieSpriteFiles, BOWSIE_FIRST, BOWSIE_LAST, type BowsieProject,
 } from '../core/bowsie.ts';
 
 export function bowsiePane(app: App, changed: () => void): Pane {
   let num = BOWSIE_FIRST;
 
   function content(proj: BowsieProject, change: () => void, origin: (file: string) => HTMLElement): Child[] {
-    const dec = new TextDecoder();
-    const sprites = [...proj.files.keys()].filter((f) => /\.asm$/i.test(f) && isBowsieSprite(dec.decode(proj.files.get(f)!))).sort();
+    const sprites = bowsieSpriteFiles(proj.files);
     let file = sprites[0] ?? '';
     const numIn = hexInput(num, 2, (v) => (num = v));
     numIn.title = `Overworld sprite: ${hex(BOWSIE_FIRST, 2)}–${hex(BOWSIE_LAST, 2)}`;

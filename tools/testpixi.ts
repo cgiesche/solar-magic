@@ -14,7 +14,7 @@ import { captureSprites } from '../src/core/spritegfx.ts';
 import { loadAsar } from '../src/core/asar.ts';
 import { ROUTINES } from '../src/core/pixiroutines.ts';
 import { uploadFiles, uploadFromFiles } from '../src/core/patchpkg.ts';
-import { planPixiUpload, applyPixiUpload, spriteFiles } from '../src/core/pixipkg.ts';
+import { planPixiUpload, applyPixiUpload, spriteFiles, pixiParts } from '../src/core/pixipkg.ts';
 import { zipSync } from 'fflate';
 import { inspectUpload, installPackage } from '../src/core/packages.ts';
 import { savePixiProject, removePixi, loadPixiProject, parsePixiList, readPixiList, parseCfg, parseJsonCfg, type PixiProject } from '../src/core/pixi.ts';
@@ -94,6 +94,18 @@ const js = parseJsonCfg(JSON.stringify({ $1656: { 'Object Clipping': 3, 'Can be 
   'Extra Property Byte 1': 5, 'Extra Property Byte 2': 0, 'Additional Byte Count (extra bit clear)': 1, 'Additional Byte Count (extra bit set)': 2,
   Collection: [{ Name: 'Brutal Bill', ExtraBit: false }], Displays: [{ Description: 'A Brutal Bill.\\n\nhoming' }] }), 'sprites/b.json');
 check(js.tweak[0] === 0x13 && js.tweak[2] === 0x09 && js.actlike === 28 && js.bytes === 1 && js.bytesExtra === 2 && js.names[0].name === 'Brutal Bill' && js.asm === 'sprites/x.asm', 'json parsed (tweaker bits, collection)');
+{
+  // another tool's .json is no PIXI sprite, also with a "Type" key (BOWSIE's tooltip .json next to its .asm)
+  const enc = new TextEncoder();
+  const up = { files: new Map([
+    ['sprites/cloud.json', enc.encode(JSON.stringify({ tooltip: 'A cloud', Type: 'overworld' }))],
+    ['sprites/cloud.asm', enc.encode('init:\nRTL\nmain:\nRTL\n')],
+    ['sprites/bill.json', enc.encode(JSON.stringify({ $1656: {}, AsmFile: 'bill.asm', ActLike: 28, Type: 1 }))],
+    ['sprites/bill.asm', enc.encode('print "MAIN ",pc\nRTL\n')],
+  ]) } as Parameters<typeof pixiParts>[0];
+  const ps = pixiParts(up).sprites.map((s) => s.file).join(',');
+  check(ps === 'sprites/bill.json', `json detection: BOWSIE's tooltip .json with a "Type" key left out, a PIXI .json taken (${ps})`);
+}
 
 // ---- a custom sprite running in the game
 // INIT: marker $7FB000 = $11, MAIN: counts $7FB001, copies extra byte 1 to $7FB002 and draws one tile

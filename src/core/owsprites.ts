@@ -148,10 +148,12 @@ export function customSpriteImages(loads: OverworldLoads, map: number, progress:
 export function* owCustomJob(loads: OverworldLoads, map: number, progress: number): Job<OwSpriteView[]> {
   return customSpriteImages(loads, map, progress);
 }
-// how custom sprites `ids` look (the palette): each alone on the main map before any event, its extra bytes 0
+// how custom sprites `ids` look (the palette): each alone on the main map before any event, its extra bytes 0,
+// spawned at LOOK_AT (8px steps); the image's offset is from the sprite's position
+const LOOK_AT = 0x20, LOOK_PX = LOOK_AT * 8;
 export function customSpriteLooks(loads: OverworldLoads, ids: number[]): (SpriteImage | null)[] {
-  return loads.derive('customSpriteLooks', () => runCustom(loads, 0, 0, ids.map((id) => ({ s: { id, x: 0x20, y: 0x20, z: 0, extra: [] }, extraAt: 0 })))
-    .map((v) => v.image && { ...v.image, ox: v.image.ox - 0x100, oy: v.image.oy - 0x100 }), ids.join(','));
+  return loads.derive('customSpriteLooks', () => runCustom(loads, 0, 0, ids.map((id) => ({ s: { id, x: LOOK_AT, y: LOOK_AT, z: 0, extra: [] }, extraAt: 0 })))
+    .map((v) => v.image && { ...v.image, ox: v.image.ox - LOOK_PX, oy: v.image.oy - LOOK_PX }), ids.join(','));
 }
 export function* owLooksJob(loads: OverworldLoads, ids: number[]): Job<(SpriteImage | null)[]> {
   return customSpriteLooks(loads, ids);

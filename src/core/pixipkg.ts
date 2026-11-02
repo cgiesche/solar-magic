@@ -38,7 +38,7 @@ export function pixiParts(upload: UploadCode): PixiParts {
   const used = new Set<string>(); // asm files belonging to a cfg/json
   for (const [f, data] of upload.files) {
     if (!/\.(json|cfg)$/i.test(f)) continue;
-    if (/\.json$/i.test(f) && !/"(ActLike|AsmFile|\$1656|Type)"/i.test(dec.decode(data))) continue; // (another tool's json, e.g. BOWSIE's tooltips)
+    if (/\.json$/i.test(f) && !isPixiJson(dec.decode(data))) continue;
     try {
       const c = /\.json$/i.test(f) ? parseJsonCfg(dec.decode(data), f) : parseCfg(dec.decode(data), f);
       if (c.asm) used.add(c.asm);
@@ -57,6 +57,15 @@ export function pixiParts(upload: UploadCode): PixiParts {
     sprites.push({ kind: k && MISC_KINDS.includes(k) ? k : k ?? 'sprites', file: f, num: -1, name: base(f).replace(/\.asm$/i, '') });
   }
   return { sprites, routines };
+}
+
+// a PIXI sprite's .json: an object with one of the keys only PIXI's have (its asm file, what it acts like, its
+// tweaker bytes); another tool's .json is none – BOWSIE's tooltip .json may have a "Type" too
+const PIXI_JSON_KEYS = ['AsmFile', 'ActLike', '$1656'];
+function isPixiJson(text: string): boolean {
+  let j: unknown;
+  try { j = JSON.parse(text.replace(/^\uFEFF/, '')); } catch { return false; }
+  return !!j && typeof j === 'object' && !Array.isArray(j) && PIXI_JSON_KEYS.some((k) => k in j);
 }
 
 // numbers for the sprites of an upload (`parts`: those to install, as detected – the sprite parts – and

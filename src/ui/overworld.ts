@@ -174,6 +174,7 @@ export class OverworldView {
   brush: Brush = { kind: 'l1', w: 1, h: 1, entries: [0x56] };
   l2Pal = 0;
   hover: { x: number; y: number } | null = null;
+  mouse: { x: number; y: number } | null = null; // the map's pixel under the mouse (on the map)
   drag: Drag | null = null;
   selected = -1; // the layer 1 tile shown in the properties (l1Index)
   mapCanvas = document.createElement('canvas');
@@ -211,7 +212,7 @@ export class OverworldView {
     this.scroller.addEventListener('contextmenu', (e) => e.preventDefault());
     this.scroller.addEventListener('mousedown', (e) => this.onDown(e));
     this.scroller.addEventListener('dblclick', (e) => this.onDouble(e));
-    this.scroller.addEventListener('mouseleave', () => { if (!this.drag) { this.hover = null; this.updateStatus(); this.paint(); } });
+    this.scroller.addEventListener('mouseleave', () => { this.mouse = null; if (!this.drag) { this.hover = null; this.updateStatus(); this.paint(); } });
     window.addEventListener('mousemove', (e) => this.onMove(e));
     window.addEventListener('mouseup', (e) => this.onUp(e));
     attachPanZoom(this.scroller, () => this.zoom, (z, ax, ay) => this.setZoom(z, ax, ay), undefined, undefined, pixelZoomSteps);
@@ -641,6 +642,7 @@ export class OverworldView {
 
   onMove(e: MouseEvent): void {
     const inside = e.target === this.scroller || e.target === this.canvas;
+    if (inside) this.mouse = this.point(e);
     const d = this.drag;
     if (this.sprites.drag) { const p = this.point(e); this.sprites.move(p.x, p.y, e.shiftKey); return; }
     if (!inside && !d && !this.links.drag) return;
@@ -1178,7 +1180,7 @@ export class OverworldView {
       if (k === 'd') return this.sprites.duplicate();
     }
     if (e.ctrlKey || e.metaKey || e.altKey) return false;
-    if (k === 'escape' && this.mode === 'sprites' && this.sprites.picked !== null) { this.sprites.pick(null); return true; }
+    if (k === 'escape' && this.mode === 'sprites' && this.sprites.unpick()) return true;
     if (k === 'escape' && this.mode === 'links' && this.links.cancelPending()) return true;
     if (k === 'escape' && this.event >= 0) { this.setEvent(-1); return true; }
     if (k === 'g') { this.showGrid = !this.showGrid; this.paint(); return true; }
