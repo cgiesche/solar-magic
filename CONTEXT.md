@@ -355,6 +355,10 @@ _Avoid_: emulated result, cache
 Test play's one slot (F5 saves, F8 loads; Select+L / Select+R on a gamepad): the whole emulated machine at a frame – memory, registers, scroll, color math, the sound unit and what is on screen – so that loading it goes on exactly as from the moment of saving. It belongs to its level on the ROM as it was then: any change of the ROM since (the level saved, a ROM edit) makes it stale, and a stale one is dropped (core/savestate.ts). Not written to disk.
 _Avoid_: snapshot (that is the emulator's boot state every load starts from), save (the game's own save file, or saving the level)
 
+**Rewind**:
+Test play stepping back in time while Backspace (a gamepad's stick pressed) is held: the machine's state is kept every 6 frames, the newest 100 (10 s, about 50 MiB; core/rewind.ts), and the game goes on from the one it was stepped back to on release. The sound is off while rewinding; the play log and the death markers go back with it (what happened after that frame is dropped). The kept states are dropped on a restart and when a savestate is loaded.
+_Avoid_: undo (that is an edit's), savestate (the one slot F5 saves)
+
 **Failed spawn**:
 A slot search of the running game that found every slot it looked at taken, so a sprite (normal, extended or cluster) did not appear, or replaced another where the code then takes a slot anyway (core/slotwatch.ts). Recognised by what the code does (a loop testing consecutive slots for zero), not by the game's tables; a search through a few kept slots (Mario's two fireball slots) is none. It may come with other slots free: the level's sprite memory or the spawning code (a generator) limits the slots it may use. Test play's slot meter shows the live slots and lists the failed spawns with Mario's tile.
 _Avoid_: sprite overflow, slot overflow

@@ -12,6 +12,7 @@ import { eventBits } from './overworld.ts';
 import type { ProgressSave } from './owprogress.ts';
 import { GM, RAM, MARIO_DYING, PAD, marioX, marioY, setMarioPos } from './ram.ts';
 import { cpuLoad } from './playlog.ts';
+import { RewindRing, REWIND_EVERY, REWIND_STATES } from './rewind.ts';
 
 // frames from the load (the level faded in) until gameplay, or until Mario has settled; more: the level hangs
 export const READY_FRAMES = 300;
@@ -56,6 +57,9 @@ export class PlaySession {
   private readonly s: Snes;
   private watchers: Watcher[] = [];
   private ready_: boolean;
+  private frames_ = 0;
+  // the states kept to rewind to (keepRewind), each with its frame
+  private rewind_: { every: number; ring: RewindRing<{ frame: number; state: SnesState }> } | null = null;
 
   private constructor(emu: LevelEmulator, render: LevelRender | null, ready: boolean) {
     this.emu = emu;
@@ -142,6 +146,8 @@ export class PlaySession {
   // the samples of the latest frame, with a sound unit (stereo, 32 kHz)
   get audio(): Int16Array | null { return this.s.audio; }
   get hasSound(): boolean { return this.s.apu !== null; }
+  // frames played by frame() (play, follow and enter too); a rewind sets it back
+  get frames(): number { return this.frames_; }
 
   // runs frames until the game is in the state; false when it doesn't get there in time (the level hangs or ended)
   until(state: Ready, limit = READY_FRAMES): boolean {
@@ -158,6 +164,9 @@ export class PlaySession {
     const modeBefore = this.s.wram[RAM.gameMode];
     this.s.joy1 = pad;
     this.s.runFrame();
+    this.frames_++;
+    const r = this.rewind_;
+    if (r && this.frames_ % r.every === 0) r.ring.push({ frame: this.frames_, state: this.s.saveState() });
     return cpuLoad(this.s.busyLines, modeBefore, this.s.wram[RAM.gameMode]);
   }
 
@@ -212,9 +221,32 @@ export class PlaySession {
   }
 
   save(): SnesState { return this.s.saveState(); }
+  // a savestate loaded: the states kept to rewind to are dropped (they lead elsewhere), the frames count on
   load(state: SnesState): void {
     this.s.loadState(state);
+    this.rewind_?.ring.clear();
     for (const w of this.watchers) w.reset();
+  }
+
+  // from here on a state kept every `every` frames, the newest `states` (rewind.ts)
+  keepRewind(every = REWIND_EVERY, states = REWIND_STATES): void {
+    this.rewind_ = { every, ring: new RewindRing(states) };
+  }
+
+  // one step back: the newest kept state from before the current frame loaded, the watchers reset; the frame gone
+  // back to (frames). null: none kept from before it (the oldest stays, to step back to again after playing on)
+  rewind(): number | null {
+    const ring = this.rewind_?.ring;
+    if (!ring) return null;
+    while (ring.length && ring.newest()!.frame > this.frames_) ring.pop();
+    const k = ring.newest()?.frame === this.frames_ ? 1 : 0;
+    const to = ring.at(k);
+    if (!to) return null;
+    if (k) ring.pop();
+    this.s.loadState(to.state);
+    this.frames_ = to.frame;
+    for (const w of this.watchers) w.reset();
+    return to.frame;
   }
 
   // a PPU from here on, drawing what is on screen; what is on screen is then part of a savestate

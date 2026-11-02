@@ -34,6 +34,16 @@ export function cpuLoad(busy: number, modeBefore: number, modeAfter: number): nu
   return modeBefore === GM.level && modeAfter === GM.level ? LAG : LINES_PER_FRAME;
 }
 
+// the log after a frame, to go back to (PlayLog.rewindTo): the events, lag events and deaths pushed so far, the
+// open events with their count and last frame then (only open events change)
+interface LogMark {
+  frame: number;
+  pushed: { events: number; lags: number; deaths: number };
+  lagFrames: number;
+  open: [SlotKind, PlayEvent, number, number][];
+  openLag: [LagEvent, number, number] | null;
+}
+
 export class PlayLog {
   history: FrameSample[] = [];
   events: PlayEvent[] = [];
@@ -43,10 +53,44 @@ export class PlayLog {
   private open = new Map<SlotKind, PlayEvent>();
   private openLag: LagEvent | null = null;
   private size: number;
-  constructor(size: number) { this.size = size; }
+  private pushed = { events: 0, lags: 0, deaths: 0 };
+  private marks: LogMark[] = [];
+  private keep: number;
+  // size: the frames sampled; keep: the latest frames the log can go back to (rewindTo)
+  constructor(size: number, keep = 0) { this.size = size; this.keep = keep; }
 
-  // the frames go on from elsewhere (a savestate loaded): a failure or lag frame from now on is an event of its own
-  cut(): void { this.open.clear(); this.openLag = null; }
+  // the frames go on from elsewhere (a savestate loaded): a failure or lag frame from now on is an event of its
+  // own, the log can't go back before it
+  cut(): void { this.open.clear(); this.openLag = null; this.marks = []; }
+
+  // back to the end of a frame kept (the game rewound to it): what was logged after it dropped, the open events as
+  // then; the deaths dropped (null: the frame isn't kept, nothing done)
+  rewindTo(frame: number): DeathEvent[] | null {
+    const i = this.marks.findIndex((m) => m.frame === frame);
+    if (i < 0) return null;
+    const m = this.marks[i];
+    this.marks.length = i + 1;
+    this.history = this.history.filter((h) => h.frame <= frame);
+    const back = <T>(list: T[], n: number) => list.splice(Math.max(0, list.length - n));
+    back(this.events, this.pushed.events - m.pushed.events);
+    back(this.lags, this.pushed.lags - m.pushed.lags);
+    const gone = back(this.deaths, this.pushed.deaths - m.pushed.deaths);
+    this.pushed = { ...m.pushed };
+    this.lagFrames = m.lagFrames;
+    this.open = new Map(m.open.map(([kind, e, count, last]) => { e.count = count; e.last = last; return [kind, e]; }));
+    this.openLag = m.openLag && Object.assign(m.openLag[0], { count: m.openLag[1], last: m.openLag[2] });
+    return gone;
+  }
+
+  private mark(frame: number): void {
+    if (!this.keep) return;
+    this.marks.push({
+      frame, pushed: { ...this.pushed }, lagFrames: this.lagFrames,
+      open: [...this.open].map(([kind, e]) => [kind, e, e.count, e.last]),
+      openLag: this.openLag && [this.openLag, this.openLag.count, this.openLag.last],
+    });
+    if (this.marks.length > this.keep) this.marks.splice(0, this.marks.length - this.keep);
+  }
 
   // one emulated frame: the live slots at its end, the searches that failed in it, the CPU's load (cpuLoad),
   // Mario's position (pixels), the level being played (when known; moments in another level are others)
@@ -62,19 +106,30 @@ export class PlayLog {
       if (near(e, MERGE)) { e.count += n; e.last = frame; continue; }
       const ev = { ...mine[0], ...at(n) };
       this.open.set(kind, ev);
+      this.pushed.events++;
       const old = push(this.events, ev);
       if (old && this.open.get(old.kind) === old) this.open.delete(old.kind);
     }
-    if (busy !== LAG) return;
-    this.lagFrames++;
-    if (near(this.openLag, LAG_MERGE)) { this.openLag.count++; this.openLag.last = frame; return; }
-    this.openLag = at(1);
-    push(this.lags, this.openLag);
+    if (busy === LAG) {
+      this.lagFrames++;
+      if (near(this.openLag, LAG_MERGE)) { this.openLag.count++; this.openLag.last = frame; }
+      else {
+        this.openLag = at(1);
+        push(this.lags, this.openLag);
+        this.pushed.lags++;
+      }
+    }
+    this.mark(frame);
   }
 
-  // Mario died in the frame
-  died(frame: number, d: Death): void {
-    push(this.deaths, { ...d, frame });
+  // Mario died in the frame (after frame() of it); the event logged
+  died(frame: number, d: Death): DeathEvent {
+    const e = { ...d, frame };
+    push(this.deaths, e);
+    this.pushed.deaths++;
+    const m = this.marks[this.marks.length - 1];
+    if (m?.frame === frame) m.pushed.deaths++;
+    return e;
   }
 
   // the lag event with the most lag frames (the first of equals)

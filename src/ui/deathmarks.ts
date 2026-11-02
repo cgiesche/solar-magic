@@ -42,10 +42,21 @@ export function loadDeaths(project: string, level: number): DeathMark[] {
   return marks;
 }
 
-// version: levelVersion of the level Mario died in
-export function addDeath(project: string, d: Death, version: number): void {
-  const { level, ...rest } = d, k = key(project, level);
-  const all = [...loadDeaths(project, level), { ...rest, version }].slice(-MAX_KEPT);
+// version: levelVersion of the level Mario died in; the mark kept (for removeDeath)
+export function addDeath(project: string, d: Death, version: number): DeathMark {
+  const { level, ...rest } = d, mark = { ...rest, version };
+  store(project, level, [...loadDeaths(project, level), mark].slice(-MAX_KEPT));
+  return mark;
+}
+
+// a mark addDeath kept taken back (test play rewound to before the death)
+export function removeDeath(project: string, level: number, mark: DeathMark): void {
+  const all = loadDeaths(project, level);
+  if (all.includes(mark)) store(project, level, all.filter((m) => m !== mark));
+}
+
+function store(project: string, level: number, all: DeathMark[]): void {
+  const k = key(project, level);
   cache.set(k, all);
   try { localStorage.setItem(k, JSON.stringify(all)); } catch { /* no storage */ }
 }

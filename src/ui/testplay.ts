@@ -17,9 +17,10 @@ import { musicPlayer } from './musicplayer.ts';
 import { RAM, PAD, GM, marioX, marioY, levelLoaded } from '../core/ram.ts';
 import { SlotWatch } from '../core/slotwatch.ts';
 import { DeathWatch } from '../core/deaths.ts';
-import { addDeath, levelVersion } from './deathmarks.ts';
+import { addDeath, removeDeath, levelVersion, type DeathMark } from './deathmarks.ts';
 import { projectId } from '../core/projectid.ts';
-import { PlayLog } from '../core/playlog.ts';
+import { PlayLog, type DeathEvent } from '../core/playlog.ts';
+import { REWIND_EVERY, REWIND_STATES } from '../core/rewind.ts';
 import { playMeter, GRAPH_FRAMES } from './playmeter.ts';
 import { applyTriggers, emptyTriggerView, customOn, switchName, isCustom, isManual, isOneShot, CUSTOM, MANUAL, ONE_SHOT } from '../core/extrigger.ts';
 import { shownSwitches } from './triggerpanel.ts';
@@ -45,12 +46,15 @@ const PADMAP: [number, number][] = [
 const PAD_PAUSE = 16; // home / guide button
 const PAD_SELECT = 8, PAD_L = [4, 6], PAD_R = [5, 7]; // Select+L saves the state, Select+R loads it
 const PAD_COMBO = PAD.select | PAD.l | PAD.r; // Select, L, R: not passed to the game while a combo is held
+const PAD_REWIND = [10, 11]; // a stick pressed: rewind while held
+const REWIND_KEY = 'Backspace';
+const REWIND_STEP_MS = 50; // a state kept (REWIND_EVERY frames) stepped back per this: twice the game's speed
 const AUDIO_LEAD = 1800; // sample pairs to keep queued at first (~56 ms; grows after underruns)
 
 // buttons of all connected gamepads; pause: the pause button is held on one of them; save / load: Select+L /
-// Select+R held on one of them (Select, L and R are then left out of bits)
-function readPads(): { bits: number; pause: boolean; save: boolean; load: boolean; names: string[] } {
-  let bits = 0, pause = false, save = false, load = false;
+// Select+R held on one of them (Select, L and R are then left out of bits); rewind: a stick pressed on one of them
+function readPads(): { bits: number; pause: boolean; save: boolean; load: boolean; rewind: boolean; names: string[] } {
+  let bits = 0, pause = false, save = false, load = false, rewind = false;
   const names: string[] = [];
   for (const p of navigator.getGamepads?.() ?? []) {
     if (!p || !p.connected) continue;
@@ -59,6 +63,7 @@ function readPads(): { bits: number; pause: boolean; save: boolean; load: boolea
     let pb = 0;
     for (const [i, bit] of PADMAP) if (pressed(i)) pb |= bit;
     if (pressed(PAD_PAUSE)) pause = true;
+    if (PAD_REWIND.some(pressed)) rewind = true;
     const sel = pressed(PAD_SELECT), l = sel && PAD_L.some(pressed), r = sel && PAD_R.some(pressed);
     if (l) save = true;
     if (r) load = true;
@@ -67,7 +72,7 @@ function readPads(): { bits: number; pause: boolean; save: boolean; load: boolea
     if (ax < -0.5) bits |= PAD.left; else if (ax > 0.5) bits |= PAD.right;
     if (ay < -0.5) bits |= PAD.up; else if (ay > 0.5) bits |= PAD.down;
   }
-  return { bits, pause, save, load, names };
+  return { bits, pause, save, load, rewind, names };
 }
 
 let testEmu: LevelEmulator | null = null;
@@ -159,7 +164,14 @@ function play(app: App, o: Origin, audio: AudioOut, p: PlaySession, ppu: PPU, ok
   const img = ctx.createImageData(256, 224);
   const info = h('div', { class: 'hint' });
   // the sprite slots and Mario's deaths, watched from here on
-  const watch = p.watch((s) => new SlotWatch(s)), deaths = p.watch((s) => new DeathWatch(s)), log = new PlayLog(GRAPH_FRAMES);
+  const watch = p.watch((s) => new SlotWatch(s)), deaths = p.watch((s) => new DeathWatch(s));
+  // states kept to rewind to; the log can go back as far
+  p.keepRewind();
+  const log = new PlayLog(GRAPH_FRAMES, REWIND_EVERY * REWIND_STATES);
+  // the death markers kept in this test (taken back when it rewinds to before a death); deathsChanged: the level view
+  // shows other markers
+  const marks = new Map<DeathEvent, DeathMark>(), project = projectId(app.rom);
+  let deathsChanged = false;
   const meter = playMeter(log, (tx, ty, level = lv.number) => {
     m.close();
     if (o.kind === 'overworld') o.showLevel(level, { x: tx, y: ty });
@@ -170,10 +182,11 @@ function play(app: App, o: Origin, audio: AudioOut, p: PlaySession, ppu: PPU, ok
   let paused = false;
   let last = performance.now();
   let acc = 0;
-  let frames = 0;
   let padPause = false;
   let padSave = false, padLoad = false;
   let padNames: string[] = [];
+  // rewinding: the key or a pad's rewind button held; rewindAt: when the last step back was; rewindEnd: no older state kept
+  let keyRewind = false, rewinding = false, rewindAt = 0, rewindEnd = false;
   // a brief note in the info line (savestate saved / loaded), until `until`
   let note = '', noteUntil = 0;
   const say = (t: string) => { note = t; noteUntil = performance.now() + 2000; };
@@ -192,7 +205,8 @@ function play(app: App, o: Origin, audio: AudioOut, p: PlaySession, ppu: PPU, ok
     if (e.target instanceof HTMLInputElement || e.target instanceof HTMLSelectElement) return; // the trigger's frame
     const bit = KEYMAP[e.key];
     if (e.key === 'p' || e.key === 'P') { if (down) setPaused(!paused); e.preventDefault(); return; }
-    if (e.key === 'm' || e.key === 'M') { if (down) { soundMuted = !soundMuted; audio.setMuted(soundMuted); } e.preventDefault(); return; }
+    if (e.key === 'm' || e.key === 'M') { if (down) { soundMuted = !soundMuted; audio.setMuted(soundMuted || rewinding); } e.preventDefault(); return; }
+    if (e.key === REWIND_KEY) { keyRewind = down; e.preventDefault(); e.stopPropagation(); return; }
     if (e.key === 'F5' || e.key === 'F8') {
       e.preventDefault(); // F5 would reload the page
       e.stopPropagation();
@@ -212,10 +226,32 @@ function play(app: App, o: Origin, audio: AudioOut, p: PlaySession, ppu: PPU, ok
     let busy = 0;
     try { busy = p.frame(keys | readPads().bits); } catch (e) { info.textContent = `Emulation error: ${e}`; paused = true; }
     if (p.audio) audio.push(p.audio);
-    frames++;
+    const frames = p.frames;
     log.frame(frames, watch.usedAll(), watch.take(), busy, marioX(p.wram), marioY(p.wram), p.mode === GM.level ? levelLoaded(p.wram) : undefined);
     // kept as markers in the level he died in
-    for (const d of deaths.take()) { log.died(frames, d); addDeath(projectId(app.rom), d, levelVersion(app.rom, d.level)); }
+    for (const d of deaths.take()) {
+      marks.set(log.died(frames, d), addDeath(project, d, levelVersion(app.rom, d.level)));
+      deathsChanged = true;
+    }
+  };
+  // one step back (the frame on screen is the state's): the log and the death markers as then
+  const stepBack = () => {
+    const f = p.rewind();
+    rewindEnd = f === null;
+    if (f === null) return;
+    for (const d of log.rewindTo(f) ?? []) {
+      const mark = marks.get(d);
+      if (mark) { removeDeath(project, d.level, mark); marks.delete(d); }
+    }
+  };
+  // the rewind button pressed or released: the sound off while rewinding, in time again after
+  const setRewinding = (on: boolean, t: number) => {
+    if (on === rewinding) return;
+    rewinding = on;
+    rewindEnd = false;
+    rewindAt = t - REWIND_STEP_MS;
+    audio.setMuted(on || soundMuted);
+    if (!on) { audio.resync(); acc = 0; }
   };
   const loop = (t: number) => {
     if (!running) return;
@@ -229,8 +265,11 @@ function play(app: App, o: Origin, audio: AudioOut, p: PlaySession, ppu: PPU, ok
     if (pad.load && !padLoad) loadState();
     padLoad = pad.load;
     padNames = pad.names;
+    setRewinding(keyRewind || pad.rewind, t);
     let n = 0;
-    if (audio.ready && p.hasSound) {
+    if (rewinding) {
+      if (t - rewindAt >= REWIND_STEP_MS) { rewindAt = t; stepBack(); }
+    } else if (audio.ready && p.hasSound) {
       // paced by the audio clock: keep ~3 frames queued
       acc = 0;
       while (!paused && audio.buffered() < audio.lead && n < 4) { frame(); n++; }
@@ -246,7 +285,8 @@ function play(app: App, o: Origin, audio: AudioOut, p: PlaySession, ppu: PPU, ok
     meter.update();
     // (from the overworld: the level being played, while one is)
     const where = o.kind === 'level' ? `Level ${hex(lv.number, 3)}` : p.mode === GM.level ? `Level ${hex(levelLoaded(p.wram), 3)}` : 'Overworld';
-    info.textContent = `${where} · Frame ${frames}${paused ? ' · Pause' : ''} · Game mode ${hex(p.mode, 2)}`
+    const rewind = rewinding ? (rewindEnd ? ' · Rewind: no older state kept' : ' · Rewinding') : '';
+    info.textContent = `${where} · Frame ${p.frames}${paused ? ' · Pause' : ''}${rewind} · Game mode ${hex(p.mode, 2)}`
       + (note && t < noteUntil ? ` · ${note}` : '')
       + (padNames.length ? ` · Gamepad: ${padNames.join(', ')}` : ' · Gamepad: none detected (press a button)')
       + (!p.hasSound || audio.failed ? (window.isSecureContext ? ' · No sound' : ' · No sound (needs https or localhost)') : soundMuted ? ' · Sound off (M)' : '');
@@ -258,7 +298,7 @@ function play(app: App, o: Origin, audio: AudioOut, p: PlaySession, ppu: PPU, ok
   const stop = () => {
     if (!running) return;
     running = false;
-    if (log.deaths.length) app.emit('change'); // the level view shows them
+    if (deathsChanged) app.emit('change'); // the level view shows them
     p.close();
     audio.close();
     window.removeEventListener('keydown', kd, true);
@@ -270,7 +310,7 @@ function play(app: App, o: Origin, audio: AudioOut, p: PlaySession, ppu: PPU, ok
     h('div', { class: 'play-main' }, canvas, meter.el),
     info,
     triggers,
-    h('div', { class: 'hint play-help' }, `Controls: arrows · X = jump (B) · Z/Y = run/fire (Y) · S = spin jump · A = X button · Enter = Start · Shift = Select · Q/W = L/R · P = pause. Gamepad: d-pad/left stick, buttons by position as on the SNES pad (bottom = B, right = A, left = Y, top = X), shoulder buttons/triggers = L/R, Start/Select, Home = pause. M = sound on/off. F5 = save state, F8 = load state (gamepad: Select+L / Select+R; one slot, kept for this ${o.kind === 'level' ? 'level' : 'test from the overworld'} until it or the ROM changes). ${o.kind === 'level' ? 'The level is saved before the test.' : 'The open level is saved before the test; levels entered on the overworld play as saved.'}`),
+    h('div', { class: 'hint play-help' }, `Controls: arrows · X = jump (B) · Z/Y = run/fire (Y) · S = spin jump · A = X button · Enter = Start · Shift = Select · Q/W = L/R · P = pause. Gamepad: d-pad/left stick, buttons by position as on the SNES pad (bottom = B, right = A, left = Y, top = X), shoulder buttons/triggers = L/R, Start/Select, Home = pause. M = sound on/off. Backspace (held) = rewind, up to ${REWIND_EVERY * REWIND_STATES / 60} s (gamepad: a stick pressed). F5 = save state, F8 = load state (gamepad: Select+L / Select+R; one slot, kept for this ${o.kind === 'level' ? 'level' : 'test from the overworld'} until it or the ROM changes). ${o.kind === 'level' ? 'The level is saved before the test.' : 'The open level is saved before the test; levels entered on the overworld play as saved.'}`),
   ), [
     { label: 'Restart from savestate', onClick: () => { setTimeout(() => begin(app, o, true), 0); } },
     { label: 'Restart', onClick: () => { setTimeout(() => begin(app, o, false), 0); } },
