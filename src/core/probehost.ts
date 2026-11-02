@@ -66,9 +66,10 @@ function* found<T>(job: Generator<void, T | null>): Job<T | undefined> { return 
 // groups (the sprite memory check's), the results of single levels of the prefab suggestions and the object boxes
 // probed in a level (dropped when the ROM changes, as the editor keeps them per ROM state), the overworld's loads (each
 // kept while the ROM bytes it read are unchanged; made when first used), the ROM copy layer 1 without an event's
-// changes is emulated on (owevents.ts EventL1Copy; made when first used); the ROM
+// changes is emulated on (owevents.ts EventL1Copy; made when first used); the ROM; the block prober (the switch tiles
+// of the save at an event progress)
 interface LearnState {
-  uses: LevelUses; groups: SpriteGroupResults; suggest: KeptSuggestions; sizes: { key: string; probe: SizeProbe } | null; ow: OverworldLoads | null; l1Copy: EventL1Copy | null; rom: Rom;
+  prober: BlockProber; uses: LevelUses; groups: SpriteGroupResults; suggest: KeptSuggestions; sizes: { key: string; probe: SizeProbe } | null; ow: OverworldLoads | null; l1Copy: EventL1Copy | null; rom: Rom;
 }
 const owLoads = (state: LearnState) => (state.ow ??= new OverworldLoads(new OverworldEmulator(state.rom), OW_LOADS_KEPT));
 
@@ -105,7 +106,7 @@ function learnJob(j: LearnJob, state: LearnState, show: (items: unknown[] | null
     case 'owSprites': return () => owSpritesJob(owLoads(state), j.map, j.progress);
     case 'owCustom': return () => owCustomJob(owLoads(state), j.map, j.progress);
     case 'owLooks': return () => owLooksJob(owLoads(state), j.ids);
-    case 'owSave': return () => progressSaveJob(owLoads(state), j.progress);
+    case 'owSave': return (emu) => progressSaveJob(owLoads(state), j.progress, { uses: state.uses, emu, prober: state.prober });
     case 'owL1Without': return () => layer1WithoutJob(state.l1Copy ??= new EventL1Copy(), state.rom, j.event);
     case 'msgRoutine': return (emu) => messageRoutineJob(state.rom, emu);
     case 'gameBg': return (emu) => gameBgJob(emu, j.level);
@@ -161,7 +162,7 @@ export class ProbeHost {
       // do (ADR 0008): the prober's emulator gets the runner's mask (gfxDisplaySkipMask)
       this.runner = new JobRunner({ rom, results: this.prober.results, noDisplay: this.prober.emu });
       const fp = this.prober.results.fp;
-      this.state = { uses: new LevelUses(rom, this.prober.results), groups: new SpriteGroupResults(fp), suggest: new KeptSuggestions(fp), sizes: null, ow: null, l1Copy: null, rom };
+      this.state = { prober: this.prober, uses: new LevelUses(rom, this.prober.results), groups: new SpriteGroupResults(fp), suggest: new KeptSuggestions(fp), sizes: null, ow: null, l1Copy: null, rom };
       return;
     }
     this.rom.data = data;

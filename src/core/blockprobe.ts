@@ -37,7 +37,7 @@ import { measureCameraBands, type CameraBands } from './camerabands.ts';
 import { applyTriggers, emptyTriggerView } from './extrigger.ts';
 import { layerGeom } from './render.ts';
 import { hasLayer2Objects, parsePrimaryHeader, encodePrimaryHeader } from './level.ts';
-import { GM, RAM, SPR, SPR_STATE, SPRITE_SLOTS, MAP_HI, MARIO_DYING, PAD, mapAddr, marioY, map16Tile, spriteX, spriteY, cameraY, setCameraX, setCameraY, setMarioPos } from './ram.ts';
+import { GM, RAM, SPR, SPR_STATE, SPRITE_SLOTS, MAP_HI, MARIO_DYING, SWITCH_PALACES, PAD, mapAddr, marioY, map16Tile, spriteX, spriteY, cameraY, setCameraX, setCameraY, setMarioPos } from './ram.ts';
 
 const PROBE_LEVEL = 0x105; // horizontal level, loaded with PROBE_HEADER, without objects and sprites
 const PROBE_HEADER = [0x33, 0x40, 0x08, 0x80, 0x27]; // primary header; the tileset is replaced
@@ -59,6 +59,7 @@ export const blockKey = (ts: number, tile: number) => `b${ts}:${tile}`;
 export const collisionKey = (ts: number, tile: number) => `c${COLLISION_VERSION}.${ts}:${tile}`;
 export const spriteKey = (ts: number, num: number) => `s2.${ts}:${num}`;
 export const runsKey = (ts: number) => `r1.${ts}`;
+export const pressKey = (ts: number, tile: number) => `sw1.${ts}:${tile}`;
 export const cameraKey = (ts: number, mode: number, vscroll: number) => `cam2.${ts}:${mode}.${vscroll}`;
 
 export interface HitResult {
@@ -232,6 +233,35 @@ export class BlockProber {
       const c = columns((col, big) => this.hit(tile, big, col), tile);
       return { tile, ...c, enter: this.enterDirs(tile, c.solid) };
     });
+  }
+
+  // the switch palace ($1F27 + index: 0-3) small Mario landing on the tile presses (the game's $00F55E sets $1423 by
+  // the tile, $00EEAE presses its switch), -1 none
+  probePress(tile: number): number {
+    return this.results.get<number>(pressKey(this.tileset, tile)) ?? this.computed(pressKey(this.tileset, tile), () => {
+      const bx = 16, by = this.by, w = this.start(bx, 0);
+      this.put(bx, by, tile);
+      this.placeMario(bx * 16, by * 16, -40, 0);
+      try {
+        for (let f = 0, still = 0; f < PROBE_FRAMES && still < SETTLE_FRAMES; f++) {
+          this.emu.snes.runFrame();
+          for (let i = 0; i < SWITCH_PALACES; i++) if (w[RAM.switchPalaces + i]) return i;
+          if (w[RAM.marioAnim] === MARIO_DYING || marioY(w) > by * 16 + 16) break;
+          still = w[RAM.marioBlocked] & 4 ? still + 1 : 0;
+        }
+      } catch { /* none pressed */ }
+      return -1;
+    });
+  }
+
+  // probePress in tileset ts (the tileset used stays); a known result's reads count for the enclosing recorder as if
+  // probed now
+  pressIn(ts: number, tile: number): number {
+    const e = this.results.entry(pressKey(ts, tile));
+    if (e) { this.rom.reads?.addDeps(e.deps); return e.data as number; }
+    const was = this.tileset;
+    this.use(ts);
+    try { return this.probePress(tile); } finally { this.use(was); }
   }
 
   cachedCollision(tile: number): CollisionProbe | undefined {

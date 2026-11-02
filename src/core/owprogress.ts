@@ -5,12 +5,22 @@
 // one: the normal exit before a secret one) is left with that exit, as the game leaves a level, so that the game's own
 // code sets the level's flags, runs the event and counts it. Two levels running the same event: only the one left is
 // passed (the game doesn't run an event twice). An event the game doesn't run so (no level runs it, the level's exit
-// runs another one) is set as the overworld view sets it (eventBits), counted by nothing. The switch palaces are
-// pressed in a level (its switch tiles, $00F55E), not when it is left: they stay a new file's (issue #257).
+// runs another one) is set as the overworld view sets it (eventBits), counted by nothing.
+// The switch palaces are pressed in a level, not when it is left: Mario landing on a switch tile ($00F55E sets $1423
+// by the tile, $00EEAE presses its switch). Which tiles press which switch is learned by the block probe (each tile
+// once, in the tileset of a level placing it: BlockProber.probePress), which levels place them by loading the levels
+// (levelusage.ts LevelUses). A save has the switches pressed whose tiles are in a level played from a translevel passed
+// at its progress (and not at a new file's): its level and those its exits lead to (ExitGraph.reachedFrom). No table
+// of palace levels or switch tiles; a switch tile placed where no exit leads counts as not pressed (#257).
 
-import { OW_EVENTS, type OverworldLoads, l1XY, baseEvent } from './overworld.ts';
+import { OW_EVENTS, FLAG, type OverworldLoads, l1XY, baseEvent, translevelToLevel } from './overworld.ts';
 import { eventRunners, submapViews, submapOf, type EventRunner } from './owevents.ts';
-import { GM, RAM, PAD, get16, set16 } from './ram.ts';
+import { ExitGraph } from './exitgraph.ts';
+import type { LevelUses } from './levelusage.ts';
+import type { LevelEmulator } from './levelemu.ts';
+import type { BlockProber } from './blockprobe.ts';
+import { GM, RAM, PAD, SWITCH_PALACES, get16, set16 } from './ram.ts';
+import type { Rom } from './rom.ts';
 import type { Job } from './jobrunner.ts';
 
 export interface ProgressSave {
@@ -20,26 +30,58 @@ export interface ProgressSave {
 }
 
 const LEVEL_FLAGS = 0x60;
-const PALACES = 4;
 const RETURN_FRAMES = 1500; // from leaving a level until the overworld has run its event and Mario stands
 
 const hasEvent = (w: Uint8Array, e: number) => (w[RAM.owEvents + (e >> 3)] & (0x80 >> (e & 7))) !== 0;
 const setEvent = (w: Uint8Array, e: number) => { w[RAM.owEvents + (e >> 3)] |= 0x80 >> (e & 7); };
 const saveOf = (w: Uint8Array): ProgressSave => ({
   levelFlags: [...w.subarray(RAM.levelFlags, RAM.levelFlags + LEVEL_FLAGS)],
-  switchPalaces: [...w.subarray(RAM.switchPalaces, RAM.switchPalaces + PALACES)],
+  switchPalaces: [...w.subarray(RAM.switchPalaces, RAM.switchPalaces + SWITCH_PALACES)],
   eventsTriggered: w[RAM.eventsTriggered],
 });
 
 // The save at each event progress 0 … OW_EVENTS (index: the progress), from the kept loads: emulated again only when
-// the ROM edits changed what it read
+// the ROM edits changed what it read. The switch palaces are a new file's (progressSaveJob adds those pressed)
 export function progressSaves(loads: OverworldLoads): ProgressSave[] {
   return loads.derive('progressSaves', () => learnSaves(loads));
 }
-// the save at event progress `progress` as a job of the result learner (probe worker), one step (overworld.ts
-// overworldMapJob: the loads' emulator is shared)
-export function* progressSaveJob(loads: OverworldLoads, progress: number): Job<ProgressSave> {
-  return progressSaves(loads)[Math.max(0, Math.min(OW_EVENTS, progress))];
+
+// where the switches pressed are learned: the levels' tiles (kept, else loaded on emu) and the tiles' probe
+export interface PressSource { uses: LevelUses; emu: LevelEmulator; prober: BlockProber }
+
+// the save at event progress `progress` as a job of the result learner (probe worker): the overworld's part in one
+// step (overworld.ts overworldMapJob: the loads' emulator is shared), then the switches pressed, a step per level
+// loaded. Without `src` the switches stay a new file's
+export function* progressSaveJob(loads: OverworldLoads, progress: number, src?: PressSource): Job<ProgressSave> {
+  const saves = progressSaves(loads), save = saves[Math.max(0, Math.min(OW_EVENTS, progress))];
+  if (!src) return save;
+  const passed: number[] = [];
+  for (let tl = 0; tl < LEVEL_FLAGS; tl++) if (save.levelFlags[tl] & ~saves[0].levelFlags[tl] & FLAG.passed) passed.push(tl);
+  const pressed = yield* switchesPressedJob(loads.emu.rom, src, passed);
+  return { ...save, switchPalaces: save.switchPalaces.map((v, i) => (v || pressed & (1 << i) ? 1 : 0)) };
+}
+
+// the switch palaces (bits 0-3: $1F27 + index) the levels played from translevels `tls` press: a level's tiles (layer
+// 1 and 2) probed in its tileset, a step per level. Known results count their reads for the job as if learned in it
+export function* switchesPressedJob(rom: Rom, src: PressSource, tls: number[]): Generator<void, number> {
+  const graph = new ExitGraph(rom), { uses, prober } = src;
+  const levels = [...new Set(tls.flatMap((tl) => graph.reachedFrom(translevelToLevel(tl))))].sort((a, b) => a - b);
+  let pressed = 0;
+  for (const n of levels) {
+    let tiles = uses.tiles(n);
+    if (tiles) {
+      const e = uses.entry(n);
+      if (e) rom.reads?.addDeps(e[1].deps);
+    } else tiles = uses.scan(n, src.emu);
+    if (tiles.ok) {
+      for (const tile of new Set(tiles.fg.map((u) => u.tile))) {
+        const i = prober.pressIn(tiles.tileset, tile);
+        if (i >= 0) pressed |= 1 << i;
+      }
+    }
+    yield;
+  }
+  return pressed;
 }
 
 function learnSaves(loads: OverworldLoads): ProgressSave[] {

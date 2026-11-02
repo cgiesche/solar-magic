@@ -4,7 +4,7 @@
 // those of the overworld loaded directly; the editor's thread loads no overworld (with a worker); a result asked again
 // is known at once (memory), also after a ROM edit it didn't read, a layer 1 edit asks again; requests for the slider's
 // event progresses replace each other (only the latest is loaded); without a worker it all runs on the main thread.
-// The save at an event progress (#255, owprogress.ts progressSaves; owSave, App.progressSave) too: as learned
+// The save at an event progress (#255, owprogress.ts progressSaveJob, the switches pressed too; owSave, App.progressSave) too: as learned
 // directly, another progress known without emulating again, without a worker on the main thread.
 // Layer 1 as after an event without its layer 1 changes (#236, owevents.ts layer1Without; owL1Without,
 // App.layer1Without), what an event's layer 1 stroke is compared with: as found directly, not on the main thread,
@@ -18,7 +18,11 @@ import { loadLevel, L2_PTRS } from '../src/core/level.ts';
 import { OverworldEmulator, OverworldLoads, readL1, writeL1, l1Index, type OwRender } from '../src/core/overworld.ts';
 import { submapViews, layer1Without, readEvents, writeEvents, paintEventL1, eventL1Tiles, type Rect } from '../src/core/owevents.ts';
 import { owSpriteImages, type OwSpriteView } from '../src/core/owsprites.ts';
-import { progressSaves, type ProgressSave } from '../src/core/owprogress.ts';
+import { progressSaveJob, type ProgressSave } from '../src/core/owprogress.ts';
+import { runJob } from '../src/core/jobrunner.ts';
+import { BlockProber } from '../src/core/blockprobe.ts';
+import { LevelUses } from '../src/core/levelusage.ts';
+import { LevelEmulator } from '../src/core/levelemu.ts';
 import { editorImage } from './fixture.ts';
 
 const file = await editorImage();
@@ -81,7 +85,9 @@ const sameRender = (a: OwRender | undefined, b: OwRender) =>
 const text = (v: unknown) => JSON.stringify(v, (_k, x) => (x instanceof Uint8Array || x instanceof Uint32Array ? Array.from(x) : x));
 
 const directRom = new Rom(file.slice()), directLoads = new OverworldLoads(new OverworldEmulator(directRom), 16);
-const direct = { main: directLoads.get(0, 0x10), yi: directLoads.get(1, 0), views: submapViews(directLoads), sprites: owSpriteImages(directLoads, 0, 0x10), saves: progressSaves(directLoads) };
+const directProber = new BlockProber(directRom);
+const directSave = (progress: number) => runJob(progressSaveJob(directLoads, progress, { prober: directProber, uses: new LevelUses(directRom, directProber.results), emu: new LevelEmulator(directRom) }) as Generator<string | void, ProgressSave>);
+const direct = { main: directLoads.get(0, 0x10), yi: directLoads.get(1, 0), views: submapViews(directLoads), sprites: owSpriteImages(directLoads, 0, 0x10), saves: { [0x20]: directSave(0x20), [0x30]: directSave(0x30) } };
 loadsHere = 0;
 
 // with a worker
@@ -118,7 +124,8 @@ loadsHere = 0;
   check(e.save(0x20, (v) => (saved = v)) === undefined, 'the save at event progress 20: asked for');
   await settle();
   w.run();
-  check(text(saved) === text(direct.saves[0x20]) && saved!.eventsTriggered === 0x20 && loadsHere === 0, `the save: as learned directly (${saved?.eventsTriggered} events triggered), not on the main thread`);
+  check(text(saved) === text(direct.saves[0x20]) && saved!.eventsTriggered === 0x20 && saved!.switchPalaces[1] === 1 && loadsHere === 0,
+    `the save: as learned directly (${saved?.eventsTriggered} events triggered, the yellow switch pressed), not on the main thread`);
   const loaded = loadsThere;
   let other: ProgressSave | undefined;
   e.save(0x30, (v) => (other = v));

@@ -121,7 +121,7 @@ export const RAM = {
   owPlayerX: 0x1f17, owPlayerY: 0x1f19, // 16-bit pixel position, per player 4 bytes apart
   owPlayerTileX: 0x1f1f, owPlayerTileY: 0x1f21, // 16-bit
   owPlayerStride: 4,
-  switchPalaces: 0x1f27, // 4: green, yellow, blue, red (1 pressed)
+  switchPalaces: 0x1f27, // SWITCH_PALACES: green, yellow, blue, red (1 pressed)
   eventsTriggered: 0x1f2e, // the count of events the overworld ran (the file select shows it)
   owLayer1: 0xc800, owLayer1End: 0xd000, // overworld layer 1 tilemap (with events applied)
   owTranslevels: 0xd000, owTranslevelsEnd: 0xd800, // translevel per overworld tile
@@ -158,6 +158,7 @@ export const RAM = {
   playerLives: 0x0db4, // per player (-1: out)
 } as const;
 
+export const SWITCH_PALACES = 4; // $1F27–$1F2A
 export const MARIO_DYING = 9; // Mario's animation while he dies
 // joypad bits ($4218)
 export const PAD = { b: 0x8000, y: 0x4000, select: 0x2000, start: 0x1000, up: 0x0800, down: 0x0400, left: 0x0200, right: 0x0100, a: 0x0080, x: 0x0040, l: 0x0020, r: 0x0010 } as const;

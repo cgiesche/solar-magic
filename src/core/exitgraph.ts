@@ -73,6 +73,16 @@ export class ExitGraph {
     return null;
   }
 
+  // the levels played from `level` on: it and those its exits lead to, through theirs (not out to the overworld)
+  reachedFrom(level: number): number[] {
+    const seen = new Set([level]), queue = [level];
+    while (queue.length) {
+      const m = queue.shift()!;
+      for (const e of this.exits) if (e.from === m && e.to >= 0 && !seen.has(e.to)) { seen.add(e.to); queue.push(e.to); }
+    }
+    return [...seen];
+  }
+
   private parents: Map<number, number> | null = null;
 
   // the main level (translevel) a sub-level is reached from, breadth first like levelTranslevel

@@ -74,8 +74,8 @@ const saves = progressSaves(new OverworldLoads(new OverworldEmulator(rom), 4));
   const counts = saves.map((v) => v.eventsTriggered);
   check(counts.every((c, p) => !p || c - counts[p - 1] === 0 || c - counts[p - 1] === 1) && counts[0x60] === 0x60,
     `events triggered follow the progress: one more with each event the game runs (${hx(counts[0x10])} at 10, ${hx(counts[0x60])} at 60, ${hx(counts[OW_EVENTS])} at 78)`);
-  // (the switch palaces are pressed in their levels, not learned yet: #257)
-  check(saves.every((v) => v.switchPalaces.every((x) => !x)), 'switch palaces: a new file\'s at every progress (#257)');
+  // (the switch palaces are pressed in their levels: progressSaveJob adds them, tools/testowswitches.ts)
+  check(saves.every((v) => v.switchPalaces.every((x) => !x)), 'switch palaces: a new file\'s at every progress (the job adds those pressed)');
 }
 // two levels running the same event with their normal exit: only the one the game marks passed
 {
