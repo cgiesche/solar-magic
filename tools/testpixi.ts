@@ -76,9 +76,19 @@ check(old.bytes === 0 && old.bytesExtra === 0, 'old cfg (assembler byte): no ext
   let threw = false;
   try { parsePixiList(text); } catch { threw = true; }
   check(threw, 'strict list: a bad line throws');
-  const l = readPixiList(text).map((e) => `${e.kind}:${e.num}:${e.file}`).join();
+  const l = readPixiList(text).list.map((e) => `${e.kind}:${e.num}:${e.file}`).join();
   check(l === 'sprites:16:foo.cfg,shooters:194:gun.json,cluster:3:cl.asm', `package list: the valid entries with their file as written (${l})`);
   check(parsePixiList('C2 gun.json\n')[0].file === 'shooters/gun.json', 'project list: files below their type\'s folder');
+  // per-level sprites (PIXI -pl): read, not thrown on; only B0–BF of levels 000–1FF, only sprites
+  const pl = '10 foo.cfg\n105:B0 per.cfg\n1FF:bf per2.json display\n105:A0 low.cfg\n200:B0 high.cfg\nCLUSTER:\n105:B0 c.asm\n';
+  const r = readPixiList(pl);
+  const per = r.perLevel.map((e) => `${e.level.toString(16)}:${e.num.toString(16)}:${e.file}`).join();
+  check(per === '105:b0:per.cfg,1ff:bf:per2.json' && r.list.length === 1, `package list: its per-level sprites (${per})`);
+  let msg = '';
+  try { parsePixiList(pl); } catch (e) { msg = String(e); }
+  check(/line 4: Per-level sprite number A0 is outside B0–BF/.test(msg), `strict list: a bad per-level entry throws (${msg})`);
+  const strict = parsePixiList('10 foo.cfg\n105:B0 per.cfg\n');
+  check(strict.length === 1 && strict[0].num === 0x10, 'strict list: per-level entries no longer throw (left out of the project)');
 }
 const js = parseJsonCfg(JSON.stringify({ $1656: { 'Object Clipping': 3, 'Can be jumped on': true }, $166E: { Palette: 4, 'Use second graphics page': true }, AsmFile: 'x.asm', ActLike: 28, Type: 1,
   'Extra Property Byte 1': 5, 'Extra Property Byte 2': 0, 'Additional Byte Count (extra bit clear)': 1, 'Additional Byte Count (extra bit set)': 2,

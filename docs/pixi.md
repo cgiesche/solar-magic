@@ -62,7 +62,9 @@ Sections: `SPRITE:` (default), `CLUSTER:`, `EXTENDED:`, `MINOREXTENDED:`, `BOUNC
 `SPINNINGCOIN:`, `SCORE:`. Additions such as `display`/`nodisplay` (only for Lunar Magic) are ignored.
 
 **Not supported:** per-level sprites (`105:B0 file.cfg`, PIXI option `-pl`). B0–BF are normal
-sprites.
+sprites. An upload whose `list.txt` has per-level entries installs its other sprites; a sprite listed
+only per level is left out, and the upload preview and the install result name it (a sprite listed
+with a normal number as well is installed under that number).
 
 ### Numbers in the game
 
@@ -215,8 +217,8 @@ removal, the extra bytes are dropped.
 
 ## Limitations
 
-- No SA-1, no per-level sprites, no relocation of `$1938` (255 sprites per level), no "run-once"
-  sprites beyond DF.
+- No SA-1, no per-level sprites (left out of an upload, see above), no relocation of `$1938`
+  (255 sprites per level), no "run-once" sprites beyond DF.
 - `asm/ExtraDefines` and `asm/ExtraHijacks` are not evaluated. Custom hijacks belong in a
   normal patch.
 - ROMs into which sprites have already been inserted with PIXI are not recognized.

@@ -35,7 +35,7 @@ import { uploadObjectText, objectTextNotes, isObjectTextFile } from './objtext.t
 import { allOrNothing } from './romedit.ts';
 import { callistoProject, includesCallistoHeader, sharedCode, type CallistoProject } from './callisto.ts';
 import { replacedPatch, replacedNote } from './replaced.ts';
-import { partAdapter, DETECT_ORDER, SHARED_CODE, planInstall, planSfx, sfxDefines, planUpload, applyParts, pixiListed, applyAssignment, patchSource, partsOf,
+import { partAdapter, DETECT_ORDER, SHARED_CODE, planInstall, planSfx, sfxDefines, planUpload, applyParts, pixiListed, perLevelSprites, perLevelLeftOut, applyAssignment, patchSource, partsOf,
   type PreviewPart, type PreviewBase, type ReadyPreview, type Detection, type FileClaim, type InstallOptions, type InstallContext, type ManualAssignment, type SfxPlan } from './pkgparts.ts';
 
 export type { PreviewPart, ReadyPreview, InstallOptions, ManualAssignment };
@@ -133,7 +133,10 @@ export function inspectFiles(fileName: string, files: Map<string, Uint8Array>): 
   const mains = new Set(parts.flatMap((p) => (p.kind === 'patch' ? p.candidates : [p.file])));
   for (const p of won.parts) if (!mains.has(p.file)) won.files.delete(p.file);
   parts = PART_KINDS.flatMap((k) => parts.filter((p) => p.kind === k));
+  // sprites the package's PIXI list gives only per-level numbers: left out with a note
+  const perLevel = code ? perLevelSprites(files, callisto, won.parts.filter((p) => p.kind === 'sprite').map((p) => p.file)) : new Map<string, string>();
   if (!parts.length) {
+    if (perLevel.size) return { ...head, status: 'failed', reason: `Nothing to install. ${[...perLevel.values()].join(' ')}` };
     if (replaced.size) return { ...head, status: 'replaced', notes: [...replaced.values()] };
     if (!asm.length) return { ...head, status: 'failed', reason: `Found ${describe(paths)}, but no .asm file (patch, UberASM code, block or sprite), no AddmusicK song (.txt), no graphics and no Lunar Magic level (.mwl).` };
     return { ...head, status: 'failed', reason: `Found ${describe(paths)}, but nothing to install: the .asm files are only included by each other.` };
@@ -141,9 +144,9 @@ export function inspectFiles(fileName: string, files: Map<string, Uint8Array>): 
   // shared code goes with the parts using it; what is left is not installed; a Callisto project's Lunar
   // Magic data and initial patch with a note
   const left = callisto?.left.filter((l) => files.has(l.file)) ?? [];
-  const notes = [...left.map((l) => `Not part of the package: ${l.file} – ${l.what}.`), ...replaced.values()];
+  const notes = [...left.map((l) => `Not part of the package: ${l.file} – ${l.what}.`), ...replaced.values(), ...perLevel.values()];
   const shared = new Set(callisto ? sharedCode(callisto, files) : []);
-  const unclaimed = paths.filter((p) => !won.files.has(p) && !replaced.has(p) && !included.has(p) && !shared.has(p) && !left.some((l) => l.file === p) && !isObjectTextFile(p) && !(code && SHARED_CODE.test(p) && /\.(asm|asar)$/i.test(p))).sort();
+  const unclaimed = paths.filter((p) => !won.files.has(p) && !replaced.has(p) && !perLevel.has(p) && !included.has(p) && !shared.has(p) && !left.some((l) => l.file === p) && !isObjectTextFile(p) && !(code && SHARED_CODE.test(p) && /\.(asm|asar)$/i.test(p))).sort();
   return { ...head, status: 'ready', parts, code, samples: graphics.mwls, unclaimed, docs, callisto, notes };
 }
 
@@ -309,6 +312,8 @@ export async function installPackage(rom: Rom, preview: ReadyPreview | ManualPre
       ctx = parts;
       rec = await recordPackageChangeAsync(rom, target, (claim) => applyParts(rom, parts, claim));
     }
+    // sprites the package's PIXI list gives only per-level numbers: named as left out
+    if (preview.status === 'ready') warnings.push(...perLevelLeftOut(preview).values());
     warnings.push(...rec.result.warnings);
     prints.push(...rec.result.prints);
     if (!rec.result.ok) return failed(rec.result.errors, warnings, prints);

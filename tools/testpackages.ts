@@ -227,6 +227,33 @@ for (const [p, what] of [[uberFolder, 'UberASM Tool folder'], [gpsFolder, 'GPS f
 }
 sameRom('tool folders removed');
 
+// a PIXI folder with per-level sprites (PIXI -pl): the global sprites installed, the per-level ones left
+// out and named in the preview and the result (a sprite listed globally too is installed); only per-level
+// sprites: nothing to install, saying why
+{
+  const per = (n: string) => ({ [`sprites/${n}.cfg`]: `01\n36\n00 00 00 00 00 00\n00 00\n${n}.asm\n00:00\n`, [`sprites/${n}.asm`]: 'print "INIT ",pc\nprint "MAIN ",pc\n  RTL\n' });
+  const bill = Object.fromEntries(Object.entries(billFiles).filter(([k]) => k.startsWith('sprites/')));
+  const p = ready(inspectUpload('PerLevel.zip', zip({ 'list.txt': '00 BrutalBill.json\n105:B0 lvl.cfg\n106:B1 lvl.cfg\n107:B0 both.cfg\n01 both.cfg\n', ...bill, ...per('lvl'), ...per('both') })));
+  const parts = p.parts.map((x) => x.file).sort().join(' ');
+  check(parts === 'sprites/BrutalBill.json sprites/both.cfg', `per-level: the global sprites are the parts (${parts})`);
+  check(p.notes.length === 1 && /sprites\/lvl\.cfg: a per-level sprite \(B0 in level 105, B1 in level 106\), not installed.*not supported/.test(p.notes[0]) && !p.unclaimed.includes('sprites/lvl.cfg'), `per-level: the preview names the sprite left out (${p.notes.join(' | ')})`);
+  const r = await install(p);
+  const proj = loadPixiProject(rom)!;
+  const list = proj.list.map((e) => `${e.num}:${e.file}`).sort().join(' ');
+  check(r.ok && list === '0:sprites/BrutalBill.json 1:sprites/both.cfg', `per-level: the global sprites installed (${r.errors.join(' ')}${list})`);
+  check(![...proj.files.keys()].some((f) => /lvl\./.test(f)), 'per-level: its files not taken along');
+  check(r.warnings.some((w) => /sprites\/lvl\.cfg.*per-level/.test(w)), `per-level: the result lists the sprite left out (${r.warnings.join(' | ')})`);
+  await uninstallPackage(rom, r.pkg!.id, opts.blank);
+  // with a part of another kind and no global sprite: that part installed, the result still naming it
+  const withBlock = ready(inspectUpload('PerLevelBlock.zip', zip({ 'pixi/list.txt': '105:B0 lvl.cfg\n', ...Object.fromEntries(Object.entries(per('lvl')).map(([k, v]) => ['pixi/' + k, v])), 'blocks/solid.asm': blockAsm })));
+  const rbk = await install(withBlock);
+  check(kinds(withBlock) === 'block' && rbk.ok && rbk.warnings.some((w) => /lvl\.cfg.*per-level/.test(w)), `per-level with a block: the block installed, the result names the sprite left out (${kinds(withBlock)}; ${rbk.warnings.join(' | ')})`);
+  await uninstallPackage(rom, rbk.pkg!.id, opts.blank);
+  const only = inspectUpload('OnlyPerLevel.zip', zip({ 'list.txt': '105:B0 lvl.cfg\n', ...per('lvl') }));
+  check(only.status === 'failed' && /per-level/.test(only.reason), `only per-level sprites: says why nothing is installed (${only.status === 'failed' ? only.reason : only.status})`);
+}
+sameRom('per-level PIXI folder removed');
+
 // No Overworld (UberASM Tool 2.0): three game mode files, each including the same file of defines and
 // macros (with a hijack) – each resource assembled on its own, as in UberASM Tool; the game modes from
 // the readme's list.txt lines

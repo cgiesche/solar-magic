@@ -68,10 +68,15 @@ const dirOf = (p: string) => (p.includes('/') ? p.slice(0, p.lastIndexOf('/') + 
 
 // ---------------------------------------------------------------- list.txt
 
-// the entries of a list.txt with their file as written (relative to the folder of their type); a bad line
-// throws (strict) or is skipped, with the lines of an unknown section
-function listLines(text: string, strict: boolean): PixiEntry[] {
+// a per-level sprite of PIXI's -pl (list.txt `105:B0 file.cfg`): number B0–BF in that level only. The
+// editor doesn't support them; an upload leaves them out and says so.
+export interface PixiLevelEntry { level: number; num: number; file: string } // file as written (below sprites/)
+
+// the entries of a list.txt with their file as written (relative to the folder of their type) and its
+// per-level sprites; a bad line throws (strict) or is skipped, with the lines of an unknown section
+function listLines(text: string, strict: boolean): { list: PixiEntry[]; perLevel: PixiLevelEntry[] } {
   const out: PixiEntry[] = [];
+  const perLevel: PixiLevelEntry[] = [];
   let section: SpriteFolder | null = 'sprites';
   text.split(/\r?\n/).forEach((raw, i) => {
     const line = raw.replace(/;.*$/, '').trim();
@@ -84,27 +89,38 @@ function listLines(text: string, strict: boolean): PixiEntry[] {
       return;
     }
     if (!section) return;
-    if (/^[0-9a-f]+:[0-9a-f]+\s/i.test(line)) return skipOrThrow('Per-level sprites (level:number) are not supported');
-    const m = /^([0-9a-f]{1,2})\s+(.+?)(?:\s+(display|nodisplay))?$/i.exec(line);
+    const m = /^(?:([0-9a-f]{1,3}):)?([0-9a-f]{1,2})\s+(.+?)(?:\s+(display|nodisplay))?$/i.exec(line);
     if (!m) return skipOrThrow(`Unrecognized entry “${line}”`);
-    const num = parseInt(m[1], 16);
+    const num = parseInt(m[2], 16);
+    const file = m[3].trim();
+    const isCfg = /\.(cfg|json)$/i.test(file);
+    if (m[1] !== undefined) {
+      const level = parseInt(m[1], 16);
+      if (section !== 'sprites') return skipOrThrow('Per-level entries (level:number) are only for sprites');
+      if (level > 0x1ff) return skipOrThrow(`Level ${m[1]} is outside 000–1FF`);
+      if (num < 0xb0 || num > 0xbf) return skipOrThrow(`Per-level sprite number ${m[2]} is outside B0–BF`);
+      if (!isCfg) return skipOrThrow(`“${file}”: sprites need a .cfg or .json file`);
+      perLevel.push({ level, num, file });
+      return;
+    }
     const kind = section === 'sprites' ? levelKind(num) : section;
     const [lo, hi] = numberRange(kind);
-    if (num < lo || num > hi) return skipOrThrow(`Number ${m[1]} is outside ${lo.toString(16).toUpperCase()}–${hi.toString(16).toUpperCase()}`);
-    const file = m[2].trim();
-    const isCfg = /\.(cfg|json)$/i.test(file);
+    if (num < lo || num > hi) return skipOrThrow(`Number ${m[2]} is outside ${lo.toString(16).toUpperCase()}–${hi.toString(16).toUpperCase()}`);
     if (section === 'sprites' ? !isCfg : !/\.asm$/i.test(file)) return skipOrThrow(section === 'sprites' ? `“${file}”: sprites need a .cfg or .json file` : `“${file}”: an .asm file is expected here`);
     out.push({ kind, num, file });
   });
-  return out;
+  return { list: out, perLevel };
 }
 
+// the project's list (the editor's own, written by writePixiList: it has no per-level sprites – those of
+// a list.txt are left out)
 export function parsePixiList(text: string): PixiEntry[] {
-  return listLines(text, true).map((e) => ({ ...e, file: normPath(FOLDER[e.kind] + e.file) }));
+  return listLines(text, true).list.map((e) => ({ ...e, file: normPath(FOLDER[e.kind] + e.file) }));
 }
 
-// the entries of a package's list.txt, maybe not all valid (those that are), with their file as written
-export function readPixiList(text: string): PixiEntry[] {
+// the entries of a package's list.txt, maybe not all valid (those that are), with their file as written,
+// and its per-level sprites
+export function readPixiList(text: string): { list: PixiEntry[]; perLevel: PixiLevelEntry[] } {
   return listLines(text, false);
 }
 

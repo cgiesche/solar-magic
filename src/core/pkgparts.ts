@@ -21,7 +21,7 @@ import { uploadSource, effectiveDefines, packUpload, type FileDefines, type Uplo
 import { suggestCalls, placed, type PkgRules } from './pkgmap.ts';
 import { isSongText, songsFromFiles, loadMusicProject, emptyMusicProject, addSongs, addSfx, nextFreeSong, folders as musicFolders, saveMusicProject, hasAmk, musicEntry } from './music.ts';
 import { pixiParts, planPixiUpload, applyPixiUpload, spriteFiles, linkedDefines, hexNum, type PixiPlan } from './pixipkg.ts';
-import { parseCfg, parseJsonCfg, readPixiList, FOLDER } from './pixi.ts';
+import { parseCfg, parseJsonCfg, readPixiList, FOLDER, type PixiLevelEntry } from './pixi.ts';
 import { bowsieUploadSprites, applyBowsieUpload } from './bowsie.ts';
 import { detectBlocks, applyBlocks, applyGraphics, routinesCalled, planPackage, plannedFgTiles, type DetectedBlock, type DetectedGraphics, type PackagePlan } from './pkgplan.ts';
 import { loadProject, saveProject, emptyProject, projectFromFiles, addCall, isUberList, type UberProject } from './uberproject.ts';
@@ -319,6 +319,12 @@ function cfgAsm(upload: UploadCode, cfg: string): string | null {
   } catch { return null; }
 }
 
+// a sprite of the upload that is one of its parts' (a Callisto project's are in its PIXI folder)
+function ownSprite(callisto: CallistoProject | null, f: string): boolean {
+  const pixi = callisto?.tools.pixi;
+  return !callisto || (!!pixi && f.startsWith(pixi.folder));
+}
+
 const sprite: PartAdapter<'sprite'> = {
   kind: 'sprite',
   // PIXI sprites: cfg/json with their .asm, misc sprites by their folder; each with the files going with
@@ -328,10 +334,9 @@ const sprite: PartAdapter<'sprite'> = {
   claims(d) {
     if (!d.code) return [];
     const out: FileClaim[] = [];
-    const pixi = d.callisto?.tools.pixi;
     const sprites = pixiParts(d.code).sprites, mains = sprites.map((s) => s.file);
     for (const s of sprites) {
-      if (d.callisto && !(pixi && s.file.startsWith(pixi.folder))) continue; // (a Callisto project's are in its PIXI folder)
+      if (!ownSprite(d.callisto, s.file)) continue;
       out.push({ file: s.file, rank: RANK.content, part: { kind: 'sprite', name: s.name, file: s.file, type: s.kind } });
       if (dirOf(s.file)) for (const p of spriteFiles(d.paths, s.file, mains, (f) => d.docs.includes(f))) if (p !== s.file) out.push({ file: p, rank: RANK.content, of: s.file });
       const asm = /\.(json|cfg)$/i.test(s.file) ? cfgAsm(d.code, s.file) : null;
@@ -339,11 +344,26 @@ const sprite: PartAdapter<'sprite'> = {
     }
     return out;
   },
+  // not those the upload's PIXI list gives only per-level numbers
+  finish(mine, _others, d) {
+    const perLevel = perLevelSprites(d.files, d.callisto, mine.map((p) => p.file));
+    return mine.filter((p) => !perLevel.has(p.file));
+  },
   apply(rom, _mine, { preview, sprites }, claim) {
-    const skip = new Set([...preview.docs, ...preview.parts.filter((p) => p.kind !== 'sprite').map((p) => p.file)]);
+    // (the per-level sprites left out and their .asm files aren't taken along from a folder they share)
+    const keptAsm = new Set(sprites!.sprites.map((s) => cfgAsm(preview.code!, s.file)));
+    const notTaken = [...perLevelLeftOut(preview).keys()].flatMap((f) => [f, ...[cfgAsm(preview.code!, f)].filter((a): a is string => !!a && !keptAsm.has(a))]);
+    const skip = new Set([...preview.docs, ...preview.parts.filter((p) => p.kind !== 'sprite').map((p) => p.file), ...notTaken]);
     return applyPixiUpload(rom, preview.code!, sprites!, skip, (f) => claim('sprite', f));
   },
 };
+
+// the sprites of a preview left out as per-level sprites, with their notes (by file)
+export function perLevelLeftOut(preview: ReadyPreview): Map<string, string> {
+  if (!preview.code) return new Map();
+  const detected = pixiParts(preview.code).sprites.map((s) => s.file).filter((f) => ownSprite(preview.callisto, f));
+  return perLevelSprites(preview.files, preview.callisto, detected);
+}
 
 // ---------- overworld sprites ----------
 
@@ -486,21 +506,42 @@ export function planInstall(rom: Rom, preview: ReadyPreview, opt: InstallOptions
   };
 }
 
-// the numbers the package's PIXI list gives its sprites, by the sprite's file: a Callisto project's list
-// of its PIXI folder, else any list.txt
-export function pixiListed(preview: ReadyPreview): Map<string, number> {
-  const out = new Map<string, number>();
-  const sprites = partsOf(preview, 'sprite').map((s) => s.file);
-  const pixi = preview.callisto?.tools.pixi;
-  const lists = pixi ? (pixi.list ? [pixi.list] : []) : [...preview.files.keys()].filter((f) => /(^|\/)list\.txt$/i.test(f));
+// the package's PIXI lists – a Callisto project's list of its PIXI folder, else any list.txt – for the
+// sprite files `sprites`: the numbers they give them (by file), and per sprite the per-level numbers of
+// one they give no other number (PIXI's -pl, not supported: that sprite is left out)
+function pixiLists(files: Map<string, Uint8Array>, callisto: CallistoProject | null, sprites: string[]) {
+  const listed = new Map<string, number>();
+  const perLevel = new Map<string, PixiLevelEntry[]>();
+  const pixi = callisto?.tools.pixi;
+  const lists = pixi ? (pixi.list ? [pixi.list] : []) : [...files.keys()].filter((f) => /(^|\/)list\.txt$/i.test(f));
   for (const f of lists) {
-    for (const e of readPixiList(dec.decode(preview.files.get(f)!))) {
-      const dir = pixi ? pixi.folder + FOLDER[e.kind] : dirOf(f);
-      const file = sprites.find((s) => s === dir + e.file || s.endsWith('/' + e.file));
-      if (file && !out.has(file)) out.set(file, e.num);
+    const find = (kind: SpriteFolder, file: string) => {
+      const dir = pixi ? pixi.folder + FOLDER[kind] : dirOf(f);
+      return sprites.find((s) => s === dir + file || s.endsWith('/' + file));
+    };
+    const l = readPixiList(dec.decode(files.get(f)!));
+    for (const e of l.list) {
+      const file = find(e.kind, e.file);
+      if (file && !listed.has(file)) listed.set(file, e.num);
+    }
+    for (const e of l.perLevel) {
+      const file = find('sprites', e.file);
+      if (file) perLevel.set(file, [...(perLevel.get(file) ?? []), e]);
     }
   }
-  return out;
+  for (const f of listed.keys()) perLevel.delete(f);
+  return { listed, perLevel };
+}
+
+export const pixiListed = (preview: ReadyPreview): Map<string, number> =>
+  pixiLists(preview.files, preview.callisto, partsOf(preview, 'sprite').map((s) => s.file)).listed;
+
+// the sprites (of the files `sprites`) the upload's PIXI list gives only per-level numbers: left out, with
+// the note saying so (by file)
+export function perLevelSprites(files: Map<string, Uint8Array>, callisto: CallistoProject | null, sprites: string[]): Map<string, string> {
+  const hx = (n: number, w: number) => n.toString(16).toUpperCase().padStart(w, '0');
+  return new Map([...pixiLists(files, callisto, sprites).perLevel].map(([f, es]) =>
+    [f, `${f}: a per-level sprite (${es.map((e) => `${hx(e.num, 2)} in level ${hx(e.level, 3)}`).join(', ')}), not installed – PIXI's per-level sprites are not supported.`]));
 }
 
 // applies every part of the preview in the order of PART_KINDS (run it in a package recording, pkgreg.ts, which gets `claim`);
