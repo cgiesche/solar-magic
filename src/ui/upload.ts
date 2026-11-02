@@ -10,7 +10,7 @@ import { installPackage, partsSummary, type ReadyPreview, type ManualPreview, ty
 import { assignmentEditor } from './pkgmap.ts';
 import type { Package } from '../core/pkgreg.ts';
 import { PART_LABEL, type PartKind } from '../core/parts.ts';
-import { map16Source } from '../core/render.ts';
+import { map16Source, blankTile } from '../core/render.ts';
 import { hex } from '../core/names.ts';
 import { settingsForm } from './patchmanager.ts';
 import { errorText } from './projectpane.ts';
@@ -32,8 +32,7 @@ export function openUploadPreview(app: App, p: ReadyPreview | ManualPreview, don
   let form = patch ? settingsForm(p.upload!, main, {}) : null;
   if (form) settingsBox.appendChild(form.el);
   const log = h('div');
-  const src = map16Source(app.rom, app.render);
-  const place = placementEditor(app, p, src.fg(0x025));
+  const place = placementEditor(app, p, blankTile(app.rom, app.render));
   const defaults = [
     has('uberasm') ? `UberASM code runs in level ${lvl}` : '',
     has('music') ? `songs get the next free numbers and play in level ${lvl}` : '',
@@ -87,7 +86,7 @@ function installDialog(app: App, p: ReadyPreview | ManualPreview, body: HTMLElem
     const routineBefore = app.messageRoutine();
     let r;
     try {
-      const opt: InstallOptions = { level: app.level.number, blank: src.fg(0x025), tileWords: (t) => src.fg(t), ...choices() };
+      const opt: InstallOptions = { level: app.level.number, blank: blankTile(app.rom, app.render), tileWords: (t) => src.fg(t), ...choices() };
       r = await app.romEditAsync(`Package “${p.name}” installed`, () => installPackage(app.rom, p, opt));
     } catch (e) { r = { ok: false, errors: [errorText(e)], warnings: [], prints: [], pkg: null }; }
     busy = false;

@@ -31,7 +31,7 @@ import { cgramToRGBA } from '../../core/gfx.ts';
 import { tileMatches, drawTileMatches, tileBehaviors, behaviorTile, pendingHint, onBehaviorProgress } from '../tilesearch.ts';
 import { animsAt, animLinks } from './animtab.ts';
 import { unusedFgTiles } from '../../core/levelusage.ts';
-import { map16Source } from '../../core/render.ts';
+import { blankTile } from '../../core/render.ts';
 import { remapTile, remapLine, slotRemapLine, parseRemap } from '../../core/remap.ts';
 import { remapEditor, type RemapEditor } from '../remaplist.ts';
 import { planMove, applyMove, planRemap, rectMap, type MovePlan, type MoveSource } from '../../core/tilemove.ts';
@@ -948,7 +948,7 @@ export class Map16Tab implements WsPanel {
   private unusedTiles(): Set<number> | null {
     if (this.unused) return this.unused;
     const app = this.app, { levels, pending } = app.levelTiles();
-    if (!pending) this.unused = new Set(unusedFgTiles(app.rom, levels, map16Source(app.rom, app.render).fg(0x025)));
+    if (!pending) this.unused = new Set(unusedFgTiles(app.rom, levels, blankTile(app.rom, app.render)));
     return this.unused;
   }
 
@@ -1111,7 +1111,7 @@ export class Map16Tab implements WsPanel {
     }
     const map = rectMap(this.sel, this.selW, this.selH, m.to);
     const { levels: index, pending, open } = app.levelTiles();
-    const src: MoveSource = { ...levelSource(app, map), blank: map16Source(app.rom, app.render).fg(0x025), index };
+    const src: MoveSource = { ...levelSource(app, map), blank: blankTile(app.rom, app.render), index };
     const plan = planMove(app.rom, layer, map, src);
     m.plan = { plan, src, pending: layer === 'bg' ? 0 : pending };
     const ok = !plan.problems.length;

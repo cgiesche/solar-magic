@@ -12,6 +12,7 @@ import type { SpriteFolder } from './pixirt.ts';
 import { TOOL_KINDS, type ToolKind } from './parts.ts';
 import { SECTIONS, SECTION_KEYS, type SectionKey, type PartSection } from './pkgsections.ts';
 import type { ObjectText } from './objtext.ts';
+import { listPatches, type PatchEntry } from './patchreg.ts';
 
 const MAGIC = [0x53, 0x4d, 0x57, 0x4b]; // "SMWK"
 const VERSION = 1;
@@ -218,6 +219,12 @@ export async function uninstallPackage(rom: Rom, id: string, blank: number[]): P
   }
   removePackageRecord(rom, id);
   return warnings;
+}
+
+// a package's patches still in the ROM, in its order
+export function packagePatches(rom: Rom, r: Package): PatchEntry[] {
+  const all = listPatches(rom);
+  return r.patches.flatMap((id) => all.filter((p) => p.id === id));
 }
 
 // the package that brought a patch (by registry id)

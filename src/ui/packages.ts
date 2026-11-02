@@ -6,21 +6,21 @@
 import type { App } from './app.ts';
 import { h, clear, toast, choose, logTool } from './dom.ts';
 import { downloadBytes } from './platform.ts';
-import { listPatches, type PatchEntry } from '../core/patchreg.ts';
+import type { PatchEntry } from '../core/patchreg.ts';
 import type { ApplyResult } from '../core/patchapply.ts';
-import { listPackages, packageSummary, packageRemoval, uninstallPackage, type Package } from '../core/pkgreg.ts';
-import { SECTIONS } from '../core/pkgsections.ts';
+import { listPackages, packageSummary, packageRemoval, uninstallPackage, packagePatches, type Package } from '../core/pkgreg.ts';
+import { toolContent, looseFiles, type ToolProjects } from '../core/pkgsections.ts';
 import { reapplyPackagePatch, packageFiles } from '../core/packages.ts';
 import { loadMusicProject, songHex, sfxKey } from '../core/music.ts';
 import { playButton, playSong, currentSongs } from './musicdialog.ts';
 import { isGfxData } from '../core/gfxfiles.ts';
 import { hex } from '../core/names.ts';
 import { ALL, type UberContext } from '../core/uberasm.ts';
-import { KIND_LABEL as SPRITE_KIND, spriteConfig, type PixiProject } from '../core/pixi.ts';
+import { KIND_LABEL as SPRITE_KIND, spriteConfig, spriteAsm, type PixiProject } from '../core/pixi.ts';
 import { bowsieSpriteInfo, type BowsieProject } from '../core/bowsie.ts';
-import type { UberProject } from '../core/uberproject.ts';
+import { removeCall, type UberProject } from '../core/uberproject.ts';
 import type { BlockProject } from '../core/blocks.ts';
-import { map16Source } from '../core/render.ts';
+import { blankTile } from '../core/render.ts';
 import { storedUpload, toUpload, settingsForm, patchDone, type PackagesTab } from './patchmanager.ts';
 import { errorText, type Pane } from './projectpane.ts';
 import { definesButton, editButton } from './defineedit.ts';
@@ -86,7 +86,7 @@ export function packagesPane(app: App, host: PackagesHost): { el: HTMLElement; r
     const recs = items.map((i) => i.rec);
     const notes: [ToolKind, string][] = [];
     const count = (k: ToolKind, label: string) => {
-      const files = [...host.panes[k].project().files.keys()].filter((f) => f !== 'list.txt' && !recs.some((r) => r[k].files.includes(f)));
+      const files = looseFiles(recs, k, host.panes[k].project() as ToolProjects[ToolKind]);
       if (files.length) notes.push([k, `${label}: ${files.length} file(s)`]);
     };
     count('uberasm', 'UberASM'); count('block', 'Blocks'); count('sprite', 'Sprites'); count('owsprite', 'Overworld sprites');
@@ -103,7 +103,7 @@ export function packagesPane(app: App, host: PackagesHost): { el: HTMLElement; r
       return;
     }
     const rec = it.rec;
-    const patches = rec.patches.flatMap((id) => listPatches(app.rom).filter((p) => p.id === id));
+    const patches = packagePatches(app.rom, rec);
     const filesBox = h('div');
     const patchBox = h('div');
     clear(detail).append(
@@ -168,15 +168,9 @@ export function packagesPane(app: App, host: PackagesHost): { el: HTMLElement; r
     // UberASM: where it runs, then its files
     if (rec.uberasm.files.length || rec.uberasm.calls.length) {
       const proj = host.panes.uberasm.project() as UberProject;
-      const calls = SECTIONS.uberasm.owned(rec.uberasm, proj);
-      const shown = new Set(calls.map((c) => c[2]));
-      const rest = rec.uberasm.files.filter((f) => !shown.has(f)).sort();
+      const { entries: calls, rest } = toolContent(rec, 'uberasm', proj);
       const where = ([ctx, num]: [UberContext, number, string]) => num === ALL ? `all ${CTX_LABEL[ctx].toLowerCase()}s` : `${CTX_LABEL[ctx]} ${hex(num, ctx === 'level' ? 3 : 2)}`;
-      const unassign = (c: [UberContext, number, string]) => {
-        const cs = proj.list[c[0]].get(c[1])?.filter((x) => x.file !== c[2]) ?? [];
-        if (cs.length) proj.list[c[0]].set(c[1], cs); else proj.list[c[0]].delete(c[1]);
-        touch('uberasm');
-      };
+      const unassign = ([ctx, num, file]: [UberContext, number, string]) => { removeCall(proj, ctx, num, file); touch('uberasm'); };
       out.push(section('uberasm', 'UberASM', '',
         calls.length ? h('table', { class: 'uber-table' }, h('tr', null, h('th', null, 'runs in'), h('th', null, 'File'), h('th')),
           calls.map((c) => h('tr', null, h('td', null, where(c)), h('td', { class: 'mono' }, c[2]),
@@ -188,8 +182,7 @@ export function packagesPane(app: App, host: PackagesHost): { el: HTMLElement; r
     // blocks
     if (rec.block.tiles.length || rec.block.files.length) {
       const proj = host.panes.block.project() as BlockProject;
-      const blocks = SECTIONS.block.owned(rec.block, proj).sort((a, b) => a.tile - b.tile);
-      const rest = rec.block.files.filter((f) => !blocks.some((b) => b.file === f)).sort();
+      const { entries: blocks, rest } = toolContent(rec, 'block', proj);
       out.push(section('block', 'Blocks', 'To place: palette → Map16, or a Direct Map16 object with the tile.',
         blocks.length ? h('table', { class: 'uber-table' }, h('tr', null, h('th', null, 'Tile'), h('th', null, 'Block'), h('th', null, 'acts like'), h('th')),
           blocks.map((b) => h('tr', null,
@@ -203,23 +196,19 @@ export function packagesPane(app: App, host: PackagesHost): { el: HTMLElement; r
     // sprites
     if (rec.sprite.list.length || rec.sprite.files.length) {
       const proj = host.panes.sprite.project() as PixiProject;
-      const sprites = SECTIONS.sprite.owned(rec.sprite, proj);
+      const { entries: sprites, rest } = toolContent(rec, 'sprite', proj);
       const nameOf = (e: PixiProject['list'][number]) => { try { return spriteConfig(proj, e).names[0]?.name ?? ''; } catch { return ''; } };
-      const asmOf = (e: PixiProject['list'][number]) => { try { return spriteConfig(proj, e).asm ?? e.file; } catch { return e.file; } };
-      const used = new Set(sprites.flatMap((e) => [e.file, asmOf(e)]));
-      const rest = rec.sprite.files.filter((f) => !used.has(f)).sort();
       out.push(section('sprite', 'Sprites', 'To insert: sprite mode, custom sprite with the number.',
         sprites.length ? h('table', { class: 'uber-table' }, h('tr', null, h('th', null, 'Type'), h('th', null, 'No.'), h('th', null, 'Name'), h('th')),
           sprites.map((e) => h('tr', null, h('td', null, SPRITE_KIND[e.kind]), h('td', { class: 'mono' }, hex(e.num, 2)), h('td', { title: e.file }, nameOf(e)),
-            h('td', { class: 'actions' }, definesButton(proj.files, asmOf(e), () => touch('sprite')), editButton(proj.files, asmOf(e), () => touch('sprite')))))) : '',
+            h('td', { class: 'actions' }, definesButton(proj.files, spriteAsm(proj, e), () => touch('sprite')), editButton(proj.files, spriteAsm(proj, e), () => touch('sprite')))))) : '',
         rest.length ? h('details', { class: 'pkg-files' }, h('summary', null, `More files (${rest.length})`),
           h('table', { class: 'uber-table' }, rest.map((f) => fileRow('sprite', proj.files, f)))) : ''));
     }
     // overworld sprites
     if (rec.owsprite.list.length || rec.owsprite.files.length) {
       const proj = host.panes.owsprite.project() as BowsieProject;
-      const sprites = SECTIONS.owsprite.owned(rec.owsprite, proj).sort((a, b) => a.num - b.num);
-      const rest = rec.owsprite.files.filter((f) => !sprites.some((e) => e.file === f)).sort();
+      const { entries: sprites, rest } = toolContent(rec, 'owsprite', proj);
       out.push(section('owsprite', 'Overworld sprites', 'To place: overworld editor, Sprites mode.',
         sprites.length ? h('table', { class: 'uber-table' }, h('tr', null, h('th', null, 'No.'), h('th', null, 'Name'), h('th')),
           sprites.map((e) => h('tr', null, h('td', { class: 'mono' }, hex(e.num, 2)), h('td', { title: e.file }, bowsieSpriteInfo(proj, e).name),
@@ -319,7 +308,7 @@ export function packagesPane(app: App, host: PackagesHost): { el: HTMLElement; r
     if (i !== 1) return;
     const keys = TOOL_KINDS.filter((k) => rec[k].files.length);
     try {
-      const blank = map16Source(app.rom, app.render).fg(0x025);
+      const blank = blankTile(app.rom, app.render);
       const w = await app.romEditAsync(`Package “${rec.name}” removed`, () => uninstallPackage(app.rom, rec.id, blank));
       toast(`“${rec.name}” removed${w.length ? ': ' + w.join(' ') : ''}`);
     } catch (e) { toast(errorText(e), 'error'); }

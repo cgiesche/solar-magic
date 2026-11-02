@@ -12,7 +12,7 @@ import { levelColors } from '../core/levelgfx.ts';
 import { altFileName, levelAltFile } from '../core/exanim.ts';
 import { LT3_DESTS, LT3_SIZES } from '../core/layer3gfx.ts';
 import { uploadFiles } from '../core/patchpkg.ts';
-import { map16Source } from '../core/render.ts';
+import { blankTile } from '../core/render.ts';
 import { errorText } from './projectpane.ts';
 import { gfxNumberField } from './gfxnum.ts';
 
@@ -32,7 +32,7 @@ export async function openLevelImport(app: App): Promise<void> {
 export function openLevelImportDialog(app: App, fileName: string, files: Map<string, Uint8Array>): void {
   const name = fileName.replace(/\.[^.]*$/, '').split(/[\\/]/).pop()!;
   const lvl = hex(app.level.number, 3);
-  const blank = map16Source(app.rom, app.render).fg(0x025);
+  const blank = blankTile(app.rom, app.render);
   const plan = planBgPack(app.rom, name, files, blank);
   const canBg = !!plan.level.bg && app.canEditBg();
   if (!canBg && !plan.fg && !plan.layer3) {

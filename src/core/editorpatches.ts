@@ -24,7 +24,7 @@ import { installFastRom } from './fastrom.ts';
 import { keepCleanSharedPalettes } from './sharedpal.ts';
 import { keepCleanGame, isCleanRom } from './cleangame.ts';
 import { LevelEmulator } from './levelemu.ts';
-import { map16Source } from './render.ts';
+import { blankTile } from './render.ts';
 import type { ApplyResult } from './patchapply.ts';
 
 
@@ -69,7 +69,7 @@ export async function installEditorPatches(rom: Rom): Promise<void> {
   installSubmapGfxPatch(rom);
   newStyleExits(rom);
   // new Map16 tiles start as the empty tile 025 of the ROM
-  const blank = map16Source(rom, new LevelEmulator(rom).load(0x105)).fg(0x025);
+  const blank = blankTile(rom, new LevelEmulator(rom).load(0x105));
   installMap16Ext(rom, blank);
   enableBlocks(rom, blank);
   // last: the long jumps the other patches' hooks took are theirs

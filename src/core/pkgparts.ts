@@ -20,7 +20,7 @@ import type { PartKind } from './parts.ts';
 import { uploadSource, effectiveDefines, packUpload, type FileDefines, type Upload } from './patchpkg.ts';
 import { suggestCalls, placed, type PkgRules } from './pkgmap.ts';
 import { isSongText, songsFromFiles, loadMusicProject, emptyMusicProject, addSongs, addSfx, nextFreeSong, folders as musicFolders, saveMusicProject, hasAmk, musicEntry } from './music.ts';
-import { pixiParts, planPixiUpload, applyPixiUpload, linkedDefines, hexNum, type PixiPlan } from './pixipkg.ts';
+import { pixiParts, planPixiUpload, applyPixiUpload, spriteFiles, linkedDefines, hexNum, type PixiPlan } from './pixipkg.ts';
 import { parseCfg, parseJsonCfg, readPixiList, FOLDER } from './pixi.ts';
 import { bowsieUploadSprites, applyBowsieUpload } from './bowsie.ts';
 import { detectBlocks, applyBlocks, applyGraphics, routinesCalled, planPackage, plannedFgTiles, type DetectedBlock, type DetectedGraphics, type PackagePlan } from './pkgplan.ts';
@@ -30,6 +30,7 @@ import { findSfx, sfxNumbers, sfxLinks, isSfxList, sfxName, type FoundSfx, type 
 import { ALL, CONTEXTS, OTHER, type UberContext } from './uberasm.ts';
 import type { Claim } from './pkgreg.ts';
 import type { Level } from './level.ts';
+import type { SpriteFolder } from './pixirt.ts';
 import { callistoAsm, toolFiles, PATCH_DEFINES, type CallistoProject } from './callisto.ts';
 
 // ---------- what the adapters detect ----------
@@ -41,7 +42,7 @@ export type PreviewPart =
   | PartBase<'patch'> & { candidates: string[] } // the main files to choose from (the upload doesn't say which)
   | PartBase<'uberasm'> & { ctx: UberContext; folder: UberProject | null } // folder: the UberASM Tool folder it is in, installed as a whole
   | PartBase<'block'> & { found: DetectedBlock[] } // one per tile a GPS list.txt puts it on, else one without a tile
-  | PartBase<'sprite'>
+  | PartBase<'sprite'> & { type: SpriteFolder } // its type (pixipkg.ts pixiParts)
   | PartBase<'owsprite'>
   | PartBase<'music'>
   | PartBase<'sfx'> & { bank: SfxBank; rel: string; author: number | null } // rel: its path below the bank's folder; author: its number in the upload's list
@@ -320,25 +321,27 @@ function cfgAsm(upload: Upload, cfg: string): string | null {
 
 const sprite: PartAdapter<'sprite'> = {
   kind: 'sprite',
-  // PIXI sprites: cfg/json with their .asm, misc sprites by their folder; each with the files of its
-  // folder (cfg/json next to it, files it includes) but the manuals
+  // PIXI sprites: cfg/json with their .asm, misc sprites by their folder; each with the files going with
+  // it (pixipkg.ts spriteFiles: of its folder, cfg/json next to it, files it includes) but the manuals.
+  // (A sprite at the upload's root has the whole upload as its folder: the other files there go by
+  // their own claims.)
   claims(d) {
     if (!d.upload) return [];
     const out: FileClaim[] = [];
     const pixi = d.callisto?.tools.pixi;
-    for (const s of pixiParts(d.upload).sprites) {
+    const sprites = pixiParts(d.upload).sprites, mains = sprites.map((s) => s.file);
+    for (const s of sprites) {
       if (d.callisto && !(pixi && s.file.startsWith(pixi.folder))) continue; // (a Callisto project's are in its PIXI folder)
-      out.push({ file: s.file, rank: RANK.content, part: { kind: 'sprite', name: s.name, file: s.file } });
-      const dir = dirOf(s.file);
-      if (dir) for (const p of d.paths) if (p !== s.file && p.startsWith(dir) && !d.docs.includes(p)) out.push({ file: p, rank: RANK.content, of: s.file });
+      out.push({ file: s.file, rank: RANK.content, part: { kind: 'sprite', name: s.name, file: s.file, type: s.kind } });
+      if (dirOf(s.file)) for (const p of spriteFiles(d.paths, s.file, mains, (f) => d.docs.includes(f))) if (p !== s.file) out.push({ file: p, rank: RANK.content, of: s.file });
       const asm = /\.(json|cfg)$/i.test(s.file) ? cfgAsm(d.upload, s.file) : null;
       if (asm) out.push({ file: asm, rank: RANK.content, of: s.file });
     }
     return out;
   },
   apply(rom, _mine, { preview, sprites }, claim) {
-    const others = new Set(preview.parts.filter((p) => p.kind !== 'sprite').map((p) => p.file));
-    return applyPixiUpload(rom, preview.upload!, { ...sprites!, routines: partRoutines(preview, 'sprite') }, others, (f) => claim('sprite', f));
+    const skip = new Set([...preview.docs, ...preview.parts.filter((p) => p.kind !== 'sprite').map((p) => p.file)]);
+    return applyPixiUpload(rom, preview.upload!, sprites!, skip, (f) => claim('sprite', f));
   },
 };
 
@@ -479,11 +482,12 @@ export function planUpload(rom: Rom, preview: ReadyPreview, blank: number[], til
 // where every part goes in this ROM; preview: with the sound effects' defines set in its files, sfx: their
 // numbers and links, planned on the author's files (planSfx, sfxDefines)
 export function planInstall(rom: Rom, preview: ReadyPreview, opt: InstallOptions, sfx: SfxPlan): InstallContext {
-  const sprites = partsOf(preview, 'sprite').map((s) => s.file);
+  // the sprites as detected, with the routines going with them
+  const sprites = partsOf(preview, 'sprite').map((s) => ({ kind: s.type, file: s.file, num: -1, name: s.name }));
   return {
     preview, opt,
     plan: opt.plan ?? planUpload(rom, preview, opt.blank),
-    sprites: sprites.length && preview.upload ? planPixiUpload(rom, preview.upload, (f) => sprites.includes(f), pixiListed(preview)) : null,
+    sprites: sprites.length && preview.upload ? planPixiUpload(rom, preview.upload, { sprites, routines: partRoutines(preview, 'sprite') }, pixiListed(preview)) : null,
     sfx,
   };
 }

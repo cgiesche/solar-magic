@@ -22,6 +22,13 @@ export function addCall(p: UberProject, ctx: UberContext, num: number, file: str
   p.list[ctx].set(num, calls);
 }
 
+// takes a file's calls out of a level, game mode or overworld map (the file stays) – for removing a
+// package and for the Packages tab
+export function removeCall(p: UberProject, ctx: UberContext, num: number, file: string): void {
+  const calls = p.list[ctx].get(num)?.filter((c) => c.file !== file) ?? [];
+  if (calls.length) p.list[ctx].set(num, calls); else p.list[ctx].delete(num);
+}
+
 const UBER: ToolFormat<UberList> = {
   kind: 'uberasm',
   what: 'UberASM',

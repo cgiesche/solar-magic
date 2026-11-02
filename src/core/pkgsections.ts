@@ -12,9 +12,9 @@ import type { Rom } from './rom.ts';
 import { listPatches, hashBytes } from './patchreg.ts';
 import { GLOBAL_GFX, globalGfxHash, globalGfxName, cleanGlobalGfx, setGlobalGfx } from './globalgfx.ts';
 import { uninstallPatch } from './patchapply.ts';
-import { loadProject, saveProject, emptyProject, type UberProject } from './uberproject.ts';
+import { loadProject, saveProject, emptyProject, removeCall, type UberProject } from './uberproject.ts';
 import { loadBlockProject, saveBlockProject, type BlockProject } from './blocks.ts';
-import { loadPixiProject, savePixiProject, type PixiProject } from './pixi.ts';
+import { loadPixiProject, savePixiProject, spriteAsm, type PixiProject } from './pixi.ts';
 import { loadBowsieProject, saveBowsieProject, type BowsieProject } from './bowsie.ts';
 import { hex } from './names.ts';
 import { removeGfx } from './gfxfiles.ts';
@@ -26,7 +26,8 @@ import { EXT_FIRST, EXT_TILES, DEFAULT_ACTS, extTileWords, actsLike, setExtTileW
 import { BG_EXT_FIRST, BG_EXT_TILES, bgExtTileWords, setBgExtTileWords, vanillaBgWords } from './bgmap16.ts';
 import { CONTEXTS, OTHER, type UberContext, type Other } from './uberasm.ts';
 import type { SpriteFolder } from './pixirt.ts';
-import type { PackageParts, GlobalAnimPart } from './pkgreg.ts';
+import type { PackageParts, GlobalAnimPart, Package } from './pkgreg.ts';
+import type { ToolKind } from './parts.ts';
 import { sharedColors, setSharedColor, sharedColorNames } from './sharedpal.ts';
 import { readGlobalList, writeGlobalList, readAltFile, writeAltFile, altFileExtent, altFileName, slotsUsed, SLOTS } from './exanim.ts';
 
@@ -47,9 +48,9 @@ export interface PartSection<S, P> {
 
 const count = (n: number, one: string, many: string) => (!n ? null : n > 1 ? `${n} ${many}` : one);
 
-// sections of tool projects also tell which entries of the project are the package's (the Packages
-// dialog shows them; removing takes them out)
-interface Owns { owned(mine: never, project: never): unknown[] }
+// sections of tool projects also tell which entries of the project are the package's (owned: the
+// Packages dialog shows them, removing takes them out) and the files each entry shows (shows)
+interface Owns<P, J, E> { owned(mine: P, project: J): E[]; shows(e: E, project: J): string[] }
 
 const check = (r: { ok: boolean; errors: string[]; warnings: string[] }, what: string): string[] => {
   if (!r.ok) throw new Error(`${what}: ${r.errors.join(' ')}`);
@@ -144,12 +145,10 @@ export const uberasm = {
   removal: (p) => (p.files.length ? `${p.files.length} UberASM file(s) with their assignments` : null),
   // its calls still in the project
   owned: (mine: UberPart, p: UberProject) => mine.calls.filter(([ctx, num, file]) => p.list[ctx].get(num)?.some((c) => c.file === file)),
+  shows: ([, , file]) => [file],
   remove(rom, mine, others) {
     const p = loadProject(rom) ?? emptyProject();
-    for (const [ctx, num, file] of mine.calls) {
-      const cs = p.list[ctx].get(num)?.filter((c) => c.file !== file);
-      if (cs?.length) p.list[ctx].set(num, cs); else p.list[ctx].delete(num);
-    }
+    for (const [ctx, num, file] of mine.calls) removeCall(p, ctx, num, file);
     for (const k of OTHER) if (mine.other[k] && p.list[k] === mine.other[k]) p.list[k] = null;
     for (const f of mine.files) if (!others.some((o) => o.files.includes(f))) p.files.delete(f);
     // calls to its files made by hand (another level, all levels) go with the files
@@ -159,7 +158,7 @@ export const uberasm = {
     }
     return check(saveProject(rom, p), 'UberASM');
   },
-} satisfies PartSection<UberRead, UberPart> & Owns;
+} satisfies PartSection<UberRead, UberPart> & Owns<UberPart, UberProject, UberPart['calls'][number]>;
 
 type BlocksPart = PackageParts['block'];
 // block files and the Map16 tiles they are on (tile → file)
@@ -174,8 +173,9 @@ export const block = {
   empty: (p) => !p.files.length && !p.tiles.length,
   summary: (p) => count(p.tiles.length, 'Block', 'blocks'),
   removal: (p) => (p.tiles.length ? `block(s) at ${p.tiles.map((t) => hex(t, 3)).join(', ')}` : null),
-  // its blocks in the project: on one of its tiles with one of its files
-  owned: (mine: BlocksPart, p: BlockProject) => p.list.filter((b) => mine.tiles.includes(b.tile) && mine.files.includes(b.file)),
+  // its blocks in the project (by tile): on one of its tiles with one of its files
+  owned: (mine: BlocksPart, p: BlockProject) => p.list.filter((b) => mine.tiles.includes(b.tile) && mine.files.includes(b.file)).sort((a, b) => a.tile - b.tile),
+  shows: (b) => [b.file],
   remove(rom, mine, others, blank) {
     const p = loadBlockProject(rom);
     if (!p) return [];
@@ -184,7 +184,7 @@ export const block = {
     for (const f of mine.files) if (!others.some((o) => o.files.includes(f))) p.files.delete(f);
     return check(saveBlockProject(rom, p), 'Custom Blocks');
   },
-} satisfies PartSection<{ files: Map<string, number>; tiles: Map<number, string> }, BlocksPart> & Owns;
+} satisfies PartSection<{ files: Map<string, number>; tiles: Map<number, string> }, BlocksPart> & Owns<BlocksPart, BlockProject, BlockProject['list'][number]>;
 
 type SpritePart = PackageParts['sprite'];
 // sprite files and the list entries (kind:num → file)
@@ -207,6 +207,8 @@ export const sprite = {
     const keys = new Set(mine.list.map((e) => e.join(':')));
     return p.list.filter((e) => keys.has(`${e.kind}:${e.num}`) && mine.files.includes(e.file));
   },
+  // its cfg/json and the .asm that names
+  shows: (e, p) => [e.file, spriteAsm(p, e)],
   remove(rom, mine, others) {
     const p = loadPixiProject(rom);
     if (!p) return [];
@@ -215,7 +217,7 @@ export const sprite = {
     for (const f of mine.files) if (!others.some((o) => o.files.includes(f))) p.files.delete(f);
     return check(savePixiProject(rom, p), 'Custom Sprites');
   },
-} satisfies PartSection<{ files: Map<string, number>; sprites: Map<string, string> }, SpritePart> & Owns;
+} satisfies PartSection<{ files: Map<string, number>; sprites: Map<string, string> }, SpritePart> & Owns<SpritePart, PixiProject, PixiProject['list'][number]>;
 
 type OwSpritePart = PackageParts['owsprite'];
 // overworld sprite files (BOWSIE) and the list entries (num → file)
@@ -230,10 +232,11 @@ export const owsprite = {
   empty: (p) => !p.files.length && !p.list.length,
   summary: (p) => count(p.list.length, 'Overworld sprite', 'overworld sprites'),
   removal: (p) => (p.list.length ? `overworld sprite(s) ${p.list.map((n) => hex(n, 2)).join(', ')}` : null),
-  // its sprites in the project: one of its numbers with one of its files
+  // its sprites in the project (by number): one of its numbers with one of its files
   owned(mine: OwSpritePart, p: BowsieProject) {
-    return p.list.filter((e) => mine.list.includes(e.num) && mine.files.includes(e.file));
+    return p.list.filter((e) => mine.list.includes(e.num) && mine.files.includes(e.file)).sort((a, b) => a.num - b.num);
   },
+  shows: (e) => [e.file],
   remove(rom, mine, others) {
     const p = loadBowsieProject(rom);
     if (!p) return [];
@@ -242,7 +245,7 @@ export const owsprite = {
     for (const f of mine.files) if (!others.some((o) => o.files.includes(f))) p.files.delete(f);
     return check(saveBowsieProject(rom, p), 'Overworld sprites');
   },
-} satisfies PartSection<{ files: Map<string, number>; sprites: Map<number, string> }, OwSpritePart> & Owns;
+} satisfies PartSection<{ files: Map<string, number>; sprites: Map<number, string> }, OwSpritePart> & Owns<OwSpritePart, BowsieProject, BowsieProject['list'][number]>;
 
 // ExGFX files it created (read: the file's address per number, 0 = none)
 const gfx: PartSection<number[], number[]> = {
@@ -372,6 +375,27 @@ const globalGfx: PartSection<number[], [number, number][]> = {
     return warnings;
   },
 };
+
+// ---------- what of the tool projects is a package's ----------
+
+const TOOL_SECTIONS = { uberasm, block, sprite, owsprite };
+export interface ToolProjects { uberasm: UberProject; block: BlockProject; sprite: PixiProject; owsprite: BowsieProject }
+export type ToolEntry<K extends ToolKind> = ReturnType<(typeof TOOL_SECTIONS)[K]['owned']>[number];
+type AnyOwns = Owns<PackageParts[ToolKind], ToolProjects[ToolKind], unknown>;
+
+// what a package has in a tool project: its entries still there (a call, a block, a sprite) and its
+// files no entry shows (libraries, settings), sorted
+export function toolContent<K extends ToolKind>(rec: Package, k: K, project: ToolProjects[K]): { entries: ToolEntry<K>[]; rest: string[] } {
+  const s = TOOL_SECTIONS[k] as unknown as AnyOwns;
+  const entries = s.owned(rec[k], project) as ToolEntry<K>[];
+  const shown = new Set(entries.flatMap((e) => s.shows(e, project)));
+  return { entries, rest: rec[k].files.filter((f) => !shown.has(f)).sort() };
+}
+
+// the files of a tool project no package brought (added before packages were recorded, or by hand)
+export function looseFiles(recs: Package[], k: ToolKind, project: ToolProjects[ToolKind]): string[] {
+  return [...project.files.keys()].filter((f) => f !== 'list.txt' && !recs.some((r) => r[k].files.includes(f)));
+}
 
 // every field of PackageParts has its adapter (the compiler checks it)
 type Sections = { [K in keyof PackageParts]-?: PartSection<any, NonNullable<PackageParts[K]>> };

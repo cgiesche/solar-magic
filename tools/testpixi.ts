@@ -14,7 +14,8 @@ import { captureSprites } from '../src/core/spritegfx.ts';
 import { loadAsar } from '../src/core/asar.ts';
 import { ROUTINES } from '../src/core/pixiroutines.ts';
 import { uploadFiles, uploadFromFiles } from '../src/core/patchpkg.ts';
-import { planPixiUpload, applyPixiUpload } from '../src/core/pixipkg.ts';
+import { planPixiUpload, applyPixiUpload, spriteFiles } from '../src/core/pixipkg.ts';
+import { zipSync } from 'fflate';
 import { inspectUpload, installPackage } from '../src/core/packages.ts';
 import { savePixiProject, removePixi, loadPixiProject, parsePixiList, readPixiList, parseCfg, parseJsonCfg, type PixiProject } from '../src/core/pixi.ts';
 import { editorImage, romDiff } from './fixture.ts';
@@ -267,12 +268,37 @@ print "MAIN ",pc
   ]));
   const listed = new Map([['pixi/sprites/donut.cfg', 0xa0]]);
   const r7 = new Rom(EDITOR_IMAGE.slice());
-  const free = planPixiUpload(r7, upload, () => true, listed);
+  const free = planPixiUpload(r7, upload, undefined, listed);
   check(free.sprites[0].num === 0xa0, `the list's number when free: A0 (${free.sprites[0].num.toString(16)})`);
   savePixiProject(r7, { files: new Map([['sprites/other.cfg', e.encode('01\n36\n00 00 00 00 00 00\n00 00\nother.asm\n00:00\n')], ['sprites/other.asm', e.encode('print "INIT ",pc\nprint "MAIN ",pc\n  RTL\n')]]), list: parsePixiList('A0 other.cfg\n') });
-  const taken = planPixiUpload(r7, upload, () => true, listed);
+  const taken = planPixiUpload(r7, upload, undefined, listed);
   const link = taken.links.find((l) => l.file === 'blocks/donut_lift.asm');
   check(taken.sprites[0].num === 0x00 && link?.define === 'Sprite' && link.sprite === 0, `A0 taken: the next free number (${taken.sprites[0].num.toString(16)}), the block's !Sprite = $A0 linked to it`);
+}
+
+// the files going with a sprite (pixipkg.ts spriteFiles), for detecting and installing alike: its
+// folder, without a deeper sprite's folder, the routines and the manuals – installed as the preview says
+{
+  const e = new TextEncoder();
+  const cfg = (asm: string) => e.encode(`01\n36\n00 00 00 00 00 00\n00 00\n${asm}\n00:00\n`);
+  const code = e.encode('incsrc "inc.asm"\nprint "INIT ",pc\nprint "MAIN ",pc\n  RTL\n');
+  const files: Record<string, Uint8Array> = {
+    'sprites/a/a.cfg': cfg('a.asm'), 'sprites/a/a.asm': code, 'sprites/a/inc.asm': e.encode('; shared\n'), 'sprites/a/readme.txt': e.encode('A sprite.\n'),
+    'sprites/a/b/b.cfg': cfg('b.asm'), 'sprites/a/b/b.asm': code, 'sprites/a/b/inc.asm': e.encode('; shared\n'),
+    'sprites/a/routines/r.asm': e.encode('RTL\n'),
+  };
+  const mains = ['sprites/a/a.cfg', 'sprites/a/b/b.cfg'];
+  const own = spriteFiles(Object.keys(files), mains[0], mains, (f) => f.endsWith('readme.txt')).sort().join(' ');
+  check(own === 'sprites/a/a.asm sprites/a/a.cfg sprites/a/inc.asm', `a sprite's files: its folder without the deeper sprite's, the routines and the manual (${own})`);
+  const r9 = new Rom(EDITOR_IMAGE.slice());
+  const preview = inspectUpload('ab.zip', zipSync(files));
+  if (preview.status !== 'ready') throw new Error('ab: ' + preview.status);
+  const blank = map16Source(r9, new LevelEmulator(r9).load(0x105)).fg(0x025);
+  const res9 = await installPackage(r9, preview, { level: null, blank, tileWords: () => blank });
+  if (!res9.ok) console.log(res9.errors.join('\n'));
+  const got = [...(loadPixiProject(r9)?.files.keys() ?? [])].filter((f) => f !== 'list.txt').sort().join(' ');
+  check(res9.ok && preview.unclaimed.some((f) => f.endsWith('a/readme.txt')) && got === 'routines/r.asm sprites/a.asm sprites/a.cfg sprites/b.asm sprites/b.cfg sprites/inc.asm',
+    `installed as detected: the manual stays out (${got})`);
 }
 
 // custom shooters and generators: MAIN runs every frame, the shooter with its extra byte

@@ -13,6 +13,7 @@ import type { SpriteFolder } from './pixirt.ts';
 export interface PixiPlanSprite { kind: SpriteFolder; file: string; num: number; name: string }
 export interface PixiLink { file: string; define: string; sprite: number } // define in a file set to sprites[sprite]'s number
 export interface PixiPlan { sprites: PixiPlanSprite[]; links: PixiLink[]; routines: string[] }
+export type PixiParts = Omit<PixiPlan, 'links'>;
 
 const dec = new TextDecoder();
 const base = (f: string) => f.slice(f.lastIndexOf('/') + 1);
@@ -32,7 +33,7 @@ function folderKind(f: string): SpriteFolder | null {
 }
 
 // the sprites and routines of an upload, without numbers yet (-1)
-export function pixiParts(upload: Upload): Omit<PixiPlan, 'links'> {
+export function pixiParts(upload: Upload): PixiParts {
   const sprites: PixiPlanSprite[] = [];
   const used = new Set<string>(); // asm files belonging to a cfg/json
   for (const [f, data] of upload.files) {
@@ -58,12 +59,12 @@ export function pixiParts(upload: Upload): Omit<PixiPlan, 'links'> {
   return { sprites, routines };
 }
 
-// numbers for the sprites of an upload (those `keep` takes: the sprite parts) and the defines naming them;
-// `listed`: the numbers the package's PIXI list gives them (by file), taken when free
-export function planPixiUpload(rom: Rom, upload: Upload, keep: (file: string) => boolean = () => true, listed = new Map<string, number>()): PixiPlan {
+// numbers for the sprites of an upload (`parts`: those to install, as detected – the sprite parts – and
+// the routines going with them) and the defines naming them; `listed`: the numbers the package's PIXI
+// list gives them (by file), taken when free
+export function planPixiUpload(rom: Rom, upload: Upload, parts: PixiParts = pixiParts(upload), listed = new Map<string, number>()): PixiPlan {
   const proj = loadPixiProject(rom) ?? { files: new Map(), list: [] };
-  const parts = pixiParts(upload);
-  const sprites = parts.sprites.filter((s) => keep(s.file)), routines = parts.routines;
+  const sprites = parts.sprites.map((s) => ({ ...s, num: -1 })), routines = parts.routines;
   // numbers: a sprite file already in the project keeps its number, the others get the list's when free,
   // else the next free one
   const taken = (s: PixiPlanSprite) => new Set([...proj.list.filter((e) => sharesNumbers(e.kind, s.kind)).map((e) => e.num),
@@ -130,26 +131,28 @@ export function hexNum(n: number): string {
   return '$' + n.toString(16).toUpperCase().padStart(2, '0');
 }
 
-// adds the sprites to the ROM's PIXI project; `others`: files of the package's other parts (not taken
-// along from a sprite's folder); claim: every project file it writes (pkgreg.ts)
-export function applyPixiUpload(rom: Rom, upload: Upload, plan: PixiPlan, others: Set<string>, claim: (file: string) => void): ApplyResult {
+// the files going with a sprite (`main`, one of `mains`: the sprites' main files): those in its folder,
+// itself among them, except what belongs to a deeper folder of another sprite, the other sprites' main
+// files, the routines (they go with the sprites calling them) and what `skip` takes (the manuals, the
+// files of other parts). For detecting (pkgparts.ts) and installing alike.
+export function spriteFiles(paths: Iterable<string>, main: string, mains: string[], skip: (f: string) => boolean = () => false): string[] {
+  const dir = dirOf(main);
+  const deeper = [...new Set(mains.map(dirOf))].filter((d) => d.length > dir.length && d.startsWith(dir));
+  return [...paths].filter((f) => f.startsWith(dir) && (f === main || (!mains.includes(f) && !skip(f))) && !/(^|\/)routines\//i.test(f)
+    && !deeper.some((d) => f.startsWith(d)));
+}
+
+// adds the sprites to the ROM's PIXI project; `skip`: files not taken along from a sprite's folder (the
+// manuals, the files of the package's other parts); claim: every project file it writes (pkgreg.ts)
+export function applyPixiUpload(rom: Rom, upload: Upload, plan: PixiPlan, skip: Set<string>, claim: (file: string) => void): ApplyResult {
   const proj: PixiProject = loadPixiProject(rom) ?? { files: new Map(), list: [] };
   // define values from the chosen numbers
   const files = withDefines(upload.files, linkedDefines(plan));
-
-  // the files of a sprite: those in its folder, except what belongs to a deeper folder of another one,
-  // the other sprites' own files, the routines and the files of other parts
-  const mains = new Set(plan.sprites.map((s) => s.file));
-  const dirs = [...new Set([...mains].map(dirOf))];
-  const filesOf = (main: string) => {
-    const dir = dirOf(main);
-    return [...upload.files.keys()].filter((f) => f.startsWith(dir) && (f === main || (!mains.has(f) && !others.has(f))) && !/(^|\/)routines\//i.test(f)
-      && !dirs.some((d) => d.length > dir.length && d.startsWith(dir) && f.startsWith(d)));
-  };
+  const mains = plan.sprites.map((s) => s.file);
   for (const s of plan.sprites) {
     const dir = dirOf(s.file);
     const destDir = dirOf(FOLDER[s.kind] + relIn(s.file, s.kind));
-    for (const f of filesOf(s.file)) { const to = destDir + f.slice(dir.length); proj.files.set(to, files.get(f)!); claim(to); }
+    for (const f of spriteFiles(upload.files.keys(), s.file, mains, (x) => skip.has(x))) { const to = destDir + f.slice(dir.length); proj.files.set(to, files.get(f)!); claim(to); }
     const entry: PixiEntry = { kind: s.kind, num: s.num, file: FOLDER[s.kind] + relIn(s.file, s.kind) };
     proj.list = proj.list.filter((e) => !(e.kind === s.kind && e.file === entry.file)); // its file under one number
     assignSprite(proj, entry);

@@ -8,14 +8,17 @@ import { loadApu } from '../src/core/apu.ts';
 import { LevelEmulator } from '../src/core/levelemu.ts';
 import { map16Source } from '../src/core/render.ts';
 import { applyPatch } from '../src/core/patchapply.ts';
-import { loadProject, saveProject, emptyProject } from '../src/core/uberproject.ts';
+import { loadProject, saveProject, emptyProject, removeCall } from '../src/core/uberproject.ts';
+import { loadPixiProject } from '../src/core/pixi.ts';
+import { loadBowsieProject } from '../src/core/bowsie.ts';
+import { TOOL_KINDS, type ToolKind } from '../src/core/parts.ts';
 import { loadBlockProject, saveBlockProject, type BlockProject } from '../src/core/blocks.ts';
 import { importGfxFile } from '../src/core/gfxfiles.ts';
 import { installEditorPatch, setLevelMusic } from '../src/core/patches.ts';
 import { enableBlocks, setExtTileWords, EXT_FIRST } from '../src/core/map16ext.ts';
 import { installBgMap16Ext, setBgExtTileWords, BG_EXT_FIRST } from '../src/core/bgmap16.ts';
 import { recordPackageChange, uninstallPackage, listPackages, packageSummary, type Package } from '../src/core/pkgreg.ts';
-import { SECTIONS, SECTION_KEYS, type SectionKey, type PartSection } from '../src/core/pkgsections.ts';
+import { SECTIONS, SECTION_KEYS, toolContent, looseFiles, type SectionKey, type PartSection, type ToolProjects } from '../src/core/pkgsections.ts';
 import { inspectUpload, installPackage, type InstallOptions, type ReadyPreview } from '../src/core/packages.ts';
 import { setSharedColor } from '../src/core/sharedpal.ts';
 import { setGlobalGfx, cleanGlobalGfx } from '../src/core/globalgfx.ts';
@@ -81,6 +84,21 @@ const samples: Record<SectionKey, () => Promise<Package | null> | Package | null
   }),
 };
 
+// what of a tool project the package has (the Packages tab shows it): its entries, its other files; its
+// files are none no package brought; an UberASM call taken out leaves its file
+const loadTool = { uberasm: loadProject, block: loadBlockProject, sprite: loadPixiProject, owsprite: loadBowsieProject } as const;
+function toolChecks(pkg: Package, k: ToolKind): void {
+  const proj = loadTool[k](rom)! as ToolProjects[ToolKind];
+  const c = toolContent(pkg, k, proj as never);
+  check(c.entries.length > 0 && c.rest.every((f) => pkg[k].files.includes(f)), `section ${k}: its entries in the project (${c.entries.length}, ${c.rest.length} other file(s))`);
+  check(!looseFiles([pkg], k, proj).length && looseFiles([], k, proj).length >= pkg[k].files.length, `section ${k}: its files are the package's, not loose`);
+  if (k !== 'uberasm') return;
+  const p = proj as ToolProjects['uberasm'];
+  for (const [ctx, num, file] of pkg.uberasm.calls) removeCall(p, ctx, num, file);
+  const after = toolContent(pkg, 'uberasm', p);
+  check(!after.entries.length && pkg.uberasm.calls.every(([, , f]) => after.rest.includes(f)) && !p.list.level.has(0x105), 'section uberasm: a call taken out (removeCall) leaves its file, shown with the other files');
+}
+
 for (const k of SECTION_KEYS) {
   const sec = SECTIONS[k] as PartSection<unknown, unknown>;
   const sample = samples[k];
@@ -89,6 +107,7 @@ for (const k of SECTION_KEYS) {
   const pkg = await sample();
   check(!!pkg && pkg[k] !== undefined && !sec.empty(pkg[k]) && !!sec.summary(pkg[k]), `section ${k}: recorded (${pkg && packageSummary(pkg).join(', ')})`);
   if (!pkg) continue;
+  if ((TOOL_KINDS as string[]).includes(k)) toolChecks(pkg, k as ToolKind);
   await uninstallPackage(rom, pkg.id, blank);
   // the checksum (AddmusicK rewrites it) doesn't count
   const diff = romDiff(rom.data, before, (i) => i >= 0x7fdc && i < 0x7fe0);

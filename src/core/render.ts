@@ -112,7 +112,7 @@ export function map16Source(rom: Rom, r: LevelRender): Map16Source {
   const w = r.wram;
   return {
     fg(t: number) {
-      if (t >= EXT_FIRST) return extTileWords(rom, t) ?? this.fg(0x025);
+      if (t >= EXT_FIRST) return extTileWords(rom, t) ?? this.fg(BLANK_TILE);
       const base = fgTileAddr(rom, r, t);
       return [rom.r16(base), rom.r16(base + 2), rom.r16(base + 4), rom.r16(base + 6)];
     },
@@ -120,6 +120,13 @@ export function map16Source(rom: Rom, r: LevelRender): Map16Source {
       return bgTileWords(rom, t);
     },
   };
+}
+
+// an empty FG Map16 tile (air) of every tileset
+export const BLANK_TILE = 0x025;
+// its 4 tile words in the level's tileset: what new Map16 tiles start with and emptied ones get back
+export function blankTile(rom: Rom, r: LevelRender): number[] {
+  return map16Source(rom, r).fg(BLANK_TILE);
 }
 
 // where FG Map16 tile t's 4 words are: the level's tileset's (its Map16 pointers in the level's WRAM),

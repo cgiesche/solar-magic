@@ -216,6 +216,12 @@ export function spriteConfig(p: PixiProject, e: PixiEntry): SpriteConfig {
   return { type: 1, actlike: 0, tweak: [0, 0, 0, 0, 0, 0], prop: [0, 0], asm: e.file, bytes: 0, bytesExtra: 0, names: [{ name, extraBit: false }], description: '' };
 }
 
+// the .asm of a sprite's entry: the one its cfg/json names (itself for a misc sprite, or when its
+// cfg/json can't be read)
+export function spriteAsm(p: PixiProject, e: PixiEntry): string {
+  try { return spriteConfig(p, e).asm ?? e.file; } catch { return e.file; }
+}
+
 // what the editor shows of the inserted sprites, shooters and generators, by sprite id (extra bits << 8 |
 // number: $2xx, with the extra bit $3xx). Both variants are known (names of placed sprites), the palette
 // lists only those named in the Collection, like Lunar Magic (without a Collection: the one without extra bit)
