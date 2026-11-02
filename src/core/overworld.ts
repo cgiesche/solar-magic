@@ -51,25 +51,73 @@ export function overworldReplacement(rom: Rom): string | null {
   return null;
 }
 
-export function readL1(rom: Rom): Uint8Array {
-  return rom.bytes(OW_L1, 0x800);
+// Layer 1: per tile (l1Index order) its low byte in the game's place (OW_L1, copied to $7EC800 as the overworld
+// loads) and its high byte (the tile's Map16 page) from Lunar Magic's map of them (#90; LC_LZ2, decompressed to
+// $7FC800 by the translevel table's hijack, its pointer at $04D822, bank at $04D827 – as in the ROMs Lunar Magic
+// saved); without it the game clears $7FC800. The game reads the high byte only where it draws layer 1 (the load's
+// $04DCF2 and the rows it draws as it scrolls); where Mario walks, enters levels and events reveal or destroy tiles it
+// reads the low byte at $7EC800.
+const L1_HI_PTR = 0x04d822, L1_HI_BANK = 0x04d827;
+const L1_HI_SLACK = 0x40; // free bytes after the map in its block, so that later strokes still fit
+export const hasL1HighMap = (rom: RomRead): boolean => hasTranslevelTable(rom) && rom.r8(L1_HI_PTR - 1) === 0xa2 && rom.r8(L1_HI_BANK - 1) === 0xa9;
+function readL1High(rom: Rom): Uint8Array | null {
+  if (!hasL1HighMap(rom)) return null;
+  const at = snesToPc(packedAt(rom, L1_HI_PTR, L1_HI_BANK)), t = lz2Decompress(rom.data, at);
+  rom.noteRead(at, t.size);
+  return t.data.subarray(0, 0x800);
 }
-export function writeL1(rom: Rom, d: Uint8Array): void {
-  rom.writeBytes(OW_L1, d);
+export function readL1(rom: Rom): Uint16Array {
+  const out = Uint16Array.from(rom.bytes(OW_L1, 0x800));
+  readL1High(rom)?.forEach((b, i) => { out[i] |= b << 8; });
+  return out;
+}
+// tiles 100–1FF need the high byte map (an editor ROM has it)
+export function writeL1(rom: Rom, d: ArrayLike<number>): void {
+  rom.writeBytes(OW_L1, Uint8Array.from(d, (t) => t & 0xff));
+  const hi = Uint8Array.from(d, (t) => t >> 8);
+  if (!hasL1HighMap(rom)) {
+    if (hi.some((b) => b)) missingPatch('Overworld layer 1 tiles 100–1FF');
+    return;
+  }
+  if (readL1High(rom)!.every((b, i) => b === hi[i])) return;
+  writePacked(rom, L1_HI_PTR, L1_HI_BANK, hi, L1_HI_SLACK);
 }
 
 // The layer 1 tiles' Map16: per tile its four quarters (8x8 tile words in the order TL, BL, TR, BR, as the FG Map16
-// tiles), 8 bytes each from $05D000 – tiles 00–C0, the game's layer 1 tiles (the overworld's load points its Map16
-// pointers there, tile by tile; Lunar Magic's expansion to 0x200 tiles is not supported yet).
-export const OW_L1_MAP16 = 0x05d000;
-export const OW_L1_TILES = 0xc1;
-export const owTileAddr = (t: number): number => OW_L1_MAP16 + t * 8;
+// tiles), 8 bytes each. The game has tiles 00–C0 at $05D000; Lunar Magic's expansion (#90), as in the ROMs it saved,
+// has 0x200 tiles (pages 0 and 1) in a block of free space, pointed to where the game points to $05D000: the first of
+// the Map16 pointers the overworld's load puts at $0FBE (0x200 of them in the game already; $04DC3B, low word), the
+// load's drawing of layer 1 ($04DCBC low word, $04DCC1 bank) and the bank of the rows the game draws as it scrolls
+// ($058B22, LDY #$05 where the tileset is the overworld's). The editor's patch moves them so, the new tiles C1–1FF
+// starting as tile 00 (empty).
+const OW_MAP16_PTRS = 0x04dc3b, OW_MAP16_LO = 0x04dcbc, OW_MAP16_BANK = 0x04dcc1, OW_MAP16_ROW_BANK = 0x058b22;
+const GAME_OW_MAP16 = 0x05d000, GAME_OW_TILES = 0xc1;
+// the operands the patch changes, Lunar Magic's hijack: a third-party patch may not change them (patchapply.ts)
+export const OW_MAP16_HOOKS: [number, number][] = [[OW_MAP16_PTRS, 2], [OW_MAP16_LO, 2], [OW_MAP16_BANK, 1], [OW_MAP16_ROW_BANK, 1]];
+export const OW_L1_TILES = 0x200;
+const owMap16 = (rom: RomRead): number => (rom.r8(OW_MAP16_BANK) << 16) | rom.r16(OW_MAP16_LO);
+export const hasOwMap16Ext = (rom: RomRead): boolean => owMap16(rom) !== GAME_OW_MAP16;
+export const owTileAddr = (rom: RomRead, t: number): number => owMap16(rom) + t * 8;
 export function owTileWords(rom: RomRead, t: number): number[] {
-  return [0, 1, 2, 3].map((q) => rom.r16(owTileAddr(t) + q * 2));
+  const at = owTileAddr(rom, t);
+  return [0, 1, 2, 3].map((q) => rom.r16(at + q * 2));
 }
 export function setOwTileWords(rom: Rom, t: number, ws: number[]): void {
   if (t < 0 || t >= OW_L1_TILES) throw new Error(`No overworld layer 1 tile ${t.toString(16).toUpperCase()}`);
-  ws.forEach((w, q) => rom.w16(owTileAddr(t) + q * 2, w));
+  if (!hasOwMap16Ext(rom)) missingPatch('Overworld layer 1 Map16 (0x200 tiles)');
+  const at = owTileAddr(rom, t);
+  ws.forEach((w, q) => rom.w16(at + q * 2, w));
+}
+export function installOwMap16Patch(rom: Rom): void {
+  if (hasOwMap16Ext(rom)) return;
+  const d = new Uint8Array(OW_L1_TILES * 8);
+  d.set(rom.bytes(GAME_OW_MAP16, GAME_OW_TILES * 8));
+  for (let t = GAME_OW_TILES; t < OW_L1_TILES; t++) d.copyWithin(t * 8, 0, 8);
+  const at = rom.allocWrite(d);
+  rom.w16(OW_MAP16_PTRS, at & 0xffff);
+  rom.w16(OW_MAP16_LO, at & 0xffff);
+  rom.w8(OW_MAP16_BANK, at >> 16);
+  rom.w8(OW_MAP16_ROW_BANK, at >> 16);
 }
 // how often layer 1 has tile t as in the ROM (before events): on the main map and on the submaps
 export function owTileUses(rom: Rom, t: number): { main: number; submaps: number } {
@@ -137,9 +185,10 @@ export function writeL2(rom: Rom, entries: Uint16Array): number {
 // game numbers the level tiles by scanning layer 1 ($04D7F2), so placing one shifts every later
 // level's number, name, base event and flags. Lunar Magic replaces the scan with a table of the 0x800 tiles'
 // translevels, LC_LZ2 compressed and decompressed to $7ED000 (its pointer at $04D803, bank at $04D808 –
-// Ankouno's OverworldTables.asm); the patch writes its own code there in that layout. The rest of the game's
-// routine stays: each level tile's initial flags ($04D678 by translevel) to $7ED800, then the passed events; before
-// them the event tiles' YXPCCCTT are decompressed again ($04DD40), $7F0000 being the VRAM patch's in a level.
+// Ankouno's OverworldTables.asm), then the layer 1 tiles' high bytes (readL1) to $7FC800. The patch writes Lunar
+// Magic's code of the two byte for byte (as in a ROM it saved); after them its own: each level tile's initial flags
+// ($04D678 by translevel) to $7ED800, as the game's routine, and the event tiles' YXPCCCTT decompressed again
+// ($04DD40), $7F0000 being the VRAM patch's in a level; then, as the game's and Lunar Magic's, the passed events.
 // Translevel 0 is no level (the scan starts at 1); a level tile has one, any other tile 0. Which tiles are level
 // tiles the game's code decides: learned by emulation (owpaths.ts levelTileTest), passed in where it matters.
 
@@ -148,75 +197,104 @@ export function translevelToLevel(t: number): number {
 }
 
 const TL_HOOK = 0x04d7f2, TL_HOOK_END = 0x04d85d;
-const TL_PTR = 0x04d803; // LDA #$xxxx operand: the table's address
+const TL_PTR = 0x04d803; // LDX #$xxxx operand: the table's address
 const TL_BANK = 0x04d808; // LDA #$xx operand: its bank
+const TL_COUNT = 0x04d859; // CMP #$xx operand: the events the load runs (owevents.ts)
 export const MAX_TRANSLEVEL = 0x5f; // level 13B
 const TL_SLACK = 0x40; // free bytes after the table in its block, so that later changes still fit
 // the game's code the patch replaces (SNES address, length), Lunar Magic's hijack: a third-party patch may not change it (patchapply.ts)
 export const TRANSLEVEL_HOOKS: [number, number][] = [[TL_HOOK, TL_HOOK_END - TL_HOOK]];
+const TL_CODE_SIZE = 0x30;
 const hx = (n: number) => '$' + n.toString(16).toUpperCase();
 
-const translevelAsm = () => `lorom
+// (code: the free space of the flags' routine)
+const translevelAsm = (code: number) => `lorom
 org ${hx(TL_HOOK)}
-  PHB
-  SEP #$20 : REP #$10
-  LDY #${hx(RAM.owTranslevels)} : STY $00 : LDA #$7E : STA $02     ; to $7E${hx(RAM.owTranslevels).slice(1)}
-  REP #$20
-  assert pc() == $04D802
-  LDA.w #$0000 : STA $8A                       ; the table (written by the editor)
-  assert pc() == $04D807
-  LDA.w #$0000 : STA $8C
-  SEP #$20
-  LDA #$00 : PHA : PLB
-  PHK : PEA.w Decompressed-1 : PEA.w $804C     ; the game's decompression (RTS) through an RTL of bank 0
+Translevels:
+  REP #$30 : LDA.w #$0000 : SEP #$20
+  LDX.w #${hx(RAM.owTranslevels)} : STX $00 : LDA.b #$7E : STA $02     ; the translevels to $7E${hx(RAM.owTranslevels).slice(1)}
+  assert pc() == ${hx(TL_PTR - 1)}
+  LDX.w #$0000 : STX $8A                                         ; (the table, written by the editor)
+  assert pc() == ${hx(TL_BANK - 1)}
+  LDA.b #$00 : STA $8C
+  PHP : PHK : PER .tl-1 : PEA.w $804C                            ; the game's decompression (RTS) through an RTL of bank 0
   JML $80B8DE
-Decompressed:
-  PLB
+.tl
+  PLP
+  LDX.w #${hx(RAM.owLayer1)} : STX $00 : LDA.b #$7F : STA $02     ; the tiles' high bytes to $7F${hx(RAM.owLayer1).slice(1)}
+  assert pc() == ${hx(L1_HI_PTR - 1)}
+  LDX.w #$0000 : STX $8A
+  assert pc() == ${hx(L1_HI_BANK - 1)}
+  LDA.b #$00 : STA $8C
+  PHP : PHK : PER .hi-1 : PEA.w $804C
+  JML $80B8DE
+.hi
+  PLP
+  JSL Flags
+  TSC : STA $0E                                ; the event tiles' YXPCCCTT to $7F0000 again: in a level it is the VRAM patch's;
+  JSL $84DD40                                  ; called long, its end an RTS or an RTL (Free $7F0000 makes it one), the
+  TSC : CMP $0E : BEQ + : PLA                  ; bank an RTS leaves dropped
++
+  padbyte $EA : pad $04D84F
+  STZ $0F                                      ; the passed events, as the game's
+- JSR $DA49
+  INC $0F : LDA $0F
+  assert pc() == ${hx(TL_COUNT - 1)}           ; the count where Lunar Magic's is (owevents.ts: 0x78)
+  CMP #$6F : BNE -
+  RTS
+assert pc() == ${hx(TL_HOOK_END)}
+
+org ${hx(code)}
+Flags:
   REP #$30 : TDC : SEP #$20
-  LDX #${hx(RAM.owTileFlags)} : STX $0A : LDA #$7E : STA $0C   ; the flags, as the game's
-  LDY #$07FF
+  LDX.w #${hx(RAM.owTileFlags)} : STX $0A : LDA.b #$7E : STA $0C   ; the flags, as the game's
+  LDY.w #$07FF
 - TYX
   LDA.l $7E${hx(RAM.owTranslevels).slice(1)},x : BEQ +
   TAX : LDA.l $04D678,x                        ; the translevel's initial flags
 + STA [$0A],y
   DEY : BPL -
-  TSC : STA $0E                                ; the event tiles' YXPCCCTT to $7F0000 again: in a level it is the VRAM patch's;
-  JSL $84DD40                                  ; called long, its end an RTS or an RTL (Free $7F0000 makes it one), the
-  TSC : CMP $0E : BEQ + : PLA                  ; bank an RTS leaves dropped
-+
-  STZ $0F                                      ; the passed events, as the game's
-- JSR $DA49
-  INC $0F : LDA $0F
-  padbyte $EA : pad $04D858                    ; the count where Lunar Magic's is (owevents.ts: 0x78)
-  CMP #$6F : BNE -
-  RTS
-assert pc() == ${hx(TL_HOOK_END)}
+  RTL
+warnpc ${hx(code + TL_CODE_SIZE)}
 `;
 
 // Lunar Magic's hijack, detected as OverworldTables.asm does
 export function hasTranslevelTable(rom: RomRead): boolean {
   return rom.r8(TL_BANK - 1) === 0xa9;
 }
-const tableAt = (rom: RomRead) => (rom.r8(TL_BANK) << 16) | rom.r16(TL_PTR);
-// the table's block in free space (its payload with the room after it), null: none
-export function translevelTableBlock(rom: Rom): { snes: number; size: number } | null {
-  const at = hasTranslevelTable(rom) ? tableAt(rom) : 0;
+// a packed table's address (the operands of its long pointer)
+const packedAt = (rom: RomRead, ptr: number, bank: number) => (rom.r8(bank) << 16) | rom.r16(ptr);
+// its block in free space (its payload with the room after it), null: none
+function packedBlock(rom: Rom, ptr: number, bank: number): { snes: number; size: number } | null {
+  const at = packedAt(rom, ptr, bank);
   const size = at && snesToPc(at) >= 0x80008 ? rom.isRatsAt(snesToPc(at) - 8) : -1;
   return size > 0 ? { snes: at, size } : null;
+}
+// writes a table (LC_LZ2) where it is when it fits its block, else to free space (with `slack` bytes after it)
+function writePacked(rom: Rom, ptr: number, bank: number, data: Uint8Array, slack: number): void {
+  const block = packedBlock(rom, ptr, bank); // null: the patch being installed
+  const packed = lz2Compress(data);
+  if (block && packed.length <= block.size) { rom.writeBytes(block.snes, packed); return; }
+  if (block) rom.freeAt(block.snes);
+  const payload = new Uint8Array(packed.length + slack);
+  payload.set(packed);
+  const addr = rom.allocWrite(payload);
+  rom.w16(ptr, addr & 0xffff);
+  rom.w8(bank, addr >> 16);
 }
 
 // the translevel of every layer 1 tile (l1Index order)
 export function readTranslevels(rom: Rom): Uint8Array {
   if (!hasTranslevelTable(rom)) missingPatch('Translevels per level tile');
   const out = new Uint8Array(0x800);
-  const at = snesToPc(tableAt(rom)), t = lz2Decompress(rom.data, at);
+  const at = snesToPc(packedAt(rom, TL_PTR, TL_BANK)), t = lz2Decompress(rom.data, at);
   rom.noteRead(at, t.size);
   out.set(t.data.subarray(0, 0x800));
   return out;
 }
 
 // the maps as in the ROM: layer 1, layer 2 and the translevel of each layer 1 tile (what the overworld view shows)
-export function readMaps(rom: Rom): { l1: Uint8Array; l2: Uint16Array; tls: Uint8Array } {
+export function readMaps(rom: Rom): { l1: Uint16Array; l2: Uint16Array; tls: Uint8Array } {
   return { l1: readL1(rom), l2: readL2(rom), tls: readTranslevels(rom) };
 }
 
@@ -227,7 +305,7 @@ export function readMaps(rom: Rom): { l1: Uint8Array; l2: Uint16Array; tls: Uint
 // scan and Lunar Magic also to the star tiles (5F), which enter no level
 export function levelTileLevels(r: RomRead): Map<number, number> | null {
   if (!hasTranslevelTable(r)) return null;
-  const at = tableAt(r);
+  const at = packedAt(r, TL_PTR, TL_BANK);
   const packed = new Proxy({} as { readonly [i: number]: number }, { get: (_, k) => r.r8(at + Number(k)) });
   const t = lz2Decompress(packed, 0).data;
   const out = new Map<number, number>();
@@ -238,28 +316,23 @@ export function levelTileLevels(r: RomRead): Map<number, number> | null {
 // writes the table where it is when it fits its block, else to free space; unchanged: nothing written
 export function writeTranslevels(rom: Rom, t: Uint8Array): void {
   if (!hasTranslevelTable(rom)) missingPatch('Translevels per level tile');
-  const block = translevelTableBlock(rom); // null: the patch being installed
-  if (block && readTranslevels(rom).every((v, i) => v === t[i])) return;
-  const packed = lz2Compress(t);
-  if (block && packed.length <= block.size) { rom.writeBytes(block.snes, packed); return; }
-  if (block) rom.freeAt(block.snes);
-  const payload = new Uint8Array(packed.length + TL_SLACK);
-  payload.set(packed);
-  const addr = rom.allocWrite(payload);
-  rom.w16(TL_PTR, addr & 0xffff);
-  rom.w8(TL_BANK, addr >> 16);
+  if (packedBlock(rom, TL_PTR, TL_BANK) && readTranslevels(rom).every((v, i) => v === t[i])) return;
+  writePacked(rom, TL_PTR, TL_BANK, t, TL_SLACK);
 }
 
 // needs Asar (loadAsar) to be loaded; every tile gets the translevel the game gives it (its table in WRAM, emulated)
+// and the high byte 0
 export function installTranslevelPatch(rom: Rom): void {
   if (hasTranslevelTable(rom)) return;
   const game = new OverworldEmulator(rom).load(0, 0);
   if (!game.ok) throw new Error('The overworld did not load – translevel table not installed');
   const t = game.wram.slice(RAM.owTranslevels, RAM.owTranslevelsEnd);
-  const r = assemble(rom.data, new Map([['translevels.asm', translevelAsm()]]), 'translevels.asm');
+  const code = rom.allocWrite(new Uint8Array(TL_CODE_SIZE));
+  const r = assemble(rom.data, new Map([['translevels.asm', translevelAsm(code)]]), 'translevels.asm');
   if (!r.ok) throw new Error(r.errors.map((e) => e.message).join(' '));
-  for (const [a, n] of TRANSLEVEL_HOOKS) rom.writeAt(snesToPc(a), r.rom.subarray(snesToPc(a), snesToPc(a) + n));
+  for (const [a, n] of [...TRANSLEVEL_HOOKS, [code, TL_CODE_SIZE]]) rom.writeAt(snesToPc(a), r.rom.subarray(snesToPc(a), snesToPc(a) + n));
   writeTranslevels(rom, t);
+  writePacked(rom, L1_HI_PTR, L1_HI_BANK, new Uint8Array(0x800), L1_HI_SLACK);
 }
 
 // the translevel no tile enters that `rank` (lower first, translevelUse) prefers, the lowest of equals (0: all are entered)
@@ -277,7 +350,7 @@ export function freeTranslevel(t: Uint8Array, rank: (tl: number) => number = () 
 // paints tile v at i (l1 and t changed): a level tile (isLevel) takes `carried` (the translevel it was picked up from the
 // map with), else keeps the one there (a level tile painted over), else gets a free one (as freeTranslevel); any
 // other tile none, so the translevel of a level tile painted over is free again (its level keeps its settings)
-export function placeTile(l1: Uint8Array, t: Uint8Array, i: number, v: number, isLevel: LevelTileTest, carried = 0, rank?: (tl: number) => number): void {
+export function placeTile(l1: Uint16Array, t: Uint8Array, i: number, v: number, isLevel: LevelTileTest, carried = 0, rank?: (tl: number) => number): void {
   l1[i] = v;
   if (!isLevel(v)) t[i] = 0;
   else if (carried) t[i] = carried;
@@ -285,7 +358,7 @@ export function placeTile(l1: Uint8Array, t: Uint8Array, i: number, v: number, i
 }
 
 // the translevels more than one level tile enters, with their tiles
-export function sharedTranslevels(l1: Uint8Array, t: Uint8Array, isLevel: LevelTileTest): Map<number, number[]> {
+export function sharedTranslevels(l1: ArrayLike<number>, t: Uint8Array, isLevel: LevelTileTest): Map<number, number[]> {
   const tiles = new Map<number, number[]>();
   t.forEach((n, i) => { if (n && isLevel(l1[i])) (tiles.get(n) ?? tiles.set(n, []).get(n)!).push(i); });
   for (const [n, l] of tiles) if (l.length < 2) tiles.delete(n);
@@ -506,9 +579,10 @@ export function setRevealEvents(rom: Rom, i: number, events: number[]): void {
     else if (revealAt(rom, e) === i) rom.w16(at + e * 2, 0);
   }
 }
-// the tile layer 1 tile t turns into when revealed, -1: it has none (a reveal does nothing)
+// the tile layer 1 tile t turns into when revealed, -1: it has none (a reveal does nothing). The game looks up and
+// writes the low byte ($7EC800, $04EDA0): a tile 1xx turns into 1yy
 export function revealedTile(rom: Rom, t: number): number {
-  for (let k = REVEALS - 1; k >= 0; k--) if (rom.r8(REVEAL_FROM + k) === t) return rom.r8(REVEAL_TO + k);
+  for (let k = REVEALS - 1; k >= 0; k--) if (rom.r8(REVEAL_FROM + k) === (t & 0xff)) return (t & 0xff00) | rom.r8(REVEAL_TO + k);
   return -1;
 }
 // The reveal list (Lunar Magic's "Edit Reveal Tile List"): which layer 1 tile a revealed tile becomes, 0x16 pairs
@@ -600,25 +674,28 @@ export function installDestroyPatch(rom: Rom): void {
 // a tile a destroy changes, relative to the destroyed one (16x16 tiles on its map)
 export interface DestroyChange { dx: number; dy: number; tile: number }
 const effectsMemo = new WeakMap<Rom, { gen: number; effects: DestroyChange[][] }>();
-// what destroying each layer 1 tile 00–FF does (the changes, [] none): learned by running the game's code on a map
-// holding the tile, an entry destroying it
+// what destroying each layer 1 tile 000–1FF does (the changes, [] none): learned by running the game's code on a map
+// holding the tile (its high byte at $7FC800), an entry destroying it
 export function destroyEffects(rom: Rom): DestroyChange[][] {
   const memo = effectsMemo.get(rom);
   if (memo?.gen === rom.gen) return memo.effects;
   const probe = new Rom(rom.data.slice()), at = l1Index(0, 4, 4), RET = 0x8000;
   writeDestroyList(probe, Array.from({ length: DESTROYS }, (_, k) => (k ? { event: NO_EVENT, tile: 0 } : { event: 0, tile: at })));
-  const s = new Snes(probe.data), cpu = s.cpu, w = s.wram, map = w.subarray(RAM.owLayer1, RAM.owLayer1End), fresh = s.saveState();
+  const s = new Snes(probe.data), cpu = s.cpu, w = s.wram, fresh = s.saveState();
+  const lo = w.subarray(RAM.owLayer1, RAM.owLayer1End), hi = w.subarray(RAM.owLayer1High, RAM.owLayer1High + 0x800);
+  const map = { keys: () => lo.keys(), get: (i: number) => lo[i] | (hi[i] << 8) };
   const effects: DestroyChange[][] = [];
-  for (let t = 0; t < 0x100; t++) {
+  for (let t = 0; t < OW_L1_TILES; t++) {
     s.loadState(fresh);
-    map[at] = t;
-    const before = map.slice();
+    lo[at] = t & 0xff;
+    hi[at] = t >> 8;
+    const before = Uint16Array.from(lo, (_, i) => map.get(i));
     // JSR $04E677 with the event in A, its RTS to RET
     Object.assign(cpu, { e: false, p: 0x30, d: 0, dbr: 0, pbr: DESTROY_CALL >> 16, pc: DESTROY_CALL & 0xffff, a: 0, s: 0x1fd, waiting: false, stopped: false });
     w[0x1fe] = (RET - 1) & 0xff; w[0x1ff] = (RET - 1) >> 8;
     for (let n = 0; n < 5000 && cpu.pc !== RET; n++) cpu.step();
     const o = l1XY(at);
-    effects.push([...map.keys()].filter((i) => map[i] !== before[i]).map((i) => { const p = l1XY(i); return { dx: p.x - o.x, dy: p.y - o.y, tile: map[i] }; }));
+    effects.push([...map.keys()].filter((i) => map.get(i) !== before[i]).map((i) => { const p = l1XY(i); return { dx: p.x - o.x, dy: p.y - o.y, tile: map.get(i) }; }));
   }
   effectsMemo.set(rom, { gen: rom.gen, effects });
   return effects;
@@ -639,8 +716,8 @@ export function destroyedAt(effects: DestroyChange[][], l1: ArrayLike<number>, i
 // the tile whose destroy setting tile i shows (destroyedAt), -1 none: one set there, else by the tile as the game
 // may see it when an event runs – on the map before events (l1), revealed, as shown (at the event progress) – and
 // that tile's value
-export function destroySettingAt(rom: Rom, l1: Uint8Array, shown: Uint8Array, i: number): { at: number; tile: number | undefined } {
-  const effects = destroyEffects(rom), revealed = l1.map((t) => { const r = revealedTile(rom, t); return r >= 0 ? r : t; });
+export function destroySettingAt(rom: Rom, l1: ArrayLike<number>, shown: ArrayLike<number>, i: number): { at: number; tile: number | undefined } {
+  const effects = destroyEffects(rom), revealed = Array.from(l1, (t) => { const r = revealedTile(rom, t); return r >= 0 ? r : t; });
   const maps = [l1, revealed, shown];
   let at = destroyEvent(rom, i) !== NO_EVENT ? i : -1;
   for (const m of maps) if (at < 0) at = destroyedAt(effects, m, i);
@@ -680,15 +757,18 @@ export function overworldDataRanges(rom: Rom): [number, number][] {
   const p = l2Pointers(rom), d = rom.data, scratch = new Uint16Array(0x2000);
   const out = [
     at(OW_L1, 0x800),
-    at(OW_L1_MAP16, OW_L1_TILES * 8),
+    at(owTileAddr(rom, 0), (hasOwMap16Ext(rom) ? OW_L1_TILES : GAME_OW_TILES) * 8),
+    ...OW_MAP16_HOOKS.map(([a, n]) => at(a, n)),
     at(p.tiles, rleDecode(d, snesToPc(p.tiles), scratch, 0, 0x2000)),
     at(p.attrs, rleDecode(d, snesToPc(p.attrs), scratch, 8, 0x2000)),
     at(L2_TILE_PTR, 2), at(L2_BANK, 1), at(L2_ATTR_PTR, 2),
     at(EXIT_DIRS, MAX_TRANSLEVEL + 1),
   ];
   out.push(...levelNameRanges(rom), ...submapPaletteRanges(rom));
-  const tl = translevelTableBlock(rom);
-  if (tl) out.push(at(tl.snes, tl.size), at(TL_PTR, 2), at(TL_BANK, 1));
+  for (const [ptr, bank] of [[TL_PTR, TL_BANK], [L1_HI_PTR, L1_HI_BANK]]) {
+    const b = packedBlock(rom, ptr, bank);
+    if (b) out.push(at(b.snes, b.size), at(ptr, 2), at(bank, 1));
+  }
   if (hasLevelFlagsPatch(rom)) out.push(at(LEVEL_FLAGS, MAX_TRANSLEVEL + 1));
   out.push(at(revealTable(rom), revealEventCount(rom) * 2), at(REVEAL_FROM, REVEALS), at(REVEAL_TO, REVEALS), ...eventDataRanges(rom));
   if (hasDestroyPatch(rom)) out.push(at(rom.r24(DESTROY_EV_OP), DESTROYS), at(rom.r24(DESTROY_LOC_OP), DESTROYS * 2));
@@ -706,8 +786,11 @@ export interface OwRender {
   ppuRegs: Uint8Array;
   ok: boolean;
 }
-// layer 1 as the game shows it, its events applied (l1Index order)
-export const gameL1 = (r: OwRender): Uint8Array => r.wram.subarray(RAM.owLayer1, RAM.owLayer1End);
+// layer 1 as the game shows it, its events applied (l1Index order; the tiles' low and high bytes, readL1)
+export const gameL1 = (r: OwRender): Uint16Array => {
+  const w = r.wram, lo = RAM.owLayer1, hi = RAM.owLayer1High;
+  return Uint16Array.from({ length: 0x800 }, (_, i) => w[lo + i] | (w[hi + i] << 8));
+};
 // layer 2 of the loaded map's region as the game shows it, its events applied: the BG2 tilemap in VRAM (64x64 at
 // BG2SC, $2108; l2Index order within the region)
 export function gameL2(r: OwRender): Uint16Array {

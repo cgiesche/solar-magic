@@ -288,7 +288,7 @@ export function paintEventL1(d: EventData, e: number, after: ArrayLike<number>, 
   return { ...d, silent };
 }
 // layer 1 as after events 0 … e passed without event e's layer 1 changes (emulated, on a copy of the ROM)
-export function layer1Without(rom: Rom, e: number): Uint8Array {
+export function layer1Without(rom: Rom, e: number): Uint16Array {
   return new EventL1Copy().without(rom, e);
 }
 // layer1Without on a copy of the ROM kept between calls (taking the ROM's bytes each time): its emulator keeps the
@@ -296,7 +296,7 @@ export function layer1Without(rom: Rom, e: number): Uint8Array {
 // ROM (its recorders: a result kept by them goes when the ROM's events or what the load read change)
 export class EventL1Copy {
   private copy: { rom: Rom; emu: OverworldEmulator } | null = null;
-  without(rom: Rom, e: number): Uint8Array {
+  without(rom: Rom, e: number): Uint16Array {
     let c = this.copy;
     if (c && c.rom.data.length === rom.data.length) c.rom.data = rom.data.slice();
     else { const copy = new Rom(rom.data); c = this.copy = { rom: copy, emu: new OverworldEmulator(copy) }; }
@@ -313,7 +313,7 @@ export class EventL1Copy {
 }
 // layer1Without as a job of the result learner (probe worker: the overworld view asks for it while an event is
 // painted), on the learner's kept copy. One step
-export function* layer1WithoutJob(copy: EventL1Copy, rom: Rom, e: number): Job<Uint8Array> {
+export function* layer1WithoutJob(copy: EventL1Copy, rom: Rom, e: number): Job<Uint16Array> {
   return copy.without(rom, e);
 }
 // the layer 1 tiles (l1Index) event e changes

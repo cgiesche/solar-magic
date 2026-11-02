@@ -25,6 +25,8 @@ import { LevelUses } from '../src/core/levelusage.ts';
 import { LevelEmulator } from '../src/core/levelemu.ts';
 import { editorImage } from './fixture.ts';
 
+const same = (a: Uint16Array, b: Uint16Array) => a.length === b.length && a.every((v, i) => v === b[i]);
+
 const file = await editorImage();
 let bad = 0;
 const check = (ok: boolean, what: string) => { console.log((ok ? 'ok   ' : 'FAIL ') + what); if (!ok) bad++; };
@@ -74,8 +76,8 @@ function editor(worker: Worker | null) {
     client.learn<OwSpriteView[]>(`ows1:${m}`, { kind: 'owSprites', map: m, progress }, { lane: 'ows', input: { progress }, replace: true, done });
   const save = (progress: number, done: (v: ProgressSave) => void = () => {}) =>
     client.learn<ProgressSave>('owps1', { kind: 'owSave', progress }, { lane: 'owps', input: { progress }, done });
-  const without = (event: number, done: (v: Uint8Array) => void = () => {}) =>
-    client.learn<Uint8Array>(`owlw1:${event}`, { kind: 'owL1Without', event }, { lane: 'owlw', replace: true, done });
+  const without = (event: number, done: (v: Uint16Array) => void = () => {}) =>
+    client.learn<Uint16Array>(`owlw1:${event}`, { kind: 'owL1Without', event }, { lane: 'owlw', replace: true, done });
   const drain = () => { while (steps.length) steps.shift()!(); };
   return { rom, client, map, views, sprites, save, without, drain };
 }
@@ -149,24 +151,24 @@ loadsHere = 0;
   // layer 1 without an event's layer 1 changes (the first with some)
   const d0 = readEvents(e.rom), ev = [...d0.silent.keys()].find((k) => eventL1Tiles(d0, k).length)!;
   const withoutHere = (rom: Rom) => { const n = loadsHere, v = layer1Without(new Rom(rom.data.slice()), ev); loadsHere = n; return v; };
-  let wo: Uint8Array | undefined;
+  let wo: Uint16Array | undefined;
   check(e.without(ev, (v) => (wo = v)) === undefined, `layer 1 without event ${ev.toString(16)}'s changes: asked for`);
   await settle();
   w.run();
   const directWo = withoutHere(e.rom);
-  check(!!wo && Buffer.compare(wo, directWo) === 0 && loadsHere === 0,
+  check(!!wo && same(wo, directWo) && loadsHere === 0,
     'layer 1 without the event: as found directly, not on the main thread');
   check(!!e.without(ev), 'asked again: known at once');
   // the event's layer 1 painted (a tile more, as an event stroke writes it)
-  const at = l1Index(0, 5, 5), after = Uint8Array.from(directWo);
+  const at = l1Index(0, 5, 5), after = Uint16Array.from(directWo);
   after[at] ^= 1;
   writeEvents(e.rom, paintEventL1(readEvents(e.rom), ev, after, directWo, new Set([at])));
   check(eventL1Tiles(readEvents(e.rom), ev).includes(at), "the event's layer 1 painted");
-  let wo2: Uint8Array | undefined;
+  let wo2: Uint16Array | undefined;
   check(e.without(ev, (v) => (wo2 = v)) === undefined, "the event's layer 1 painted: asked again");
   await settle();
   w.run();
-  check(!!wo2 && Buffer.compare(wo2, withoutHere(e.rom)) === 0 && Buffer.compare(wo2, directWo) === 0 && loadsHere === 0,
+  check(!!wo2 && same(wo2, withoutHere(e.rom)) && same(wo2, directWo) && loadsHere === 0,
     "again as found directly, the same as before (the event's own layer 1 changes aren't in it), not on the main thread");
 }
 

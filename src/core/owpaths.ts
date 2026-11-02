@@ -9,7 +9,7 @@
 
 import type { LevelEmulator } from './levelemu.ts';
 import type { Job } from './jobrunner.ts';
-import { l1Index, overworldDataRanges, OW_L1, DIR_FLAGS } from './overworld.ts';
+import { l1Index, overworldDataRanges, DIR_FLAGS, OW_L1_TILES } from './overworld.ts';
 import { RAM, GM, PAD, get16, getS16 } from './ram.ts';
 
 export const PATH_KINDS = ['walk', 'climb', 'swim', 'exit', 'stop', 'level', 'none'] as const;
@@ -28,9 +28,9 @@ export const PATH_KIND_NAMES: Record<PathKind, string> = {
 const WALK_FRAMES = 90; // until Mario reached the tile after the probed one or stopped (a climb is slow)
 const ENTER_FRAMES = 60; // A pressed on a tile he stopped at, until a level loads
 
-// The kind of every layer 1 tile 00–FF, a tile per step (the result learner's job). The overworld's data the
-// editor writes isn't recorded as read (emu.skipMask, restored when it ends: not withSkipMask, the mask stays
-// set between the job's steps, each run in a tracked() that reads it).
+// The kind of every layer 1 tile 000–1FF (its high byte at $7FC800, overworld.ts readL1), a tile per step (the result
+// learner's job). The overworld's data the editor writes isn't recorded as read (emu.skipMask, restored when it ends:
+// not withSkipMask, the mask stays set between the job's steps, each run in a tracked() that reads it).
 export function pathKindsJob(emu: LevelEmulator): Job<PathKind[]> {
   return probeAll(emu, maskOverworldData(emu));
 }
@@ -51,22 +51,24 @@ function* probeAll(emu: LevelEmulator, end: () => void): Generator<string | void
     const dx = tx + 2 < 32 ? 1 : -1, pad = dx > 0 ? PAD.right : PAD.left;
     const at = (k: number, dy = 0) => l1Index(map, tx + k * dx, ty + dy);
     // the way: his tile (translevel 1, every direction open), the probed tile (the same translevel), a stop tile
-    // (his own, read: what is painted there matters), nothing around
-    const home = at(0), tl = 1, stop = emu.rom.r8(OW_L1 + home);
+    // (his own: what is painted there matters), nothing around
+    const home = at(0), tl = 1, L = RAM.owLayer1, H = RAM.owLayer1High;
     for (let dy = -1; dy <= 1; dy++) for (let k = -1; k <= 3; k++) {
       const y = ty + dy, x = tx + k * dx;
-      if ((k || dy) && x >= 0 && x < 32 && y >= 0 && y < 32) w[RAM.owLayer1 + at(k, dy)] = w[RAM.owTranslevels + at(k, dy)] = 0;
+      if ((k || dy) && x >= 0 && x < 32 && y >= 0 && y < 32) w[L + at(k, dy)] = w[H + at(k, dy)] = w[RAM.owTranslevels + at(k, dy)] = 0;
     }
-    w[RAM.owLayer1 + at(2)] = stop;
+    w[L + at(2)] = w[L + home];
+    w[H + at(2)] = w[H + home];
     w[RAM.owTranslevels + home] = w[RAM.owTranslevels + at(1)] = tl; // (the probed tile enters a level if it can)
     w[RAM.levelFlags + tl] = DIR_FLAGS.reduce<number>((a, b) => a | b, 0); // (not passed: no "no entry")
     const standing = w[RAM.owProcess], start = s.saveState();
     const kinds: PathKind[] = [];
-    for (let t = 0; t < 0x100; t++) {
+    for (let t = 0; t < OW_L1_TILES; t++) {
       s.loadState(start);
-      w[RAM.owLayer1 + at(1)] = t;
+      w[L + at(1)] = t & 0xff;
+      w[H + at(1)] = t >> 8;
       kinds.push(probe(emu, t, tx, dx, pad, standing));
-      yield `Path tiles (${0xff - t})`;
+      yield `Path tiles (${OW_L1_TILES - 1 - t})`;
     }
     return kinds;
   } finally { end(); }
@@ -109,13 +111,14 @@ function probe(emu: LevelEmulator, t: number, tx: number, dx: number, pad: numbe
 // first step ends and where the look-ahead onto t sends him give t's vectors. The result depends on the game's code
 // only.
 // first, walk: per tile * 4 + the way he steps onto it (DIR_NAMES order: up, down, left, right) the vector (x, y at
-// index * 2, * 2 + 1); NO_SHAPE where he doesn't step onto it (tiles 00, 56 and up, an exit, no path)
+// index * 2, * 2 + 1); NO_SHAPE where he doesn't step onto it (tiles 00, 56 and up, an exit, no path; on page 1
+// 100, 156 and up)
 export interface PathShapes { first: number[]; walk: number[] }
 export const NO_SHAPE = -0x8000;
 export const DX = [0, 0, -1, 1], DY = [-1, 1, 0, 0];
 const SHAPE_FRAMES = 40; // until the overworld looked ahead onto the tile (Mario walked half a tile)
 const PADS = [PAD.up, PAD.down, PAD.left, PAD.right];
-export const PATH_TILES_END = 0x56; // the tiles below are walked over
+export const PATH_TILES_END = 0x56; // the tiles below are walked over (on each page of the Map16)
 
 export function pathShapesJob(emu: LevelEmulator): Job<PathShapes> {
   return probeShapes(emu, maskOverworldData(emu));
@@ -127,24 +130,28 @@ function* probeShapes(emu: LevelEmulator, end: () => void): Generator<string | v
     // with nothing around
     emu.startGame(0);
     let w = emu.snes.wram;
-    const stop = w[RAM.owLayer1 + l1Index(w[RAM.submap] ? 1 : 0, get16(w, RAM.owPlayerTileX), get16(w, RAM.owPlayerTileY))];
+    const L = RAM.owLayer1, H = RAM.owLayer1High, own = l1Index(w[RAM.submap] ? 1 : 0, get16(w, RAM.owPlayerTileX), get16(w, RAM.owPlayerTileY));
+    const stop = w[L + own], stopHi = w[H + own];
     const hx = 16, hy = 16, home = l1Index(0, hx, hy);
     emu.startGameAt(home);
     const s = emu.snes;
     w = s.wram;
-    for (let y = hy - 3; y <= hy + 3; y++) for (let x = hx - 3; x <= hx + 3; x++) w[RAM.owLayer1 + l1Index(0, x, y)] = w[RAM.owTranslevels + l1Index(0, x, y)] = 0;
-    w[RAM.owLayer1 + home] = stop;
+    for (let y = hy - 3; y <= hy + 3; y++) for (let x = hx - 3; x <= hx + 3; x++) w[L + l1Index(0, x, y)] = w[H + l1Index(0, x, y)] = w[RAM.owTranslevels + l1Index(0, x, y)] = 0;
+    w[L + home] = stop;
+    w[H + home] = stopHi;
     w[RAM.owTranslevels + home] = 1;
     w[RAM.levelFlags + 1] = DIR_FLAGS.reduce<number>((a, b) => a | b, 0);
     const standing = w[RAM.owProcess], start = s.saveState();
     const px = get16(w, RAM.owPlayerX), py = get16(w, RAM.owPlayerY);
     const target = () => [getS16(w, RAM.owTarget), getS16(w, RAM.owTarget + 2)];
-    const out: PathShapes = { first: new Array(0x800).fill(NO_SHAPE), walk: new Array(0x800).fill(NO_SHAPE) };
-    for (let t = 1; t < PATH_TILES_END; t++) {
+    const out: PathShapes = { first: new Array(OW_L1_TILES * 8).fill(NO_SHAPE), walk: new Array(OW_L1_TILES * 8).fill(NO_SHAPE) };
+    const tiles = [0, 0x100].flatMap((page) => Array.from({ length: PATH_TILES_END - 1 }, (_, k) => page + 1 + k));
+    for (const t of tiles) {
       for (let d = 0; d < 4; d++) {
         s.loadState(start);
         const x1 = hx + DX[d], y1 = hy + DY[d], k = t * 4 + d;
-        w[RAM.owLayer1 + l1Index(0, x1, y1)] = t;
+        w[L + l1Index(0, x1, y1)] = t & 0xff;
+        w[H + l1Index(0, x1, y1)] = t >> 8;
         let first: number[] | null = null;
         for (let f = 0; f < SHAPE_FRAMES; f++) {
           s.joy1 = f < 4 ? PADS[d] : 0;
@@ -158,7 +165,7 @@ function* probeShapes(emu: LevelEmulator, end: () => void): Generator<string | v
           }
         }
       }
-      yield `Path shapes (${PATH_TILES_END - 1 - t})`;
+      yield `Path shapes (${tiles.length - 1 - tiles.indexOf(t)})`;
     }
     s.joy1 = 0;
     return out;

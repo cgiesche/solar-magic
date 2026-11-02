@@ -711,7 +711,7 @@ for (const changeRead of [false, true]) {
     'layer 2 motions: their entry as on the main thread (key, input, bytes read: no picture)');
   const pk = run({ type: 'learn', lane: 'owpk1', key: 'owpk-test', job: { kind: 'pathKinds' }, replace: true });
   const pkNow = atOnce<PathKind[]>({ key: 'owpk-test', keep: true, picture: false, start: pathKindsJob });
-  check(pk.done?.type === 'learned' && pkNow.length === 0x100 && JSON.stringify(pk.done.result) === JSON.stringify(pkNow), 'path kinds: as on the main thread');
+  check(pk.done?.type === 'learned' && pkNow.length === 0x200 && JSON.stringify(pk.done.result) === JSON.stringify(pkNow), 'path kinds: as on the main thread');
   check(same(pk.put.get('owpk-test'), results.entry('owpk-test', undefined)), 'path kinds: their entry as on the main thread (bytes read: no picture)');
 
   // the prefab suggestions of some levels, the open one as edited (a 3×3 block of Direct Map16 tiles twice, once in

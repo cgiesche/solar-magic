@@ -201,6 +201,8 @@ export function levelTeleports(rom: Rom, graph: ExitGraph, tl: number): LevelTel
 // ---- Koopa Kids ----
 export const KOOPA_X = 0x048e49, KOOPA_Y = 0x048e4f, KOOPAS = 3;
 export const KOOPA_TILE = 0x49; // the tile of the first; the others the next ones
+// the Koopa Kid whose tile layer 1 tile t is (-1 none): the game reads the low byte ($7EC800), 149 is one too
+export function koopaOfTile(t: number): number { const k = (t & 0xff) - KOOPA_TILE; return k >= 0 && k < KOOPAS ? k : -1; }
 // where Mario is put after losing to Koopa Kid k, a tile of his submap – the one of its tile (null: none, the game's 0,0)
 export function koopaTeleport(rom: Rom, k: number): { x: number; y: number } | null {
   const x = rom.r16(KOOPA_X + k * 2), y = rom.r16(KOOPA_Y + k * 2);

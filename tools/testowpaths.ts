@@ -29,7 +29,7 @@ const rom = new Rom(image.slice());
 const t0 = performance.now();
 const { kinds, reads } = learn(rom);
 console.log(`learned in ${Math.round(performance.now() - t0)} ms`);
-check(kinds.length === 0x100, '256 tiles');
+check(kinds.length === 0x200, '512 tiles (pages 0 and 1)');
 
 // ---- the clean game's path tiles ----
 {

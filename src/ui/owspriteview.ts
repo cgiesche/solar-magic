@@ -15,7 +15,7 @@ import {
   readOwSprites, writeOwSprite, readStart, writeStart, koopaKidPos, setKoopaKidPos, OW_SPRITE_NAMES, OW_SPRITE_SLOTS, KOOPA_KIDS,
   type OwSpriteView,
 } from '../core/owsprites.ts';
-import { KOOPA_TILE } from '../core/owlinks.ts';
+import { KOOPA_TILE, koopaOfTile } from '../core/owlinks.ts';
 import { l1Index, MAP_NAMES } from '../core/overworld.ts';
 import { hex } from '../core/names.ts';
 import { hasOwSpriteSlots, hasKoopaKidTable } from '../core/owsprites.ts';
@@ -70,7 +70,7 @@ export class SpriteLayer {
   // a Koopa Kid is shown where its tile is on the map
   private koopaShown(k: number): boolean {
     const base = this.view.region * 0x400, l1 = this.view.shown.l1;
-    for (let i = base; i < base + 0x400; i++) if (l1[i] === KOOPA_TILE + k) return true;
+    for (let i = base; i < base + 0x400; i++) if (koopaOfTile(l1[i]) === k) return true;
     return false;
   }
   private items(): Item[] {

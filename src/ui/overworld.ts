@@ -11,7 +11,7 @@ import {
   translevelUse, resetTranslevel, baseEvent, setBaseEvent, eventNames, exitDirections, setExitDirection, DIR_ARROWS, DIR_NAMES, EXIT_NAMES, NO_EVENT,
   initialFlags, setInitialFlags, FLAG, DIR_FLAGS, OW_EVENTS, revealEvents, setRevealEvents, revealAt, revealedTile, revealEventCount,
   readRevealList, writeRevealList, destroyEffects, destroySettingAt, destroyEvent, setDestroyEvent, readDestroyList, freeTranslevel, levelTilesOf, OW_L1_TILES,
-  eventBits,
+  eventBits, owTileWords,
 } from '../core/overworld.ts';
 import { hasMessages, isBlank, readMessage } from '../core/messages.ts';
 import { messageRoutineNote, messageRoutineUnknown, MESSAGE_ROUTINE_CHECKING } from '../core/messagedraw.ts';
@@ -35,7 +35,6 @@ import { menuButton } from './menu.ts';
 import { levelPicker } from './levelpicker.ts';
 import { fillPixels, fitScale, sized, previewSheet, hidePickerPreview } from './pickerview.ts';
 import { mainTranslevel } from '../core/level.ts';
-import { RAM, map16Pointer } from '../core/ram.ts';
 import { loadMusicProject, submapSongs, submapMusic, setSubmapMusic, songHex, type SongInfo } from '../core/music.ts';
 import { songLabel, playButton } from './musicdialog.ts';
 import { musicPlayer, submapMusicLabel } from './musicplayer.ts';
@@ -58,13 +57,13 @@ type Drag =
 
 // the 512x512 image of a map region (0 the main map, 1 the submaps): layer 2 (`l2`), then layer 1 (`l1`, null: the
 // state after the events in `r`); undefined leaves a layer out
-export function drawOwMap(rom: Rom, r: OwRender, region: number, l1: Uint8Array | null | undefined, l2: Uint16Array | undefined): Uint32Array {
+export function drawOwMap(rom: Rom, r: OwRender, region: number, l1: Uint16Array | null | undefined, l2: Uint16Array | undefined): Uint32Array {
   const W = 512;
   const img = new Uint32Array(W * W);
   const tc = new TileCache(r.vram, r.cgram, 0);
   if (l2) for (let y = 0; y < 64; y++) for (let x = 0; x < 64; x++) blit8(img, W, W, tc.get(l2[l2Index(region, x, y)]), x * 8, y * 8);
   if (l1 !== undefined) {
-    const src = l1 ?? r.wram.subarray(RAM.owLayer1, RAM.owLayer1End);
+    const src = l1 ?? gameL1(r);
     for (let y = 0; y < 32; y++) for (let x = 0; x < 32; x++) drawL1Tile(rom, img, tc, r, src[l1Index(region, x, y)], x * 16, y * 16);
   }
   return img;
@@ -78,13 +77,15 @@ export function putImage(canvas: HTMLCanvasElement, img: Uint32Array, W = 512): 
   ctx.putImageData(id, 0, 0);
 }
 function drawL1Tile(rom: Rom, img: Uint32Array, tc: TileCache, r: OwRender, t: number, px: number, py: number, W = 512, H = 512): void {
-  const p = map16Pointer(r.wram, t);
-  const w = [0, 1, 2, 3].map((q) => rom.r16(0x050000 | (p + q * 2)));
+  const w = owTileWords(rom, t);
   blit8(img, W, H, tc.get(w[0]), px, py);
   blit8(img, W, H, tc.get(w[1]), px, py + 8);
   blit8(img, W, H, tc.get(w[2]), px + 8, py);
   blit8(img, W, H, tc.get(w[3]), px + 8, py + 8);
 }
+
+// a layer 1 tile's number: 2 digits on page 0, 3 on page 1 (82, 1A5)
+const l1Hex = (t: number) => hex(t, t > 0xff ? 3 : 2);
 
 // what the timeline shows: an animated step, a silent one, the layer 1 changes
 type StepKind = 'step' | 'silent' | 'l1';
@@ -125,7 +126,7 @@ export class OverworldView {
   // event progress comes, the map drawn last stays (last: its load, of map `map`, with the maps as in the ROM then;
   // stale: something was built from another load or none, built again when it comes; afterShown: what waits for the
   // map shown, as the game shows it)
-  private last: { r: OwRender; map: number; rom: { l1: Uint8Array; l2: Uint16Array } } | null = null;
+  private last: { r: OwRender; map: number; rom: { l1: Uint16Array; l2: Uint16Array } } | null = null;
   private stale = false;
   private afterShown: (() => void) | null = null;
   private shownViews: Rect[] | null = null;
@@ -133,10 +134,10 @@ export class OverworldView {
   // the maps as in the ROM, with the stroke being painted (written to the ROM when it ends); tls: the translevel
   // of each layer 1 tile; rom: the maps as in the ROM; shown: as the game shows them at the event progress, the
   // tiles of the stroke being painted as painted (it goes to the map before events)
-  l1: Uint8Array;
+  l1: Uint16Array;
   l2: Uint16Array;
-  rom: { l1: Uint8Array; l2: Uint16Array };
-  shown: { l1: Uint8Array; l2: Uint16Array };
+  rom: { l1: Uint16Array; l2: Uint16Array };
+  shown: { l1: Uint16Array; l2: Uint16Array };
   tls: Uint8Array;
   mode: Layer | 'links' | 'sprites' = 'l1';
   showL1 = true;
@@ -160,7 +161,7 @@ export class OverworldView {
   // stroke being painted; without: layer 1 as after it without its layer 1 changes (what a stroke is compared with,
   // App.layer1Without; undefined while it is emulated, null when it could not be). Layer 1 is painted once both come
   private ev: {
-    data: EventData; before: Uint16Array; after: Uint16Array; l1: Uint8Array | null; game: Uint8Array | null; without: Uint8Array | null | undefined;
+    data: EventData; before: Uint16Array; after: Uint16Array; l1: Uint16Array | null; game: Uint16Array | null; without: Uint16Array | null | undefined;
     runners: Map<number, EventRunner[]>;
   } | null = null;
   private hoverStep: { kind: StepKind; k: number } | null = null;
@@ -849,9 +850,9 @@ export class OverworldView {
     if (this.mode !== 'l2') {
       if (c.x >= 0 && c.y >= 0 && c.x < 32 && c.y < 32) {
         const i = l1Index(this.region, c.x, c.y), shown = this.shown.l1[i];
-        t += `  ·  Tile ${hex(shown, 2)}`;
+        t += `  ·  Tile ${l1Hex(shown)}`;
         if (this.ev && eventL1Tiles(this.ev.data, this.event).includes(i)) t += ' (by this event)';
-        else if (shown !== this.l1[i]) t += ` (by events, ${hex(this.l1[i], 2)} before)`;
+        else if (shown !== this.l1[i]) t += ` (by events, ${l1Hex(this.l1[i])} before)`;
         const tl = this.tls[i];
         if (this.isLevelTile(this.l1[i])) t += tl ? `  ·  Level ${hex(translevelToLevel(tl), 3)} “${levelName(this.app.rom, tl)}”` : '  ·  Enters no level';
         const k = this.showPaths ? this.pathKinds()?.[shown] : undefined;
@@ -928,7 +929,7 @@ export class OverworldView {
     const e = this.event;
     if (e < 0) { this.ev = null; this.buildTimeline(); return; }
     const rom = this.app.rom, data = readEvents(rom), base = readL2(rom), before = applyEvents(base, data, 0, e);
-    const ev = this.ev = { data, before, after: applyEvents(before, data, e, e + 1), l1: null, game: null, without: undefined as Uint8Array | null | undefined, runners: eventRunners(rom) };
+    const ev = this.ev = { data, before, after: applyEvents(before, data, e, e + 1), l1: null, game: null, without: undefined as Uint16Array | null | undefined, runners: eventRunners(rom) };
     ev.without = this.app.layer1Without(e, (v) => { if (this.ev === ev) ev.without = v; });
     this.buildTimeline();
   }
@@ -1404,15 +1405,15 @@ export class OverworldView {
   // the selected tile: a level tile's settings, and for every tile the events that reveal it
   tileInfo(i: number): HTMLElement {
     const { x, y } = l1XY(i), t = this.l1[i];
-    const info = this.isLevelTile(t) ? this.levelInfo(i) : h('div', { class: 'ow-info' }, h('div', { class: 'hint' }, `Tile ${hex(x, 2)},${hex(y, 2)} · ${hex(t, 2)} (not a level tile)`));
-    info.append(h('div', { class: 'row' }, h('button', { title: 'Edit which 8x8 tiles make this layer 1 tile, in the Map16 tab (M) – for every place of the tile on all maps', onclick: () => this.editTile(i) }, `Edit tile ${hex(t, 2)} in Map16 …`)),
+    const info = this.isLevelTile(t) ? this.levelInfo(i) : h('div', { class: 'ow-info' }, h('div', { class: 'hint' }, `Tile ${hex(x, 2)},${hex(y, 2)} · ${l1Hex(t)} (not a level tile)`));
+    info.append(h('div', { class: 'row' }, h('button', { title: 'Edit which 8x8 tiles make this layer 1 tile, in the Map16 tab (M) – for every place of the tile on all maps', onclick: () => this.editTile(i) }, `Edit tile ${l1Hex(t)} in Map16 …`)),
       ...this.revealSettings(i), ...this.destroySettings(i));
     return info;
   }
   // the Map16 tab on layer 1 tile i's tile (as in the ROM), drawn as on this map at the event progress
   private editTile(i: number): void {
     const t = this.l1[i];
-    if (t >= OW_L1_TILES) { toast(`Tile ${hex(t, 2)} is past the overworld's layer 1 tiles (00–${hex(OW_L1_TILES - 1, 2)})`); return; }
+    if (t >= OW_L1_TILES) { toast(`Tile ${l1Hex(t)} is past the overworld's layer 1 tiles (000–${hex(OW_L1_TILES - 1, 3)})`); return; }
     this.app.editTile(t, 'ow', { submap: this.map, progress: this.progress });
   }
 
@@ -1473,8 +1474,8 @@ export class OverworldView {
       h('div', { class: 'prop' }, h('label', null, 'Revealed on'), add),
       ...evs.map((e) => h('div', { class: 'row' }, h('span', { class: 'hint' }, this.eventLabel(names, e)),
         h('button', { title: 'This event no longer reveals the tile', onclick: () => set(evs.filter((v) => v !== e)) }, '×'))),
-      ...(!evs.length ? [] : [into < 0 ? h('div', { class: 'hint warn-text' }, `⚠ Tile ${hex(t, 2)} is not in the reveal list: revealing it changes nothing.`)
-        : h('div', { class: 'hint' }, `Revealed, tile ${hex(t, 2)} becomes ${hex(into, 2)}.`)]),
+      ...(!evs.length ? [] : [into < 0 ? h('div', { class: 'hint warn-text' }, `⚠ Tile ${l1Hex(t)} is not in the reveal list: revealing it changes nothing.`)
+        : h('div', { class: 'hint' }, `Revealed, tile ${l1Hex(t)} becomes ${l1Hex(into)}.`)]),
     ];
   }
 
@@ -1494,11 +1495,11 @@ export class OverworldView {
     });
     pick.title = 'The event that destroys this tile when it passes (as castles and fortresses): an event destroys one tile, one destroying another moves here';
     const side = (c: { dx: number; dy: number }) => (c.dy > 0 ? 'below' : c.dy < 0 ? 'above' : c.dx > 0 ? 'right of it' : 'left of it');
-    const changes = t === undefined ? [] : effects[t].map((c) => `${c.dx || c.dy ? `the tile ${side(c)} ` : ''}becomes ${hex(c.tile, 2)}`);
+    const changes = t === undefined ? [] : effects[t].map((c) => `${c.dx || c.dy ? `the tile ${side(c)} ` : ''}becomes ${l1Hex(c.tile)}`);
     return [
       h('div', { class: 'prop' }, h('label', null, 'Destroyed on'), pick),
       j !== i ? h('div', { class: 'hint' }, `The setting of the tile at ${where(j)}, whose destroy changes this one too (a castle's top).`) : null,
-      ev !== NO_EVENT && t !== undefined ? h('div', { class: 'hint' }, `Destroyed, tile ${hex(t, 2)} ${changes.join(', ')}.`) : null,
+      ev !== NO_EVENT && t !== undefined ? h('div', { class: 'hint' }, `Destroyed, tile ${l1Hex(t)} ${changes.join(', ')}.`) : null,
       ev !== NO_EVENT && t === undefined ? h('div', { class: 'hint warn-text' }, '⚠ The game destroys no such tile: destroying it changes nothing.') : null,
     ].filter((v): v is HTMLDivElement => !!v);
   }
@@ -1564,14 +1565,15 @@ export class OverworldView {
       ctx.putImageData(id, 0, 0);
       return c;
     };
-    const sheet = tiles(Array.from({ length: 256 }, (_, t) => t), 16, 256, 256);
+    // pages 0 and 1 of the Map16 (overworld.ts): tiles 100–1FF do where Mario walks what 00–FF do
+    const rows = OW_L1_TILES / 16, sheet = tiles(Array.from({ length: OW_L1_TILES }, (_, t) => t), 16, 256, rows * 16);
     const b = this.brush;
     const one = b.kind === 'l1' && b.entries.length === 1;
     return h('div', null,
-      h('div', { class: 'hint' }, `${one ? `Tile ${hex(b.entries[0], 2)}` : b.kind === 'l1' ? `Block ${b.w}×${b.h}` : ''} · Level tiles: 56–80`),
-      this.sheetPalette(sheet, 'ow-pal', 16, 16, 16, (x, y) => y * 16 + x,
+      h('div', { class: 'hint' }, `${one ? `Tile ${l1Hex(b.entries[0])}` : b.kind === 'l1' ? `Block ${b.w}×${b.h}` : ''} · Level tiles: 56–80 (156–180)`),
+      this.sheetPalette(sheet, 'ow-pal', 16, rows, 16, (x, y) => y * 16 + x,
         (ctx) => ctx.drawImage(tiles(b.entries, b.w, b.w * 16, b.h * 16), 0, 0),
-        (q) => [q.w * q.h > 1 ? `Block ${q.w}×${q.h} from tile ${hex(q.y * 16 + q.x, 2)}` : `Tile ${hex(q.y * 16 + q.x, 2)}`]));
+        (q) => [q.w * q.h > 1 ? `Block ${q.w}×${q.h} from tile ${l1Hex(q.y * 16 + q.x)}` : `Tile ${l1Hex(q.y * 16 + q.x)}`]));
   }
 
   l2Palette(): HTMLElement {

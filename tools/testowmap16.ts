@@ -1,4 +1,4 @@
-// The overworld's layer 1 tiles as a Map16 target: a tile's quarters read and written at $05D000 (8 bytes a tile, the
+// The overworld's layer 1 tiles as a Map16 target: a tile's quarters read and written in its Map16 (8 bytes a tile, the
 // one edit changes those bytes only, one undo step), the game draws the changed tile wherever layer 1 has it (emulated:
 // the BG1 tilemap after the overworld's load), and the bytes are overworld data (a change restarts no result that
 // leaves the overworld's data out).
@@ -28,8 +28,9 @@ function shownWords(r: OwRender, x: number, y: number): number[] {
 const rom = new Rom(image.slice()), s = new RomEditSession(rom), emu = new OverworldEmulator(rom);
 const r0 = emu.load(0, 0);
 check(r0.ok, 'the overworld loads');
-// the game's pointers of tiles 00–C0 are where the editor reads and writes them
-check(Array.from({ length: OW_L1_TILES }, (_, t) => (0x050000 | map16Pointer(r0.wram, t)) === owTileAddr(t)).every(Boolean), 'the game\'s Map16 pointers of tiles 00–C0 are $05D000 + 8 per tile');
+// the game's pointers of tiles 000–1FF are where the editor reads and writes them
+const bank = owTileAddr(rom, 0) & 0xff0000;
+check(Array.from({ length: OW_L1_TILES }, (_, t) => (bank | map16Pointer(r0.wram, t)) === owTileAddr(rom, t)).every(Boolean), 'the game\'s Map16 pointers of tiles 000–1FF are the Map16\'s + 8 per tile');
 // a tile on the main map (x, y), as the game draws it before the change
 // (one the submaps have too)
 const l1 = gameL1(r0), r3 = emu.load(3, 0), l13 = Uint8Array.from(gameL1(r3));
@@ -48,7 +49,7 @@ ws[0] = (ws[0] & ~0x1c00) | (7 << 10);
 const before = rom.data.slice();
 s.edit(`OW tile ${t.toString(16)}: changed`, () => setOwTileWords(rom, t, ws));
 check(s.history.undoStack.length === 1, 'one undo step');
-const o = snesToPc(owTileAddr(t));
+const o = snesToPc(owTileAddr(rom, t));
 check(diff(before, rom.data).every((i) => i >= o && i < o + 8), 'only the tile\'s 8 bytes changed');
 check(same(owTileWords(rom, t), ws), 'read back as written');
 const r1 = emu.load(0, 0);
@@ -61,9 +62,9 @@ check(same(rom.data, before), 'undone');
 check(same(shownWords(emu.load(0, 0), at.x, at.y), old), 'the game draws it as before after the undo');
 let threw = false;
 try { setOwTileWords(rom, OW_L1_TILES, ws); } catch { threw = true; }
-check(threw, 'no tile past C0');
+check(threw, 'no tile past 1FF');
 const ranges = overworldDataRanges(rom);
-check(ranges.some(([a, b]) => a <= snesToPc(owTileAddr(0)) && b >= snesToPc(owTileAddr(OW_L1_TILES - 1)) + 8), 'the tiles\' Map16 is overworld data');
+check(ranges.some(([a, b]) => a <= snesToPc(owTileAddr(rom, 0)) && b >= snesToPc(owTileAddr(rom, OW_L1_TILES - 1)) + 8), 'the tiles\' Map16 is overworld data');
 
 // a tile's places on layer 1 as in the ROM (before events): on the main map, on the submaps
 {

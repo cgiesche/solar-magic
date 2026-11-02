@@ -44,7 +44,7 @@ for (const [name, rom, progress] of [
   ['clean game', new Rom(cleanImage()), [0, 2, 6, 0x0c, 0x20, 0x45, OW_EVENTS]],
   ['with the editor patches', new Rom(await editorImage()), [0, 0x20, OW_EVENTS]],
 ] as [string, Rom, number[]][]) {
-  const emu = new OverworldEmulator(rom), shown = new Map<number, Uint8Array>();
+  const emu = new OverworldEmulator(rom), shown = new Map<number, Uint16Array>();
   for (const map of [0, 1]) for (const n of progress) {
     const r = emu.load(map, n), save = fromSave(rom, n, map), l1 = gameL1(r).slice();
     if (map === 0) shown.set(n, l1);

@@ -124,6 +124,7 @@ export const RAM = {
   switchPalaces: 0x1f27, // SWITCH_PALACES: green, yellow, blue, red (1 pressed)
   eventsTriggered: 0x1f2e, // the count of events the overworld ran (the file select shows it)
   owLayer1: 0xc800, owLayer1End: 0xd000, // overworld layer 1 tilemap (with events applied)
+  owLayer1High: 0x1c800, // ($7FC800) the high bytes of its tiles (their Map16 page, overworld.ts readL1)
   owTranslevels: 0xd000, owTranslevelsEnd: 0xd800, // translevel per overworld tile
   owTileFlags: 0xd800, owTileFlagsEnd: 0xe000, // per overworld tile: its translevel's initial flags ($04D678)
   levelExit: 0x0dd5, // how the level was left: 1 the normal exit, 2 the secret exit, $80 the player's turn ends (died)

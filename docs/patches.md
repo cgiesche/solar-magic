@@ -723,6 +723,21 @@ game's routine stays (the initial flags `$04D678` of each tile's translevel to `
 The clean game's tiles get the translevels its scan gives them; `tools/testleveltiles.ts` enters every level
 tile by emulation and compares the translevel with the clean game.
 
+### Overworld layer 1 tiles 100–1FF
+
+Lunar Magic's expansion of the overworld's layer 1 Map16 to 0x200 tiles, as in a ROM it saved (#90): each tile's
+high byte (its Map16 page) in a map of its own, LC_LZ2 compressed in free space and decompressed to `$7FC800` right
+after the translevel table (its address at `$04D822`, its bank at `$04D827`; the game clears `$7FC800` there and
+already draws layer 1 from tile words, `$04DCF2`); the tiles' Map16 (8 bytes each, 0x1000 bytes) moved from
+`$05D000` to free space, pointed to by the first of the pointers the load puts at `$0FBE` (`$04DC3B`), the load's
+drawing (`$04DCBC`, bank `$04DCC1`) and the bank of the rows drawn as the map scrolls (`$058B22`, which the Map16
+extension's renderer takes too). The code from `$04D7F2` to the second decompression is Lunar Magic's byte for byte;
+after it the editor's own (the initial flags, by a JSL to free space, and the event tiles' properties again), then
+the passed events as in both. New tiles C1–1FF start as tile 00. The game reads the low byte (`$7EC800`) where
+Mario walks, enters levels and events reveal or destroy tiles: there a tile 1xx does what xx does (learned, as the
+path kinds are). `tools/testowpages.ts` reads a ROM Lunar Magic saved with the expansion as the game shows it and
+checks the editor's ROM by emulation.
+
 ### Level tile settings
 
 A level's settings on the overworld (*Overworld*, a level tile selected; Lunar Magic's "Modify Level Tile
@@ -1018,7 +1033,8 @@ not compatible with the respective feature.
 | `$008A7F`, `$0087AD`, `$0085E3`, `$0580B0`, `$0580B4`, `$0580BF`, `$0580C3`, `$058730`, `$058770`, `$0587D4`, `$0587DB`, `$05880B`, `$058812`, `$0586F7`, `$058A3A` | VRAM patch (SMWV): tilemaps relocated, taller levels' rows; RAM `$7F0000–$7F3654` |
 | Header `$00FFD5`, vectors `$00FFEA`, `$00FFEE`, `$00FFFC`, stubs `$00BA4E–$00BA59` (the rewritten bank bytes of long jumps are not hooks) | FastROM (SMWR) |
 | `$048509`, `$048543` | Overworld teleports (the star/pipe table with 0x100 entries) |
-| `$04D7F2–$04D85C` | Translevels per level tile (Lunar Magic's table) |
+| `$04D7F2–$04D85C` | Translevels per level tile and the layer 1 tiles' high bytes (Lunar Magic's tables) |
+| `$04DC3B`, `$04DCBC`, `$04DCC1`, `$058B22` | Overworld layer 1 Map16 (0x200 tiles, Lunar Magic's) |
 | `$009F19`, `$048F8A`, `$049001`, `$049199`; code `$05DD80`, `$03BA10`, `$03BA50`, table `$05DDA0` | Initial level flags, no entry if passed, save prompt (Lunar Magic's places) |
 | `$04E9F7`, `$04DCA5`, `$04DCAA`, `$04D859`; pointers `$04E49F`, `$04E4A4`, `$04E709`, `$04E710`, `$04EE3F`, `$04EE5A`, `$04E4B0`, `$04E4BB`, `$04EAF5`, `$04DD45`, `$04DD4A`, `$04DA74`, `$04EC8C`, `$04ECBA`, `$04ECC5`, `$04ED97`, `$04EDBE`, `$04EDB8` | Event steps, silent events, 0x78 events (Lunar Magic's places) |
 | `$04E6C5`, `$04DA98`; pointers `$04E67C`, `$04E69C` | Destroyed level tiles, 0x18 entries (Lunar Magic's places) |

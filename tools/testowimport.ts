@@ -135,7 +135,7 @@ check(!warnings.some((w) => /song|option|lightning/i.test(w)), 'no warning about
   const es = new OverworldEmulator(src), ed = new OverworldEmulator(dst);
   for (const [m, progress] of [[0, 0], [1, 0], [2, 0x74], [3, 0]]) {
     const x = es.load(m, progress), y = ed.load(m, progress);
-    check(x.ok && y.ok && same(x.vram, y.vram) && same(x.cgram, y.cgram) && same(gameL1(x), gameL1(y)), `${MAP_NAMES[m]} at progress ${progress.toString(16)}: VRAM, CGRAM and layer 1 as in the other ROM`);
+    check(x.ok && y.ok && same(x.vram, y.vram) && same(x.cgram, y.cgram) && gameL1(x).every((v, i) => v === gameL1(y)[i]), `${MAP_NAMES[m]} at progress ${progress.toString(16)}: VRAM, CGRAM and layer 1 as in the other ROM`);
   }
 }
 

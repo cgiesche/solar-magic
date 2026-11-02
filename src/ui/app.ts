@@ -1161,8 +1161,8 @@ export class App {
   // the event is compared with), learned in the probe worker and kept in memory while the ROM bytes it read are
   // unchanged: undefined while it runs (a new request drops the one still waiting), then `done` is called; null when
   // it could not be emulated (not asked again until the ROM changes)
-  layer1Without(e: number, done: (l1: Uint8Array | null) => void): Uint8Array | null | undefined {
-    const r = this.probes.learnOrFailed<Uint8Array>(`owlw1:${e}`, { kind: 'owL1Without', event: e },
+  layer1Without(e: number, done: (l1: Uint16Array | null) => void): Uint16Array | null | undefined {
+    const r = this.probes.learnOrFailed<Uint16Array>(`owlw1:${e}`, { kind: 'owL1Without', event: e },
       { lane: 'owlw', replace: true, label: 'Overworld event', done, failed: () => done(null) });
     return r === FAILED ? null : r;
   }

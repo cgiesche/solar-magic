@@ -33,6 +33,8 @@
 // addresses' low words, then bank and flags) indexed like the acts-like table; the hook runs at the JML's target
 // without a JSL and skips the table while blocks are off (a BRA, patched to +0 when they are enabled). A tile without
 // a block costs about as much as the acts-like mapping alone.
+// Version 8 takes the overworld's bank from the game's operand at $058B22, which Lunar Magic's overworld Map16 expansion
+// (overworld.ts) changes, instead of $05.
 
 import { Rom } from './rom.ts';
 import { Asm } from './asm.ts';
@@ -169,10 +171,11 @@ function build(): Asm {
   a.b(0xc0, 0x00, 0x04); // CPY #$0400
   a.br(0xb0, 'rext');
   a.b(0xb9, 0xbe, 0x0f, 0x85, 0x0a); // LDA $0FBE,y STA $0A
-  // vanilla bank, chosen like the caller: $0D, or $05 if $1931 >= $10 (signed)
+  // vanilla bank, chosen like the caller: $0D, or the overworld's if $1931 >= $10 (signed): its layer 1 Map16's bank,
+  // the operand of the game's LDY #$05 at $058B22 (overworld.ts, Lunar Magic's expansion to 0x200 tiles moves it)
   a.b(0xe2, 0x20, 0xad, 0x31, 0x19, 0xc9, 0x10); // SEP #$20 LDA $1931 CMP #$10
   a.br(0x30, 'rb0d');
-  a.b(0xa9, 0x05);
+  a.b(0xaf, 0x22, 0x8b, 0x05); // LDA.l $058B22
   a.br(0x80, 'rbset');
   a.label('rb0d');
   a.b(0xa9, 0x0d);

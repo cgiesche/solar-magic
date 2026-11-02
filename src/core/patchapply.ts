@@ -16,7 +16,7 @@ import { prefabPatch, PREFAB_HOOKS } from './prefabs.ts';
 import { fastRom, FASTROM_HOOKS } from './fastrom.ts';
 import { listPatches, addPatch, removeEntry, backupBytes, patchedHash, hashBytes, overlaps, type PatchEntry, type RamClaim } from './patchreg.ts';
 
-import { hasTranslevelTable, hasLevelFlagsPatch, hasDestroyPatch, TRANSLEVEL_HOOKS, LEVEL_FLAGS_HOOKS, DESTROY_HOOKS } from './overworld.ts';
+import { hasTranslevelTable, hasLevelFlagsPatch, hasDestroyPatch, hasOwMap16Ext, TRANSLEVEL_HOOKS, LEVEL_FLAGS_HOOKS, DESTROY_HOOKS, OW_MAP16_HOOKS } from './overworld.ts';
 import { hasEventPatch, EVENT_HOOKS } from './owevents.ts';
 import { hasOwTeleportPatch, TELEPORT_HOOKS, OW_TELEPORT_PATCH_NAME } from './owteleport.ts';
 import { levelNamePatch, LEVEL_NAME_HOOKS } from './levelnames.ts';
@@ -40,6 +40,7 @@ export function builtins(): Builtin[] {
     { name: 'Extended BG Map16 (SMWH)', installed: (r) => !!bgMap16Ext(r), hooks: BGMAP16_HOOKS },
     { name: 'FastROM (SMWR)', installed: (r) => !!fastRom(r), hooks: FASTROM_HOOKS },
     { name: 'Translevels per level tile', installed: hasTranslevelTable, hooks: TRANSLEVEL_HOOKS },
+    { name: 'Overworld layer 1 Map16 (0x200 tiles)', installed: hasOwMap16Ext, hooks: OW_MAP16_HOOKS },
     { name: 'Initial level flags', installed: hasLevelFlagsPatch, hooks: LEVEL_FLAGS_HOOKS },
     { name: 'Event steps (Lunar Magic format)', installed: hasEventPatch, hooks: EVENT_HOOKS },
     { name: 'Destroyed level tiles (Lunar Magic format)', installed: hasDestroyPatch, hooks: DESTROY_HOOKS },

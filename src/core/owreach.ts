@@ -40,6 +40,8 @@ const reverse = (d: number): number => d ^ 1;
 const TURNS = [3, 2, 1, 0]; // the game's order of trying another way: right, left, down, up
 const ANY_WAY_TILE = 0x82; // the game lets Mario walk off it in every direction ($049268)
 const WARP_TILES = [0x5b, 0x5f, 0x82]; // the tiles A takes Mario to a star/pipe entry's destination from ($04915E)
+// (the game reads the tiles' low byte there, $7EC800: a tile 182 is one too)
+const lowByte = (t: number) => t & 0xff;
 
 const tileOf = (t: OwTile): number => l1Index(t.submap ? 1 : 0, t.x, t.y);
 
@@ -184,17 +186,17 @@ export function reach(inp: ReachInput): Reach {
   stand(inp.start);
   while (queue.length) {
     const s = queue.pop()!, tl = inp.tls[s];
-    if (WARP_TILES.includes(inp.l1[s])) for (const to of inp.stars.get(s) ?? []) stand(to);
+    if (WARP_TILES.includes(lowByte(inp.l1[s]))) for (const to of inp.stars.get(s) ?? []) stand(to);
     if (tl) for (const to of inp.levelWarps?.(tl) ?? []) stand(to);
     for (let d = 0; d < 4; d++) {
-      if (walks.has(s * 4 + d) || (inp.l1[s] !== ANY_WAY_TILE && !(flags[tl] & DIR_FLAGS[d]))) continue;
+      if (walks.has(s * 4 + d) || (lowByte(inp.l1[s]) !== ANY_WAY_TILE && !(flags[tl] & DIR_FLAGS[d]))) continue;
       const w = walkFrom(inp, s, d);
       if (!w) continue;
       walks.set(s * 4 + d, w);
       for (const i of w.path) tiles[i] = 1;
       if (w.to < 0) continue;
       stand(w.to);
-      if (inp.l1[w.to] !== ANY_WAY_TILE) open(inp.tls[w.to], DIR_FLAGS[reverse(w.dir)]);
+      if (lowByte(inp.l1[w.to]) !== ANY_WAY_TILE) open(inp.tls[w.to], DIR_FLAGS[reverse(w.dir)]);
     }
   }
   return { tiles, stops, walks, flags };

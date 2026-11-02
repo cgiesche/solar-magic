@@ -10,7 +10,7 @@ import type { OverworldView } from './overworld.ts';
 import { h, toast, checkbox, select, emptyState } from './dom.ts';
 import {
   readLinks, makeLink, removeLink, setBothWays, moveLocation, locationUses, pathSide, koopaTeleport, setKoopaTeleport, opposite,
-  KOOPAS, KOOPA_TILE, type OwLink, type LinkEnd, type LinkKind,
+  KOOPAS, KOOPA_TILE, koopaOfTile, type OwLink, type LinkEnd, type LinkKind,
 } from '../core/owlinks.ts';
 import { readTeleports, tileText, sameTile, type OwTile } from '../core/owteleport.ts';
 import { l1Index, l1XY, DIR_NAMES, DIR_ARROWS } from '../core/overworld.ts';
@@ -90,7 +90,7 @@ export class LinkLayer {
     const k = kinds[this.view.shown.l1[i]];
     if (k === 'exit') return { kind: 'exit' };
     if (k === 'stop' || k === 'level') return { kind: 'star' };
-    return { kind: null, why: `Mario doesn't stop on tile ${hex(this.view.shown.l1[i], 2)} (${PATH_KIND_NAMES[k].toLowerCase()}): a star or pipe is a tile he stops on, an exit path an exit path tile` };
+    return { kind: null, why: `Mario doesn't stop on tile ${hex(this.view.shown.l1[i], this.view.shown.l1[i] > 0xff ? 3 : 2)} (${PATH_KIND_NAMES[k].toLowerCase()}): a star or pipe is a tile he stops on, an exit path an exit path tile` };
   }
   // an exit path tile's end: the side its path goes on (toward a path tile around it)
   private exitEnd(t: OwTile): LinkEnd {
@@ -99,7 +99,7 @@ export class LinkLayer {
     return { ...t, side };
   }
   // the Koopa Kid whose tile i is (-1 none)
-  private koopaAt(i: number): number { const k = this.view.shown.l1[i] - KOOPA_TILE; return k >= 0 && k < KOOPAS ? k : -1; }
+  private koopaAt(i: number): number { return koopaOfTile(this.view.shown.l1[i]); }
   // the tiles of the shown region with Koopa Kid k's tile
   private koopaTiles(k: number): number[] {
     const base = this.view.region * 0x400;
