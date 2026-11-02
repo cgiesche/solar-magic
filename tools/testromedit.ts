@@ -39,6 +39,22 @@ function setup() {
   check(s.history.undoStack.length === 1 && runs.written === 3, 'an edit changing nothing: no step, nothing written');
 }
 
+// a follow-up told by the bytes it read; with same, not when what it reads is the same as before (a byte read that
+// doesn't change its value)
+{
+  const rom = new Rom(cleanImage());
+  let plain = 0, compared = 0;
+  const high = (r: Rom) => r.r16(A) & 0xff00;
+  const s = new RomEditSession(rom, { followUps: [
+    { read: high, changed: () => { plain++; } },
+    { read: high, same: (a, b) => a === b, changed: () => { compared++; } },
+  ] });
+  s.edit('Low byte', () => rom.w16(A, rom.r16(A) ^ 1));
+  check(plain === 1 && compared === 0, 'a byte read changed, the value read the same: told, with same not');
+  s.edit('High byte', () => rom.w16(A, rom.r16(A) ^ 0x100));
+  check(plain === 2 && compared === 1, 'the value read changed: told, with same too');
+}
+
 // all or nothing: throws
 {
   const { rom, s, runs } = setup();

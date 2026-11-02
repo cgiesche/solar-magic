@@ -176,7 +176,7 @@ export class App {
   private romTimer = 0;
   // the views' watches of the ROM bytes they read (romwatch.ts): told on a ROM change that changed one of them; while
   // one is held (a stroke being drawn) the debounced re-emulation waits (it would stall the stroke)
-  readonly romWatch: RomWatch;
+  private readonly romWatch: RomWatch;
   private quietUntil = 0; // and after a stroke until then (the next one often follows quickly)
   private persistTimer = 0;
   // the arrangements of Direct Map16 objects pasted in the session (pastehint.ts); the hint to save the last
@@ -246,10 +246,11 @@ export class App {
       settled: () => this.checkSuggestions(),
       // (each told when the edit changed a ROM byte its read read)
       followUps: [
-        // the open level as stored (a patch rewrote its sprite data, a package its sample …): loaded again
-        { read: (r) => { if (this.level) attempt(() => loadLevel(r, this.level.number)); }, changed: () => this.reloadLevel() },
+        // the open level as stored (a patch rewrote its sprite data, a package its sample …): loaded again (not when it
+        // reads the same: loading it again clears its undo history)
+        { read: (r) => (this.level ? storedLevel(r, this.level.number) : null), same: (a, b) => sameLevel(a, b), changed: () => this.reloadLevel() },
         // its graphics slots, own palette or music: shown at once
-        { read: (r) => { if (this.level) levelHeaderGfx(r, this.level.number); }, changed: () => { this.flushRomChange(); this.emit('level-header'); } },
+        { read: (r) => { if (this.level) readLevelHeader(r, this.level.number); }, changed: () => { this.flushRomChange(); this.emit('level-header'); } },
         { read: (r) => attempt(() => listPrefabs(r)), changed: () => { this.flushRomChange(); this.emit('prefabs'); this.emit('change'); } },
         // the secondary entrances (markers, the exit panel): shown at once, also after undo/redo
         { read: (r) => entranceTables(r), changed: () => this.emit('change') },
@@ -1921,8 +1922,15 @@ export { hasLayer2Objects, SEC_HDR };
 function attempt(f: () => unknown): void {
   try { f(); } catch { /* (read up to the error) */ }
 }
+// the level as stored (the error when the editor can't read it); two are the same without the objects' and sprites'
+// ids (compared only when a byte it read changed)
+function storedLevel(rom: Rom, n: number): Level | string {
+  try { return loadLevel(rom, n); } catch (e) { return String(e); }
+}
+const levelText = (v: unknown) => JSON.stringify(v, (k, x) => (k === 'uid' ? undefined : x));
+const sameLevel = (a: unknown, b: unknown) => levelText(a) === levelText(b);
 // the level's graphics slots, own palette and music
-function levelHeaderGfx(rom: Rom, n: number): void {
+function readLevelHeader(rom: Rom, n: number): void {
   levelGfx(rom, n); levelExtGfx(rom, n); customPalette(rom, n); levelMusic(rom, n);
 }
 

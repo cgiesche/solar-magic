@@ -1,4 +1,4 @@
-// Views subscribed to the ROM bytes they read: a view draws through its Watch (run), which records what the drawing
+// Views watching the ROM bytes they read: a view draws through its Watch (run), which records what the drawing
 // read (romdeps.ts record); after a ROM change (notify) a watch is told only when a byte it read changed. A watch
 // held (a stroke being drawn) is told nothing while held, and while any is held the ROM's other followers wait
 // (held: the level's re-emulation would stall the stroke). A ROM edit the view makes itself (own) is taken as seen:
@@ -11,6 +11,7 @@ export class Watch {
   private seen: Recorded<unknown> | null = null; // what it drew last read (null: nothing watched)
   private holding = false;
   private owning = 0;
+  private running = 0;
   private owner: RomWatch;
   private changed: () => void;
 
@@ -21,8 +22,19 @@ export class Watch {
 
   // runs fn (the view's drawing), watching what it reads from then on instead of what was watched before
   run<T>(fn: () => T): T {
-    const r = record(this.owner.rom, fn, { counted: false });
+    this.running++;
+    let r: Recorded<T>;
+    try { r = record(this.owner.rom, fn, { counted: false }); } finally { this.running--; }
     this.seen = r;
+    return r.result;
+  }
+
+  // runs fn (a part of the view drawn again on its own), watching what it reads too (inside run: part of it)
+  add<T>(fn: () => T): T {
+    if (this.running) return fn();
+    const r = record(this.owner.rom, fn, { counted: false });
+    // (a change not told yet stays to be told)
+    if (this.seen && holds(this.owner.rom, this.seen)) this.seen.reads.add(r.reads);
     return r.result;
   }
 

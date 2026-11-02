@@ -894,6 +894,8 @@ export class GfxTab implements WsPanel {
     if (!f || f.empty) { toast(f ? `${gfxName(f.num)} is empty – nothing to export` : 'Choose a file on the left first'); return; }
     try {
       this.watch.own(() => this.app.romEdit(`${gfxName(f.num)}: ${label}`, () => writeGfx(this.app.rom, f)));
+      // (the file as written watched: it may have moved)
+      this.watch.add(() => readGfx(this.app.rom, f.num, this.bppOverride));
     } catch (e) { toast(String(e instanceof Error ? e.message : e), 'error'); this.reload(); }
   }
 

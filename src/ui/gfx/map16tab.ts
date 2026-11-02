@@ -169,6 +169,7 @@ export class Map16Tab implements WsPanel {
     // (drawn again when a ROM change changed what it was drawn from)
     this.watch = app.watchRom(redraw);
     app.on('render', redraw);
+    app.on('rom-change', () => (this.unused = null)); // (found again when asked)
     app.on('probes', () => { if (this.visible) this.buildBuilder(); });
     onBehaviorProgress(app, () => { if (this.visible && this.matchPending) { this.findMatches(); this.drawSheet(); } });
     app.on('animated', redraw);

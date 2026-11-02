@@ -16,9 +16,11 @@ import { RomHistory, type RomEdit } from './romhistory.ts';
 import { record, holds, type Recorded } from './romdeps.ts';
 
 // a consequence of a ROM edit: `read` what it depends on (the ROM bytes it reads are recorded before the edit);
-// `changed` when the edit changed one of them
+// `changed` when the edit changed one of them – with `same`, only when what is read now isn't the same as before (a
+// follow-up that costs much when told for nothing: compared only once a byte read changed)
 export interface FollowUp {
   read(rom: Rom): unknown;
+  same?(before: unknown, now: unknown): boolean;
   changed(): void;
 }
 
@@ -161,7 +163,7 @@ export class RomEditSession {
     this.hooks.written?.({ label, recorded });
     // (the edit is done either way: a failing follow-up is reported, not passed on to the caller)
     (this.hooks.followUps ?? []).forEach((f, i) => {
-      try { if (!holds(this.rom, before[i])) f.changed(); } catch (e) { console.error(e); }
+      try { if (!holds(this.rom, before[i]) && !f.same?.(before[i].result, f.read(this.rom))) f.changed(); } catch (e) { console.error(e); }
     });
   }
 }

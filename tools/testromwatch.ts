@@ -46,6 +46,15 @@ w.run(() => rom.r16(A));
 write(A);
 check(told === 4, 'run again: told');
 
+// a part drawn on its own after the run: what it reads watched too
+{
+  w.run(() => rom.r16(A));
+  w.add(() => rom.r16(B));
+  const n = told;
+  write(B);
+  check(told === n + 1, 'add: a byte read by a part drawn on its own told');
+}
+
 // a failing watch doesn't keep the others from being told
 {
   let other = 0;

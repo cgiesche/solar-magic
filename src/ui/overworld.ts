@@ -277,7 +277,11 @@ export class OverworldView {
   // ---------------- drawing ----------------
   // the map at the event progress; while its load is emulated the last load of this map, with what was painted since
   // (another map's: the image drawn last stays)
+  // (what it reads watched too: drawn again on its own after the last sync)
   redrawMap(): void {
+    this.watch.add(() => this.redrawMapNow());
+  }
+  private redrawMapNow(): void {
     const exact = this.load(), last = exact ? null : this.last?.map === this.map ? this.last : null;
     if (!exact && !last) { this.paint(); return; }
     const r = exact ?? last!.r, from = exact ? this.rom : last!.rom;
@@ -701,7 +705,11 @@ export class OverworldView {
     this.paint();
   }
 
+  // (what it reads watched too: drawn again on its own after the last sync)
   updateStatus(): void {
+    this.watch.add(() => this.updateStatusNow());
+  }
+  private updateStatusNow(): void {
     const c = this.hover;
     const b = this.brush;
     this.scroller.title = ''; // the kind of the path tile under the mouse
@@ -1046,7 +1054,11 @@ export class OverworldView {
   }
 
   // ---------------- left: level tiles of the map ----------------
+  // (what it reads watched too: drawn again on its own after the last sync)
   buildLeft(): void {
+    this.watch.add(() => this.buildLeftNow());
+  }
+  private buildLeftNow(): void {
     const shared = sharedTranslevels(this.l1, this.tls, this.isLevelTile);
     const items: HTMLElement[] = [];
     for (let y = 0; y < 32; y++) for (let x = 0; x < 32; x++) {
@@ -1065,7 +1077,11 @@ export class OverworldView {
   }
 
   // ---------------- right: palette, properties ----------------
+  // (what it reads watched too: drawn again on its own after the last sync)
   buildSide(): void {
+    this.watch.add(() => this.buildSideNow());
+  }
+  private buildSideNow(): void {
     const scroll = this.palPanel.scrollTop;
     hidePickerPreview(this.palPanel);
     this.palPixels = 0;
