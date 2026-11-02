@@ -18,6 +18,9 @@ import { DM16_EXT, setLevelGfx, customPalette, setCustomPalette } from '../core/
 import { objectLength2D, OBJ_2D } from '../core/obj2d.ts';
 import { bgFromWram } from '../core/bg.ts';
 import { PREFAB_EXT } from '../core/prefabs.ts';
+import { Rom } from '../core/rom.ts';
+import { prepareRom } from '../core/editorpatches.ts';
+import { importOverworld, overworldImportProblem } from '../core/owimport.ts';
 
 // overview of all secondary entrances (000-1FF): where each leads, which exits use it
 export function openEntrancesDialog(app: App): void {
@@ -223,6 +226,29 @@ export async function importLevel(app: App): Promise<boolean> {
     toast(String(e instanceof Error ? e.message : e), 'error');
     return false;
   }
+}
+
+// Lunar Magic's "Copy Overworld to Another ROM", the other way round: the overworld of another ROM the editor made (or
+// the clean game) replaces this one's, one ROM edit (core/owimport.ts); what it refers to that this ROM lacks is told
+export async function importOverworldFrom(app: App): Promise<void> {
+  const f = await pickFile('.smc,.sfc,.smwproj');
+  if (!f) return;
+  let src: Rom;
+  try {
+    src = Rom.fromFile(new Uint8Array(await f.arrayBuffer()));
+    await prepareRom(src); // (the clean game gets the editor's patches, in this copy only)
+  } catch (e) { toast(`Could not read “${f.name}”: ${e instanceof Error ? e.message : e}`, 'error'); return; }
+  const why = overworldImportProblem(app.rom, src);
+  if (why) { toast(`The overworld can't be imported: ${why}`, 'error'); return; }
+  const ok = await choose('Import overworld', `Replace this ROM's overworld with the one of “${f.name}”? Its maps, level tiles, events, level names, messages and settings, overworld links, sprites, options and each submap's music, graphics files, palettes and animations are copied; its packages (custom overworld sprites, graphics files, songs) are not. (undoable)`,
+    [{ label: 'Cancel' }, { label: 'Import', primary: true }]);
+  if (ok !== 1) return;
+  let warnings: string[];
+  try { ({ warnings } = app.romEdit(`Overworld imported from ${f.name}`, () => importOverworld(app.rom, src))); } catch (e) { toast(String(e instanceof Error ? e.message : e), 'error'); return; }
+  if (!warnings.length) { toast(`Overworld of “${f.name}” imported.`); return; }
+  modal('Overworld imported', h('div', { style: 'max-width:520px' },
+    h('p', null, `The overworld of “${f.name}” was imported. It refers to things this ROM has otherwise or lacks:`),
+    h('ul', null, ...warnings.map((w) => h('li', null, w)))), [{ label: 'Close', primary: true }]);
 }
 
 // Insert by number (like Lunar Magic's manual insert): object, extended object or sprite at tile (tx, ty)

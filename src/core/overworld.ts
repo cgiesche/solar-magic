@@ -493,6 +493,10 @@ export function revealEvents(rom: Rom, i: number): number[] {
   if (!i) return [];
   return Array.from({ length: revealEventCount(rom) }, (_, e) => e).filter((e) => revealAt(rom, e) === i);
 }
+// the tile event e reveals (0 none)
+export function setRevealAt(rom: Rom, e: number, i: number): void {
+  rom.w16(revealTable(rom) + e * 2, i);
+}
 // tile i revealed on exactly `events` (each then reveals only it)
 export function setRevealEvents(rom: Rom, i: number, events: number[]): void {
   const at = revealTable(rom);
@@ -556,7 +560,7 @@ export function readDestroyList(rom: Rom): Destroy[] {
   const t = destroyTables(rom);
   return Array.from({ length: DESTROYS }, (_, k) => ({ event: rom.r8(t.ev + k), tile: rom.r16(t.loc + k * 2) }));
 }
-function writeDestroyList(rom: Rom, list: Destroy[]): void {
+export function writeDestroyList(rom: Rom, list: Destroy[]): void {
   const t = destroyTables(rom);
   rom.writeBytes(t.ev, Uint8Array.from(list, (d) => d.event));
   rom.writeBytes(t.loc, Uint8Array.from(list.flatMap((d) => [d.tile & 0xff, d.tile >> 8])));

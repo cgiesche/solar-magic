@@ -214,6 +214,10 @@ Where Mario and Luigi stand when a new game begins: a submap and a tile each.
 One of Lunar Magic's "Extra Options" of the overworld the community uses (Start+Select on passed levels, Start to scroll the main map, the 5 hardcoded paths, the event path fade with the path reveal speed, the save prompt after castles and the like, saving Luigi's position, life exchange and L/R for it): a switch for the whole game that changes a few bytes of the game's code to Lunar Magic's, turned back the clean game's; one ROM edit each.
 _Avoid_: extra option, setting (for these)
 
+**Overworld import**:
+The overworld of another ROM the editor made (or the clean game) replacing this one's, Lunar Magic's "Copy Overworld to Another ROM" the other way round (core/owimport.ts): its maps, level tiles with their translevels, events and their steps, the translevels' settings (names, messages), overworld links, start positions, the game's overworld sprites, overworld options, and each submap's music, graphics slots, palettes and animations, read from the other ROM and written through the same modules. One ROM edit; no file format of its own. Package content (custom overworld sprites, graphics files, songs) is not copied: what the import refers to that this ROM lacks or has otherwise is told as a warning.
+_Avoid_: overworld transfer, overworld export
+
 ### The game
 
 **Game workspace**:

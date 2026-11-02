@@ -20,7 +20,7 @@ import { hex } from './core/names.ts';
 import { GfxWorkspace, type WsTab, type WsTarget } from './ui/gfxworkspace.ts';
 import type { Map16Target } from './ui/gfx/target.ts';
 import { openRemapUses } from './ui/tileuses.ts';
-import { openEntrancesDialog, openRomInfo, openInsertDialog, openExpandDialog, openSaveAsDialog, exportLevel, importLevel, openScreenDialog, clearLevelConfirm } from './ui/tools.ts';
+import { openEntrancesDialog, openRomInfo, openInsertDialog, openExpandDialog, openSaveAsDialog, exportLevel, importLevel, importOverworldFrom, openScreenDialog, clearLevelConfirm } from './ui/tools.ts';
 import { menuBar, closeMenus } from './ui/menu.ts';
 import { viewMenu } from './ui/viewmenu.ts';
 import { LEVEL_FILE_EXT } from './core/levelfile.ts';
@@ -182,6 +182,7 @@ function buildUi(app: App): { start: (at: NavLoc | null) => Promise<void> } {
       'sep',
       { label: 'Import level file …', title: 'Replaces the current level (undoable; palette/graphics bypass are written to the ROM directly)', disabled: () => !inLevel(), onClick: () => importLevel(app) },
       { label: 'Export level file …', title: `Level as ${LEVEL_FILE_EXT} file (objects, sprites, exits, header, graphics bypass, custom palette)`, disabled: () => !inLevel(), onClick: () => exportLevel(app) },
+      { label: 'Import overworld from ROM …', title: 'The overworld of another ROM made with the editor (or the clean game) replaces this one\'s – as Lunar Magic\'s “Copy Overworld to Another ROM”; its packages are not copied (undoable)', onClick: () => void importOverworldFrom(app) },
       { label: 'Level as PNG …', title: 'The level as the level view shows it (the View menu\'s layers, sprites and overlays, without the selection) at original size', disabled: () => !inLevel(), onClick: () => void exportLevelPng(app) },
       { label: 'Levels as images …', title: 'Several levels (used, all or chosen) as PNGs in one .zip, drawn as Level as PNG; with a zoom and cropped to the screens each level uses', disabled: () => !inLevel(), onClick: () => openLevelImages(app, () => levels.shown) },
       'sep',
