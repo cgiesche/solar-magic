@@ -78,6 +78,7 @@ check(loadMusicProject(rom)?.sfx.map(sfxKey).join() === '1DFC/Retry/Death Prelud
   ps.play(32);
   // the song muted: the sound effect's voice alone
   sn.apu!.mute(0x7f);
+  ps.play(5); // the echo of what the song played before fades out (muting stops only the voices)
   let before = 0, after = 0;
   for (let f = 0; f < 30; f++) { ps.frame(); before = Math.max(before, peak(ps.audio!)); }
   sn.wram[0x1dfc] = 0x38;

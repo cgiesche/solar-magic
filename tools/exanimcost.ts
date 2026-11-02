@@ -4,8 +4,9 @@
 // opens it, and with the Romhack Races baserom's global animations and a level list that uses every slot
 // type installed; the clean game's own animated tiles' uploads for comparison. The engine's part (over the clean
 // game's) within a budget: 3.81 lines on the editor's ROM and 9.54 with the baserom's global animations before
-// #151, 1.73 and 6.83 after. Also a hash of what the animation shows (VRAM, CGRAM, the palette copies in WRAM)
-// per frame, to compare before and after a change of the engine (the animation must stay the same).
+// #151, 1.73 and 6.83 after (1.75 and 7.07 with the memory timing of #152). Also a hash of what the animation
+// shows (VRAM, CGRAM, the palette copies in WRAM) per frame, to compare before and after a change of the engine
+// (the animation must stay the same).
 //   node tools/exanimcost.ts [--save=file.json] [--check=file.json]
 import { readFileSync, writeFileSync } from 'node:fs';
 import { unzipSync, zipSync } from 'fflate';
@@ -14,7 +15,7 @@ import { loadAsar } from '../src/core/asar.ts';
 import { LevelEmulator } from '../src/core/levelemu.ts';
 import { PlaySession } from '../src/core/playsession.ts';
 import { map16Source } from '../src/core/render.ts';
-import { CYCLES_PER_LINE } from '../src/core/snes.ts';
+import { MASTER_PER_LINE } from '../src/core/snes.ts';
 import { RAM, PAD } from '../src/core/ram.ts';
 import { hashBytes } from '../src/core/patchreg.ts';
 import { inspectUpload, installPackage } from '../src/core/packages.ts';
@@ -66,7 +67,7 @@ function measure(rom: Rom): { step: number; nmi: number; hashes: number[] } {
     p.frame(PAD.right | PAD.y | (f % 40 < 10 ? PAD.b : 0));
     hashes.push(hashBytes([s.vram, s.cgram]) ^ palette);
   }
-  const lines = (c: number) => Math.round(c / (FRAMES - FROM) / CYCLES_PER_LINE * 100) / 100;
+  const lines = (c: number) => Math.round(c / (FRAMES - FROM) / MASTER_PER_LINE * 100) / 100;
   return { step: lines(acc.step - step0), nmi: lines(acc.nmi - nmi0), hashes };
 }
 

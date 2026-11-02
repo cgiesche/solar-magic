@@ -8,10 +8,13 @@ import type { PPU, PpuState } from './ppu.ts';
 import { APU_CLOCKS_PER_FRAME, type Apu } from './apu.ts';
 import type { RomReads } from './romdeps.ts';
 
-export const CYCLES_PER_LINE = 170; // approximate CPU cycles (slow bus accesses) per scanline
+// time is counted in master cycles (21.477 MHz, Cpu.cycles): a bus access takes 6, 8 or 12, an internal cycle 6
+export const MASTER_PER_LINE = 1364;
 export const LINES_PER_FRAME = 262;
 export const VBLANK_LINE = 225;
-const APU_RATIO = APU_CLOCKS_PER_FRAME / (CYCLES_PER_LINE * LINES_PER_FRAME); // SPC clocks per CPU cycle
+const REFRESH_AT = 538, REFRESH = 40; // DRAM refresh: the CPU stands still for 40 master cycles of each line
+const HBLANK_AT = 274 * 4; // $4212 bit 6 from dot 274
+const APU_RATIO = APU_CLOCKS_PER_FRAME / (MASTER_PER_LINE * LINES_PER_FRAME); // SPC clocks per master cycle
 
 export interface MemHook {
   // called for every read of a ROM byte (after mapping): pc offset in rom
@@ -37,7 +40,7 @@ export interface SnesState {
 const STATE_ARRAYS = ['wram', 'sram', 'vram', 'cgram', 'oam', 'ppuRegs', 'dma', 'apuIn', 'apuOut'] as const;
 const STATE_SCALARS = ['vmain', 'vaddr', 'vreadLatch', 'cgaddr', 'cgLatch', 'cgReadHigh', 'oamaddr', 'oamLatch', 'm7a', 'm7b',
   'm7latch', 'wmaddr', 'nmitimen', 'wrmpya', 'wrdiv', 'rddiv', 'rdmpy', 'htime', 'vtime', 'nmiFlag', 'irqFlag', 'joy1',
-  'apuLastReadAddr', 'apuSpin', 'apuFrameStart', 'frame', 'line', 'lineCycle', 'openBus', 'hdmaen', 'hdmaDo', 'hdmaOn',
+  'apuLastReadAddr', 'apuSpin', 'apuFrameStart', 'frame', 'line', 'lineCycle', 'lineAt', 'openBus', 'hdmaen', 'hdmaDo', 'hdmaOn',
   'fixedColor', 'cgLatchTaint', 'busyLines', 'sinceNmi', 'waited', 'memsel'] as const;
 const CPU_SCALARS = ['a', 'x', 'y', 's', 'd', 'dbr', 'pbr', 'pc', 'p', 'e', 'cycles', 'stopped', 'waiting', 'nmiPending', 'irqLine',
   'lastOp', 'lastOpPc'] as const;
@@ -119,7 +122,8 @@ export class Snes implements Bus {
   // timing
   frame = 0;
   line = 0;
-  lineCycle = 0;
+  lineCycle = 0; // master cycles since the current line began
+  lineAt = 0; // Cpu.cycles when the next line begins (lines run at fixed times; a DMA takes the lines it lasts)
   openBus = 0;
 
   constructor(rom: Uint8Array) {
@@ -299,7 +303,7 @@ export class Snes implements Bus {
       case 0x4212: {
         let v = 0;
         if (this.line >= VBLANK_LINE) v |= 0x80;
-        if (this.lineCycle >= CYCLES_PER_LINE - 24) v |= 0x40;
+        if (this.lineCycle >= HBLANK_AT) v |= 0x40;
         if (this.line >= VBLANK_LINE && this.line <= VBLANK_LINE + 2) v |= 0x01;
         return v;
       }
@@ -431,7 +435,7 @@ export class Snes implements Bus {
           if (this.taintOn) this.wtag = this.cpu.readTag();
           this.writeIO(b, v);
         }
-        this.cpu.cycles += 1;
+        this.cpu.cycles += 8; // a DMA byte: 8 master cycles
         if (!fixed) aAddr = (aAddr + (dec ? -1 : 1)) & 0xffff;
         i++;
         count--;
@@ -581,6 +585,8 @@ export class Snes implements Bus {
   runFrame(maxSteps = 2_000_000): void {
     const cpu = this.cpu;
     let steps = 0;
+    // a state from before lines had fixed times, or a CPU run without frames: the lines start now
+    if (this.lineAt === undefined || Math.abs(cpu.cycles - this.lineAt) >= MASTER_PER_LINE * LINES_PER_FRAME) this.lineAt = cpu.cycles;
     for (this.line = 0; this.line < LINES_PER_FRAME; this.line++, this.sinceNmi++) {
       if (this.line === VBLANK_LINE) {
         this.busyLines = this.waited;
@@ -600,19 +606,24 @@ export class Snes implements Bus {
         this.hdmaLine();
         this.ppu.renderLine(this.line);
       }
-      const target = cpu.cycles + CYCLES_PER_LINE;
-      const start = cpu.cycles;
+      const start = this.lineAt, target = start + MASTER_PER_LINE;
+      this.lineAt = target;
+      let refresh = true;
       while (cpu.cycles < target) {
         this.lineCycle = cpu.cycles - start;
+        if (refresh && this.lineCycle >= REFRESH_AT) { cpu.cycles += REFRESH; refresh = false; continue; }
         cpu.step();
         if (++steps > maxSteps) throw new Error('frame step limit exceeded');
         // wait loop: skip the rest of the line (interrupts are only raised at line starts)
         if (cpu.idle) {
           cpu.idle = false;
           if (this.waited < 0) this.waited = this.sinceNmi;
-          if (!cpu.nmiPending && !(cpu.irqLine && !(cpu.p & 0x04))) cpu.cycles = target;
+          if (!cpu.nmiPending && !(cpu.irqLine && !(cpu.p & 0x04))) { cpu.cycles = target; refresh = false; }
         }
       }
+      // refresh: in the line (above), skipped with a wait loop's rest of the line, or here: a DMA ran through
+      // the line and the refresh paused it
+      if (refresh) cpu.cycles += REFRESH;
     }
     if (this.apu) {
       const t = this.apuTime();

@@ -15,6 +15,8 @@ const FLAG_M = 0x20;
 const FLAG_V = 0x40;
 const FLAG_N = 0x80;
 
+// master cycles of an internal cycle (and of an access to most I/O registers)
+const IO = 6;
 // source tracking: what an instruction's writes carry (W_*) and what it does to the registers' tags (R_*)
 const W_NONE = 0, W_REG = 1, W_PUSH = 2, W_COPY = 3;
 const R_OTHER = 0, R_LDA = 1, R_LDX = 2, R_LDY = 3, R_TAX = 4, R_TAY = 5, R_TXA = 6, R_TYA = 7, R_TXY = 8, R_TYX = 9, R_XBA = 10,
@@ -46,7 +48,7 @@ export class CPU {
   pc = 0;
   p = 0x34;
   e = true;
-  cycles = 0; // in slow bus accesses (8 master cycles)
+  cycles = 0; // in master cycles (21.477 MHz)
   fastRom = false; // $420D bit 0: accesses in $80-$BF:8000-FFFF and $C0-$FF take 6 master cycles
   stopped = false;
   waiting = false;
@@ -79,12 +81,20 @@ export class CPU {
   }
 
   // ---- memory helpers ----
+  // master cycles of a bus access, by the SNES memory map: ROM (and every bank $40-$7F) 8, 6 in $80+ with
+  // $420D = 1; in the system banks WRAM and $6000-$7FFF 8, the I/O registers 6, the slow window $4000-$41FF 12
+  accessCycles(addr: number): number {
+    if (addr & 0x408000) return this.fastRom && (addr & 0x800000) ? 6 : 8;
+    if ((addr + 0x6000) & 0x4000) return 8;
+    if ((addr - 0x4000) & 0x7e00) return IO;
+    return 12;
+  }
   rd(addr: number): number {
-    this.cycles += this.fastRom && (addr & 0x800000) && (addr & 0x408000) ? 0.75 : 1;
+    this.cycles += this.accessCycles(addr);
     return this.bus.read(addr & 0xffffff);
   }
   wr(addr: number, v: number): void {
-    this.cycles += this.fastRom && (addr & 0x800000) && (addr & 0x408000) ? 0.75 : 1;
+    this.cycles += this.accessCycles(addr);
     this.bus.write(addr & 0xffffff, v & 0xff);
   }
   rd16(addr: number): number {
@@ -208,7 +218,7 @@ export class CPU {
   }
   aDp(): number {
     const o = this.fetch8();
-    if ((this.d & 0xff) !== 0) this.cycles++;
+    if ((this.d & 0xff) !== 0) this.cycles += IO;
     return this.dpAddr(o);
   }
   aDpX(): number {
@@ -498,11 +508,11 @@ export class CPU {
   rmw(addr: number, dp: boolean, op: (v: number) => number): void {
     if (dp) {
       const v = this.rdMdp(addr);
-      this.cycles++;
+      this.cycles += IO;
       this.wrMdp(addr, op.call(this, v));
     } else {
       const v = this.rdM(addr);
-      this.cycles++;
+      this.cycles += IO;
       this.wrM(addr, op.call(this, v));
     }
   }
@@ -510,7 +520,7 @@ export class CPU {
   branch(cond: boolean): void {
     const off = this.fetch8();
     if (cond) {
-      this.cycles++;
+      this.cycles += IO;
       this.pc = (this.pc + ((off << 24) >> 24)) & 0xffff;
       // LDA dp : Bxx back to it (waiting for the NMI to change a WRAM byte): nothing can change
       // until an interrupt
@@ -527,7 +537,7 @@ export class CPU {
 
   step(): void {
     if (this.stopped) {
-      this.cycles += 4;
+      this.cycles += 4 * IO;
       return;
     }
     if (this.nmiPending) {
@@ -540,7 +550,7 @@ export class CPU {
       return;
     }
     if (this.waiting) {
-      this.cycles += 4;
+      this.cycles += 4 * IO;
       return;
     }
     this.lastOpPc = this.opPc;
@@ -755,22 +765,22 @@ export class CPU {
 
       // ---- shifts / rmw ----
       case 0x06: this.rmw(this.aDp(), true, this.asl); break;
-      case 0x0a: this.cycles++; this.setA(this.asl(this.getA())); break;
+      case 0x0a: this.cycles += IO; this.setA(this.asl(this.getA())); break;
       case 0x0e: this.rmw(this.aAbs(), false, this.asl); break;
       case 0x16: this.rmw(this.aDpX(), true, this.asl); break;
       case 0x1e: this.rmw(this.aAbsX(), false, this.asl); break;
       case 0x26: this.rmw(this.aDp(), true, this.rol); break;
-      case 0x2a: this.cycles++; this.setA(this.rol(this.getA())); break;
+      case 0x2a: this.cycles += IO; this.setA(this.rol(this.getA())); break;
       case 0x2e: this.rmw(this.aAbs(), false, this.rol); break;
       case 0x36: this.rmw(this.aDpX(), true, this.rol); break;
       case 0x3e: this.rmw(this.aAbsX(), false, this.rol); break;
       case 0x46: this.rmw(this.aDp(), true, this.lsr); break;
-      case 0x4a: this.cycles++; this.setA(this.lsr(this.getA())); break;
+      case 0x4a: this.cycles += IO; this.setA(this.lsr(this.getA())); break;
       case 0x4e: this.rmw(this.aAbs(), false, this.lsr); break;
       case 0x56: this.rmw(this.aDpX(), true, this.lsr); break;
       case 0x5e: this.rmw(this.aAbsX(), false, this.lsr); break;
       case 0x66: this.rmw(this.aDp(), true, this.ror); break;
-      case 0x6a: this.cycles++; this.setA(this.ror(this.getA())); break;
+      case 0x6a: this.cycles += IO; this.setA(this.ror(this.getA())); break;
       case 0x6e: this.rmw(this.aAbs(), false, this.ror); break;
       case 0x76: this.rmw(this.aDpX(), true, this.ror); break;
       case 0x7e: this.rmw(this.aAbsX(), false, this.ror); break;
@@ -782,8 +792,8 @@ export class CPU {
       case 0xee: this.rmw(this.aAbs(), false, this.inc); break;
       case 0xf6: this.rmw(this.aDpX(), true, this.inc); break;
       case 0xfe: this.rmw(this.aAbsX(), false, this.inc); break;
-      case 0x1a: this.cycles++; this.setA(this.inc(this.getA())); break;
-      case 0x3a: this.cycles++; this.setA(this.dec(this.getA())); break;
+      case 0x1a: this.cycles += IO; this.setA(this.inc(this.getA())); break;
+      case 0x3a: this.cycles += IO; this.setA(this.dec(this.getA())); break;
       case 0x04: this.rmw(this.aDp(), true, this.tsb); break;
       case 0x0c: this.rmw(this.aAbs(), false, this.tsb); break;
       case 0x14: this.rmw(this.aDp(), true, this.trb); break;
@@ -829,63 +839,63 @@ export class CPU {
       case 0xcc: this.cmp(this.y, this.rdX(this.aAbs()), this.x8); break;
 
       // ---- INX/INY/DEX/DEY ----
-      case 0xe8: this.cycles++; this.setX(this.x + 1); this.nzX(this.x); break;
-      case 0xc8: this.cycles++; this.setY(this.y + 1); this.nzX(this.y); break;
-      case 0xca: this.cycles++; this.setX(this.x - 1); this.nzX(this.x); break;
-      case 0x88: this.cycles++; this.setY(this.y - 1); this.nzX(this.y); break;
+      case 0xe8: this.cycles += IO; this.setX(this.x + 1); this.nzX(this.x); break;
+      case 0xc8: this.cycles += IO; this.setY(this.y + 1); this.nzX(this.y); break;
+      case 0xca: this.cycles += IO; this.setX(this.x - 1); this.nzX(this.x); break;
+      case 0x88: this.cycles += IO; this.setY(this.y - 1); this.nzX(this.y); break;
 
       // ---- transfers ----
-      case 0xaa: this.cycles++; this.setX(this.a); this.nzX(this.x); break; // TAX
-      case 0xa8: this.cycles++; this.setY(this.a); this.nzX(this.y); break; // TAY
-      case 0x8a: this.cycles++; this.setA(this.x); this.nzM(this.getA()); break; // TXA
-      case 0x98: this.cycles++; this.setA(this.y); this.nzM(this.getA()); break; // TYA
-      case 0x9b: this.cycles++; this.setY(this.x); this.nzX(this.y); break; // TXY
-      case 0xbb: this.cycles++; this.setX(this.y); this.nzX(this.x); break; // TYX
-      case 0xba: this.cycles++; this.setX(this.s); this.nzX(this.x); break; // TSX
+      case 0xaa: this.cycles += IO; this.setX(this.a); this.nzX(this.x); break; // TAX
+      case 0xa8: this.cycles += IO; this.setY(this.a); this.nzX(this.y); break; // TAY
+      case 0x8a: this.cycles += IO; this.setA(this.x); this.nzM(this.getA()); break; // TXA
+      case 0x98: this.cycles += IO; this.setA(this.y); this.nzM(this.getA()); break; // TYA
+      case 0x9b: this.cycles += IO; this.setY(this.x); this.nzX(this.y); break; // TXY
+      case 0xbb: this.cycles += IO; this.setX(this.y); this.nzX(this.x); break; // TYX
+      case 0xba: this.cycles += IO; this.setX(this.s); this.nzX(this.x); break; // TSX
       case 0x9a: // TXS
-        this.cycles++;
+        this.cycles += IO;
         this.s = this.e ? 0x100 | (this.x & 0xff) : this.x;
         break;
-      case 0x5b: this.cycles++; this.d = this.a; this.nz16(this.d); break; // TCD
-      case 0x7b: this.cycles++; this.a = this.d; this.nz16(this.a); break; // TDC
-      case 0x1b: this.cycles++; this.s = this.e ? 0x100 | (this.a & 0xff) : this.a; break; // TCS
-      case 0x3b: this.cycles++; this.a = this.s; this.nz16(this.a); break; // TSC
+      case 0x5b: this.cycles += IO; this.d = this.a; this.nz16(this.d); break; // TCD
+      case 0x7b: this.cycles += IO; this.a = this.d; this.nz16(this.a); break; // TDC
+      case 0x1b: this.cycles += IO; this.s = this.e ? 0x100 | (this.a & 0xff) : this.a; break; // TCS
+      case 0x3b: this.cycles += IO; this.a = this.s; this.nz16(this.a); break; // TSC
       case 0xeb: // XBA
-        this.cycles += 2;
+        this.cycles += 2 * IO;
         this.a = ((this.a >> 8) | (this.a << 8)) & 0xffff;
         this.nz8(this.a & 0xff);
         break;
 
       // ---- stack ----
-      case 0x48: this.cycles++; if (this.m8) this.push8(this.a); else this.push16(this.a); break; // PHA
-      case 0x68: this.cycles += 2; if (this.m8) { v = this.pull8(); this.setA(v); } else { this.a = this.pull16(); } this.nzM(this.getA()); break; // PLA
-      case 0xda: this.cycles++; if (this.x8) this.push8(this.x); else this.push16(this.x); break; // PHX
-      case 0xfa: this.cycles += 2; this.x = this.x8 ? this.pull8() : this.pull16(); this.nzX(this.x); break; // PLX
-      case 0x5a: this.cycles++; if (this.x8) this.push8(this.y); else this.push16(this.y); break; // PHY
-      case 0x7a: this.cycles += 2; this.y = this.x8 ? this.pull8() : this.pull16(); this.nzX(this.y); break; // PLY
-      case 0x08: this.cycles++; this.push8(this.p); break; // PHP
-      case 0x28: this.cycles += 2; this.setP(this.pull8()); break; // PLP
-      case 0x8b: this.cycles++; this.push8(this.dbr); break; // PHB
-      case 0xab: this.cycles += 2; this.dbr = this.pull8(); this.nz8(this.dbr); break; // PLB
-      case 0x4b: this.cycles++; this.push8(this.pbr); break; // PHK
-      case 0x0b: this.cycles++; this.push16(this.d); break; // PHD
-      case 0x2b: this.cycles += 2; this.d = this.pull16(); this.nz16(this.d); break; // PLD
+      case 0x48: this.cycles += IO; if (this.m8) this.push8(this.a); else this.push16(this.a); break; // PHA
+      case 0x68: this.cycles += 2 * IO; if (this.m8) { v = this.pull8(); this.setA(v); } else { this.a = this.pull16(); } this.nzM(this.getA()); break; // PLA
+      case 0xda: this.cycles += IO; if (this.x8) this.push8(this.x); else this.push16(this.x); break; // PHX
+      case 0xfa: this.cycles += 2 * IO; this.x = this.x8 ? this.pull8() : this.pull16(); this.nzX(this.x); break; // PLX
+      case 0x5a: this.cycles += IO; if (this.x8) this.push8(this.y); else this.push16(this.y); break; // PHY
+      case 0x7a: this.cycles += 2 * IO; this.y = this.x8 ? this.pull8() : this.pull16(); this.nzX(this.y); break; // PLY
+      case 0x08: this.cycles += IO; this.push8(this.p); break; // PHP
+      case 0x28: this.cycles += 2 * IO; this.setP(this.pull8()); break; // PLP
+      case 0x8b: this.cycles += IO; this.push8(this.dbr); break; // PHB
+      case 0xab: this.cycles += 2 * IO; this.dbr = this.pull8(); this.nz8(this.dbr); break; // PLB
+      case 0x4b: this.cycles += IO; this.push8(this.pbr); break; // PHK
+      case 0x0b: this.cycles += IO; this.push16(this.d); break; // PHD
+      case 0x2b: this.cycles += 2 * IO; this.d = this.pull16(); this.nz16(this.d); break; // PLD
       case 0xf4: this.push16(this.fetch16()); break; // PEA
       case 0xd4: a = this.aDp(); this.push16(this.rd16bank0(a)); break; // PEI
       case 0x62: v = this.fetch16(); this.push16((this.pc + v) & 0xffff); break; // PER
 
       // ---- flags ----
-      case 0x18: this.cycles++; this.p &= ~FLAG_C; break;
-      case 0x38: this.cycles++; this.p |= FLAG_C; break;
-      case 0x58: this.cycles++; this.p &= ~FLAG_I; break;
-      case 0x78: this.cycles++; this.p |= FLAG_I; break;
-      case 0xb8: this.cycles++; this.p &= ~FLAG_V; break;
-      case 0xd8: this.cycles++; this.p &= ~FLAG_D; break;
-      case 0xf8: this.cycles++; this.p |= FLAG_D; break;
-      case 0xc2: this.cycles++; this.setP(this.p & ~this.fetch8()); break; // REP
-      case 0xe2: this.cycles++; this.setP(this.p | this.fetch8()); break; // SEP
+      case 0x18: this.cycles += IO; this.p &= ~FLAG_C; break;
+      case 0x38: this.cycles += IO; this.p |= FLAG_C; break;
+      case 0x58: this.cycles += IO; this.p &= ~FLAG_I; break;
+      case 0x78: this.cycles += IO; this.p |= FLAG_I; break;
+      case 0xb8: this.cycles += IO; this.p &= ~FLAG_V; break;
+      case 0xd8: this.cycles += IO; this.p &= ~FLAG_D; break;
+      case 0xf8: this.cycles += IO; this.p |= FLAG_D; break;
+      case 0xc2: this.cycles += IO; this.setP(this.p & ~this.fetch8()); break; // REP
+      case 0xe2: this.cycles += IO; this.setP(this.p | this.fetch8()); break; // SEP
       case 0xfb: { // XCE
-        this.cycles++;
+        this.cycles += IO;
         const c = this.p & FLAG_C;
         this.p = (this.p & ~FLAG_C) | (this.e ? 1 : 0);
         this.e = c !== 0;
@@ -908,7 +918,7 @@ export class CPU {
       case 0xd0: this.branch(!(this.p & FLAG_Z)); break;
       case 0xf0: this.branch((this.p & FLAG_Z) !== 0); break;
       case 0x80: this.branch(true); break;
-      case 0x82: v = this.fetch16(); this.pc = (this.pc + v) & 0xffff; this.cycles++; break; // BRL
+      case 0x82: v = this.fetch16(); this.pc = (this.pc + v) & 0xffff; this.cycles += IO; break; // BRL
 
       // ---- jumps ----
       case 0x4c: this.pc = this.fetch16(); break; // JMP abs
@@ -920,7 +930,7 @@ export class CPU {
         this.pc = this.rd16bank0(a);
         this.pbr = this.rd((a + 2) & 0xffff);
         break;
-      case 0x20: a = this.fetch16(); this.cycles++; this.push16((this.pc - 1) & 0xffff); this.pc = a; break; // JSR
+      case 0x20: a = this.fetch16(); this.cycles += IO; this.push16((this.pc - 1) & 0xffff); this.pc = a; break; // JSR
       case 0xfc: // JSR (abs,X)
         a = this.fetch16();
         this.push16((this.pc - 1) & 0xffff);
@@ -935,10 +945,10 @@ export class CPU {
         this.pbr = bank;
         break;
       }
-      case 0x60: this.cycles += 3; this.pc = (this.pull16() + 1) & 0xffff; break; // RTS
-      case 0x6b: this.cycles += 2; this.pc = (this.pull16() + 1) & 0xffff; this.pbr = this.pull8(); break; // RTL
+      case 0x60: this.cycles += 3 * IO; this.pc = (this.pull16() + 1) & 0xffff; break; // RTS
+      case 0x6b: this.cycles += 2 * IO; this.pc = (this.pull16() + 1) & 0xffff; this.pbr = this.pull8(); break; // RTL
       case 0x40: // RTI
-        this.cycles += 2;
+        this.cycles += 2 * IO;
         this.setP(this.pull8());
         this.pc = this.pull16();
         if (!this.e) this.pbr = this.pull8();
@@ -954,7 +964,7 @@ export class CPU {
         const mask = this.x8 ? 0xff : 0xffff;
         do {
           this.wr((dst << 16) | this.y, this.rd((src << 16) | this.x));
-          this.cycles += 2;
+          this.cycles += 2 * IO;
           this.x = (this.x + inc) & mask;
           this.y = (this.y + inc) & mask;
           this.a = (this.a - 1) & 0xffff;
@@ -963,7 +973,7 @@ export class CPU {
       }
 
       // ---- misc ----
-      case 0xea: this.cycles++; break; // NOP
+      case 0xea: this.cycles += IO; break; // NOP
       case 0x42: this.fetch8(); break; // WDM
       case 0xcb: this.waiting = true; break; // WAI
       case 0xdb: this.stopped = true; break; // STP

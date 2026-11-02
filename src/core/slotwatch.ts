@@ -24,7 +24,7 @@ export interface SlotFailure { kind: SlotKind; searched: number; free: number; r
 
 const BEQ = 0xf0, BNE = 0xd0;
 const INTERRUPT = 4; // bytes an interrupt pushes (native mode): deeper on the stack, the search is interrupted
-const REPLACE_CYCLES = 200; // how soon after the failed search a write to a taken slot is its replacement
+const REPLACE_CYCLES = 1600; // master cycles: how soon after the failed search a write to a taken slot is its replacement
 
 interface Run { kind: SlotKind; pc: number; sp: number; last: number; dir: number; count: number }
 
