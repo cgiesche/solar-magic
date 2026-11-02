@@ -263,6 +263,7 @@ function buildUi(app: App): { start: (at: NavLoc | null) => Promise<void> } {
     musicBtn.disabled = workspace === 'ow';
     musicBtn.title = workspace === 'ow' ? 'The level\'s music plays in the level editor' : musicTitle;
     if (workspace === 'ow' && musicPlayer.label === LEVEL_MUSIC) musicPlayer.stop();
+    if (workspace !== 'ow' && musicPlayer.label?.startsWith('submap:')) musicPlayer.stop(); // (a submap's song, listened to in the overworld)
     menus.refresh();
   };
   app.on('mode', updateToolbar);

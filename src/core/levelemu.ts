@@ -430,6 +430,15 @@ export class LevelEmulator {
     this.snes.wram[RAM.gameMode] = GM.overworldLoad;
     this.untilOverworld(false, events);
   }
+  // a new game (startGameAt), the overworld then loaded on submap `map` as the game loads it after a level – what
+  // plays there with the sound unit emulated: the submap's song from the overworld's sound bank (without AddmusicK
+  // another bank than the levels'); events: as startGameAt
+  loadOverworldOn(map: number, events?: Uint8Array): void {
+    this.startGameAt(-1, events);
+    const w = this.snes.wram;
+    w[RAM.submap] = w[RAM.submap + 1] = map;
+    this.reloadOverworld(events);
+  }
   // frames until the overworld runs (newGame: through the title screen and file select, buttons pressed), no intro
   // level; events (startGameAt) set as the file and the overworld load
   private untilOverworld(newGame: boolean, events?: Uint8Array): void {

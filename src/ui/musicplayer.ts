@@ -1,7 +1,7 @@
-// Plays music in the editor, one thing at a time: a level's music (or a song of the ROM in a level) by
-// emulating the game with its sound unit – the level is loaded, and once the game has started the
-// music only the SPC700 runs on (gameplay would go on and e.g. Mario die) – or an SPC file (AddmusicK's
-// output for a song not yet inserted). Once only the SPC700 runs, it runs in a worker (musicworker.ts)
+// Plays music in the editor, one thing at a time: a level's music (or a song of the ROM in a level) or a submap's
+// song by emulating the game with its sound unit – the level (the overworld on that submap) is loaded, and once
+// the game has started the music only the SPC700 runs on (gameplay would go on and e.g. Mario die) – or an SPC
+// file (AddmusicK's output for a song not yet inserted). Once only the SPC700 runs, it runs in a worker (musicworker.ts)
 // that feeds the audio output directly, so computing in the page doesn't make the music stutter.
 
 import type { App } from './app.ts';
@@ -12,7 +12,7 @@ import type { MusicMessage, MusicReply } from './musicworker.ts';
 
 const AHEAD = APU_RATE / 8; // sample pairs kept queued
 const CHUNK = 1066; // samples (pairs × 2) per step once only the SPC runs, about one frame (without the worker)
-const START_FRAMES = 40; // frames run after the level has loaded, so the game sends the music
+const START_FRAMES = 40; // frames run after the level (the overworld) has loaded, so the game sends the music
 
 type Listener = (label: string | null) => void;
 
@@ -99,7 +99,24 @@ class MusicPlayer {
   }
 
   // the music of `level` as the game plays it (song: another song of the ROM in its place)
-  async playLevel(app: App, level: number, label: string, song?: number): Promise<void> {
+  playLevel(app: App, level: number, label: string, song?: number): Promise<void> {
+    return this.playGame(app, label, (emu) => {
+      const ov = { ...app.buildOverrides(), ...(song !== undefined ? { music: song } : {}) };
+      if (level !== app.level.number) { delete ov.layer1; delete ov.layer2; delete ov.sprites; delete ov.bgData; delete ov.byteOwner; delete ov.secondaryHeader; }
+      const r = emu.load(level, ov);
+      if (!r.ok) throw new Error(r.error ?? 'level load failed');
+    });
+  }
+
+  // the song of submap `map` as the game plays it: a new game, the overworld loaded there (with the overworld's
+  // sound bank, which without AddmusicK is another than the levels'); events: the event bits the game has
+  playSubmap(app: App, map: number, label: string, events?: Uint8Array): Promise<void> {
+    return this.playGame(app, label, (emu) => emu.loadOverworldOn(map, events));
+  }
+
+  // the game emulated with its sound unit: start() gets it to where the music plays, then it runs on until the
+  // game has sent the music, after which only the SPC700 runs
+  private async playGame(app: App, label: string, start: (emu: LevelEmulator) => void): Promise<void> {
     const { audio, token } = this.begin(label);
     try {
       if (!apuReady()) await loadApu();
@@ -109,10 +126,7 @@ class MusicPlayer {
         this.emu.snes.apu = new Apu();
       }
       const emu = this.emu;
-      const ov = { ...app.buildOverrides(), ...(song !== undefined ? { music: song } : {}) };
-      if (level !== app.level.number) { delete ov.layer1; delete ov.layer2; delete ov.sprites; delete ov.bgData; delete ov.byteOwner; delete ov.secondaryHeader; }
-      const r = emu.load(level, ov);
-      if (!r.ok) throw new Error(r.error ?? 'level load failed');
+      start(emu);
       const s = emu.snes, apu = s.apu!;
       let frames = 0, handed = false;
       this.run(audio, token, () => {

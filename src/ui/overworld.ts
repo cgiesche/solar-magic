@@ -10,6 +10,7 @@ import {
   translevelUse, resetTranslevel, baseEvent, setBaseEvent, eventNames, exitDirections, setExitDirection, DIR_ARROWS, DIR_NAMES, EXIT_NAMES, NO_EVENT,
   initialFlags, setInitialFlags, FLAG, DIR_FLAGS, OW_EVENTS, revealEvents, setRevealEvents, revealAt, revealedTile, revealEventCount,
   readRevealList, writeRevealList, destroyEffects, destroySettingAt, destroyEvent, setDestroyEvent, readDestroyList, freeTranslevel, levelTilesOf, OW_L1_TILES,
+  eventBits,
 } from '../core/overworld.ts';
 import { hasMessages, isBlank, readMessage } from '../core/messages.ts';
 import { messageRoutineNote, messageRoutineUnknown, MESSAGE_ROUTINE_CHECKING } from '../core/messagedraw.ts';
@@ -34,7 +35,8 @@ import { fillPixels, fitScale, sized, previewSheet, hidePickerPreview } from './
 import { mainTranslevel } from '../core/level.ts';
 import { RAM, map16Pointer } from '../core/ram.ts';
 import { loadMusicProject, submapSongs, submapMusic, setSubmapMusic, songHex, type SongInfo } from '../core/music.ts';
-import { songLabel } from './musicdialog.ts';
+import { songLabel, playButton } from './musicdialog.ts';
+import { musicPlayer } from './musicplayer.ts';
 import type { Rom } from '../core/rom.ts';
 import { OW_OPTIONS, owOption, owOptionValue, setOwOption, revealSpeed, setRevealSpeed, revealStepFrames, MAX_REVEAL_SPEED, DEFAULT_REVEAL_SPEED, submapLightning, setSubmapLightning, LIGHTNING_TITLE, lightningEditLabel } from '../core/owoptions.ts';
 
@@ -1149,9 +1151,18 @@ export class OverworldView {
     try { songs = submapSongs(rom, loadMusicProject(rom)); } catch { songs = submapSongs(rom); } // (names of custom songs missing)
     const opts = songs.map((s): [number, string] => [s.num, songLabel(s)]);
     if (!songs.some((s) => s.num === cur)) opts.push([cur, songHex(cur)]);
-    const sel = select(opts, cur, (v) => this.app.romEdit(`Music of ${MAP_NAMES[map]}`, () => setSubmapMusic(rom, map, v)));
+    // listening: the overworld loaded on this map at the event progress shown, as the game plays its song
+    const label = `submap:${map}`;
+    const listen = () => void musicPlayer.playSubmap(this.app, map, label, eventBits(this.progress)).then(() => {
+      if (musicPlayer.error) toast(`Could not play: ${musicPlayer.error}`, 'error');
+    });
+    const sel = select(opts, cur, (v) => {
+      this.app.romEdit(`Music of ${MAP_NAMES[map]}`, () => setSubmapMusic(rom, map, v));
+      if (musicPlayer.label === label) listen(); // the new song
+    });
     sel.title = `The song ${MAP_NAMES[map]} plays – when the overworld loads there and when Mario comes from another map (songs come with packages; with AddmusicK all of its songs)`;
-    return h('div', { class: 'ow-info' }, h('div', { class: 'prop' }, h('label', null, 'Map music'), sel),
+    const play = playButton(label, listen, `Listen: the overworld on ${MAP_NAMES[map]}, as the game plays its song`);
+    return h('div', { class: 'ow-info' }, h('div', { class: 'prop' }, h('label', null, 'Map music'), sel, play),
       h('button', { onclick: () => this.onEditGraphics(map, this.progress), title: `${MAP_NAMES[map]}'s own palettes, graphics files, layer 3 and animations in the graphics workspace` }, 'Edit graphics of this submap'));
   }
 

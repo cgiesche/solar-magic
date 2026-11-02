@@ -4,11 +4,14 @@
 // AddmusicK gives the choices its numbers (as it does with the original table, also for a changed one), the tables
 // stay out of AddmusicK's bytes (a song chosen later is no change of its code), inserting again keeps them, and
 // removing AddmusicK gives them the original numbers back (a removed custom song: the submap's own song).
+// Listening (issue #241): the editor's music player loads the overworld on a submap with the sound unit emulated
+// (LevelEmulator.loadOverworldOn) – the submap's song sounds, without AddmusicK from the overworld's sound bank.
 // node tools/testowmusic.ts
 import { Rom, snesToPc } from '../src/core/rom.ts';
 import { LevelEmulator } from '../src/core/levelemu.ts';
 import { l1Index, MAP_NAMES } from '../src/core/overworld.ts';
 import { RAM, GM, PAD } from '../src/core/ram.ts';
+import { Apu, loadApu } from '../src/core/apu.ts';
 import {
   emptyMusicProject, songsFromZip, addSongs, removeSong, saveMusicProject, musicEntry, hasAmk, romSongs,
   submapMusic, setSubmapMusic, submapSongs, defaultSubmapMusic, submapsWithSong, SUBMAP_MUSIC, SUBMAP_MUSIC_SWITCH, SUBMAPS,
@@ -60,6 +63,36 @@ function played(rom: Rom): { load: number[]; walk: number } {
   return { load, walk: w[RAM.submap] === 1 ? song() : -1 };
 }
 
+// What the music player plays for submap `map`: the song the game asked for (as played) and the sound's peak once it
+// runs; bank: without AddmusicK, whether the sound unit holds the original overworld sound bank ($0E98B1: blocks of
+// length, ARAM address, data), not the levels' ($0EAED6)
+function heard(rom: Rom, map: number): { song: number; peak: number; owBank: boolean } {
+  const emu = new LevelEmulator(rom), s = emu.snes, w = s.wram, cpu = s.cpu, amk = hasAmk(rom);
+  s.apu = new Apu();
+  let last = 0;
+  const exec = cpu.exec.bind(cpu);
+  cpu.exec = (op: number) => { exec(op); if (w[RAM.musicRequest]) last = w[RAM.musicRequest]; };
+  emu.loadOverworldOn(map);
+  let peak = 0;
+  for (let f = 0; f < 120; f++) { s.runFrame(); for (const v of s.audio!) peak = Math.max(peak, Math.abs(v)); }
+  cpu.exec = exec;
+  const ram = s.apu.ram();
+  let owBank = rom.r16(0x0e98b1) > 0;
+  for (let a = 0x0e98b1, len; (len = rom.r16(a)); a += 4 + len) {
+    const dst = rom.r16(a + 2), src = snesToPc(a + 4);
+    if (!ram.subarray(dst, dst + len).every((v, i) => v === rom.data[src + i])) owBank = false;
+  }
+  return { song: amk ? w[RAM.amkSong] : last, peak, owBank };
+}
+const listened = (rom: Rom, want: number[], what: string) => {
+  for (const k of [0, 1, 5]) {
+    const h = heard(rom, k);
+    check(h.song === want[k] && h.peak > 1000 && (hasAmk(rom) || h.owBank),
+      `${what}: listening to ${MAP_NAMES[k]} plays its song ${hx(h.song)} (want ${hx(want[k])}, peak ${h.peak}${hasAmk(rom) ? '' : `, overworld sound bank ${h.owBank}`})`);
+  }
+};
+
+await loadApu();
 const rom = new Rom(await editorImage());
 const original = songs(rom);
 check(list(original) === list(AMK_SUBMAP_SONGS.original) && list(table(rom, SUBMAP_MUSIC_SWITCH)) === list(original),
@@ -85,6 +118,7 @@ for (let i = 0; i < SUBMAPS; i++) setSubmapMusic(rom, i, rotated[i]);
   check(list(p.load) === list(rotated), `every submap set to another song: the game plays it when the overworld loads there (${list(p.load)}, set ${list(rotated)})`);
   check(p.walk === rotated[1], `walked onto Yoshi's Island: its song (${hx(p.walk)})`);
 }
+listened(rom, rotated, 'every submap set to another song');
 
 // ---- AddmusicK inserted: the choices under its numbers ----
 const proj = emptyMusicProject();
@@ -101,6 +135,7 @@ check(submapSongs(rom, proj).length === romSongs(rom, proj).length && submapSong
   const p = played(rom);
   check(list(p.load) === list(mapped) && p.walk === mapped[1], `AddmusicK plays them: loaded ${list(p.load)}, walked onto Yoshi's Island ${hx(p.walk)}`);
 }
+listened(rom, mapped, 'AddmusicK');
 
 // ---- a custom song for Yoshi's Island; inserting again (as a package does) keeps it ----
 setSubmapMusic(rom, 1, custom.num);
