@@ -13,7 +13,7 @@ import { Rom, MAX_ROM_SIZE, snesToPc, pcToSnes } from './rom.ts';
 import { registerChanges, reserveTop, uninstallPatch } from './patchapply.ts';
 import { listPatches, patchArchive, hashBytes, missingSources, type PatchEntry } from './patchreg.ts';
 import { RESERVED_TOP } from './rom.ts';
-import { HEADER_MUSIC_TABLE, levelMusic, setLevelMusic } from './patches.ts';
+import { HEADER_MUSIC_TABLE, levelMusic, setLevelMusic, musicPatch } from './patches.ts';
 import { MUSIC } from './names.ts';
 import { runAmk, type AmkResult } from './amk.ts';
 import { AMK_ORIGINALS, AMK_SUBMAP_SONGS } from '../vendor/amk/originals.ts';
@@ -465,26 +465,21 @@ function amkErrors(r: AmkResult): string[] {
 export async function saveMusicProject(rom: Rom, p: MusicProject): Promise<MusicResult> {
   const amkBefore = hasAmk(rom);
   const table = rom.data.slice(snesToPc(HEADER_MUSIC_TABLE), snesToPc(HEADER_MUSIC_TABLE) + 8);
-  const submaps = Array.from({ length: SUBMAPS }, (_, i) => submapMusic(rom, i));
   const r = await insertProject(rom, p);
-  if (r.ok && hasAmk(rom) !== amkBefore) {
-    remapLevelMusic(rom, table);
-    remapSubmapMusic(rom, submaps);
-  }
+  if (r.ok && hasAmk(rom) !== amkBefore) renumberUsers(rom, table);
   return r;
 }
 
-// AddmusicK installed or removed: song numbers mean other songs now. The 8 header settings play the
-// same songs before and after (AddmusicK rewrites their table), so levels set to one of those songs get
-// its new number; levels set to any other song (a custom one gone) get their header music back.
-function remapLevelMusic(rom: Rom, before: Uint8Array): void {
-  const after = rom.data.subarray(snesToPc(HEADER_MUSIC_TABLE), snesToPc(HEADER_MUSIC_TABLE) + 8);
-  for (let l = 0; l < 0x200; l++) {
-    const s = levelMusic(rom, l);
-    if (!s) continue;
-    const i = before.indexOf(s);
-    setLevelMusic(rom, l, i >= 0 ? after[i] : 0);
-  }
+// AddmusicK installed or removed (`before`: the header music table then): song numbers mean other songs now. The 8
+// header settings play the same songs before and after (AddmusicK rewrites their table), so levels set to one of those
+// songs get its new number; each submap plays the same song under its new number, as AddmusicK does with an unchanged
+// table. A user of any other song (a custom one gone) gets its default back.
+function renumberUsers(rom: Rom, before: Uint8Array): void {
+  const after = rom.data.subarray(snesToPc(HEADER_MUSIC_TABLE), snesToPc(HEADER_MUSIC_TABLE) + 8), amk = hasAmk(rom);
+  retarget(rom, (song, u) => {
+    if ('level' in u) { const i = before.indexOf(song); return i >= 0 ? after[i] : null; }
+    return SUBMAP_SONGS.find((x) => x[driver(!amk)] === song)?.[driver(amk)] ?? null;
+  });
 }
 
 async function insertProject(rom: Rom, p: MusicProject): Promise<MusicResult> {
@@ -603,26 +598,66 @@ export function setSubmapMusic(rom: Rom, map: number, song: number): void {
   rom.w8(SUBMAP_MUSIC_SWITCH + map, song);
 }
 
+// the original game's song of each submap: under the original sound driver's number and AddmusicK's of its recreation
+const SUBMAP_SONGS = AMK_SUBMAP_SONGS.original.map((original, i) => ({ original, amk: AMK_SUBMAP_SONGS.amk[i] }));
+const driver = (amk: boolean) => (amk ? 'amk' : 'original');
+
 // the song a submap plays in the game as it came (under AddmusicK's number when it is in the ROM)
-export const defaultSubmapMusic = (rom: Rom, map: number): number => (hasAmk(rom) ? AMK_SUBMAP_SONGS.amk : AMK_SUBMAP_SONGS.original)[map];
+export const defaultSubmapMusic = (rom: Rom, map: number): number => SUBMAP_SONGS[map][driver(hasAmk(rom))];
 
 // The songs a submap can play: with AddmusicK all of the ROM's (romSongs), without the original game's submap songs
 // (named as AddmusicK names its recreations of them)
 export function submapSongs(rom: Rom, p: MusicProject | null = null): SongInfo[] {
   if (hasAmk(rom)) return romSongs(rom, p);
-  return AMK_SUBMAP_SONGS.original.map((num, i): SongInfo => {
-    const f = AMK_ORIGINALS.find((o) => o[0] === AMK_SUBMAP_SONGS.amk[i])?.[1];
+  return SUBMAP_SONGS.map(({ original: num, amk }): SongInfo => {
+    const f = AMK_ORIGINALS.find((o) => o[0] === amk)?.[1];
     return { num, name: f ? originalName(f) : songHex(num), kind: 'vanilla' };
   }).sort((a, b) => a.num - b.num);
 }
 
-// the submaps set to song `num`
-export const submapsWithSong = (rom: Rom, num: number): number[] =>
-  Array.from({ length: SUBMAPS }, (_, i) => i).filter((i) => submapMusic(rom, i) === num);
+// ---------- a song's users ----------
 
-// AddmusicK installed or removed (`before`: the submaps' songs then): each submap plays the same song under its new
-// number, as AddmusicK does with an unchanged table; one set to another song (a custom one gone) gets its own back
-function remapSubmapMusic(rom: Rom, before: number[]): void {
-  const amk = hasAmk(rom), from = amk ? AMK_SUBMAP_SONGS.original : AMK_SUBMAP_SONGS.amk, to = amk ? AMK_SUBMAP_SONGS.amk : AMK_SUBMAP_SONGS.original;
-  before.forEach((s, i) => { const k = from.indexOf(s); setSubmapMusic(rom, i, to[k >= 0 ? k : i]); });
+// What plays a song: a level set to it (music per level; a level without a setting plays its header music and is no
+// user) or a submap (always set to one). Without AddmusicK levels and submaps number their songs apart (another bank).
+export type SongUser = { level: number } | { submap: number };
+
+function uses(rom: Rom): { user: SongUser; song: number }[] {
+  const out: { user: SongUser; song: number }[] = [];
+  if (musicPatch(rom)) for (let l = 0; l < 0x200; l++) { const s = levelMusic(rom, l); if (s) out.push({ user: { level: l }, song: s }); }
+  for (let m = 0; m < SUBMAPS; m++) out.push({ user: { submap: m }, song: submapMusic(rom, m) });
+  return out;
+}
+
+// the users of each song: the levels and the submaps set to it
+export function songUsers(rom: Rom): Map<number, { levels: number[]; submaps: number[] }> {
+  const out = new Map<number, { levels: number[]; submaps: number[] }>();
+  for (const { user, song } of uses(rom)) {
+    let e = out.get(song);
+    if (!e) out.set(song, e = { levels: [], submaps: [] });
+    if ('level' in user) e.levels.push(user.level); else e.submaps.push(user.submap);
+  }
+  return out;
+}
+
+// each user plays song `to(its song, it)` instead; null: back to its default (a level its header music, a submap its
+// own song)
+function retarget(rom: Rom, to: (song: number, u: SongUser) => number | null): void {
+  for (const { user, song } of uses(rom)) {
+    const t = to(song, user);
+    if (t === song) continue;
+    if ('level' in user) setLevelMusic(rom, user.level, t ?? 0);
+    else setSubmapMusic(rom, user.submap, t ?? defaultSubmapMusic(rom, user.submap));
+  }
+}
+
+// song `from` under number `to`: its users move along
+export function moveSongUsers(rom: Rom, from: number, to: number): void {
+  retarget(rom, (s) => (s === from ? to : s));
+}
+
+// songs `nums` gone (after project `p` is inserted): their users back to their defaults, unless the ROM still has a
+// song of that number for them (an original AddmusicK inserts again in place of a removed custom song)
+export function resetGoneSongUsers(rom: Rom, p: MusicProject | null, nums: number[]): void {
+  const levels = new Set(romSongs(rom, p).map((s) => s.num)), submaps = new Set(submapSongs(rom, p).map((s) => s.num));
+  retarget(rom, (s, u) => (!nums.includes(s) || ('level' in u ? levels : submaps).has(s) ? s : null));
 }

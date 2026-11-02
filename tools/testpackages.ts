@@ -283,9 +283,10 @@ check(rm.ok && loadMusicProject(rom)?.songs.length === 1 && levelMusic(rom, 0x10
   const r2 = await install(inspectUpload('Second Test.zip', testSongZip()), { level: null });
   const song = loadMusicProject(rom)?.songs.find((s) => s.num !== loadMusicProject(rom)!.songs[0].num)?.num ?? -1;
   setSubmapMusic(rom, 1, song);
+  setLevelMusic(rom, 0x106, song);
   await uninstallPackage(rom, r2.pkg!.id, opts.blank);
-  check(r2.ok && song > 0 && hasAmk(rom) && submapMusic(rom, 1) === defaultSubmapMusic(rom, 1),
-    `second song's package removed: Yoshi's Island back to its own song (${submapMusic(rom, 1).toString(16)})`);
+  check(r2.ok && song > 0 && hasAmk(rom) && submapMusic(rom, 1) === defaultSubmapMusic(rom, 1) && levelMusic(rom, 0x106) === 0,
+    `second song's package removed: Yoshi's Island back to its own song (${submapMusic(rom, 1).toString(16)}), level 106 to its header music (${levelMusic(rom, 0x106)})`);
 }
 await uninstallPackage(rom, rm.pkg!.id, opts.blank);
 sameRom('song removed');

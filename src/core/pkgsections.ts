@@ -18,10 +18,8 @@ import { loadPixiProject, savePixiProject, spriteAsm, type PixiProject } from '.
 import { loadBowsieProject, saveBowsieProject, type BowsieProject } from './bowsie.ts';
 import { hex } from './names.ts';
 import { removeGfx } from './gfxfiles.ts';
-import { gfxEntry, gfxHex, GFX_FILES, VANILLA_GFX, levelMusic, setLevelMusic } from './patches.ts';
-import {
-  loadMusicProject, saveMusicProject, removeSong, removeSfx, sfxKey, submapSongs, submapMusic, setSubmapMusic, defaultSubmapMusic, SUBMAPS,
-} from './music.ts';
+import { gfxEntry, gfxHex, GFX_FILES, VANILLA_GFX } from './patches.ts';
+import { loadMusicProject, saveMusicProject, removeSong, removeSfx, sfxKey, resetGoneSongUsers } from './music.ts';
 import { EXT_FIRST, EXT_TILES, DEFAULT_ACTS, extTileWords, actsLike, setExtTileWords, setActsLike } from './map16ext.ts';
 import { BG_EXT_FIRST, BG_EXT_TILES, bgExtTileWords, setBgExtTileWords, vanillaBgWords } from './bgmap16.ts';
 import { CONTEXTS, OTHER, type UberContext, type Other } from './uberasm.ts';
@@ -271,9 +269,7 @@ const music = listSection((rom) => (tryLoad(() => loadMusicProject(rom))?.songs 
   for (const n of nums) removeSong(p, n);
   const r = await saveMusicProject(rom, p);
   if (!r.ok) throw new Error(`Music: ${r.errors.join(' ')}`);
-  for (let l = 0; l < 0x200; l++) if (nums.includes(levelMusic(rom, l)) && !p.songs.some((s) => s.num === levelMusic(rom, l))) setLevelMusic(rom, l, 0);
-  const remaining = submapSongs(rom, p);
-  for (let i = 0; i < SUBMAPS; i++) if (nums.includes(submapMusic(rom, i)) && !remaining.some((s) => s.num === submapMusic(rom, i))) setSubmapMusic(rom, i, defaultSubmapMusic(rom, i));
+  resetGoneSongUsers(rom, p, nums);
   return r.warnings;
 }, (p) => count(p.length, 'Song', 'songs'), (p) => (!p.length ? null : `${p.length > 1 ? 'songs' : 'the song'} (AddmusicK inserts the music again)`));
 

@@ -12,9 +12,10 @@ import { LevelEmulator } from '../src/core/levelemu.ts';
 import { l1Index, MAP_NAMES } from '../src/core/overworld.ts';
 import { RAM, GM, PAD } from '../src/core/ram.ts';
 import { Apu, loadApu } from '../src/core/apu.ts';
+import { levelMusic, setLevelMusic } from '../src/core/patches.ts';
 import {
   emptyMusicProject, songsFromZip, addSongs, removeSong, saveMusicProject, musicEntry, hasAmk, romSongs,
-  submapMusic, setSubmapMusic, submapSongs, defaultSubmapMusic, submapsWithSong, SUBMAP_MUSIC, SUBMAP_MUSIC_SWITCH, SUBMAPS,
+  submapMusic, setSubmapMusic, submapSongs, defaultSubmapMusic, songUsers, moveSongUsers, SUBMAP_MUSIC, SUBMAP_MUSIC_SWITCH, SUBMAPS,
 } from '../src/core/music.ts';
 import { AMK_SUBMAP_SONGS } from '../src/vendor/amk/originals.ts';
 import { testSongZip } from './testsong.ts';
@@ -141,7 +142,19 @@ listened(rom, mapped, 'AddmusicK');
 
 // ---- a custom song for Yoshi's Island; inserting again (as a package does) keeps it ----
 setSubmapMusic(rom, 1, custom.num);
-check(submapsWithSong(rom, custom.num).join() === '1', 'Yoshi\'s Island set to the custom song');
+check(songUsers(rom).get(custom.num)?.submaps.join() === '1', 'Yoshi\'s Island set to the custom song');
+// renumbering a song (issue #242): its users – levels and submaps alike – move along, no other
+{
+  setLevelMusic(rom, 0x105, custom.num);
+  setLevelMusic(rom, 0x106, 0x0a);
+  const u = songUsers(rom).get(custom.num), main = submapMusic(rom, 0);
+  check(u?.levels.join() === [0x105].join() && u.submaps.join() === '1', `the custom song's users: level 105 and Yoshi's Island (levels ${u?.levels.map(hx)}, submaps ${u?.submaps})`);
+  moveSongUsers(rom, custom.num, 0x50);
+  check(!songUsers(rom).has(custom.num) && levelMusic(rom, 0x105) === 0x50 && submapMusic(rom, 1) === 0x50 && levelMusic(rom, 0x106) === 0x0a && submapMusic(rom, 0) === main,
+    `moved to song 50: level 105 ${hx(levelMusic(rom, 0x105))}, Yoshi's Island ${hx(submapMusic(rom, 1))}, the others kept`);
+  moveSongUsers(rom, 0x50, custom.num);
+  setLevelMusic(rom, 0x106, 0);
+}
 const [second] = addSongs(proj, songsFromZip('Second.zip', testSongZip(), new Set(['square test'])));
 const r2 = await saveMusicProject(rom, proj);
 check(r2.ok && !r2.warnings.some((x) => x.includes('modified')), `another song inserted, no warning about AddmusicK's bytes changed (${[...r2.errors, ...r2.warnings].join(' ')})`);
@@ -162,6 +175,7 @@ const r3 = await saveMusicProject(rom, proj);
 check(r3.ok && !hasAmk(rom), `AddmusicK removed ${r3.errors.join(' ')}`);
 const back = rotated.map((s, i) => (i === 1 ? defaultSubmapMusic(rom, 1) : s));
 check(list(songs(rom)) === list(back) && list(table(rom, SUBMAP_MUSIC_SWITCH)) === list(back), `the original numbers back, Yoshi's Island its own song (${list(songs(rom))}, want ${list(back)})`);
+check(levelMusic(rom, 0x105) === 0, `level 105, set to the custom song, back to its header music (${hx(levelMusic(rom, 0x105))})`);
 check(defaultSubmapMusic(rom, 1) === original[1], `${MAP_NAMES[1]}'s own song: ${hx(defaultSubmapMusic(rom, 1))}`);
 
 if (bad) { console.log(`${bad} failed`); process.exit(1); }
