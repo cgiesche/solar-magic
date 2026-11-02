@@ -13,6 +13,8 @@
 // tables) run here too, in lanes (one job at a time, a request replacing the lane's others drops them), taking turns
 // with the tasks; they choose whether the display data counts for them (pictures: it does; the probes and tasks: it
 // doesn't, ADR 0008).
+// The level as edited the tiles of the level and the placement preview are learned on comes whole once (then named by
+// its id, probeprotocol.ts StateRef), the latest few kept.
 // After the first copy of the ROM the editor sends the ranges a change wrote: queued jobs stay, a task starts over
 // before its next step only when it read a changed byte, results are checked against the ROM as always.
 
@@ -24,11 +26,11 @@ import { objKindsJob, kindsKey } from './objkinds.ts';
 import { levelScanJob, type ScanResult } from './levelscan.ts';
 import { cameraAtJob, type CameraAt } from './camerareach.ts';
 import { spriteSetJob, spriteAtJob, spriteBytesJob } from './spritegfx.ts';
-import { LevelUses, levelUsesJob, levelTilesJob } from './levelusage.ts';
+import { LevelUses, levelUsesJob, levelTilesJob, levelOverride } from './levelusage.ts';
 import { layer3KindsJob } from './layer3.ts';
 import { SpriteGroupResults, spriteMemCheckJob } from './spritemem.ts';
 import { animatedJob } from './levelemu.ts';
-import { objectThumbsJob, placementPreviewJob } from './objthumbs.ts';
+import { objectThumbsJob, placementPreviewJob, withPlaced } from './objthumbs.ts';
 import { jumpArcsJob } from './jumparcs.ts';
 import { layer2MotionsJob } from './l2scroll.ts';
 import { pathKindsJob } from './owpaths.ts';
@@ -45,9 +47,9 @@ import { prefabPlacesJob } from './prefabplaces.ts';
 import { sameTilesJob } from './prefabsources.ts';
 import { slipperyJob } from './slippery.ts';
 import { objectTableJob } from './objectnames.ts';
-import { inputHash } from './inputs.ts';
+import { inputHash, type EditState } from './inputs.ts';
 import { Lane, Lanes, laneId } from './lanes.ts';
-import { jobId, jobKey, learnKeep, LEARN_KINDS, type ProbeJob, type ProbeMessage, type ProbeReply, type TaskMessage, type TaskType, type LearnJob, type LearnMessage, type LearnLane } from './probeprotocol.ts';
+import { jobId, jobKey, learnKeep, LEARN_KINDS, EDIT_STATES, type StateRef, type ProbeJob, type ProbeMessage, type ProbeReply, type TaskMessage, type TaskType, type LearnJob, type LearnMessage, type LearnLane } from './probeprotocol.ts';
 
 // a longer task: what was asked (a request asking for the same result may have replaced it) and its job
 interface Task { msg: TaskMessage; run: JobRun<unknown> }
@@ -84,12 +86,19 @@ function learnJob(j: LearnJob, state: LearnState, show: (items: unknown[] | null
     case 'spriteMem': return (emu) => spriteMemCheckJob(emu, j.level, state.groups);
     case 'animated': return (emu) => animatedJob(emu, j.level, j.ov);
     case 'layer3': return (emu) => layer3KindsJob(emu, j.level, j.ov);
-    case 'levelTiles': return (emu) => levelTilesJob(state.rom, emu, j.level, j.ov);
+    case 'levelTiles': return (emu) => {
+      // (the owners of its bytes as the client's, serialized again here: not sent)
+      const s = sent(j.state), ov = s.ov.byteOwner ? s.ov : { ...s.ov, byteOwner: levelOverride(state.rom, s.level).byteOwner };
+      return levelTilesJob(state.rom, emu, s.level, ov);
+    };
     case 'thumbs': {
       const keys = new Map(j.specs.map((s, i) => [s, j.keys[i]]));
       return (emu) => objectThumbsJob(state.rom, emu, j.level, j.specs, (s) => keys.get(s)!);
     }
-    case 'preview': return (emu) => placementPreviewJob(state.rom, emu, j.level, j.ov, j.layer2, j.placed);
+    case 'preview': return (emu) => {
+      const p = withPlaced(state.rom, sent(j.state), j.layer2, j.objects);
+      return placementPreviewJob(state.rom, emu, p.level, p.ov, j.layer2, p.placed);
+    };
     case 'arcs': return (emu, prepare) => jumpArcsJob(emu, prepare, j.level, j.load, j.tx, j.ty, j.runs);
     case 'layer2Motions': return function* (emu) { return (yield* layer2MotionsJob(emu, j.level, j.ov)).result; };
     case 'pathKinds': return (emu) => pathKindsJob(emu);
@@ -117,6 +126,12 @@ function learnJob(j: LearnJob, state: LearnState, show: (items: unknown[] | null
   }
 }
 
+// the level as edited a job names (the host has it whole when the job is asked for, ProbeHost.learn; else the job fails)
+function sent(s: StateRef): EditState {
+  if ('level' in s) return s;
+  throw new Error(`level as edited ${s.id} not sent`);
+}
+
 // a learn job asked for: the latest request for its result, its job and what it showed since the last reply
 interface Learn { msg: LearnMessage; run: JobRun<unknown>; fresh: boolean; shown: unknown[] }
 // what takes turns: the tasks and the lanes with jobs (a lane's first job runs; its name is its emulator's, as a task's
@@ -141,6 +156,7 @@ export class ProbeHost {
   // (which would use their emulator)
   private cancelled = new Map<TaskType, Task>();
   private turned = false; // the last job run was a turn's (prefetched probes take turns with them)
+  private states = new Map<string, EditState>(); // the levels as edited sent whole, the latest EDIT_STATES (kept over ROMs)
 
   // tasks' jobs (re)started
   get started(): number { return this.runner?.started ?? 0; }
@@ -215,6 +231,7 @@ export class ProbeHost {
   // then); replace drops the lane's other jobs
   private learn(msg: LearnMessage): void {
     if (!this.runner) return;
+    msg = this.withState(msg);
     const id = laneId(msg.key, msg.input), runner = this.runner, state = this.state!;
     if (msg.replace) this.lanes.replace(msg.lane, id);
     if (msg.parts) this.prober!.results.load(msg.parts); // (not handed back: the editor has them)
@@ -227,6 +244,22 @@ export class ProbeHost {
     });
     if (!added) job.msg = msg;
     this.turns.add(lane); // (one with jobs keeps its turn)
+  }
+
+  // the request with the level as edited it names whole: kept when sent whole (the latest EDIT_STATES, in the order
+  // first sent, as the client counts them), else the one kept
+  private withState(msg: LearnMessage): LearnMessage {
+    const j = msg.job;
+    if (!('state' in j)) return msg;
+    const s = j.state;
+    if ('level' in s) {
+      const had = this.states.has(s.id);
+      this.states.set(s.id, s);
+      if (!had && this.states.size > EDIT_STATES) this.states.delete(this.states.keys().next().value!);
+      return msg;
+    }
+    const known = this.states.get(s.id);
+    return known ? { ...msg, job: { ...j, state: known } } : msg;
   }
 
   // the jobs of a lane are not wanted any more
@@ -244,10 +277,12 @@ export class ProbeHost {
     try { r = this.runner!.step(lane.name, l.run); } catch (e) { console.error(e); r = { result: null }; failed = true; }
     if (r) {
       this.lanes.remove(lane.name, l);
-      const keep = learnKeep(m.job), memory = failed || keep !== 'memory' ? undefined : this.runner!.memory.entry(m.key, m.input);
+      // (a result kept as its parts only: its parts are among the entries set)
+      const keep = failed || LEARN_KINDS[m.job.kind].whole === false ? false : learnKeep(m.job);
+      const memory = keep !== 'memory' ? undefined : this.runner!.memory.entry(m.key, m.input);
       return {
         type: 'learned', gen: this.gen, lane: m.lane, key: m.key, input: m.input, result: failed ? null : r.result, failed,
-        put: [...this.put(failed || keep !== true ? null : m.key, m.input), ...this.usesKnown(m.job)], ...(memory && { memory: { ...memory, input: m.input } }),
+        put: [...this.put(keep !== true ? null : m.key, m.input), ...this.usesKnown(m.job)], ...(memory && { memory: { ...memory, input: m.input } }),
       };
     }
     const d: ProbeReply = { type: 'learning', gen: this.gen, lane: m.lane, key: m.key, input: m.input, label: l.run.label, fresh: l.fresh, shown: l.shown, put: this.put(null) };

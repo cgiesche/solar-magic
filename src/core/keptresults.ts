@@ -156,6 +156,12 @@ export class KeptResults<D> {
     return true;
   }
 
+  // drops the results of key, of all inputs
+  delete(key: string): void {
+    const k = this.keys.get(key);
+    if (k) this.removeKey(key, k);
+  }
+
   // the key becomes the latest used
   private touch(key: string, k: KeyEntry<D>): void {
     if (this.round && k.round !== this.round) { k.round = this.round; this.used++; }

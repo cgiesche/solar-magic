@@ -60,7 +60,7 @@ import { holds, perRomState, type Recorded } from '../core/romdeps.ts';
 import { RomWatch, type Watch } from '../core/romwatch.ts';
 import { thumbCanvas } from './thumbs.ts';
 import { thumbsKey, thumbsInput, previewInput, objKey, type ObjSpec, type ObjThumb, type PlacementPreview } from '../core/objthumbs.ts';
-import { levelInput, inputHash } from '../core/inputs.ts';
+import { levelInput, inputHash, editState } from '../core/inputs.ts';
 import { map16Tile, bgTile } from '../core/ram.ts';
 import { exanimTiles, exanimColors, exanimPeriod, readLevelList, readGlobalList } from '../core/exanim.ts';
 import { usedTriggers, initTriggers, type TriggerView, type SlotRef } from '../core/extrigger.ts';
@@ -1065,9 +1065,9 @@ export class App {
     const idx = this.usesIndex ??= new LevelUses(this.rom, this.results);
     // the open level's (kept in memory with the level as edited as their input); a level with conditional
     // Direct Map16 objects in both of their states, whatever the view's flags
-    const lv = this.level, ov = this.buildOverrides();
-    const here = this.probes.learnOrFailed<LevelTiles>(`lt:${lv.number}`, { kind: 'levelTiles', level: lv, ov },
-      { input: this.levelInput(ov), lane: 'lt', replace: true, label: 'Uses in this level', done: this.usesLearned, failed: this.usesLearned });
+    const lv = this.level, edited = editState(lv, this.buildOverrides());
+    const here = this.probes.learnOrFailed<LevelTiles>(`lt:${lv.number}`, { kind: 'levelTiles', state: edited },
+      { input: edited.id, lane: 'lt', replace: true, label: 'Uses in this level', done: this.usesLearned, failed: this.usesLearned });
     const failed = here === FAILED, { tiles, state } = this.openTiles.shown(lv.number, this.rom.gen, failed ? undefined : here, failed);
     const levels = tiles ? [tiles] : [], missing: number[] = [];
     for (const n of usedLevels(this.rom)) {
@@ -1799,13 +1799,12 @@ export class App {
   private objectsPreview(objects: LevelObject[]): PreviewPart | null | undefined {
     const sig = JSON.stringify([this.model.mode, objects.map((o) => ({ ...o, uid: 0 }))]), m = this.previewMemo;
     if (m.render === this.render && m.sig === sig) return m.part;
-    const l2 = this.model.mode === 'l2', rom = this.rom, base = this.model.currentObjects();
-    const lv: Level = l2 ? { ...this.level, layer2Objects: [...base, ...objects] } : { ...this.level, objects: [...base, ...objects] };
-    const ov = this.buildOverrides(lv), g = l2 ? this.images.geom2 : this.images.geom1;
+    const l2 = this.model.mode === 'l2', g = l2 ? this.images.geom2 : this.images.geom1;
     if (!g) return null;
-    // (learned in the probe worker: objectKey's keys of the placed objects)
-    const pic = this.probes.learn<PlacementPreview | null>(`pp1:${lv.number}:${l2 ? 2 : 1}`, { kind: 'preview', level: lv, ov, layer2: l2, placed: objects.map((_, i) => base.length + i) },
-      { input: inputHash(previewInput(rom, lv, ov)), lane: 'placement', replace: true, done: this.previewLearned });
+    // (learned in the probe worker on the level as edited, sent there once: the objects placed in it)
+    const state = editState(this.level, this.buildOverrides());
+    const pic = this.probes.learn<PlacementPreview | null>(`pp1:${state.level.number}:${l2 ? 2 : 1}`, { kind: 'preview', state, layer2: l2, objects },
+      { input: inputHash(previewInput(this.rom, state, l2, objects)), lane: 'placement', replace: true, done: this.previewLearned });
     const part = pic && { x: pic.x0 * 16, y: pic.y0 * 16, img: thumbCanvas(pic) };
     this.previewMemo = { render: this.render, sig, part };
     return part;

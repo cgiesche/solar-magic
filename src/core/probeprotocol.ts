@@ -9,7 +9,9 @@ import type { CameraAt } from './camerareach.ts';
 import type { SpriteLevel } from './spritegfx.ts';
 import type { SpriteMemLevel } from './spritemem.ts';
 import type { LevelOverride } from './levelemu.ts';
-import type { Level } from './level.ts';
+import type { Level, LevelObject } from './level.ts';
+import type { EditState } from './inputs.ts';
+import { spriteSetParts } from './spritegfx.ts';
 import type { Keep } from './jobrunner.ts';
 import type { ObjSpec } from './objthumbs.ts';
 import type { RunStates } from './blockprobe.ts';
@@ -60,7 +62,7 @@ export type ProbeReply = ProbeDone | KindsDone | ScanDone | CameraDone | Learned
 // (their uses, levelusage.ts), a level's sprite memory check, the tiles and colors animating in a level, what the four
 // layer 3 settings do in a level as given (layer3.ts), the tiles of a level as edited (levelusage.ts levelTilesAll),
 // the object picker's thumbnails (objthumbs.ts; keys: each object's key, objKey), the placement preview (objthumbs.ts
-// placementPreviewJob), the jump arcs from a tile (jumparcs.ts; level: the hash of the level as loaded, load: what it
+// placementPreviewJob: the objects placed in the level as edited, withPlaced), the jump arcs from a tile (jumparcs.ts; level: the hash of the level as loaded, load: what it
 // is loaded with), what the layer 2 scroll settings do in a level (l2scroll.ts), what Mario does on each overworld
 // layer 1 tile (owpaths.ts), the prefab suggestions (prefabsuggest.ts; open: the open level as edited) and the boxes
 // of objects at sizes (objresize.ts; layer2Pointer: the level's layer 2 objects as the probe loads take them); the
@@ -80,9 +82,9 @@ export type LearnJob =
   | { kind: 'spriteMem'; level: SpriteMemLevel }
   | { kind: 'animated'; level: number; ov: LevelOverride }
   | { kind: 'layer3'; level: number; ov: LevelOverride }
-  | { kind: 'levelTiles'; level: Level; ov: LevelOverride }
+  | { kind: 'levelTiles'; state: StateRef }
   | { kind: 'thumbs'; level: Level; specs: ObjSpec[]; keys: string[] }
-  | { kind: 'preview'; level: Level; ov: LevelOverride; layer2: boolean; placed: number[] }
+  | { kind: 'preview'; state: StateRef; layer2: boolean; objects: LevelObject[] }
   | { kind: 'arcs'; level: string; load: [number, LevelOverride, number, number]; tx: number; ty: number; runs: RunStates }
   | { kind: 'layer2Motions'; level: number; ov: LevelOverride }
   | { kind: 'pathKinds' }
@@ -103,6 +105,12 @@ export type LearnJob =
   | { kind: 'slippery' }
   | { kind: 'objectTable'; tileset: number };
 
+// The level as edited a job is learned on (inputs.ts EditState; levelTiles, preview): the probe client sends it whole
+// with the first request to a host, later ones name it by its id; a host keeps the latest EDIT_STATES sent whole (the
+// client knows which: it sends them in the same order)
+export type StateRef = EditState | { id: string };
+export const EDIT_STATES = 4;
+
 // Whether a later request for the same result (key and input) asks the job for other work, which it then takes up as
 // it runs: the levels' uses with another list of levels (the running job scans the levels the latest list still needs)
 export function learnRetargets(was: LearnJob, now: LearnJob): boolean {
@@ -118,9 +126,10 @@ export function learnRetargets(was: LearnJob, now: LearnJob): boolean {
 // skip mask, so they count the display data, the submaps' views, the save at a progress and layer 1 without an event's
 // changes (no pictures) too: marked pictures (ADR 0008). They change with the map painted, the event progress slider
 // goes through many (memory only). A level's game BG (Map16 numbers, no picture) goes to the result cache; the places of
-// a prefab and whether two loads draw the same tiles are asked for once, by a dialog or an action (to the editor only)
-export const LEARN_KINDS: { [K in LearnJob['kind']]: { keep: Keep; picture: boolean; boot?: false } } = {
-  sprites: { keep: true, picture: true },
+// a prefab and whether two loads draw the same tiles are asked for once, by a dialog or an action (to the editor only).
+// A sprite set's images are kept as their parts only (whole false, learnParts).
+export const LEARN_KINDS: { [K in LearnJob['kind']]: { keep: Keep; picture: boolean; boot?: false; whole?: false } } = {
+  sprites: { keep: true, picture: true, whole: false },
   spriteAt: { keep: true, picture: true },
   spriteBytes: { keep: true, picture: true },
   uses: { keep: false, picture: false },
@@ -152,6 +161,13 @@ export const LEARN_KINDS: { [K in LearnJob['kind']]: { keep: Keep; picture: bool
 };
 export const learnKeep = (j: LearnJob): Keep => LEARN_KINDS[j.kind].keep;
 
+// The parts a result kept as its parts only (whole: false; jobrunner.ts Part) is put together from: their sub keys and
+// inputs, and how. A sprite set's images are kept per test level load (spriteSetJob), not again as the whole set.
+export function learnParts(j: LearnJob): { parts: [string, string][]; join(data: unknown[]): unknown } | null {
+  if (j.kind !== 'sprites' || LEARN_KINDS[j.kind].whole !== false) return null;
+  return { parts: spriteSetParts(j.nums, j.input).map((p) => [p.sub, p.input]), join: (data) => (data as unknown[][]).flat() };
+}
+
 // The lanes of learn jobs (lanes.ts): the editor's fixed set, a lane per custom overworld sprite map (owc and the map).
 // Their names are busy keys too (ProbeBusyKey), so none is a task's type.
 export type LearnLane =
@@ -168,7 +184,7 @@ void NO_TASK_LANE;
 
 // a learn job asked for: its result under key and input (the hash of what it depends on outside the ROM, inputs.ts),
 // learned in a lane (one job at a time, in the order asked); replace drops the lane's other jobs; parts: the editor's
-// stored entries of the result's parts (jobrunner.ts Part, by stored key; checked when first used)
+// stored entries of the result's parts for their current inputs (learnParts; jobrunner.ts Part, by stored key)
 export interface LearnMessage { type: 'learn'; lane: LearnLane; key: string; input?: string; job: LearnJob; replace: boolean; parts?: [string, CacheEntry][] }
 
 // a learn job's result (failed: it threw, result null), with its result cache entry (memory: the entry of one kept in

@@ -11,7 +11,8 @@ import { objectVariant, sizedByte, type ObjKind } from './objkinds.ts';
 import { levelSlots, layerSlots } from './gfxslots.ts';
 import { gfxFilesHash } from './gfxpages.ts';
 import { levelAnimHash } from './exanim.ts';
-import { inputHash, levelInput } from './inputs.ts';
+import { inputHash, type EditState } from './inputs.ts';
+import { levelOverride } from './levelusage.ts';
 import { runJob } from './jobrunner.ts';
 import { effectLoad, ramEffect } from './objeffects.ts';
 import { snesToPc } from './rom.ts';
@@ -56,10 +57,20 @@ export function thumbsInput(rom: Rom, level: Level): unknown {
   return { level: level.number, header: { ...level.header, screens: 0, mode: 0 }, gfx: layerFilesHash(rom, level), anim: animHash(rom, level.number) };
 }
 // what the placement preview (App.objectsPreview) depends on outside the ROM bytes it read: the level as edited
-// with the placed objects (ov: its load's overrides) and, as for thumbnails, the content of the graphics files its
-// layers draw from and what its animations copy
-export function previewInput(rom: Rom, level: Level, ov: LevelOverride): unknown {
-  return { level: levelInput(level.number, ov), gfx: layerFilesHash(rom, level), anim: animHash(rom, level.number) };
+// (state) with the objects placed on layer 2 or 1 (their uids don't count) and, as for thumbnails, the content of the
+// graphics files its layers draw from and what its animations copy
+export function previewInput(rom: Rom, state: EditState, layer2: boolean, objects: LevelObject[]): unknown {
+  const level = state.level;
+  return { state: state.id, layer2, objects: objects.map((o) => ({ ...o, uid: 0 })), gfx: layerFilesHash(rom, level), anim: animHash(rom, level.number) };
+}
+// The level as edited (state) with objects placed on layer 2 or 1 (after the layer's own), as its load is given it: the
+// objects serialized anew with their owners, the rest of the load as the state's (a BG tilemap only while layer 2
+// holds no objects); placed: the placed objects' indices on their layer
+export function withPlaced(rom: Rom, state: EditState, layer2: boolean, objects: LevelObject[]): { level: Level; ov: LevelOverride; placed: number[] } {
+  const lv = state.level, base = (layer2 ? lv.layer2Objects : lv.objects) ?? [];
+  const level = layer2 ? { ...lv, layer2Objects: [...base, ...objects] } : { ...lv, objects: [...base, ...objects] };
+  const own = levelOverride(rom, level);
+  return { level, ov: { ...state.ov, ...own, bgData: own.layer2 ? undefined : state.ov.bgData }, placed: objects.map((_, i) => base.length + i) };
 }
 // the content hash of the graphics files level's Map16 tiles draw from (its layer slots)
 function layerFilesHash(rom: Rom, level: Level): number {

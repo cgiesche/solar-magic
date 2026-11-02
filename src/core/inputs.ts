@@ -4,6 +4,7 @@
 // holds while its key, its input and the bytes it read are unchanged (learner.ts, ResultCache).
 
 import type { LevelOverride } from './levelemu.ts';
+import type { Level } from './level.ts';
 
 // A 64-bit hash (two 32-bit ones) of a value: the same for equal values whatever their object identity or
 // the order of keys, Set and Map entries. Typed arrays by their bytes; functions and undefined fields don't
@@ -72,4 +73,11 @@ class Hasher {
 // only records the load (byteOwner, trace, trackSources, fadeHook).
 export function levelInput(n: number, ov: LevelOverride): { level: number; ov: LevelOverride } {
   return { level: n, ov: { ...ov, byteOwner: undefined, trace: undefined, trackSources: undefined, fadeHook: undefined } };
+}
+
+// The level as edited: a level and what its load is given (ov, App.buildOverrides), named by the hash of both (id; not
+// of what only records the load, as levelInput). Learn jobs on it send it to the probe worker once (probeclient.ts).
+export interface EditState { id: string; level: Level; ov: LevelOverride }
+export function editState(level: Level, ov: LevelOverride): EditState {
+  return { id: inputHash({ level, load: levelInput(level.number, ov) }), level, ov };
 }

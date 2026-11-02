@@ -361,6 +361,9 @@ export class ResultCache {
     this.kept.set(key, data, deps, input, current);
   }
 
+  // drops the results of key, of all inputs (also from storage)
+  delete(key: string): void { this.kept.delete(key); }
+
   // checks up to count results not checked against the current ROM yet (of any input, used or not) and drops those
   // that no longer hold, so storage loses them without them being asked for; false once all are checked. A changed
   // ROM starts again with the results not checked since.

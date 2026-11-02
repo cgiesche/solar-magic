@@ -48,6 +48,7 @@ export interface JobSpec<T> {
   keep: Keep;
   picture: boolean; // the result shows what things look like: it reads the display data
   boot?: boolean; // the boot snapshot's reads count for the result (default: true)
+  whole?: false; // the result isn't kept itself, only its parts (Part), which give it put together (keep: theirs)
   start: (emu: LevelEmulator, prepare: Prepare, part: Part) => Job<T>;
 }
 
@@ -98,7 +99,7 @@ export class JobRunner {
     if (r.job && !holds(rom, r)) r.job = null;
     if (!r.job) {
       // (stored meanwhile, or loaded from storage)
-      const stored = this.stored<T>(r.key, r.input, r.keep);
+      const stored = r.whole === false ? undefined : this.stored<T>(r.key, r.input, r.keep);
       if (stored !== undefined) return { result: stored };
       const emu = r.emu = this.emu(lane, r.picture);
       r.reads = new RomReads(rom);
@@ -115,7 +116,7 @@ export class JobRunner {
     }
     r.job = null;
     if (!holds(rom, r)) return null; // (the job wrote bytes it read: again)
-    if (t.result.value !== undefined) this.store(r.key, r.input, r.keep, t.result.value, r.reads);
+    if (t.result.value !== undefined && r.whole !== false) this.store(r.key, r.input, r.keep, t.result.value, r.reads);
     return { result: t.result.value };
   }
 

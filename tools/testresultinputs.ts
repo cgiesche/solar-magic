@@ -21,7 +21,7 @@ import { Rom, snesToPc } from '../src/core/rom.ts';
 import { ResultCache, RomFingerprint, RomReads, oldStoreKeys, type CacheEntry } from '../src/core/romdeps.ts';
 import { INPUTS_PER_KEY } from '../src/core/keptresults.ts';
 import { ResultLearner } from '../src/core/learner.ts';
-import { inputHash, levelInput } from '../src/core/inputs.ts';
+import { inputHash, levelInput, editState } from '../src/core/inputs.ts';
 import { spriteSetJob, spriteAtJob, spriteBytesJob } from '../src/core/spritegfx.ts';
 import { spriteJobs, spriteInput, layer3Spec, type LearnSpec } from '../src/core/learnspecs.ts';
 import { renderObjectThumbs, thumbsKey, thumbsInput, previewInput, objKey, type ObjSpec } from '../src/core/objthumbs.ts';
@@ -49,9 +49,15 @@ function jobOf(e: LevelEmulator, j: LearnJob, part: Part): Job<unknown> {
 // learns spec at once on a job runner of the main thread, kept as its kind says (probeprotocol.ts LEARN_KINDS): its
 // stored result, else its job's (started: counted)
 const runner = new JobRunner({ rom, results, main: emu });
+// (jobs started; of a result kept as its parts only, the parts learned: it starts to put them together)
 let started = 0;
-const learn = (s: LearnSpec): unknown =>
-  learnAtOnce(runner, { key: s.key, input: inputHash(s.input), ...LEARN_KINDS[s.job.kind], start: (e, _p, part) => { started++; return jobOf(e, s.job, part); } });
+const learn = (s: LearnSpec): unknown => {
+  const kind = LEARN_KINDS[s.job.kind];
+  return learnAtOnce(runner, { key: s.key, input: inputHash(s.input), ...kind, start: (e, _p, part) => {
+    if (kind.whole !== false) started++;
+    return jobOf(e, s.job, (sub, input, l) => part(sub, input, () => { started++; return l(); }));
+  } });
+};
 const ovOf = (lv: Level, r = rom): LevelOverride => ({ layer1: serializeLayer1(r, lv), secondaryHeader: encodeSecondaryHeader(lv.secondary), layer2Pointer: lv.layer2Pointer });
 const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
 
@@ -116,7 +122,7 @@ const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b)
   let runs = 0;
   const key = `pp1:${N.toString(16)}:1`;
   // (as the probe worker learns it: kept in memory, a picture)
-  const preview = () => learnAtOnce(lr, { key, input: inputHash(previewInput(r, lv, ov)), ...LEARN_KINDS.preview,
+  const preview = () => learnAtOnce(lr, { key, input: inputHash(previewInput(r, editState(lv, ov), false, [])), ...LEARN_KINDS.preview,
     start: function* (em) { runs++; const res = em.load(N, ov); return res.ok ? renderLayerTiles(r, res, g, false, tiles) : null; } });
   const a = await preview(), pixels = (p: typeof a) => p ? inputHash(p.px) : '';
   const files = layerSlots(levelSlots(r, N, lv.header)).map((s) => s.file);
@@ -154,7 +160,7 @@ const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b)
   let runs = 0;
   const key = `pp1:${N.toString(16)}:1`;
   // (as the probe worker learns it: kept in memory, a picture)
-  const preview = () => learnAtOnce(lr, { key, input: inputHash(previewInput(r, lv, ov)), ...LEARN_KINDS.preview,
+  const preview = () => learnAtOnce(lr, { key, input: inputHash(previewInput(r, editState(lv, ov), false, [])), ...LEARN_KINDS.preview,
     start: function* (em) { runs++; const res = em.load(N, ov); return res.ok ? renderLayerTiles(r, res, g, false, tiles) : null; } });
   const pixels = (p: Awaited<ReturnType<typeof preview>>) => p ? inputHash(p.px) : '';
   // pixels drawn in tiles [from, to) of a file, as the graphics tab does

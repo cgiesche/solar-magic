@@ -389,16 +389,21 @@ export function* spriteSetJob(
   emu: LevelEmulator, lv: SpriteLevel, nums: number[], show: (images: [number, SpriteImage][] | null) => void, part: Part, input?: string,
 ): Generator<string, [number, SpriteImage][]> {
   show(null);
-  const loads = spriteLoads(nums), images: [number, SpriteImage][] = [];
+  const loads = spriteSetParts(nums, input), images: [number, SpriteImage][] = [];
   let i = 0;
-  for (const [load, ids] of loads) {
+  for (const p of loads) {
     i++;
-    const r = part(load.toString(16), inputHash({ input, ids }), () => [...captureSprites(emu, lv.number, lv.header, lv.spriteHeader, lv.bgPointer, ids)]);
+    const r = part(p.sub, p.input, () => [...captureSprites(emu, lv.number, lv.header, lv.spriteHeader, lv.bgPointer, p.ids)]);
     show(r.result!);
     images.push(...r.result!);
-    if (r.learned) yield `Sprite graphics ${Math.round(i / loads.size * 100)} %`;
+    if (r.learned) yield `Sprite graphics ${Math.round(i / loads.length * 100)} %`;
   }
   return images;
+}
+// the parts of spriteSetJob's result in its order: a test level load each, with its sprites, its sub key and its input
+// (input: the job's); the result is these parts' images one after another
+export function spriteSetParts(nums: number[], input?: string): { sub: string; input: string; ids: number[] }[] {
+  return [...spriteLoads(nums)].map(([load, ids]) => ({ sub: load.toString(16), input: inputHash({ input, ids }), ids }));
 }
 
 // the image of sprite id with these extra bytes (a custom sprite's; null: none)

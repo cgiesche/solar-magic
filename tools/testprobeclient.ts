@@ -7,21 +7,24 @@
 // scan is told to the worker; learn jobs (the sprite images) come in as they run, with a worker and without; a lane's
 // jobs can be dropped (telling their askers), an urgent one (or any, urged) runs without a worker while a dialog holds the background slices; a failed job
 // asked again is FAILED without telling the asker again, the open level's last known tiles hold for their level and ROM
-// state only, a progress reply from an older ROM shows nothing.
+// state only, a progress reply from an older ROM shows nothing. A sprite set is kept as its parts only, the parts sent with a
+// request only for their current inputs; the level as edited goes to the worker whole once (#232).
 import { readFileSync } from 'node:fs';
 import { Rom } from '../src/core/rom.ts';
 import { BlockProber } from '../src/core/blockprobe.ts';
 import { ProbeHost } from '../src/core/probehost.ts';
-import { jobKey, type ProbeJob, type ProbeMessage, type ProbeReply } from '../src/core/probeprotocol.ts';
+import { jobKey, EDIT_STATES, type ProbeJob, type ProbeMessage, type ProbeReply } from '../src/core/probeprotocol.ts';
 import { ProbeClient, FAILED } from '../src/core/probeclient.ts';
 import { ResultCache, RomFingerprint } from '../src/core/romdeps.ts';
 import { LevelEmulator } from '../src/core/levelemu.ts';
 import { loadLevel, L2_PTRS } from '../src/core/level.ts';
 import { ObjKindProbe, kindsKey, type ObjKinds } from '../src/core/objkinds.ts';
 import type { ScanLevel } from '../src/core/levelscan.ts';
-import { captureSprites, spriteLoad, type SpriteLevel } from '../src/core/spritegfx.ts';
+import { captureSprites, spriteLoad, spriteSetParts, type SpriteLevel } from '../src/core/spritegfx.ts';
 import type { LearnJob } from '../src/core/probeprotocol.ts';
-import { inputHash } from '../src/core/inputs.ts';
+import { inputHash, editState } from '../src/core/inputs.ts';
+import { partKey } from '../src/core/jobrunner.ts';
+import { serialize } from 'node:v8';
 import { levelTilesKey, levelOverride, OpenLevelTiles, type LevelTiles } from '../src/core/levelusage.ts';
 import { editorImage } from './fixture.ts';
 
@@ -326,21 +329,32 @@ function editor(worker: Worker | null) {
   check(replies[0]?.type === 'learning' && shown.length === 2 && shown[0] === null && (shown[1]?.length ?? 0) > 0 && e.busy.get('sprites') === 'Sprite graphics 20 %', `learn: the first images as they come, the progress label (${e.busy.get('sprites')})`);
   w.run();
   check(done.length === 1 && JSON.stringify(done[0]) === direct && JSON.stringify(shown.slice(1).flat()) === direct, 'learn: the result and the images shown as captured directly');
-  check(JSON.stringify(e.results.get('spr', inputHash(input))) === direct && !e.busy.has('sprites'), 'learn: in the result cache under its key and input, nothing busy');
+  // (#232: the images stored once, as the set's parts: not again as the whole set)
+  const partsOf = (c: ResultCache) => spriteSetParts(nums).map((p) => c.get(partKey('spr', p.sub), p.input));
+  check(e.results.get('spr', inputHash(input)) === undefined && JSON.stringify(partsOf(e.results).flat()) === direct && !e.busy.has('sprites'),
+    'learn: in the result cache as its parts only (under its key and their inputs), nothing busy');
   check(e.steps.every(([k]) => k === 'probe-prefetch'), 'learn: the main thread ran nothing for it');
-  check(JSON.stringify(e.client.learn('spr', job, opts)) === direct, 'learn: asked again, the stored result');
+  const again = e.client.learn('spr', job, opts);
+  check(JSON.stringify(again) === direct, 'learn: asked again, the stored result (put together from its parts)');
+  check(again === done[0] && e.client.learn('spr', job, opts) === again, '… the same result as told to the asker, and on every request');
   await settle();
   check(learns(w) === 1, '… not asked again');
 
   // the stored test level loads go with the request (#176): a worker without them captures none
   const w3 = new Worker(), e3 = editor(w3), done3: unknown[] = [];
-  e3.results.setAll(e.results.under('spr/'), true);
+  // (all loads but one; #232: that one stored for another input – of a set before a change – stays here)
+  const [[k0, e0], ...others] = e.results.under('spr/');
+  e3.results.setAll(others, true);
+  e3.results.set(k0.split('#')[0], e0.data, e0.deps, 'stale');
+  e3.results.set('spr', e0.data, e0.deps, inputHash(input)); // (the whole set as kept before #232)
   e3.client.learn('spr', job, { ...opts, done: (r) => done3.push(r) });
   await settle();
   const sent3 = w3.sent.find((m) => m.type === 'learn');
   const got3 = w3.run();
-  check(sent3?.type === 'learn' && sent3.parts?.length === loads.length, `learn: the stored loads sent with it (${sent3?.type === 'learn' && sent3.parts?.length})`);
-  check(!got3.some((d) => d.type === 'learning') && done3.length === 1 && JSON.stringify(done3[0]) === direct, '… none captured, the same images');
+  check(sent3?.type === 'learn' && sent3.parts?.length === loads.length - 1 && sent3.parts.every(([, p]) => p.input !== 'stale'),
+    `learn: the stored loads for their current inputs sent with it (${sent3?.type === 'learn' && sent3.parts?.length}), not another input's`);
+  check(got3.filter((d) => d.type === 'learning').length === 1 && done3.length === 1 && JSON.stringify(done3[0]) === direct, '… only the other load captured, the same images');
+  check(e3.results.get('spr', inputHash(input)) === undefined, '… the whole set as kept before dropped');
 
   // replace: another set drops the variants asked before it (the worker told), also when it is known
   const at = (x: number): LearnJob => ({ kind: 'spriteAt', level, id: 0x0d, x, y: 0 });
@@ -368,7 +382,7 @@ function editor(worker: Worker | null) {
   e2.client.learn('spr', job, { ...opts, done: (r) => done2.push(r) });
   await settle();
   e2.drain();
-  check(done2.length === 1 && JSON.stringify(done2[0]) === direct && JSON.stringify(e2.results.get('spr', inputHash(input))) === direct, 'no worker: captured on the main thread');
+  check(done2.length === 1 && JSON.stringify(done2[0]) === direct && JSON.stringify(partsOf(e2.results).flat()) === direct, 'no worker: captured on the main thread');
 }
 
 // the levels' uses and the animated tiles and colors (#177): the uses come in the levels' entries as each level is
@@ -489,7 +503,7 @@ function editor(worker: Worker | null) {
 // the asker again (who redraws on it); the last known ones only for the level and ROM state they were learned at
 {
   const w = new Worker(), e = editor(w), lv = loadLevel(e.rom, 0x105);
-  const job: LearnJob = { kind: 'levelTiles', level: lv, ov: levelOverride(e.rom, lv) }, input = { lt: 1 };
+  const job: LearnJob = { kind: 'levelTiles', state: editState(lv, levelOverride(e.rom, lv)) }, input = { lt: 1 };
   let fails = 0;
   const opts = { input, lane: 'lt' as const, replace: true, failed: () => fails++ };
   check(e.client.learnOrFailed('lt:105', job, opts) === undefined, 'open level tiles: unknown, asked for');
@@ -534,6 +548,52 @@ function editor(worker: Worker | null) {
   check(first[0]?.type === 'learning' && first[0].shown.length > 0 && shown.every((i) => i === null), 'progress from an older ROM: its images not shown');
   w.run();
   check(shown.some((i) => i?.length) && done.length === 1, '… those of the current ROM are, and the result');
+}
+
+// the level as edited (#232): sent to the worker whole once, later requests name it (the tiles of the level as edited,
+// the placement preview under the mouse); whole again once the worker dropped it (EDIT_STATES others since) and to the
+// main thread's host once the worker broke down. The size of a placement preview request before and after.
+{
+  const w = new Worker(), e = editor(w), lv = loadLevel(e.rom, 0x105), state = editState(lv, levelOverride(e.rom, lv));
+  const learns = () => w.sent.filter((m): m is ProbeMessage & { type: 'learn' } => m.type === 'learn');
+  const whole = (m: ProbeMessage & { type: 'learn' }) => 'state' in m.job && 'level' in m.job.state;
+  const obj = (x: number) => ({ uid: 100 + x, num: 0x21, ext: 0, size: 0x13, x, y: 0x14 });
+  const preview = (x: number): LearnJob => ({ kind: 'preview', state, layer2: false, objects: [obj(x)] });
+  e.client.learnOrFailed('lt:105', { kind: 'levelTiles', state }, { input: state.id, lane: 'lt', replace: true });
+  for (let x = 2; x < 6; x++) { e.client.learn(`pp:${x}`, preview(x), { input: x, lane: 'placement', replace: true }); await settle(); }
+  const sent = learns();
+  check(sent.length === 5 && whole(sent[0]) && sent.slice(1).every((m) => !whole(m)), `level as edited: sent whole with the first request only (${sent.map((m) => whole(m) ? 'whole' : 'id').join()})`);
+  const got = w.run().filter((d) => d.type === 'learned');
+  check(got.length === 2 && got.every((d) => d.type === 'learned' && !d.failed), '… the worker learns on it (the tiles, the latest preview)');
+
+  // the size of a placement preview request: the level and its load as before, the objects placed in the level named
+  const placed = { ...lv, objects: [...lv.objects, obj(6)] }, ovp = levelOverride(e.rom, placed);
+  const before = { type: 'learn', lane: 'placement', key: 'pp', input: 'x', replace: true, job: { kind: 'preview', level: placed, ov: ovp, layer2: false, placed: [lv.objects.length] } };
+  e.client.learn('pp:6', preview(6), { input: 6, lane: 'placement', replace: true });
+  await settle();
+  const after = learns().at(-1)!, size = (m: unknown) => serialize(m).length;
+  console.log(`  placement preview request: ${size(before)} bytes before, ${size(after)} after (the level as edited sent once: ${size(sent[0])}, with the owners of its bytes ${size({ ...sent[0], job: { ...sent[0].job, state } })})`);
+  check(size(after) * 50 < size(before), '… a preview request is a small part of what it was');
+
+  // EDIT_STATES others sent whole: the first whole again
+  for (let i = 0; i < EDIT_STATES; i++) {
+    const other = editState({ ...lv, number: 0x100 + i }, levelOverride(e.rom, lv));
+    e.client.learnOrFailed(`lt:${i}`, { kind: 'levelTiles', state: other }, { input: other.id, lane: 'lt' });
+    await settle();
+  }
+  e.client.learn('pp:7', preview(7), { input: 7, lane: 'placement', replace: true });
+  await settle();
+  check(whole(learns().at(-1)!), `… whole again after ${EDIT_STATES} others`);
+  w.run();
+
+  // the worker breaks down: the main thread's host is sent it whole (it learns on it)
+  e.client.learn('pp:8', preview(8), { input: 8, lane: 'placement', replace: true });
+  await settle();
+  w.failed();
+  await settle();
+  e.drain();
+  const pv = e.client.learn('pp:8', preview(8), { input: 8, lane: 'placement' });
+  check(!!pv, '… after the worker broke down: learned on the main thread');
 }
 
 console.log(bad ? `${bad} failures` : 'all ok');

@@ -13,13 +13,13 @@ import { readFileSync } from 'node:fs';
 import { Rom, snesToPc } from '../src/core/rom.ts';
 import { BlockProber, blockKey, collisionKey, spriteKey, runsKey, cameraKey } from '../src/core/blockprobe.ts';
 import { ProbeHost } from '../src/core/probehost.ts';
-import { jobId, jobKey, type ProbeJob, type ProbeMessage, type ProbeDone, type ProbeReply } from '../src/core/probeprotocol.ts';
+import { jobId, jobKey, LEARN_KINDS, EDIT_STATES, type ProbeJob, type ProbeMessage, type ProbeDone, type ProbeReply } from '../src/core/probeprotocol.ts';
 import { ResultCache, RomFingerprint } from '../src/core/romdeps.ts';
 import { LevelEmulator } from '../src/core/levelemu.ts';
 import { ObjKindProbe, kindsKey, type ObjKinds } from '../src/core/objkinds.ts';
 import { levelScanJob, type ScanLevel } from '../src/core/levelscan.ts';
 import { cameraAtJob } from '../src/core/camerareach.ts';
-import { runJob, JobRunner, type JobSpec } from '../src/core/jobrunner.ts';
+import { runJob, JobRunner, partKey, type JobSpec } from '../src/core/jobrunner.ts';
 import { loadLevel, serializeLayer1, serializeSprites, encodeSecondaryHeader, newUid, L2_PTRS } from '../src/core/level.ts';
 import { editorImage } from './fixture.ts';
 import { checkJobRunner, learnAtOnce } from './runnercheck.ts';
@@ -29,14 +29,14 @@ import { setActsLike, extTileWords, setExtTileWords } from '../src/core/map16ext
 import { bgTileAddr } from '../src/core/bgmap16.ts';
 import { FG_PALS, BACK_AREA } from '../src/core/sharedpal.ts';
 import { setCustomPalette } from '../src/core/patches.ts';
-import { captureSprites, captureSpriteAt, spriteSetJob, spriteLoad, spriteLoads, type SpriteLevel } from '../src/core/spritegfx.ts';
+import { captureSprites, captureSpriteAt, spriteSetJob, spriteSetParts, spriteLoad, spriteLoads, type SpriteLevel } from '../src/core/spritegfx.ts';
 import { storeKey, type CacheEntry } from '../src/core/romdeps.ts';
 import { LevelUses, levelUsesJob, levelTilesKey, levelTilesAll, levelOverride } from '../src/core/levelusage.ts';
 import { layer3Kinds } from '../src/core/layer3.ts';
 import { spriteMemCheckJob, usedSpriteMemory, SpriteGroupResults, type SpriteMemLevel, type SpriteMemResult } from '../src/core/spritemem.ts';
 import { animatedJob, type Animated } from '../src/core/levelemu.ts';
-import { inputHash } from '../src/core/inputs.ts';
-import { objectThumbsJob, placementPreviewJob, objKey, type ObjSpec, type ObjThumb, type PlacementPreview } from '../src/core/objthumbs.ts';
+import { inputHash, editState } from '../src/core/inputs.ts';
+import { objectThumbsJob, placementPreviewJob, withPlaced, objKey, type ObjSpec, type ObjThumb, type PlacementPreview } from '../src/core/objthumbs.ts';
 import { jumpArcsJob, type JumpArc } from '../src/core/jumparcs.ts';
 import { layer2MotionsJob, type Layer2Motions } from '../src/core/l2scroll.ts';
 import { pathKindsJob, type PathKind } from '../src/core/owpaths.ts';
@@ -373,19 +373,22 @@ for (const changeRead of [false, true]) {
   const shown = steps.flatMap((d) => (d.type === 'learning' ? d.shown : []));
   check(JSON.stringify(shown) === JSON.stringify(direct), 'sprite set: the images as they come, as captured directly');
   check(done?.type === 'learned' && !done.failed && JSON.stringify(done.result) === JSON.stringify(direct), 'sprite set: the result as captured directly');
-  const entry = done?.type === 'learned' ? done.put.find(([k]) => k === storeKey('spr-set', input))?.[1] : undefined;
-  check(entry?.input === input && JSON.stringify(entry.data) === JSON.stringify(direct), 'sprite set: its result cache entry, with its input');
+  // (#232: the images once, as the entries of the set's parts; not again as the whole set)
+  const put = replies.flatMap((d) => ('put' in d ? d.put : []));
+  const partEntries = spriteSetParts(nums).map((p) => put.find(([k]) => k === storeKey(partKey('spr-set', p.sub), p.input))?.[1]);
+  check(!put.some(([k]) => k === storeKey('spr-set', input)) && partEntries.every((e) => !!e) && JSON.stringify(partEntries.flatMap((e) => e!.data as unknown[])) === JSON.stringify(direct),
+    'sprite set: kept as its parts only, the images in their entries');
 
-  atOnce({ key: 'spr-set', input, keep: true, picture: true, start: (e, _p, part) => spriteSetJob(e, level, nums, () => {}, part) });
-  const there = results.entry('spr-set', input);
-  check(!!there && !!entry && JSON.stringify(there.deps) === JSON.stringify(entry.deps) && JSON.stringify(there.data) === JSON.stringify(entry.data),
-    'sprite set: the same entry as on the main thread (bytes read)');
-  check(!!entry && entry.deps.pages.some((p) => emuMask[p << 8]), 'sprite set: a picture, its reads keep the display data');
+  atOnce({ key: 'spr-set', input, ...LEARN_KINDS.sprites, start: (e, _p, part) => spriteSetJob(e, level, nums, () => {}, part) });
+  const there = spriteSetParts(nums).map((p) => results.entry(partKey('spr-set', p.sub), p.input));
+  check(results.entry('spr-set', input) === undefined && there.every((t, i) => !!t && !!partEntries[i] && JSON.stringify(t.deps) === JSON.stringify(partEntries[i]!.deps) && JSON.stringify(t.data) === JSON.stringify(partEntries[i]!.data)),
+    'sprite set: the same entries as on the main thread (bytes read)');
+  check(partEntries.some((e) => !!e && e.deps.pages.some((p) => emuMask[p << 8])), 'sprite set: a picture, its reads keep the display data');
 
-  // the same set again: the stored result at once
+  // the same set again: the parts as stored, no load captured
   h.handle({ type: 'learn', lane: 'sprites', key: 'spr-set', input, job: { kind: 'sprites', level, nums }, replace: true });
   const again = h.next();
-  check(again?.type === 'learned' && again.put.some(([k]) => k === storeKey('spr-set', input)) && h.pending === 0, 'sprite set asked again: its stored result, with its entry');
+  check(again?.type === 'learned' && JSON.stringify(again.result) === JSON.stringify(direct) && h.pending === 0, 'sprite set asked again: put together from its stored parts at once');
 
   // variants and extra bytes in lanes of their own: one after another, the same result asked twice runs once
   const at = (x: number): ProbeMessage => ({ type: 'learn', lane: 'variants', key: `v:${x}`, input, job: { kind: 'spriteAt', level, id: 0x0d, x, y: 0 }, replace: false });
@@ -537,7 +540,7 @@ for (const changeRead of [false, true]) {
   check(same(l3.put.get(storeKey('l3k-test', l3Input)), results.entry('l3k-test', l3Input) && { ...results.entry('l3k-test', l3Input)!, input: l3Input }),
     'layer 3 kinds: their entry as on the main thread (key, input, bytes read: no picture)');
   const ltInput = inputHash({ lt: 'test' });
-  const lt = run({ type: 'learn', lane: 'lt', key: 'lt-test', input: ltInput, job: { kind: 'levelTiles', level: lv5, ov: ov5 }, replace: true });
+  const lt = run({ type: 'learn', lane: 'lt', key: 'lt-test', input: ltInput, job: { kind: 'levelTiles', state: editState(lv5, ov5) }, replace: true });
   const ltNow = atOnce({ key: 'lt-test', input: ltInput, keep: 'memory', picture: false, start: function* (emu) { return levelTilesAll(lr, lv5, (o) => emu.load(0x105, o), ov5); } });
   check(lt.done?.type === 'learned' && !lt.done.failed && JSON.stringify(lt.done.result) === JSON.stringify(ltNow) && ltNow.fg.length > 0,
     `open level's tiles: as on the main thread (${ltNow.fg.length} FG, ${ltNow.bg.length} BG uses)`);
@@ -573,14 +576,28 @@ for (const changeRead of [false, true]) {
     'thumbnails: their entry as on the main thread (key, input, bytes read: a picture)');
 
   // the placement preview: an object placed in level 105 (in memory only); a request replacing it drops it
-  const placed = { ...lv5, objects: [...lv5.objects, { uid: 1, num: 0x21, ext: 0, size: 0x13, x: 4, y: 0x14 }] }, ovp = levelOverride(r, placed);
-  const pvJob = (i: number): ProbeMessage => ({ type: 'learn', lane: 'placement', key: `pp-test${i}`, input: thInput, job: { kind: 'preview', level: placed, ov: ovp, layer2: false, placed: [placed.objects.length - 1] }, replace: true });
+  // (#232: the level as pvState sent whole once, then named by its id)
+  const obj = { uid: 1, num: 0x21, ext: 0, size: 0x13, x: 4, y: 0x14 }, placed = { ...lv5, objects: [...lv5.objects, obj] }, ovp = levelOverride(r, placed);
+  const pvState = editState(lv5, ov5);
+  const pvJob = (i: number, whole: boolean): ProbeMessage => ({ type: 'learn', lane: 'placement', key: `pp-test${i}`, input: thInput, job: { kind: 'preview', state: whole ? pvState : { id: pvState.id }, layer2: false, objects: [obj] }, replace: true });
   const started = h.started;
-  const pv = run(pvJob(1), pvJob(2));
+  const pv = run(pvJob(1, true), pvJob(2, false));
   const pvNow = atOnce<PlacementPreview | null>({ key: 'pp-now', input: 'pp', keep: 'memory', picture: true, start: (emu) => placementPreviewJob(lr, emu, placed, ovp, false, [placed.objects.length - 1]) });
   check(pv.learned.length === 1 && pv.done?.type === 'learned' && pv.done.key === 'pp-test2' && h.started === started + 1, 'placement preview: the replaced request dropped, only the latest learned');
   check(pv.done?.type === 'learned' && !!pvNow && pvNow.w > 0 && json(pv.done.result) === json(pvNow) && !pv.put.has(storeKey('pp-test2', thInput)) && !!pv.done.memory,
     `placement preview: as on the main thread (${pvNow?.w}x${pvNow?.h}), in memory only`);
+  const placedAt = withPlaced(r, pvState, false, [obj]);
+  check(json(placedAt.ov) === json({ ...ov5, ...ovp }) && placedAt.placed.join() === `${lv5.objects.length}`, 'placement preview: the level as pvState with the object placed loads as it would with the object in it');
+  const unsent = run({ ...(pvJob(3, false) as ProbeMessage & { type: 'learn' }), job: { kind: 'preview', state: { id: 'unsent' }, layer2: false, objects: [obj] } });
+  check(unsent.done?.type === 'learned' && unsent.done.failed, 'placement preview: a level as pvState never sent whole: failed');
+  // the host keeps the latest EDIT_STATES sent whole, also over a new ROM
+  h.setRom(2, r.data.slice());
+  for (let i = 0; i < EDIT_STATES - 1; i++) run({ ...(pvJob(4, false) as ProbeMessage & { type: 'learn' }), job: { kind: 'levelTiles', state: editState({ ...lv5, number: 0x100 + i }, ov5) }, lane: 'lt' });
+  const pvKept = run(pvJob(5, false));
+  run({ ...(pvJob(6, false) as ProbeMessage & { type: 'learn' }), job: { kind: 'levelTiles', state: editState({ ...lv5, number: 0x1ff }, ov5) }, lane: 'lt' });
+  const gone = run(pvJob(7, false));
+  check(pvKept.done?.type === 'learned' && !pvKept.done.failed && json(pvKept.done.result) === json(pvNow) && gone.done?.type === 'learned' && gone.done.failed,
+    `placement preview: the level as pvState kept over a new ROM, until ${EDIT_STATES} others came`);
 
   // jump arcs from two tiles: the first replaced
   const runs = direct.runStates(), lvHash = inputHash({ lv: 'test' });
