@@ -4,8 +4,8 @@ import { makeProjectId } from '../core/projectid.ts';
 import { Rom } from '../core/rom.ts';
 import { LevelEmulator, type LevelRender, type LevelOverride, type Animated, MAP_BASE, MAP_SIZE } from '../core/levelemu.ts';
 import {
-  type Level, type LevelObject, type LevelSprite, type ScreenExit, loadLevel, spriteLoadOrder, serializeLayer1, serializeSprites, serializeLevelSprites, spriteSizes, spriteId, spriteBytes,
-  isL1Vertical, newUid, hasLayer2Objects, hasObjects, SEC_HDR,
+  type Level, type LevelObject, type LevelSprite, type ScreenExit, loadLevel, spriteLoadOrder, serializeLayer1, serializeSprites, serializeLevelSprites, spriteId,
+  isL1Vertical, hasLayer2Objects, hasObjects, SEC_HDR,
   nearestEntrance, encodeSecondaryHeader, mainSpot, sameSpot, placeMain, midwaySpot, nearestMidway, placeMidway, exitLandsAtMidway, isSized, SPRITE_MEMORY, levelRows, TIME_TABLE,
 } from '../core/level.ts';
 import { levelBgPointer } from '../core/levelheader.ts';
@@ -18,7 +18,6 @@ import { renderLevel, type LevelImages, composite, animatedPixels, TileAnimation
 import type { SpriteImage, SpriteLevel } from '../core/spritegfx.ts';
 import { usedSpriteMemory, type SpriteMemLevel, type SpriteMemResult } from '../core/spritemem.ts';
 import { DM16_EXT, levelGfx, levelExtGfx, customPalette, levelMusic, defaultGfx } from '../core/patches.ts';
-import { objectLength2D, fitExtension } from '../core/obj2d.ts';
 import { gfxSkipMask, gfxFilesHash } from '../core/gfxpages.ts';
 import { flagBytes, usedFlags, isDm16, dm16Tiles, type Dm16Cond } from '../core/cdm16.ts';
 import { PREFAB_EXT, PREFAB_MAX, TRANSPARENT, listPrefabs, writePrefab, type Prefab } from '../core/prefabs.ts';
@@ -39,8 +38,9 @@ import { SecondaryEntrances, NO_FREE_ENTRANCE, entranceTables, entranceMarkers, 
 import type { RomHistory } from '../core/romhistory.ts';
 import type { EditOptions } from '../core/romedit.ts';
 import { EditSession, type LevelEdit, type StepResult } from '../core/editsession.ts';
+import { LevelModel, isBrushMode, type EditMode, type PickedItem, type Placement, type Clipboard } from '../core/levelmodel.ts';
 import { resizeObjectSize, type ObjKind, type ObjKinds, type KindLevel } from '../core/objkinds.ts';
-import { sizeKey, sizeParts, partSizes, namedDrivers, keyResize, ObjectBoxes, StepQueue, type Box, type Drivers, type SizeSpec } from '../core/objresize.ts';
+import { sizeKey, sizeParts, partSizes, namedDrivers, ObjectBoxes, StepQueue, type Box, type Drivers, type SizeSpec } from '../core/objresize.ts';
 import { type JumpArc } from '../core/jumparcs.ts';
 import { scanKey, type ScanLevel, type ScanResult } from '../core/levelscan.ts';
 import { cameraAtKey, type CameraReach, type CameraAt } from '../core/camerareach.ts';
@@ -70,18 +70,8 @@ import type { ProgressSave } from '../core/owprogress.ts';
 import type { Map16Target } from './gfx/target.ts';
 import type { WsTarget } from './gfxworkspace.ts';
 
-export type EditMode = 'l1' | 'l2' | 'spr' | 'exit' | 'bg' | 'l3';
-// the modes painted with a brush of tiles picked from the level or the picker: BG tiles, layer 3's 8x8 tiles
-export const isBrushMode = (m: EditMode) => m === 'bg' || m === 'l3';
+export { isBrushMode, type EditMode, type PickedItem, type Placement };
 export interface Brush { w: number; h: number; tiles: number[] }
-export type PickedItem =
-  // block: a rectangle of Map16 tiles from the picker sheet (tile + row * 16 + col), one Direct-Map16 object each
-  // prefab: prefab number (extended object $04, see prefabs.ts)
-  // extension: object 2D's bytes after its 3 when the ROM reads them (obj2d.ts)
-  | { kind: 'obj'; num: number; ext: number; size: number; tile?: number; block?: { w: number; h: number }; prefab?: number; extension?: number[] }
-  | { kind: 'spr'; num: number; extra: number };
-// what a right click in the level adds (App.placement)
-export interface Placement { objects: LevelObject[]; sprites: LevelSprite[] }
 // a part of the placement preview (which is a picture, CONTEXT.md) in level pixels; img null: a sprite without an image (drawn as its tile)
 export interface PreviewPart { x: number; y: number; img: HTMLCanvasElement | null }
 
@@ -156,15 +146,23 @@ export class App {
   render!: LevelRender;
   images!: LevelImages;
   compositeImg!: Uint32Array;
+  // the level editing model (levelmodel.ts): the edit mode, selection, picked item, clipboard and the object/sprite edits
+  readonly model: LevelModel = new LevelModel({
+    rom: () => this.rom,
+    level: () => this.level,
+    edit: (f) => this.editLevel(f),
+    geometry: () => ({ l1: this.images.geom1, l2: this.images.geom2 ?? null, vertical: this.vertical }),
+    switchMode: (m) => this.setMode(m),
+  });
   // the edit mode: changed through setMode (or App's own level opening and exit jumps)
-  private editMode: EditMode = 'l1';
-  get mode(): EditMode { return this.editMode; }
-  selection = new Set<number>();
+  get mode(): EditMode { return this.model.mode; }
+  get selection(): Set<number> { return this.model.selection; }
+  set selection(s: Set<number>) { this.model.selection = s; }
   // what a right click in the level places: the picked item, or – picked in the level after it – a copy of the selection
-  private picked: PickedItem | null = null;
-  get pickedItem(): PickedItem | null { return this.picked; }
-  set pickedItem(p: PickedItem | null) { this.picked = p; this.stampSelection = false; }
-  stampSelection = false;
+  get pickedItem(): PickedItem | null { return this.model.pickedItem; }
+  set pickedItem(p: PickedItem | null) { this.model.pickedItem = p; }
+  get stampSelection(): boolean { return this.model.stampSelection; }
+  set stampSelection(b: boolean) { this.model.stampSelection = b; }
   // BG mode brush: a w×h block of BG Map16 tiles (row-major), picked from the picker sheet or the level
   bgBrush: Brush = { w: 1, h: 1, tiles: [0] };
   l3Brush: Brush = { w: 1, h: 1, tiles: [0] }; // layer 3 tilemap words
@@ -191,7 +189,7 @@ export class App {
   holdRender = false; // while drawing: the debounced re-emulation waits (it would stall the stroke)
   private quietUntil = 0; // and after a stroke until then (the next one often follows quickly)
   private persistTimer = 0;
-  clipboard: { objects?: LevelObject[]; sprites?: LevelSprite[] } = {};
+  get clipboard(): Clipboard { return this.model.clipboard; }
   // the arrangements of Direct Map16 objects pasted in the session (pastehint.ts); the hint to save the last
   // paste (its objects as placed in level/layer) as prefab, until it is dismissed or another level is opened
   private pastes = new PasteCounter();
@@ -395,7 +393,7 @@ export class App {
     this.selection.clear();
     this.exitScreen = 0;
     this.exitMarker = null;
-    if (this.layerGone()) this.editMode = 'l1';
+    if (this.layerGone()) this.model.mode = 'l1';
     this.spriteMem = this.spriteMemBase = null;
     this.refresh();
     this.emit('level');
@@ -650,7 +648,7 @@ export class App {
     const t = exitTarget(this.rom, this.level.number, e);
     if (t.overworld) return;
     this.openLevel(t.to);
-    this.editMode = 'exit';
+    this.model.mode = 'exit';
     this.exitMarker = t.entrance >= 0 ? { kind: 'sec', index: t.entrance }
       : { kind: exitLandsAtMidway(e, this.level.secondary) ? 'midway' : 'main', index: 0 };
     this.emit('mode');
@@ -674,7 +672,7 @@ export class App {
   // opens a level and chooses the screen of one of its exits
   gotoExit(level: number, screen: number): void {
     if (level !== this.level.number) this.openLevel(level);
-    this.editMode = 'exit';
+    this.model.mode = 'exit';
     this.emit('mode');
     this.selectScreen(screen);
     this.reveal = this.vertical ? { x: 128, y: screen * 256 + 128 } : { x: screen * 256 + 128, y: 200 };
@@ -953,8 +951,7 @@ export class App {
 
   // ------------- queries -------------
   currentObjects(): LevelObject[] {
-    if (this.mode === 'l2') return this.level.layer2Objects ?? [];
-    return this.level.objects;
+    return this.model.currentObjects();
   }
 
   objectKey(layer2: boolean, idx: number): number {
@@ -1410,10 +1407,10 @@ export class App {
   }
 
   selectedObjects(): LevelObject[] {
-    return this.currentObjects().filter((o) => this.selection.has(o.uid));
+    return this.model.selectedObjects();
   }
   selectedSprites(): LevelSprite[] {
-    return this.level.sprites.filter((s) => this.selection.has(s.uid));
+    return this.model.selectedSprites();
   }
 
   levelWidthTiles(): number {
@@ -1482,7 +1479,7 @@ export class App {
     const ghosts = this.level.layer2Objects || isBrushMode(m) || isBrushMode(this.mode);
     const recompose = m !== this.mode && ((ghosts && this.show.ghost) || (m === 'l3' && !this.show.layer3));
     if (m === 'l3') this.show.layer3 = true;
-    this.editMode = m;
+    this.model.mode = m;
     this.selection = new Set(selection);
     if (recompose) this.recomposite();
     this.emit('mode');
@@ -1566,64 +1563,16 @@ export class App {
   }
 
   clampObject(o: { x: number; y: number }): void {
-    const { w, h } = this.objectLimits();
-    o.x = Math.max(0, Math.min(w - 1, o.x));
-    o.y = Math.max(0, Math.min(h - 1, o.y));
+    this.model.clampObject(o);
   }
   // the tiles an object's origin can be on in the mode's layer: 0 to w - 1, 0 to h - 1
   objectLimits(): { w: number; h: number } {
-    const w = this.mode === 'l2' && this.images.geom2 ? this.images.geom2.width : this.levelWidthTiles();
-    const hgt = this.mode === 'l2' && this.images.geom2 ? this.images.geom2.height : this.levelHeightTiles();
-    return { w, h: this.vertical ? Math.min(hgt, 0x1ff) : hgt };
+    return this.model.objectLimits();
   }
 
   insertAt(tx: number, ty: number, p: PickedItem | null = this.pickedItem): void {
     if (!p) { toast('Choose an object/sprite in the picker first.'); return; }
-    this.editLevel(() => {
-      const pl = this.newItems(p, tx, ty);
-      if (!pl) return false;
-      this.add(pl);
-    });
-    // the placed item is selected: changed (resized, …), the next right click copies it as it is now
-    this.stampSelection = true;
-  }
-  // picked item p at tile (tx, ty): objects in layer 1/2, a sprite in any mode; null when it can't go into the
-  // current mode (an object while editing sprites)
-  private newItems(p: PickedItem, tx: number, ty: number): Placement | null {
-    if (p.kind === 'spr') {
-      const s: LevelSprite = { uid: newUid(), num: p.num, x: tx, y: ty, extra: p.extra };
-      if (s.extra >= 2) { const b = spriteBytes(spriteSizes(this.rom), s); if (b.length) s.bytes = b; }
-      return { objects: [], sprites: [s] };
-    }
-    if (this.mode !== 'l1' && this.mode !== 'l2') return null;
-    const cells = p.block ? Array.from({ length: p.block.w * p.block.h }, (_, i) => ({ dx: i % p.block!.w, dy: Math.floor(i / p.block!.w) })) : [{ dx: 0, dy: 0 }];
-    const objects = cells.map(({ dx, dy }) => {
-      const o: LevelObject = { uid: newUid(), num: p.num, ext: p.ext, x: tx + dx, y: ty + dy, size: p.size };
-      if (p.tile !== undefined) o.tile = p.tile + dy * 16 + dx;
-      if (p.prefab !== undefined) o.prefab = p.prefab;
-      if (p.extension) o.extension = [...p.extension];
-      fitExtension(o, objectLength2D(this.rom));
-      this.clampObject(o);
-      return o;
-    });
-    return { objects, sprites: [] };
-  }
-  // copies of the current mode's items with their upper left at tile (tx, ty)
-  private copiesAt(items: (LevelObject | LevelSprite)[], tx: number, ty: number): Placement {
-    const minX = Math.min(...items.map((o) => o.x)), minY = Math.min(...items.map((o) => o.y));
-    const copies = items.map((it) => {
-      const c = { ...structuredClone(it), uid: newUid(), x: it.x - minX + tx, y: it.y - minY + ty };
-      this.clampObject(c);
-      return c;
-    });
-    return this.mode === 'spr' ? { objects: [], sprites: copies as LevelSprite[] } : { objects: copies as LevelObject[], sprites: [] };
-  }
-  // puts the placement into the level, selected (sprites in mode sprites)
-  private add(pl: Placement): void {
-    if (pl.sprites.length && this.mode !== 'spr') this.setMode('spr');
-    this.level.sprites.push(...pl.sprites);
-    this.currentObjects().push(...pl.objects);
-    this.selection = new Set([...pl.objects, ...pl.sprites].map((o) => o.uid));
+    this.model.insertAt(tx, ty, p);
   }
 
   // ------------- conditional Direct Map16 (cdm16.ts) -------------
@@ -1824,21 +1773,11 @@ export class App {
   }
 
   deleteSelection(): void {
-    if (!this.selection.size) return;
-    this.editLevel(() => {
-      if (this.mode === 'spr') this.level.sprites = this.level.sprites.filter((s) => !this.selection.has(s.uid));
-      else if (this.mode === 'l2' && this.level.layer2Objects) this.level.layer2Objects = this.level.layer2Objects.filter((o) => !this.selection.has(o.uid));
-      else if (this.mode === 'l1') this.level.objects = this.level.objects.filter((o) => !this.selection.has(o.uid));
-      this.selection.clear();
-    });
+    this.model.deleteSelection();
   }
 
   moveSelection(dx: number, dy: number): void {
-    if (!this.selection.size) return;
-    this.editLevel(() => {
-      const items = this.mode === 'spr' ? this.selectedSprites() : this.selectedObjects();
-      for (const o of items) { o.x += dx; o.y += dy; this.clampObject(o); }
-    });
+    this.model.moveSelection(dx, dy);
   }
 
   // resize: width/height nibbles of settings byte by one step each; the left and top edges stay where they
@@ -1853,11 +1792,7 @@ export class App {
     if (!objs.length) return true;
     const sized = objs.map((o) => resizeObjectSize(this.objectKind(o.num), o.size, dw, dh));
     if (!this.askSizes(objs.flatMap((o, i) => [this.sizeSpec(o, o.size), this.sizeSpec(o, sized[i])]), retry)) return false;
-    const { w, h } = this.objectLimits();
-    this.editLevel(() => objs.forEach((o, i) => {
-      const r = keyResize(o, sized[i], this.sizeBoxes(o), far, w, h);
-      if (r) { o.x = r.x; o.y = r.y; o.size = r.size; }
-    }));
+    this.model.resizeObjects(objs, sized, (o) => this.sizeBoxes(o), far);
     return true;
   }
 
@@ -1922,44 +1857,28 @@ export class App {
   // copies the selection and pastes it one tile down-right (Ctrl+D)
   duplicateSelection(): void {
     this.copy();
-    const s = this.mode === 'spr' ? this.selectedSprites() : this.selectedObjects();
+    const s = this.model.selectedItems();
     if (s[0]) this.paste(s[0].x + 1, s[0].y + 1);
   }
 
   reorderSelection(dir: 'front' | 'back'): void {
-    if (this.mode === 'spr' || !this.selection.size) return;
-    this.editLevel(() => {
-      const objs = this.currentObjects();
-      const sel = objs.filter((o) => this.selection.has(o.uid));
-      const rest = objs.filter((o) => !this.selection.has(o.uid));
-      const res = dir === 'front' ? [...rest, ...sel] : [...sel, ...rest];
-      if (this.mode === 'l2') this.level.layer2Objects = res; else this.level.objects = res;
-    });
+    this.model.reorderSelection(dir);
   }
 
   copy(): void {
-    if (this.mode === 'spr') this.clipboard = { sprites: structuredClone(this.selectedSprites()) };
-    else this.clipboard = { objects: structuredClone(this.selectedObjects()) };
+    this.model.copy();
   }
   paste(tx: number, ty: number): void {
-    this.placeCopy((this.mode === 'spr' ? this.clipboard.sprites : this.clipboard.objects) ?? [], tx, ty);
+    this.placeCopy(this.model.clipboardItems(), tx, ty);
   }
   // a right click in the level: a copy of the selection when it was picked after the picked item, else the picked item
   placeAt(tx: number, ty: number): void {
-    if (this.copiesSelection()) this.placeCopy(this.selectedItems(), tx, ty);
+    if (this.model.copiesSelection()) this.placeCopy(this.model.selectedItems(), tx, ty);
     else this.insertAt(tx, ty);
-  }
-  private copiesSelection(): boolean {
-    return this.stampSelection && this.selection.size > 0;
-  }
-  private selectedItems(): (LevelObject | LevelSprite)[] {
-    return this.mode === 'spr' ? this.selectedSprites() : this.selectedObjects();
   }
   // what a right click at tile (tx, ty) places (placeAt); null: nothing (only layer 1/2 and sprites place)
   placement(tx: number, ty: number): Placement | null {
-    if (this.mode !== 'l1' && this.mode !== 'l2' && this.mode !== 'spr') return null;
-    if (this.copiesSelection()) { const items = this.selectedItems(); return items.length ? this.copiesAt(items, tx, ty) : null; }
-    return this.pickedItem ? this.newItems(this.pickedItem, tx, ty) : null;
+    return this.model.placement(tx, ty);
   }
   // The placement preview at tile (tx, ty): the placement as the level shows it once placed – objects drawn by
   // the level's load with them added (learned in the background: undefined until known), sprites with their images
@@ -2007,8 +1926,7 @@ export class App {
 
   // copies of the items with their upper left at tile (tx, ty), selected
   private placeCopy(items: (LevelObject | LevelSprite)[], tx: number, ty: number): void {
-    if (!items.length) return;
-    this.editLevel(() => this.add(this.copiesAt(items, tx, ty)));
+    if (!this.model.placeCopy(items, tx, ty)) return;
     if (this.mode !== 'l1' && this.mode !== 'l2') return;
     const pasted = this.selectedObjects();
     const hint = this.pastes.paste(pasted);
