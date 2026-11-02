@@ -1250,7 +1250,7 @@ export class GfxTab implements WsPanel {
 
   // writes an imported file as one undoable ROM edit; into: the package that gets the new number
   private importEdit<T>(label: string, into: Package | undefined, write: () => T): T {
-    return this.app.romEdit(label, () => importForPackage(this.app.rom, into, write));
+    return this.app.romEdit(label, () => importForPackage(this.app.rom, into ?? null, write));
   }
 
   // the number the image went to; null: cancelled or failed

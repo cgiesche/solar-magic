@@ -152,7 +152,7 @@ await uninstallPackage(rom, pb.pkg!.id, opts.blank);
   const rec = listPackages(rom).find((p) => p.id === r.pkg!.id)!;
   check(r.ok && typeof kind === 'string' && hasGfx(rom, free) && rec.gfx.includes(free), `an imported graphic goes into its package's record (${rec.gfx.join()})`);
   const before = JSON.stringify(listPackages(rom));
-  importForPackage(rom, undefined, () => storeGfxBin(rom, free + 1, data));
+  importForPackage(rom, null, () => storeGfxBin(rom, free + 1, data));
   check(hasGfx(rom, free + 1) && JSON.stringify(listPackages(rom)) === before, 'imported for no package: no record changes');
   await uninstallPackage(rom, r.pkg!.id, opts.blank);
   check(!hasGfx(rom, free) && hasGfx(rom, free + 1), 'removing the package takes its imported graphic along, not the other');

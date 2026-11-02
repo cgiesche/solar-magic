@@ -165,8 +165,9 @@ export interface Recorded<R> { result: R; pkg: Package | null }
 
 // runs `change` and records what it put into the ROM into the package; when it fails (ok false) nothing
 // is recorded, when it throws (or the record can't be saved) the error is passed on. Run it in an edit
-// session (romedit.ts): that puts the ROM back after a failure. Called by packages.ts only (installing,
-// reapplying a patch, a graphic imported for a package): the UI goes through it, never through the recorder.
+// session (romedit.ts): that puts the ROM back after a failure. This recorder and recordPackageChangeAsync
+// are called by packages.ts only (installing, reapplying a patch, a graphic imported for a package): the
+// UI goes through packages.ts, never through the recorder.
 export function recordPackageChange<R extends { ok: boolean }>(rom: Rom, target: PackageTarget, change: (claim: Claim) => R): Recorded<R> {
   const rec = startRecording(rom, target);
   return rec.finish(change(rec.claim));

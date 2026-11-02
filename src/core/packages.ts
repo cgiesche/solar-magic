@@ -348,17 +348,21 @@ export async function installPackage(rom: Rom, preview: ReadyPreview | ManualPre
 // applies the patch of an installed package (registry entry `entryId`) anew with other settings; the
 // patch's new id goes into the package's record (`rec`; null: none). Run it in an edit session.
 export function reapplyPackagePatch(rom: Rom, entryId: string, upload: Upload, fileName: string, main: string, values: Record<string, string>, rec: Package | null): ApplyResult {
-  const apply = () => reapplyPatch(rom, entryId, patchSource(upload, fileName, main, values));
-  return rec ? recordPackageChange(rom, rec, apply).result : apply();
+  return recordedIn(rom, rec, () => reapplyPatch(rom, entryId, patchSource(upload, fileName, main, values)));
 }
 
-// writes a graphics file imported for an installed package (`into`; undefined: for none): what it adds
-// (its ExGFX number) goes into the package's record. Run it in an edit session. Returns what `write` did.
-export function importForPackage<T>(rom: Rom, into: Package | undefined, write: () => T): T {
-  if (!into) return write();
+// writes a file imported for an installed package (`into`; null: for none; the graphics tab's import):
+// what it adds (an ExGFX number) goes into the package's record; `write` throws when it fails. Run it in
+// an edit session. Returns what `write` did.
+export function importForPackage<T>(rom: Rom, into: Package | null, write: () => T): T {
   let value!: T;
-  recordPackageChange(rom, into, () => { value = write(); return { ok: true }; });
+  recordedIn(rom, into, () => { value = write(); return { ok: true }; });
   return value;
+}
+
+// runs `change`, recorded into the package when there is one
+function recordedIn<R extends { ok: boolean }>(rom: Rom, pkg: Package | null, change: () => R): R {
+  return pkg ? recordPackageChange(rom, pkg, change).result : change();
 }
 
 // ---------- files and manuals ----------
