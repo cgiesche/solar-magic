@@ -24,11 +24,12 @@ import { DM16_EXT, levelGfx, levelExtGfx, customPalette, levelMusic } from '../c
 import { gfxSkipMask, gfxFilesHash } from '../core/gfxpages.ts';
 import { flagBytes, usedFlags, isDm16, dm16Tiles } from '../core/cdm16.ts';
 import { RenderQuery, type TileCut } from '../core/renderquery.ts';
-import { PREFAB_EXT, listPrefabs, writePrefab, type Prefab } from '../core/prefabs.ts';
-import { breakUpParts, replaced, setPrefabSources } from '../core/prefabsources.ts';
-import { PasteCounter, findPasted, arrangementKey, type PasteHint } from '../core/pastehint.ts';
-import { SuggestRuns, SuggestionList, suggestInput, type PrefabSuggestion, type SuggestLevels, type SuggestRun } from '../core/prefabsuggest.ts';
-import { applyPrefabPlaces, deletePrefab, prefabObjectCount, replaceWithPrefab, type LevelPlaces, type LevelGroups, type PrefabGroup } from '../core/prefabplaces.ts';
+import { PREFAB_EXT, listPrefabs, type Prefab } from '../core/prefabs.ts';
+import { breakUpParts, replaced } from '../core/prefabsources.ts';
+import { PasteCounter, findPasted, type PasteHint } from '../core/pastehint.ts';
+import { SuggestRuns, suggestInput, type PrefabSuggestion, type SuggestRun } from '../core/prefabsuggest.ts';
+import { SessionSuggestions } from '../core/suggestsession.ts';
+import { deletePrefab, storePrefab, prefabObjectCount, replaceWithPrefab, type LevelPlaces, type LevelGroups, type PrefabGroup } from '../core/prefabplaces.ts';
 import type { Package } from '../core/pkgreg.ts';
 import { kvEntries, kvKeys, kvWrite, saveRom } from './storage.ts';
 import { ResultCache, RomFingerprint, oldStoreKeys, type CacheEntry } from '../core/romdeps.ts';
@@ -40,7 +41,7 @@ import { musicPlayer } from './musicplayer.ts';
 import { exitTarget } from '../core/exitgraph.ts';
 import { SecondaryEntrances, NO_FREE_ENTRANCE, entranceTables, entranceMarkers, type Marker } from '../core/entrances.ts';
 import type { EditOptions } from '../core/romedit.ts';
-import { EditSession, type LevelEdit, type StepResult } from '../core/editsession.ts';
+import { type EditSession, type LevelEdit, type StepResult } from '../core/editsession.ts';
 import { LevelModel, isBrushMode, type EditMode, type PickedItem, type Placement } from '../core/levelmodel.ts';
 import { resizeObjectSize, sizedByte, withSizedByte, UNSIZED, type ObjKind, type ObjKinds, type KindLevel } from '../core/objkinds.ts';
 import { sizeKey, sizeParts, partSizes, namedDrivers, ObjectBoxes, StepQueue, type Box, type Drivers, type SizeSpec } from '../core/objresize.ts';
@@ -191,10 +192,11 @@ export class App {
   pasteHint: PasteHintAt | null = null;
   // repeated arrangements of Direct Map16 objects across the levels (prefabsuggest.ts), found in the background
   // a while after the last change; null while not known yet
-  private suggestions: SuggestionList; // the list shown and whether it is current (prefabsuggest.ts SuggestionList)
-  get prefabSuggestions(): PrefabSuggestion[] | null { return this.suggestions.list; }
+  // the list shown and whether it is current, wired to the edit session (suggestsession.ts)
+  private suggestions: SessionSuggestions;
+  get prefabSuggestions(): PrefabSuggestion[] | null { return this.suggestions.list.list; }
   // they are of the levels and the ROM as they are now (their places can be taken)
-  get suggestionsCurrent(): boolean { return this.suggestions.current; }
+  get suggestionsCurrent(): boolean { return this.suggestions.list.current; }
   private suggestTimer = 0;
   private suggestRun = 0;
   private listeners = new Map<AppEvent, Set<Listener>>();
@@ -242,14 +244,15 @@ export class App {
       if (names !== this.objectNamesSeen) { this.objectNamesSeen = names; this.emit('object-names'); }
     });
     musicPlayer.onChange(() => { this.scheduler.resume(); this.emit('busy'); });
-    // level edits and ROM edits (romEdit: one undo step, all or nothing, the follow-ups below)
-    this.edits = new EditSession(rom, {
+    this.results = new ResultCache(new RomFingerprint(rom));
+    // level edits and ROM edits (romEdit: one undo step, all or nothing, the follow-ups below), with the prefab
+    // suggestions checked on their changes; the levels' arrangements and places of earlier runs kept (only changed
+    // levels are taken apart again)
+    this.suggestions = new SessionSuggestions(rom, new SuggestRuns(this.results.fp), {
       changed: (rerender) => this.levelChanged(rerender),
       saved: (log, silent) => this.levelSaved(log, silent),
       saveFailed: (e) => toast(`Save failed: ${e}`, 'error'),
       written: () => this.romChanged(),
-      // (the open level loaded again by then, whatever the order of the follow-ups)
-      settled: () => this.checkSuggestions(),
       // (each told when the edit changed a ROM byte its read read)
       followUps: [
         // the open level as stored (a patch rewrote its sprite data, a package its sample …): loaded again (not when it
@@ -261,9 +264,13 @@ export class App {
         // the secondary entrances (markers, the exit panel): shown at once, also after undo/redo
         { read: (r) => entranceTables(r), changed: () => this.emit('change') },
       ],
+    }, {
+      start: () => this.startSuggestRun(),
+      stop: () => this.stopSuggestRun(),
+      changed: () => this.emit('prefab-suggestions'),
     });
+    this.edits = this.suggestions.edits;
     this.entrances = new SecondaryEntrances(this.edits);
-    this.results = new ResultCache(new RomFingerprint(rom));
     this.cacheReady = kvEntries<CacheEntry | string[]>(CACHE_PREFIX)
       .then((e) => this.results.load(e.map(([k, v]) => [k.slice(CACHE_PREFIX.length), v])))
       .catch((e) => console.error(e));
@@ -271,15 +278,6 @@ export class App {
     kvKeys(CACHE_NAME).then((k) => kvWrite([], oldStoreKeys(k, CACHE_NAME, CACHE_VERSION))).catch((e) => console.error(e));
     void this.cacheReady.then(() => this.sweepResults());
     this.learner = new ResultLearner({ rom, results: this.results, main: this.emu });
-    // the levels' arrangements and places of earlier runs kept (only changed levels are taken apart again)
-    this.suggestions = new SuggestionList(new SuggestRuns(this.results.fp), {
-      rom: () => this.rom,
-      source: () => this.suggestSource(),
-      editing: () => this.edits.running,
-      start: () => this.startSuggestRun(),
-      stop: () => this.stopSuggestRun(),
-      changed: () => this.emit('prefab-suggestions'),
-    });
     this.probes = new ProbeClient({
       results: this.results,
       cacheReady: this.cacheReady,
@@ -354,18 +352,19 @@ export class App {
   // ------------- level loading / rendering -------------
   // opens level n (the open one saved first, or its unsaved changes dropped with discard)
   openLevel(n: number, discard = false): void {
-    this.edits.open(n, discard);
-    this.model.selection.clear();
-    this.exitScreen = 0;
-    this.exitMarker = null;
-    if (this.layerGone()) this.model.mode = 'l1';
-    this.spriteMem = this.spriteMemBase = null;
-    this.refresh();
-    this.emit('level');
-    logMsg(`Level ${hex(n, 3)} opened`);
-    this.scheduleSpriteMem();
-    this.probes.prefetch();
-    this.checkSuggestions(); // (the open level as edited is part of them)
+    // (the prefab suggestions checked then: the open level as edited is part of them)
+    this.suggestions.open(n, discard, () => {
+      this.model.selection.clear();
+      this.exitScreen = 0;
+      this.exitMarker = null;
+      if (this.layerGone()) this.model.mode = 'l1';
+      this.spriteMem = this.spriteMemBase = null;
+      this.refresh();
+      this.emit('level');
+      logMsg(`Level ${hex(n, 3)} opened`);
+      this.scheduleSpriteMem();
+      this.probes.prefetch();
+    });
   }
 
   get vertical(): boolean {
@@ -1418,7 +1417,6 @@ export class App {
     if (rerender) this.refresh();
     this.emit('change');
     this.scheduleSpriteMem();
-    this.checkSuggestions();
     if (this.layerGone()) this.setMode('l1'); // (its header changed, an edit undone)
   }
   // the open level has no layer for the edit mode (layer 2 objects, BG tilemap)
@@ -1630,9 +1628,8 @@ export class App {
 
   // stores arrangement s (a suggestion's) as prefab n, its places (prefabPlaces) replaced in the same ROM edit
   saveArrangementAsPrefab(n: number, s: Prefab, places: LevelPlaces[]): boolean {
-    if (!this.storePrefab(n, s, places, places)) return false;
-    // its places replaced: not offered any more (the next background run doesn't find it either)
-    if (places.length) this.suggestions.drop(arrangementKey(s));
+    // (its places replaced: no longer suggested)
+    try { this.suggestions.saveArrangement(n, s, places); } catch (e) { toast(String(e instanceof Error ? e.message : e), 'error'); return false; }
     this.model.pickedItem = { kind: 'obj', num: 0, ext: PREFAB_EXT, size: 0, prefab: n };
     return true;
   }
@@ -1640,27 +1637,17 @@ export class App {
   // prefab n as s and plan's objects replaced by it, one ROM edit labelled with the places found elsewhere;
   // sources: the objects it is made from, its top left at x, y (prefabsources.ts)
   private storePrefab(n: number, s: Prefab, plan: LevelGroups[], places: LevelPlaces[], sources?: { objects: LevelObject[]; x: number; y: number }): boolean {
-    const open = this.level.number, found = places.reduce((k, p) => k + p.places.length, 0);
     try {
-      this.romEdit(`Prefab ${hex(n, 2)} saved${found ? `, ${found} place${found > 1 ? 's' : ''} replaced` : ''}`, () => {
-        // (the plan's objects are the open level's as edited: saved before the ROM edit)
-        if (plan.some((p) => p.level === open) && this.dirty) throw new Error(`Level ${hex(open, 3)} could not be saved`);
-        writePrefab(this.rom, n, s);
-        setPrefabSources(this.rom, n, s, sources?.objects ?? null, sources?.x, sources?.y);
-        applyPrefabPlaces(this.rom, n, plan);
-      });
+      storePrefab(this.edits, n, s, plan, places, sources);
       return true;
     } catch (e) { toast(String(e instanceof Error ? e.message : e), 'error'); return false; }
   }
 
-  // the suggestions anew a while after the last change, in the probe worker; the levels that didn't change keep their
+  // the suggestion runs: the suggestions anew a while after the last change, in the probe worker; the levels that didn't change keep their
   // results there (prefabsuggest.ts KeptSuggestions). A change they don't depend on keeps them current at once; one
   // back to the latest run's state (an undo) makes them current at once with that run's whole list (a suggestion
   // saved and undone is back with its places, a list it was dropped from is never current). During a ROM edit the
-  // edit session's settled checks once it is done (SuggestionList.check).
-  private checkSuggestions(): void {
-    this.suggestions.check();
-  }
+  // edit session's settled checks once it is done (suggestsession.ts).
   private stopSuggestRun(): void {
     clearTimeout(this.suggestTimer);
     this.suggestRun++; // (a run started meanwhile stops)
@@ -1670,15 +1657,12 @@ export class App {
     const run = this.suggestRun;
     this.suggestTimer = window.setTimeout(() => {
       if (run !== this.suggestRun || this.closed) return;
-      const src = this.suggestSource(), { levels, open } = src;
+      const src = this.suggestions.source(), { levels, open } = src;
       // (a run on other levels or contents replaces the one running)
       this.probes.learn<SuggestRun>('suggest', { kind: 'suggest', levels, open }, { lane: 'prefab-suggest', input: suggestInput(this.rom, src), replace: true, done: (r) => {
-        if (run === this.suggestRun) this.suggestions.done(r);
+        if (run === this.suggestRun) this.suggestions.list.done(r);
       } });
     }, 1500);
-  }
-  private suggestSource(): SuggestLevels {
-    return { levels: usedLevels(this.rom), open: this.level };
   }
 
   // levels whose saved data uses prefab n (plus the open level with its unsaved changes), with how many objects

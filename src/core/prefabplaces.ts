@@ -17,6 +17,9 @@ import { levelOverride } from './levelusage.ts';
 import { isDm16, dm16Tiles, flagBytes, COND_FLAGS, type Dm16Cond } from './cdm16.ts';
 import { PREFAB_EXT, TRANSPARENT, writePrefab, type Prefab } from './prefabs.ts';
 import { objectBytes } from './prefabcost.ts';
+import { setPrefabSources } from './prefabsources.ts';
+import { hex } from './names.ts';
+import type { EditSession } from './editsession.ts';
 
 export type Layer = 1 | 2;
 // objects (indices in the layer's list) to become one prefab object at x, y
@@ -180,4 +183,17 @@ export function deletePrefab(rom: Rom, n: number, levels: number[]): void {
     saveLevel(rom, lv);
   }
   writePrefab(rom, n, null);
+}
+
+// prefab n as s and plan's objects replaced by it, one ROM edit labelled with the places found elsewhere;
+// sources: the objects it is made from, its top left at x, y (prefabsources.ts). Throws when it failed.
+export function storePrefab(edits: EditSession, n: number, s: Prefab, plan: LevelGroups[], places: LevelPlaces[], sources?: { objects: LevelObject[]; x: number; y: number }): void {
+  const open = edits.level.number, found = places.reduce((k, p) => k + p.places.length, 0);
+  edits.romEdit(`Prefab ${hex(n, 2)} saved${found ? `, ${found} place${found > 1 ? 's' : ''} replaced` : ''}`, () => {
+    // (the plan's objects are the open level's as edited: saved before the ROM edit)
+    if (plan.some((p) => p.level === open) && edits.dirty) throw new Error(`Level ${hex(open, 3)} could not be saved`);
+    writePrefab(edits.rom, n, s);
+    setPrefabSources(edits.rom, n, s, sources?.objects ?? null, sources?.x, sources?.y);
+    applyPrefabPlaces(edits.rom, n, plan);
+  });
 }
