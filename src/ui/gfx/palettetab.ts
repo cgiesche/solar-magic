@@ -16,6 +16,7 @@ import { snesColorToRGBA } from '../../core/gfx.ts';
 import { pcToSnes } from '../../core/rom.ts';
 import { hex } from '../../core/names.ts';
 import { customPalette, setCustomPalette } from '../../core/patches.ts';
+import { pathFadeColors } from '../../core/owoptions.ts';
 import { parsePrimaryHeader, L1_PTRS, type PrimaryHeader } from '../../core/level.ts';
 import type { LevelRender } from '../../core/levelemu.ts';
 import { ColorSources } from '../../core/colorsources.ts';
@@ -117,6 +118,10 @@ export class PaletteTab implements WsPanel {
   // the colors the game keeps rewriting (on a submap: its load's CGRAM differs from its palette there)
   private animatedColor(i: number): boolean {
     return !!this.t.animatedColors(this.ws.preview.submapCgram(), this.special)?.has(i);
+  }
+  // a submap's colors the path fade rewrites (while it is on: core/owoptions.ts, learned by emulation)
+  private fadedColor(i: number): boolean {
+    return this.fixed !== null && pathFadeColors(this.app.rom).has(i);
   }
 
   show(): void {
@@ -335,9 +340,12 @@ export class PaletteTab implements WsPanel {
       sw.classList.toggle('range', i >= lo && i <= hi && lo !== hi);
       const animated = this.animatedColor(i);
       sw.classList.toggle('locked', locked);
+      const faded = this.fadedColor(i);
       sw.classList.toggle('animated', animated);
-      sw.title = `Color ${hex(i >> 4, 1)}·${hex(i & 15, 1)} – ${locked ? 'set by the game, not editable (only with an own palette)' : fixed !== null ? `palette of ${this.ownerName()}` : originName(this.origin(i))}${animated ? ` · animated: the game keeps rewriting it${this.t.anims ? ' (Ctrl+click: open its animation)' : ''}` : ''}`;
+      sw.classList.toggle('faded', faded);
+      sw.title = `Color ${hex(i >> 4, 1)}·${hex(i & 15, 1)} – ${locked ? 'set by the game, not editable (only with an own palette)' : fixed !== null ? `palette of ${this.ownerName()}` : originName(this.origin(i))}${animated ? ` · animated: the game keeps rewriting it${this.t.anims ? ' (Ctrl+click: open its animation)' : ''}` : ''}${faded ? ' · rewritten while an event\'s path fades in' : ''}`;
     }
+    if (fixed !== null) this.buildHeader();
     for (let row = 0; row < 16; row++) {
       const names: string[] = [];
       for (let c = 0; c < 16; c++) {
@@ -372,8 +380,9 @@ export class PaletteTab implements WsPanel {
         : editable ? `${originName(o)} · ${o.kind === 'own' ? 'applies to this level only' : others ? `also in ${others} other level${others === 1 ? '' : 's'}` : 'this level only'}` : ''),
       own.length ? h('div', { class: 'warn-box' }, 'Animated by ', animLinks(this.ws, own), ' – the level shows its colors instead of this one.')
         : this.animatedColor(i) ? h('div', { class: 'warn-box' }, fixed
-          ? 'Animated: the game rewrites this color on the overworld (Mario, the level tiles\' blinking, the lightning, the path fade). A change here is barely or not at all visible in the game.'
+          ? `Animated: the game rewrites this color as the ${this.t.where} loads (emulated). A change here is barely or not at all visible in the game.`
           : 'Animated: the game keeps rewriting this color (flashing coins, ?-blocks etc.). A change here is barely or not at all visible in the game.') : '',
+      this.fadedColor(i) ? h('div', { class: 'warn-box' }, 'The event path fade rewrites this color while a path fades in (Overworld options: "Event path fade effect").') : '',
     );
     if (!editable) {
       d.append(
@@ -417,8 +426,11 @@ export class PaletteTab implements WsPanel {
     const box = this.headerBox;
     clear(box);
     if (this.fixed !== null) {
-      box.append(h('p', { class: 'hint' }, 'When a path is revealed the game copies colors 1–7 of palettes 4–7 into palettes 0–3 and C–F and fades them: '
-        + 'tiles drawn in those palettes change color during the path fade.'));
+      // (with the fade off, or its code a patch's, nothing is known to rewrite them)
+      if (pathFadeColors(app.rom).size) {
+        box.append(h('p', { class: 'hint' }, 'Colors marked in the lower left corner are rewritten while an event\'s path fades in (Overworld options: '
+          + '"Event path fade effect"): tiles drawn in them change color then.'));
+      }
       return;
     }
     if (this.custom) {

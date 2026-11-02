@@ -627,6 +627,7 @@ button.danger { background: #5a2626; border-color: #8a3a3a; color: #fff; }
 button.danger:hover:not(:disabled) { border-color: var(--danger); }
 .warn-box { padding: 6px 8px; border-radius: 4px; background: #3a2036; border: 1px solid #a0408f; font-size: 12px; }
 .pt-sw.animated::before { content: ''; position: absolute; right: -1px; top: -1px; border-style: solid; border-width: 0 8px 8px 0; border-color: transparent #ff4fd8 transparent transparent; z-index: 2; }
+.pt-sw.faded::after { content: ''; position: absolute; left: -1px; bottom: -1px; border-style: solid; border-width: 8px 0 0 8px; border-color: transparent transparent transparent #4fc3ff; z-index: 2; }
 .gfxnum-next { font-size: 11px; padding: 1px 6px; margin-left: 4px; }
 .gt-list-head { padding: 6px 6px 2px; font-family: system-ui; font-size: 11px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); border-top: 1px solid var(--border); margin-top: 4px; }
 /* animations tab */

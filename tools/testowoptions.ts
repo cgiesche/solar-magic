@@ -5,9 +5,10 @@ import { Rom } from '../src/core/rom.ts';
 import { LevelEmulator } from '../src/core/levelemu.ts';
 import { RomEditSession } from '../src/core/romedit.ts';
 import { readL1, readTranslevels, setInitialFlags, FLAG, OverworldEmulator, MAP_NAMES } from '../src/core/overworld.ts';
-import { OW_OPTIONS, owOptionValue, setOwOption, submapLightning, setSubmapLightning, lightningEditLabel, LIGHTNING_MASK, revealSpeed, setRevealSpeed, DEFAULT_REVEAL_SPEED, MAX_REVEAL_SPEED, revealStepFrames, type OwOptionId } from '../src/core/owoptions.ts';
+import { OW_OPTIONS, owOptionValue, setOwOption, submapLightning, setSubmapLightning, lightningEditLabel, LIGHTNING_MASK, revealSpeed, setRevealSpeed, DEFAULT_REVEAL_SPEED, MAX_REVEAL_SPEED, revealStepFrames, PATH_FADE_COLORS, pathFadeColors, type OwOptionId } from '../src/core/owoptions.ts';
 import { GM, RAM, PAD, get16, set16 } from '../src/core/ram.ts';
 import { PlaySession } from '../src/core/playsession.ts';
+import { setSubmapPalette, SUBMAP_PALETTE_SIZE } from '../src/core/submapgfx.ts';
 import { cleanImage, editorImage } from './fixture.ts';
 
 let bad = 0;
@@ -115,27 +116,39 @@ function hardcoded(rom: Rom, tl: number): string[] {
 // ---- the event path fade, the reveal speed ----
 // a new game on translevel tl's tile, the level passed with its normal exit: the frames between the steps the
 // overworld shows ($1DEB) and the layer 2 tilemap ($7F4000) when the event has run
-function reveal(rom: Rom, tl: number): { gaps: number[]; l2: Uint8Array } {
+// and the colors that changed meanwhile (CGRAM at the end) and the palettes of the sprites shown
+function reveal(rom: Rom, tl: number): { gaps: number[]; l2: Uint8Array; changed: Set<number>; cgram: Uint8Array; spritePals: Set<number> } {
   const p = PlaySession.overworld(new LevelEmulator(rom), tileOf(tl));
   if (!p.enter()) throw new Error('not entered');
   const w = p.wram;
   w[RAM.levelExit] = 1; w[RAM.midwayTouched] = 1; w[RAM.levelBeaten] = 1;
   w[RAM.gameMode] = GM.overworldReturn;
   p.follow();
-  const at: number[] = [];
+  const at: number[] = [], cg = p.emu.snes.cgram, oam = p.emu.snes.oam, start = cg.slice();
+  const changed = new Set<number>(), spritePals = new Set<number>();
   let step = get16(w, RAM.owEventStep);
   for (let f = 0; f < 900; f++) {
     p.frame();
     const s = get16(w, RAM.owEventStep);
     if (s !== step) { at.push(f); step = s; }
+    for (let i = 0; i < 256; i++) if (cg[i * 2] !== start[i * 2] || cg[i * 2 + 1] !== start[i * 2 + 1]) changed.add(i);
+    for (let k = 0; k < 128; k++) if (oam[k * 4 + 1] < 0xe0) spritePals.add(8 + ((oam[k * 4 + 3] >> 1) & 7));
   }
-  return { gaps: at.slice(1).map((f, k) => f - at[k]), l2: w.slice(0x14000, 0x16000) };
+  return { gaps: at.slice(1).map((f, k) => f - at[k]), l2: w.slice(0x14000, 0x16000), changed, cgram: cg.slice(), spritePals };
 }
+// every submap's colors (both sets) told apart, so that any color the game copies shows as a change
+const distinctColors = (rom: Rom) => {
+  const pal = new Uint8Array(SUBMAP_PALETTE_SIZE);
+  for (let i = 0; i < 256; i++) { const v = (i * 97 + 3) & 0x7fff; pal[i * 2] = v & 0xff; pal[i * 2 + 1] = v >> 8; }
+  for (const special of [false, true]) for (let m = 0; m < MAP_NAMES.length; m++) setSubmapPalette(rom, m, special, pal);
+  return rom;
+};
+const colorAt = (cg: Uint8Array, i: number) => cg[i * 2] | (cg[i * 2 + 1] << 8);
 // Yoshi's Island 1's event (on its submap) and Donut Plains 1's (on the main map)
 for (const tl of [0x29, 0x15]) {
   const at = `translevel ${hx(tl)} (tile ${hx(tileOf(tl))})`;
-  const fade = reveal(fresh(), tl);
-  const rom = with_('pathFade', false);
+  const fade = reveal(distinctColors(fresh()), tl);
+  const rom = distinctColors(with_('pathFade', false));
   const off = reveal(rom, tl);
   setRevealSpeed(rom, MAX_REVEAL_SPEED);
   const fast = reveal(rom, tl);
@@ -147,6 +160,22 @@ for (const tl of [0x29, 0x15]) {
   check(off.gaps.every((g) => g === Math.ceil(0x40 / DEFAULT_REVEAL_SPEED) + 2) && fast.gaps.every((g) => g === want(rom)),
     `${at}: without the fade a step every $40 / speed frames + 2: speed ${DEFAULT_REVEAL_SPEED}: ${steps(off)}; ${hx(MAX_REVEAL_SPEED)}: ${steps(fast)}`);
   check(same(fade.l2, off.l2) && same(fade.l2, fast.l2), `${at}: the same layer 2 after the event`);
+  // the colors the fade rewrites: those that change with it and not without it (the palette animations change either way)
+  const byFade = [...fade.changed].filter((i) => !off.changed.has(i)).sort((a, b) => a - b);
+  const names = (is: Iterable<number>) => [...is].map((i) => hx(i).padStart(2, '0')).join(' ');
+  check(same(byFade, [...PATH_FADE_COLORS].sort((a, b) => a - b)) && [...off.changed].every((i) => !PATH_FADE_COLORS.has(i)),
+    `${at}: the fade rewrites PATH_FADE_COLORS, without it none of them changes (${names(byFade)})`);
+  const pals = (ps: Set<number>) => [...ps].sort((a, b) => a - b).map(hx).join(' ');
+  const pal = (p: number, c: number) => colorAt(fade.cgram, p * 16 + c);
+  check([0xc, 0xd, 0xe, 0xf].every((p) => [0, 1, 2, 3, 4, 5, 6, 7].every((c) => pal(p, c) === pal(p - 8, c)))
+    && [0xc, 0xd, 0xe].every((p) => [8, 9, 10, 11, 12, 13, 14, 15].every((c) => pal(p, c) === 0)),
+  `${at}: palettes C–F took colors 0–7 of palettes 4–7, colors 8–F of palettes C–E are black`);
+  check([...fade.spritePals].some((p) => p >= 0xc) && [...off.spritePals].every((p) => p < 0xc),
+    `${at}: sprites in palettes C–F with the fade (${pals(fade.spritePals)}), none without (${pals(off.spritePals)})`);
+}
+{
+  const rom = fresh();
+  check(pathFadeColors(rom) === PATH_FADE_COLORS && pathFadeColors(with_('pathFade', false)).size === 0, 'pathFadeColors: with the fade on only');
 }
 {
   const tl = 0x29;

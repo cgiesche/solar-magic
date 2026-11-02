@@ -39,6 +39,14 @@ export interface OwOption {
   sub?: { of: OwOptionId; when: boolean };
 }
 
+// The colors the path fade rewrites while a step fades in, on the main map and the submaps alike (learned by emulation,
+// testowoptions: colors 0–7 of palettes 0–3 change, palettes C–F take colors 0–7 of palettes 4–7, colors 8–F of
+// palettes C–E turn black; with the fade off none of them changes)
+export const PATH_FADE_COLORS: ReadonlySet<number> = new Set(Array.from({ length: 256 }, (_, i) => i)
+  .filter((i) => (i < 0x40 && (i & 15) < 8) || (i >= 0xc0 && (i < 0xf0 || (i & 15) < 8))));
+// the colors the path fade rewrites in this ROM: none while it is off (or its code is a patch's)
+export const pathFadeColors = (rom: Rom): ReadonlySet<number> => (owOptionValue(rom, 'pathFade') === true ? PATH_FADE_COLORS : new Set());
+
 const FADE_SPEED = 0x04ead1; // the ADC's operand in Lunar Magic's step routine
 export const DEFAULT_REVEAL_SPEED = 0x06; // Lunar Magic's
 export const MAX_REVEAL_SPEED = 0x40; // the counter reaches $40 in one frame (a step every 3 frames)
@@ -61,7 +69,7 @@ export const OW_OPTIONS: readonly OwOption[] = [
   },
   {
     id: 'pathFade', label: 'Event path fade effect', game: true,
-    title: 'The game fades in each step of an event\'s path on layer 2. The fade overwrites colors 1–7 of palettes 0–3 and C–F, zeroes colors 8–F of palettes C–E, keeps colors 8–F of palettes 0–2 set, makes palettes C–F translucent in sprites, needs SP3/SP4 to be FG1/FG2 and the path tiles to use only FG1/FG2 tiles with colors 0–7 of palettes 4–7. Turned off, each step appears at once at the path reveal speed and none of this applies – and custom overworld sprites (BOWSIE) run with MaxTile, which needs it off.',
+    title: 'The game fades in each step of an event\'s path, with sprites in palettes C–F, translucent. While it fades, colors 0–7 of palettes 0–3 change, palettes C–F take colors 0–7 of palettes 4–7 and colors 8–F of palettes C–E turn black (the Palettes tab marks them on a submap). Turned off, each step appears at once at the path reveal speed and the colors stay – and custom overworld sprites (BOWSIE) run with MaxTile, which needs it off.',
     bytes: [
       { at: 0x04e6fa, game: [0x62, 0xea], changed: [0x96, 0xe4] },
       { at: 0x04e73e, game: [0xef], changed: [0xff] },
