@@ -44,6 +44,7 @@ import { lt3Users, lt3Covers, layer3Word, layer3WordText, blankTile, layer3CharB
 import { layer3Picker } from './l3picker.ts';
 import { LT3_DESTS, levelLayer3 } from '../core/layer3gfx.ts';
 import { submapGfxEntry } from '../core/patches.ts';
+import { ReachLayer } from './owreachview.ts';
 import { OW_OPTIONS, owOption, owOptionValue, setOwOption, revealSpeed, setRevealSpeed, revealStepFrames, MAX_REVEAL_SPEED, DEFAULT_REVEAL_SPEED, submapLightning, setSubmapLightning, LIGHTNING_TITLE, lightningEditLabel } from '../core/owoptions.ts';
 
 // a w×h block of L1 tiles (16x16), L2 or layer 3 tilemap entries (8x8), row-major; L1 tiles picked up from the map
@@ -149,6 +150,7 @@ export class OverworldView {
   links = new LinkLayer(this);
   showSprites = false; // the sprites also while painting (always in the sprites mode)
   sprites = new SpriteLayer(this);
+  reach = new ReachLayer(this); // path validation: the tiles Mario doesn't reach dimmed, the problems of the paths
   // event progress: the map shown with events 0 … progress-1 passed (a view setting kept per ROM, not in the ROM)
   progress = 0;
   // the event being painted (both layers shown and painted as after it), -1 none: the map before events
@@ -190,7 +192,7 @@ export class OverworldView {
     this.canvas = h('canvas', { class: 'level-canvas' });
     this.sizer = h('div', { class: 'level-sizer' });
     this.scroller = h('div', { class: 'level-scroller', tabIndex: 0 }, this.canvas, this.sizer);
-    this.status = h('div', { class: 'statusbar' }, this.statusText, this.statusStats);
+    this.status = h('div', { class: 'statusbar' }, this.statusText, this.statusStats, this.reach.button);
     this.side = h('div', { class: 'ow-side' }, this.palPanel, this.props);
     this.bar = h('div', { class: 'ctxbar' });
     this.left = h('div', { class: 'left' }, h('div', { class: 'panel levels' },
@@ -254,7 +256,7 @@ export class OverworldView {
   }
 
   // the load of the map at the event progress, undefined while it is emulated (asked for: it is shown when it comes)
-  private load(): OwRender | undefined {
+  load(): OwRender | undefined {
     const r = this.app.overworldMap(this.map, this.progress, this.loaded);
     if (r) this.last = { r, map: this.map, rom: this.rom };
     return r;
@@ -323,6 +325,7 @@ export class OverworldView {
     if (exact && this.drag?.kind !== 'paint') this.l3Stroke.clear();
     this.drawL3(r);
     this.paint();
+    this.reach.button.update();
     if (!exact) return;
     const after = this.afterShown;
     this.afterShown = null;
@@ -382,6 +385,7 @@ export class OverworldView {
     const lw = 1 / z;
     if (this.playing) this.paintPlay(ctx);
     else ctx.drawImage(this.mapCanvas, 0, 0);
+    if (!this.playing) this.reach.paint(ctx);
     const l3 = this.mode === 'l3' && this.l3Grid;
     if ((this.mode === 'l3' || this.showL3) && this.l3Grid && !this.playing) ctx.drawImage(this.l3Canvas, this.l3Grid.x, this.l3Grid.y);
     if (this.showGrid) {
@@ -445,7 +449,7 @@ export class OverworldView {
   // the kinds of the layer 1 tiles, as the game sees them (null while they are learned)
   private kinds: { gen: number; kinds: PathKind[] } | null = null;
   // (the level tiles come with them: their labels, the list, the selected tile's settings)
-  private kindsLearned = () => { if (!this.root.isConnected) return; this.paint(); this.updateStatus(); this.buildSide(); this.buildLeft(); };
+  private kindsLearned = () => { if (!this.root.isConnected) return; this.paint(); this.updateStatus(); this.buildSide(); this.buildLeft(); this.reach.button.update(); };
   pathKinds(): PathKind[] | null {
     const gen = this.app.rom.gen;
     if (this.kinds?.gen !== gen) {
@@ -849,6 +853,8 @@ export class OverworldView {
         if (this.isLevelTile(this.l1[i])) t += tl ? `  ·  Level ${hex(translevelToLevel(tl), 3)} “${levelName(this.app.rom, tl)}”` : '  ·  Enters no level';
         const k = this.showPaths ? this.pathKinds()?.[shown] : undefined;
         if (k && isPathKind(k)) { t += `  ·  ${PATH_KIND_NAMES[k]}`; this.scroller.title = PATH_KIND_NAMES[k]; }
+        const unreached = this.reach.status(i);
+        if (unreached) t += `  ·  ${unreached}`;
       }
     } else if (c.x >= 0 && c.y >= 0 && c.x < 64 && c.y < 64) {
       const i = l2Index(this.region, c.x, c.y), shown = this.shown.l2[i];
@@ -1143,6 +1149,8 @@ export class OverworldView {
         view('Grid', () => this.showGrid, (v) => (this.showGrid = v), undefined, 'G'),
         view('Path tiles', () => this.showPaths, (v) => (this.showPaths = v),
           'Layer 1 tiles Mario walks, climbs (rungs) or swims along (blue), exits to another submap on (red) or stops on without entering a level (cross) – invisible in the game; what each does is learned from the game\'s code'),
+        view('Unreached tiles', () => this.reach.show, (v) => (this.reach.show = v),
+          'Path and level tiles Mario can\'t get to at this event progress dimmed – searched along the paths as the game moves him (what each tile does learned from the game\'s code), with the level flags of a save at the progress; the problems of the paths are in the status bar'),
         view('Sprites', () => this.showSprites, (v) => (this.showSprites = v),
           'The overworld\'s sprites as the game shows them at the event progress (always shown in the Sprites mode)'),
         view('Sprite shadows', () => this.sprites.showShadows, (v) => (this.sprites.showShadows = v), 'A shadow on the ground under each sprite'),

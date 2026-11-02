@@ -144,6 +144,7 @@ export const RAM = {
   koopaKid: 0x0ef6, // the Koopa Kid of tiles 49–4B Mario met (0–2, owlinks.ts)
   koopaKidSlot: 0x0ef7, // $80 | its overworld sprite slot while it is there, 0 none
   owProcess: 0x13d9, // what the overworld is doing: Mario standing, walking, switching submaps …
+  owTarget: 0x0dc7, // per player (4 bytes apart): the pixel position Mario walks to (X, Y words; owpaths.ts path shapes)
   owPose: 0x1f13, // per player (2 bytes apart): Mario's pose on the overworld – bit 3 swimming, bit 4 climbing
   savePrompt: 0x13ca, // set when the overworld is to show the save prompt
   saveCopy: 0x1fa9, // the overworld's state copied to be saved ($1F02–$1F2E: owEvents … owPlayerTileY, switchPalaces …)

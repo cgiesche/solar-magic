@@ -10,7 +10,7 @@
 import type { LevelEmulator } from './levelemu.ts';
 import type { Job } from './jobrunner.ts';
 import { l1Index, overworldDataRanges, OW_L1, DIR_FLAGS } from './overworld.ts';
-import { RAM, GM, PAD, get16 } from './ram.ts';
+import { RAM, GM, PAD, get16, getS16 } from './ram.ts';
 
 export const PATH_KINDS = ['walk', 'climb', 'swim', 'exit', 'stop', 'level', 'none'] as const;
 export type PathKind = (typeof PATH_KINDS)[number];
@@ -97,4 +97,70 @@ function probe(emu: LevelEmulator, t: number, tx: number, dx: number, pad: numbe
     if (w[RAM.gameMode] === GM.levelLoad) return 'level';
   }
   return 'stop';
+}
+
+// Path shapes: how Mario moves over a path tile, by the tile and the way he steps onto it – the game moves him by the
+// tile's vector in pixels from where he is (a straight tile a tile on, a bend half a tile each way …) when it looks
+// ahead onto the tile ($04971D: the target $0DC7, the sum's low 2 bits cleared), and turns him by where that ends: on
+// a tile's left/right edge he goes on left or right, else on its top/bottom edge up or down, else as before ($0497F4,
+// the way kept in $0DD3). His first step off a stop tile is a vector of its own ($049384: half a tile, other ones for
+// some tiles), the way kept. From each tile the overworld looks ahead the way he has first (owreach.ts). Learned by
+// emulation, as the path kinds: on the main map Mario walks off a stop tile onto tile t in each direction; where his
+// first step ends and where the look-ahead onto t sends him give t's vectors. The result depends on the game's code
+// only.
+// first, walk: per tile * 4 + the way he steps onto it (DIR_NAMES order: up, down, left, right) the vector (x, y at
+// index * 2, * 2 + 1); NO_SHAPE where he doesn't step onto it (tiles 00, 56 and up, an exit, no path)
+export interface PathShapes { first: number[]; walk: number[] }
+export const NO_SHAPE = -0x8000;
+export const DX = [0, 0, -1, 1], DY = [-1, 1, 0, 0];
+const SHAPE_FRAMES = 40; // until the overworld looked ahead onto the tile (Mario walked half a tile)
+const PADS = [PAD.up, PAD.down, PAD.left, PAD.right];
+export const PATH_TILES_END = 0x56; // the tiles below are walked over
+
+export function pathShapesJob(emu: LevelEmulator): Job<PathShapes> {
+  return probeShapes(emu, maskOverworldData(emu));
+}
+
+function* probeShapes(emu: LevelEmulator, end: () => void): Generator<string | void, PathShapes> {
+  try {
+    // the tile Mario starts on (a stop tile: what is painted there matters), then Mario in the middle of the main map
+    // with nothing around
+    emu.startGame(0);
+    let w = emu.snes.wram;
+    const stop = w[RAM.owLayer1 + l1Index(w[RAM.submap] ? 1 : 0, get16(w, RAM.owPlayerTileX), get16(w, RAM.owPlayerTileY))];
+    const hx = 16, hy = 16, home = l1Index(0, hx, hy);
+    emu.startGameAt(home);
+    const s = emu.snes;
+    w = s.wram;
+    for (let y = hy - 3; y <= hy + 3; y++) for (let x = hx - 3; x <= hx + 3; x++) w[RAM.owLayer1 + l1Index(0, x, y)] = w[RAM.owTranslevels + l1Index(0, x, y)] = 0;
+    w[RAM.owLayer1 + home] = stop;
+    w[RAM.owTranslevels + home] = 1;
+    w[RAM.levelFlags + 1] = DIR_FLAGS.reduce<number>((a, b) => a | b, 0);
+    const standing = w[RAM.owProcess], start = s.saveState();
+    const px = get16(w, RAM.owPlayerX), py = get16(w, RAM.owPlayerY);
+    const target = () => [getS16(w, RAM.owTarget), getS16(w, RAM.owTarget + 2)];
+    const out: PathShapes = { first: new Array(0x800).fill(NO_SHAPE), walk: new Array(0x800).fill(NO_SHAPE) };
+    for (let t = 1; t < PATH_TILES_END; t++) {
+      for (let d = 0; d < 4; d++) {
+        s.loadState(start);
+        const x1 = hx + DX[d], y1 = hy + DY[d], k = t * 4 + d;
+        w[RAM.owLayer1 + l1Index(0, x1, y1)] = t;
+        let first: number[] | null = null;
+        for (let f = 0; f < SHAPE_FRAMES; f++) {
+          s.joy1 = f < 4 ? PADS[d] : 0;
+          s.runFrame();
+          if (!first && w[RAM.owProcess] !== standing) { first = target(); out.first[k * 2] = first[0] - px; out.first[k * 2 + 1] = first[1] - py; }
+          // (the look-ahead onto it, where his first step ends, sets his tile and the next target at once)
+          if (first && get16(w, RAM.owPlayerTileX) === x1 && get16(w, RAM.owPlayerTileY) === y1) {
+            const [x, y] = target();
+            out.walk[k * 2] = x - first[0]; out.walk[k * 2 + 1] = y - first[1];
+            break;
+          }
+        }
+      }
+      yield `Path shapes (${PATH_TILES_END - 1 - t})`;
+    }
+    s.joy1 = 0;
+    return out;
+  } finally { end(); }
 }

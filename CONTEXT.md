@@ -169,6 +169,14 @@ _Avoid_: message slot
 A layer 1 tile Mario walks, climbs or swims along, or stops or exits on; invisible in the game, drawn by the editor as an overlay. The game's 5 hardcoded paths are not tiles.
 _Avoid_: road, Mario path (Lunar Magic's view name)
 
+**Path shape**:
+How a path tile moves Mario: by a vector from where he is, by the tile and the way he steps onto it, turning him where it ends (a bend, a junction taken one way). Learned by emulation (owpaths.ts), as the path tiles' kinds.
+_Avoid_: tile direction, path direction
+
+**Reached tile**:
+A layer 1 tile Mario can get to at an event progress, from his start position: along the paths as the game moves him (path shapes), through stars, pipes, exit paths and the game's hardcoded paths, with the level flags of a save at the progress (the directions open) and the ways back that arriving opens (owreach.ts, path validation). Not reached: dimmed on the map ("Unreached tiles"); a way that ends without a stop tile is a **dead end**.
+_Avoid_: accessible, unlocked (for a tile)
+
 **Event**:
 One of the overworld's 0x78 changes run once when a level is passed (its base event, + 1…3 for its secret exits) or by a teleport or the user's own code: layer 2 steps, layer 1 changes, reveals and destroyed level tiles. Chosen by the level and exit that runs it; its number shown only for those that run otherwise.
 _Avoid_: path reveal (that is part of one), trigger

@@ -33,7 +33,7 @@ import { animatedJob } from './levelemu.ts';
 import { objectThumbsJob, placementPreviewJob, withPlaced } from './objthumbs.ts';
 import { jumpArcsJob } from './jumparcs.ts';
 import { layer2MotionsJob } from './l2scroll.ts';
-import { pathKindsJob } from './owpaths.ts';
+import { pathKindsJob, pathShapesJob } from './owpaths.ts';
 import { revealWalkJob } from './revealwalk.ts';
 import { KeptSuggestions, prefabSuggestionsJob } from './prefabsuggest.ts';
 import { SizeProbe, sizesJob } from './objresize.ts';
@@ -102,6 +102,7 @@ function learnJob(j: LearnJob, state: LearnState, show: (items: unknown[] | null
     case 'arcs': return (emu, prepare) => jumpArcsJob(emu, prepare, j.level, j.load, j.tx, j.ty, j.runs);
     case 'layer2Motions': return function* (emu) { return (yield* layer2MotionsJob(emu, j.level, j.ov)).result; };
     case 'pathKinds': return (emu) => pathKindsJob(emu);
+    case 'pathShapes': return (emu) => pathShapesJob(emu);
     case 'revealWalks': return (emu) => revealWalkJob(emu);
     case 'suggest': return (emu) => prefabSuggestionsJob(state.rom, emu, state.suggest, j.levels, j.open);
     case 'sizes': return (emu) => {

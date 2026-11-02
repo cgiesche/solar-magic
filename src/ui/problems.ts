@@ -4,7 +4,7 @@
 import type { App } from './app.ts';
 import { h, clear } from './dom.ts';
 import { closeMenus } from './menu.ts';
-import { exitProblems, levelProblems, scanProblems, sortProblems, type Problem, type ProblemPlace } from '../core/problems.ts';
+import { exitProblems, levelProblems, scanProblems, sortProblems, type Problem, type ProblemPlace, type Severity } from '../core/problems.ts';
 import { incompleteSprites, spriteMemDialog, spriteMemText, SPRITE_MEM_HELP } from './spritemem.ts';
 import { messageLevels, messageProblems, type MessageLevel } from '../core/messageuse.ts';
 import { loadLevel } from '../core/level.ts';
@@ -45,27 +45,41 @@ export function collectProblems(app: App, reveal: (uids: number[]) => void): Pro
   return sortProblems(out);
 }
 
-const ICON: Record<Problem['severity'], string> = { error: '⛔', warn: '⚠', info: 'ℹ' };
+const ICON: Record<Severity, string> = { error: '⛔', warn: '⚠', info: 'ℹ' };
 
-// the status bar button; update() recounts (call it after changes and finished checks)
+// the status bar button of the level; update() recounts (call it after changes and finished checks)
 export function problemsButton(app: App, reveal: (uids: number[]) => void): HTMLButtonElement & { update: () => void } {
-  let list: Problem[] = [];
-  let pop: HTMLDivElement | null = null;
-  const btn = h('button', { class: 'status-warn', hidden: true, title: 'Problems found in this level' }) as HTMLButtonElement & { update: () => void };
   const show = (p: ProblemPlace) => {
     if ('sprites' in p) reveal(p.sprites);
     else if ('screen' in p && p.exit) app.gotoExit(app.level.number, p.screen);
     else if ('screen' in p) { app.reveal = app.vertical ? { x: 128, y: p.screen * 256 + 128 } : { x: p.screen * 256 + 128, y: app.images.height - 112 }; app.emit('reveal'); }
     else { app.reveal = { x: p.tx * 16 + 8, y: p.ty * 16 + 8 }; app.emit('reveal'); }
   };
+  return problemListButton<Problem>({
+    title: 'Problems found in this level', heading: 'Problems in this level', collect: () => collectProblems(app, reveal),
+    canOpen: (p) => !!p.where || !!p.message,
+    open: (p) => { if (p.where) show(p.where); if (p.message) app.openMessages(p.message.translevel, p.message.msg); },
+  });
+}
+
+// what a problem list shows of a problem
+export interface ListedProblem { key: string; severity: Severity; text: string; title?: string; fix?: { label: string; run: () => void } }
+// A status bar button "⚠ N problems" opening the list of what `collect` finds (an entry `open`s where the problem is);
+// update() recounts
+export function problemListButton<P extends ListedProblem>(o: {
+  title: string; heading: string; collect: () => P[]; canOpen: (p: P) => boolean; open: (p: P) => void;
+}): HTMLButtonElement & { update: () => void } {
+  let list: P[] = [];
+  let pop: HTMLDivElement | null = null;
+  const btn = h('button', { class: 'status-warn', hidden: true, title: o.title }) as HTMLButtonElement & { update: () => void };
   const fill = () => {
     if (!pop) return;
     clear(pop);
-    pop.append(h('div', { class: 'menu-heading' }, list.length ? 'Problems in this level' : 'No problems found'));
+    pop.append(h('div', { class: 'menu-heading' }, list.length ? o.heading : 'No problems found'));
     for (const p of list) {
       const row = h('div', { class: `problem problem-${p.severity}`, title: p.title ?? '' },
         h('span', { class: 'problem-icon' }, ICON[p.severity]),
-        h('button', { class: 'problem-text', disabled: !p.where && !p.message, onclick: () => { if (p.where) show(p.where); if (p.message) app.openMessages(p.message.translevel, p.message.msg); } }, p.text),
+        h('button', { class: 'problem-text', disabled: !o.canOpen(p), onclick: () => o.open(p) }, p.text),
         p.fix ? h('button', { class: 'problem-fix', onclick: () => { close(); p.fix!.run(); } }, p.fix.label) : null);
       pop.append(row);
     }
@@ -91,7 +105,7 @@ export function problemsButton(app: App, reveal: (uids: number[]) => void): HTML
     window.addEventListener('keydown', key, true);
   };
   btn.update = () => {
-    list = collectProblems(app, reveal);
+    list = o.collect();
     const worst = list.find((p) => p.severity !== 'info');
     const shown = list.filter((p) => p.severity !== 'info').length;
     btn.hidden = !list.length;

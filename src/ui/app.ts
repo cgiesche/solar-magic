@@ -68,9 +68,9 @@ import { LevelUses, OpenLevelTiles, levelOverride, usedLevels, spriteUsage, isTi
 import { TILESETS, sharingTilesets } from '../core/tilesets.ts';
 import { slipperyKey } from '../core/slippery.ts';
 import { gameBgKey } from '../core/tilemove.ts';
-import { type PathKind, type LevelTileTest, levelTileTest } from '../core/owpaths.ts';
+import { type PathKind, type PathShapes, type LevelTileTest, levelTileTest } from '../core/owpaths.ts';
 import type { RevealWalkSkips } from '../core/revealwalk.ts';
-import type { OwRender } from '../core/overworld.ts';
+import { OW_EVENTS, type OwRender } from '../core/overworld.ts';
 import type { Rect } from '../core/owevents.ts';
 import type { OwSpriteView } from '../core/owsprites.ts';
 import type { ProgressSave } from '../core/owprogress.ts';
@@ -1121,6 +1121,18 @@ export class App {
   // and kept in the result cache while the game's code is unchanged; null while that runs, then `done` is called
   revealWalkSkips(done: () => void): RevealWalkSkips | null {
     return this.probes.learn<RevealWalkSkips>('owrw1', { kind: 'revealWalks' }, { lane: 'owrw', label: 'Reveal walks', done }) ?? null;
+  }
+  // how path tiles move Mario on the overworld (owpaths.ts path shapes, for path validation): learned in the probe
+  // worker once and kept in the result cache while the game's code is unchanged; null while that runs, then `done` is
+  // called
+  pathShapes(done: () => void): PathShapes | null {
+    return this.probes.learn<PathShapes>('owsh1', { kind: 'pathShapes' }, { lane: 'owsh', label: 'Path shapes', done }) ?? null;
+  }
+  // the overworld with every event passed (path validation, owreach.ts: what Mario can ever reach), learned in the probe
+  // worker in a lane of its own (the map shown keeps its) and kept in memory while the ROM bytes it read are unchanged:
+  // undefined while it is emulated, then `done` is called
+  overworldAllEvents(done: () => void): OwRender | undefined {
+    return this.probes.learn<OwRender>('owma1', { kind: 'owMap', map: 0, progress: OW_EVENTS }, { lane: 'owreach', label: 'Overworld', done });
   }
   // which overworld tiles are level tiles (owpaths.ts levelTileTest), from the path tiles: null while they are learned
   levelTileTest(done: () => void): LevelTileTest | null {

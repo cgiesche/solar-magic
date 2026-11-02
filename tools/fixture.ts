@@ -10,7 +10,7 @@ import { RenderQuery } from '../src/core/renderquery.ts';
 import { renderLevel } from '../src/core/render.ts';
 import { levelRows, type Level } from '../src/core/level.ts';
 import type { LevelRender } from '../src/core/levelemu.ts';
-import { pathKindsJob, levelTileTest, type PathKind, type LevelTileTest } from '../src/core/owpaths.ts';
+import { pathKindsJob, pathShapesJob, levelTileTest, type PathKind, type PathShapes, type LevelTileTest } from '../src/core/owpaths.ts';
 
 // the render query of level lv's load r, its layers' geometry as the editor draws it (App.refresh)
 export function levelQuery(rom: Rom, r: LevelRender, lv: Level): RenderQuery {
@@ -36,6 +36,12 @@ export function pathKinds(rom: Rom): PathKind[] {
   const runner = new JobRunner({ rom, results: new ResultCache(new RomFingerprint(rom)) });
   const run = runner.run({ key: 'owpk', keep: false, picture: false, start: pathKindsJob });
   for (;;) { const r = runner.step('owpk', run); if (r) return r.result; }
+}
+// the shapes of the overworld's path tiles in `rom` (owpaths.ts), as pathKinds
+export function pathShapes(rom: Rom): PathShapes {
+  const runner = new JobRunner({ rom, results: new ResultCache(new RomFingerprint(rom)) });
+  const run = runner.run({ key: 'owsh', keep: false, picture: false, start: pathShapesJob });
+  for (;;) { const r = runner.step('owsh', run); if (r) return r.result; }
 }
 // which tiles are level tiles in `rom`, learned as the editor learns them
 export const levelTiles = (rom: Rom): LevelTileTest => levelTileTest(pathKinds(rom));

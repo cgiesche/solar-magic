@@ -64,7 +64,7 @@ export type ProbeReply = ProbeDone | KindsDone | ScanDone | CameraDone | Learned
 // the object picker's thumbnails (objthumbs.ts; keys: each object's key, objKey), the placement preview (objthumbs.ts
 // placementPreviewJob: the objects placed in the level as edited, withPlaced), the jump arcs from a tile (jumparcs.ts; level: the hash of the level as loaded, load: what it
 // is loaded with), what the layer 2 scroll settings do in a level (l2scroll.ts), what Mario does on each overworld
-// layer 1 tile (owpaths.ts), the prefab suggestions (prefabsuggest.ts; open: the open level as edited) and the boxes
+// layer 1 tile and how path tiles move him (owpaths.ts), the prefab suggestions (prefabsuggest.ts; open: the open level as edited) and the boxes
 // of objects at sizes (objresize.ts; layer2Pointer: the level's layer 2 objects as the probe loads take them); the
 // overworld's map at an event progress (overworld.ts overworldMapJob), the submaps' views (owevents.ts submapViews),
 // the overworld sprites' images at a map and event progress (owsprites.ts owSpriteImages) and the save at an event
@@ -88,6 +88,7 @@ export type LearnJob =
   | { kind: 'arcs'; level: string; load: [number, LevelOverride, number, number]; tx: number; ty: number; runs: RunStates }
   | { kind: 'layer2Motions'; level: number; ov: LevelOverride }
   | { kind: 'pathKinds' }
+  | { kind: 'pathShapes' }
   | { kind: 'revealWalks' }
   | { kind: 'suggest'; levels: number[]; open?: Level }
   | { kind: 'sizes'; level: KindLevel; layer2Pointer: number; specs: SizeSpec[] }
@@ -142,6 +143,7 @@ export const LEARN_KINDS: { [K in LearnJob['kind']]: { keep: Keep; picture: bool
   arcs: { keep: 'memory', picture: false },
   layer2Motions: { keep: true, picture: false },
   pathKinds: { keep: true, picture: false },
+  pathShapes: { keep: true, picture: false },
   revealWalks: { keep: true, picture: false },
   suggest: { keep: false, picture: false },
   sizes: { keep: false, picture: false },
@@ -174,7 +176,7 @@ export type LearnLane =
   | 'sprites' | 'variants' | 'bytes' | 'spritemem' | 'animated' | 'layer3' | 'l2' | 'lt' | 'uses' | 'arcs' | 'thumbs'
   | 'placement' | 'sizes' | 'prefab-suggest' | 'msgr' | 'level-png' | 'level-images' | 'gamebg' | 'prefab-places'
   | 'breakup' | 'slippery' | 'otab'
-  | 'ow' | 'owpick' | 'owpk1' | 'owrw' | 'owlw' | 'owps' | 'owv' | 'ows' | 'owl' | `owc${number}`;
+  | 'ow' | 'owpick' | 'owpk1' | 'owsh' | 'owreach' | 'owrw' | 'owlw' | 'owps' | 'owv' | 'ows' | 'owl' | `owc${number}`;
 
 // what the probe client shows as busy: the probes, the tasks, the learn jobs' lanes
 export type ProbeBusyKey = 'probe' | TaskType | LearnLane;
