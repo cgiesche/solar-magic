@@ -35,7 +35,7 @@ import { blankTile } from '../../core/render.ts';
 import { remapTile, remapLine, slotRemapLine, parseRemap } from '../../core/remap.ts';
 import { remapEditor, type RemapEditor } from '../remaplist.ts';
 import { planMove, applyMove, planRemap, rectMap, type MovePlan, type MoveSource } from '../../core/tilemove.ts';
-import { levelSource, planList, openRemapUses } from '../tileuses.ts';
+import { levelSource, planList, openRemapUses, whenLoaded, type LoadedBgs } from '../tileuses.ts';
 import { loadAsar } from '../../core/asar.ts';
 import { NAME_MAX, namesOf, setName, cleanName, type NameKind } from '../../core/usernames.ts';
 import { overworldReplacement, MAP_NAMES, type OwRender } from '../../core/overworld.ts';
@@ -1561,7 +1561,12 @@ export class Map16Tab implements WsPanel {
     if (!o || o.bg !== (layer === 'bg') || o.tile === this.sel) return;
     const w = Math.min(16, m.width), line = remapLine(o.tile, w, m.height, this.sel);
     const { remap } = parseRemap(line, { what: 'numbers' });
-    const users = planRemap(this.app.rom, layer, remap.tiles, levelSource(this.app, remap.tiles)).levels;
+    // (once the game BGs it needs are loaded, in the probe worker)
+    const loaded: LoadedBgs = new Map();
+    const users = await whenLoaded((changed) => {
+      const src = levelSource(this.app, remap.tiles, undefined, loaded, changed);
+      return { value: planRemap(this.app.rom, layer, remap.tiles, src).levels, pending: src.pending };
+    });
     if (!users.length) return;
     const span = `${hex(o.tile, 3)}–${hex(o.tile + (m.height - 1) * 16 + w - 1, 3)}`;
     const pick = await choose('Rewrite the levels using these tiles?', h('div', { style: 'max-width:480px' },

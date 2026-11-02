@@ -8,9 +8,11 @@
 // result, it goes on where it stood. The result learner's jobs (CONTEXT.md; probeprotocol.ts LearnJob: the sprite images,
 // the levels' uses, the sprite memory check, the animated tiles and colors, the layer 3 kinds, the tiles of the level as
 // edited, the object thumbnails, the placement preview, the jump arcs, the layer 2 motions, the overworld path kinds, the
-// prefab suggestions, the object boxes for resizing, the overworld's maps, submap views and sprite images) run here
-// too, in lanes (one job at a time, a request replacing the lane's others drops them), taking turns with the tasks;
-// they choose whether the display data counts for them (pictures: it does; the probes and tasks: it doesn't, ADR 0008).
+// prefab suggestions, the object boxes for resizing, the overworld's maps, submap views and sprite images, the levels'
+// game BGs, a prefab's places, the loads comparing a broken up prefab, the slippery entrance actions, the object
+// tables) run here too, in lanes (one job at a time, a request replacing the lane's others drops them), taking turns
+// with the tasks; they choose whether the display data counts for them (pictures: it does; the probes and tasks: it
+// doesn't, ADR 0008).
 // After the first copy of the ROM the editor sends the ranges a change wrote: queued jobs stay, a task starts over
 // before its next step only when it read a changed byte, results are checked against the ROM as always.
 
@@ -38,6 +40,11 @@ import { submapViewsJob, layer1WithoutJob, EventL1Copy } from './owevents.ts';
 import { owSpritesJob, owCustomJob, owLooksJob } from './owsprites.ts';
 import { progressSaveJob } from './owprogress.ts';
 import { messageRoutineJob } from './messagedraw.ts';
+import { gameBgJob } from './tilemove.ts';
+import { prefabPlacesJob } from './prefabplaces.ts';
+import { sameTilesJob } from './prefabsources.ts';
+import { slipperyJob } from './slippery.ts';
+import { objectTableJob } from './objectnames.ts';
 import { inputHash } from './inputs.ts';
 import { Lane, Lanes, laneId } from './lanes.ts';
 import { jobId, jobKey, learnKeep, LEARN_KINDS, type ProbeJob, type ProbeMessage, type ProbeReply, type TaskMessage, type TaskType, type LearnJob, type LearnMessage, type LearnLane } from './probeprotocol.ts';
@@ -101,6 +108,11 @@ function learnJob(j: LearnJob, state: LearnState, show: (items: unknown[] | null
     case 'owSave': return () => progressSaveJob(owLoads(state), j.progress);
     case 'owL1Without': return () => layer1WithoutJob(state.l1Copy ??= new EventL1Copy(), state.rom, j.event);
     case 'msgRoutine': return (emu) => messageRoutineJob(state.rom, emu);
+    case 'gameBg': return (emu) => gameBgJob(emu, j.level);
+    case 'prefabPlaces': return (emu) => prefabPlacesJob(state.rom, emu, j.prefab, j.levels, j.open, j.skip);
+    case 'sameTiles': return (emu) => sameTilesJob(emu, j.level, j.a, j.b);
+    case 'slippery': return (emu) => slipperyJob(emu);
+    case 'objectTable': return (emu) => objectTableJob(emu, j.tileset);
   }
 }
 

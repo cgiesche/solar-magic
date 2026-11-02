@@ -12,7 +12,7 @@ import type { Rom } from './rom.ts';
 import { loadLevel, levelRows, newUid, type Level, type LevelObject } from './level.ts';
 import { saveLevel } from './save.ts';
 import { layerGeom, type LayerGeom } from './render.ts';
-import { MAP_BASE, type LevelOverride, type LevelRender } from './levelemu.ts';
+import { MAP_BASE, type LevelEmulator, type LevelOverride, type LevelRender } from './levelemu.ts';
 import { levelOverride } from './levelusage.ts';
 import { isDm16, dm16Tiles, flagBytes, COND_FLAGS, type Dm16Cond } from './cdm16.ts';
 import { PREFAB_EXT, TRANSPARENT, writePrefab, type Prefab } from './prefabs.ts';
@@ -109,6 +109,26 @@ export function planPrefabPlaces(rom: Rom, s: Prefab, src: {
     try { lv = src.level?.(n) ?? loadLevel(rom, n); } catch { continue; } // unreadable level
     const places = findPrefabPlaces(rom, lv, s, (ov) => src.load(n, ov), src.skip && ((layer, i) => src.skip!(n, layer, i)));
     if (places.length) out.push({ level: n, places });
+  }
+  return out;
+}
+
+// objects of a level's layer that are no place's (the selection), as a learn job is asked for with them
+export interface PrefabSkip { level: number; layer: Layer; objects: number[] }
+
+// The places in the levels as a job (the result learner's, no picture, CONTEXT.md), learned in the probe worker: a level
+// per step, open the open level as edited (the others as saved), an object load on the job's emulator
+export function* prefabPlacesJob(rom: Rom, emu: LevelEmulator, s: Prefab, levels: number[], open?: Level, skip?: PrefabSkip): Generator<void, LevelPlaces[]> {
+  const sel = new Set(skip?.objects);
+  const out: LevelPlaces[] = [];
+  for (const n of levels) {
+    out.push(...planPrefabPlaces(rom, s, {
+      levels: [n],
+      level: (m) => (m === open?.number ? open : loadLevel(rom, m)),
+      load: (m, ov) => emu.load(m, ov),
+      skip: (m, l, i) => m === skip?.level && l === skip.layer && sel.has(i),
+    }));
+    yield;
   }
   return out;
 }

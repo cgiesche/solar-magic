@@ -12,13 +12,25 @@ import { RAM } from './ram.ts';
 const ACTIONS = 8; // the entrance action's 3 bits
 const PROBE_LEVEL = 0x105; // the level loaded with each action
 
-// the entrance actions after which the level is slippery, and what the loads read
-export function slipperyActions(emu: LevelEmulator): { result: number[]; reads: RomReads } {
+// the entrance actions after which the level is slippery
+function slipperyOnes(emu: LevelEmulator): number[] {
   const sec = { ...readSecondaryHeader(emu.rom, PROBE_LEVEL), slippery: 0, midwayOwn: 0 };
-  return emu.tracked(() => Array.from({ length: ACTIONS }, (_, a) => a).filter((a) => {
+  return Array.from({ length: ACTIONS }, (_, a) => a).filter((a) => {
     const r = emu.load(PROBE_LEVEL, { secondaryHeader: encodeSecondaryHeader({ ...sec, entranceAction: a }) });
     return r.wram[RAM.slippery] !== 0;
-  }));
+  });
+}
+
+// the same with what the loads read
+export function slipperyActions(emu: LevelEmulator): { result: number[]; reads: RomReads } {
+  return emu.tracked(() => slipperyOnes(emu));
+}
+
+// the same as a job (the result learner's, no picture, CONTEXT.md) learned in the probe worker under slipperyKey: a
+// single step
+export const slipperyKey = 'slip1';
+export function* slipperyJob(emu: LevelEmulator): Generator<never, number[]> {
+  return slipperyOnes(emu);
 }
 
 // whether Mario arrives in a slippery level through an entrance: by its own bit or its action (actions:

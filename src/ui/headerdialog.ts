@@ -67,6 +67,9 @@ export function openHeaderDialog(app: App): void {
   const l3Fill = () => l3Sel.replaceChildren(...l3Opts().map(([v, l]) => h('option', { value: String(v), selected: v === sd.layer3 }, l)));
   const l3Known = () => { if (open) l3Fill(); };
   const l3Sel = sel2('layer3', l3Opts());
+  // which entrances make the level slippery (learned in the background, filled in when known)
+  const slipNote = h('span', { class: 'hint' }, slipperyText(app, sd));
+  if (!app.slipperyActions()) app.once('slippery', () => { if (open) slipNote.textContent = slipperyText(app, sd); });
   const tilesetSel = select(range(16, (i) => `${hex2(i)} – ${TILESETS[i]}`), hd.tileset, (v) => {
     hd.tileset = v;
     l3Fill();
@@ -228,7 +231,7 @@ export function openHeaderDialog(app: App): void {
       fgRow, bgRow, bgStartRow,
       f('Vertical positioning', sel2('verticalPositioning', range(4))),
       f('Yoshi intro', sel2('noYoshiIntro', [[0, 'On'], [1, 'Off']])),
-      f('Slippery', h('span', { class: 'hint' }, slipperyText(app, sd)), 'Set per entrance (main, midway, secondary) in its properties (Entrances/Exits)'),
+      f('Slippery', slipNote, 'Set per entrance (main, midway, secondary) in its properties (Entrances/Exits)'),
       // a row of its own: with separate rates the two dropdowns stay side by side
       h('div', { class: 'prop wide' }, h('label', null, 'Layer 2 scroll'),
         h('label', { class: 'row', title: 'Separate horizontal and vertical layer 2 rates, with more rates and auto-scrolls (as Lunar Magic 3.40)' }, sepBox, 'Separate H/V'),

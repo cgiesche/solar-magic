@@ -14,6 +14,8 @@ import type { Keep } from './jobrunner.ts';
 import type { ObjSpec } from './objthumbs.ts';
 import type { RunStates } from './blockprobe.ts';
 import type { SizeSpec } from './objresize.ts';
+import type { Prefab } from './prefabs.ts';
+import type { PrefabSkip } from './prefabplaces.ts';
 
 // a probe in tileset ts: what a Map16 tile does, how Mario collides with it, what a sprite does, Mario's
 // run speeds, the scroll bands in a level of that mode and vertical scroll setting
@@ -65,7 +67,11 @@ export type ProbeReply = ProbeDone | KindsDone | ScanDone | CameraDone | Learned
 // overworld's map at an event progress (overworld.ts overworldMapJob), the submaps' views (owevents.ts submapViews),
 // the overworld sprites' images at a map and event progress (owsprites.ts owSpriteImages) and the save at an event
 // progress (owprogress.ts progressSaves), layer 1 as after an event without its layer 1 changes (owevents.ts
-// layer1Without); whether the game draws the editor's messages (messagedraw.ts messageRoutine)
+// layer1Without); whether the game draws the editor's messages (messagedraw.ts messageRoutine); a level's game BG as
+// its load as saved has it (tilemove.ts gameBgJob), where a prefab's arrangement already is (prefabplaces.ts
+// prefabPlacesJob; open: the open level as edited, skip: the objects that are no place's), whether two loads of a level
+// draw the same tiles (prefabsources.ts sameTilesJob: a prefab broken up into its sources), the entrance actions that
+// make a level slippery (slippery.ts slipperyJob), the object table of a tileset (objectnames.ts objectTableJob)
 export type LearnJob =
   | { kind: 'sprites'; level: SpriteLevel; nums: number[]; input?: string } // (input: of each test level load, spriteSetJob)
   | { kind: 'spriteAt'; level: SpriteLevel; id: number; x: number; y: number }
@@ -90,7 +96,12 @@ export type LearnJob =
   | { kind: 'owLooks'; ids: number[] }
   | { kind: 'owSave'; progress: number }
   | { kind: 'owL1Without'; event: number }
-  | { kind: 'msgRoutine' };
+  | { kind: 'msgRoutine' }
+  | { kind: 'gameBg'; level: number }
+  | { kind: 'prefabPlaces'; prefab: Prefab; levels: number[]; open?: Level; skip?: PrefabSkip }
+  | { kind: 'sameTiles'; level: number; a: LevelOverride; b: LevelOverride }
+  | { kind: 'slippery' }
+  | { kind: 'objectTable'; tileset: number };
 
 // Whether a later request for the same result (key and input) asks the job for other work, which it then takes up as
 // it runs: the levels' uses with another list of levels (the running job scans the levels the latest list still needs)
@@ -106,7 +117,8 @@ export function learnRetargets(was: LearnJob, now: LearnJob): boolean {
 // copy's), not on one booted for levels: its boot doesn't count for them (boot false, jobrunner.ts JobSpec); it has no
 // skip mask, so they count the display data, the submaps' views, the save at a progress and layer 1 without an event's
 // changes (no pictures) too: marked pictures (ADR 0008). They change with the map painted, the event progress slider
-// goes through many (memory only)
+// goes through many (memory only). A level's game BG (Map16 numbers, no picture) goes to the result cache; the places of
+// a prefab and whether two loads draw the same tiles are asked for once, by a dialog or an action (to the editor only)
 export const LEARN_KINDS: { [K in LearnJob['kind']]: { keep: Keep; picture: boolean; boot?: false } } = {
   sprites: { keep: true, picture: true },
   spriteAt: { keep: true, picture: true },
@@ -132,6 +144,11 @@ export const LEARN_KINDS: { [K in LearnJob['kind']]: { keep: Keep; picture: bool
   owSave: { keep: 'memory', picture: true, boot: false },
   owL1Without: { keep: 'memory', picture: true, boot: false },
   msgRoutine: { keep: true, picture: false },
+  gameBg: { keep: true, picture: false },
+  prefabPlaces: { keep: false, picture: false },
+  sameTiles: { keep: false, picture: false },
+  slippery: { keep: true, picture: false },
+  objectTable: { keep: true, picture: false },
 };
 export const learnKeep = (j: LearnJob): Keep => LEARN_KINDS[j.kind].keep;
 
@@ -139,7 +156,8 @@ export const learnKeep = (j: LearnJob): Keep => LEARN_KINDS[j.kind].keep;
 // Their names are busy keys too (ProbeBusyKey), so none is a task's type.
 export type LearnLane =
   | 'sprites' | 'variants' | 'bytes' | 'spritemem' | 'animated' | 'layer3' | 'l2' | 'lt' | 'uses' | 'arcs' | 'thumbs'
-  | 'placement' | 'sizes' | 'prefab-suggest' | 'msgr' | 'level-png' | 'level-images'
+  | 'placement' | 'sizes' | 'prefab-suggest' | 'msgr' | 'level-png' | 'level-images' | 'gamebg' | 'prefab-places'
+  | 'breakup' | 'slippery' | 'otab'
   | 'ow' | 'owpick' | 'owpk1' | 'owrw' | 'owlw' | 'owps' | 'owv' | 'ows' | 'owl' | `owc${number}`;
 
 // what the probe client shows as busy: the probes, the tasks, the learn jobs' lanes

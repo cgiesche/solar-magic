@@ -13,7 +13,7 @@ import {
 } from '../core/level.ts';
 import { levelBgPointer } from '../core/levelheader.ts';
 import { hex, hex2, spriteName } from '../core/names.ts';
-import { objectTable, objectName, objectNameKey, setObjectName, namedPerTable, numberName } from '../core/objectnames.ts';
+import { objectTableKey, objectName, objectNameKey, setObjectName, namedPerTable, numberName } from '../core/objectnames.ts';
 import { layerBoxes, boxAt, objectKey } from '../core/objboxes.ts';
 import { objectUserNames } from '../core/usernames.ts';
 import { loadPixiProject, customSpriteList, type CustomSprite } from '../core/pixi.ts';
@@ -25,10 +25,10 @@ import { gfxSkipMask, gfxFilesHash } from '../core/gfxpages.ts';
 import { flagBytes, usedFlags, isDm16, dm16Tiles } from '../core/cdm16.ts';
 import { RenderQuery, type TileCut } from '../core/renderquery.ts';
 import { PREFAB_EXT, listPrefabs, writePrefab, type Prefab } from '../core/prefabs.ts';
-import { breakUpPrefab, replaced, setPrefabSources } from '../core/prefabsources.ts';
+import { breakUpParts, replaced, setPrefabSources } from '../core/prefabsources.ts';
 import { PasteCounter, findPasted, arrangementKey, type PasteHint } from '../core/pastehint.ts';
 import { SuggestRuns, SuggestionList, suggestInput, type PrefabSuggestion, type SuggestLevels, type SuggestRun } from '../core/prefabsuggest.ts';
-import { planPrefabPlaces, applyPrefabPlaces, deletePrefab, prefabObjectCount, replaceWithPrefab, type LevelPlaces, type LevelGroups, type PrefabGroup } from '../core/prefabplaces.ts';
+import { applyPrefabPlaces, deletePrefab, prefabObjectCount, replaceWithPrefab, type LevelPlaces, type LevelGroups, type PrefabGroup } from '../core/prefabplaces.ts';
 import type { Package } from '../core/pkgreg.ts';
 import { kvEntries, kvKeys, kvWrite, saveRom } from './storage.ts';
 import { ResultCache, RomFingerprint, oldStoreKeys, type CacheEntry } from '../core/romdeps.ts';
@@ -66,7 +66,8 @@ import { exanimTiles, exanimColors, exanimPeriod, readLevelList, readGlobalList 
 import { usedTriggers, initTriggers, type TriggerView, type SlotRef } from '../core/extrigger.ts';
 import { LevelUses, OpenLevelTiles, levelOverride, usedLevels, spriteUsage, isTilesetTile, type LevelTiles, type OpenTilesState, type SpriteUser } from '../core/levelusage.ts';
 import { TILESETS, sharingTilesets } from '../core/tilesets.ts';
-import { slipperyActions } from '../core/slippery.ts';
+import { slipperyKey } from '../core/slippery.ts';
+import { gameBgKey } from '../core/tilemove.ts';
 import { type PathKind, type LevelTileTest, levelTileTest } from '../core/owpaths.ts';
 import type { RevealWalkSkips } from '../core/revealwalk.ts';
 import type { OwRender } from '../core/overworld.ts';
@@ -112,7 +113,8 @@ export type AppEvent =
   | 'animated' // which tiles and colors of the level animate is known
   | 'anim-frame' // the next frame of the level animation is shown, or the level as rendered again when it stops
   | 'prefabs' // the prefab table changed
-  | 'object-names' // the user's object names changed (a rename, its undo or redo)
+  | 'object-names' // the user's object names changed (a rename, its undo or redo), or an object table became known
+  | 'slippery' // the entrance actions that make a level slippery are known (App.slipperyActions)
   | 'paste-hint' // App.pasteHint changed
   | 'prefab-suggestions' // App.prefabSuggestions changed
   | 'bgtile' // the BG or layer 3 brush changed (picked from the level)
@@ -207,9 +209,9 @@ export class App {
   // stored in IndexedDB, loaded once at start (cacheReady)
   results: ResultCache;
   cacheReady: Promise<void>;
-  // the emulated results needed at once, on the main thread (learner.ts now: the slippery entrance actions, the
-  // object tables, the tilesets' pointers; its emulator for loads at once). The others are learned in the probe worker
-  // (probeclient.ts), without one by its host on the main thread.
+  // the emulated results needed at once, on the main thread: the tilesets' pointers only (tilesetPointerTable says
+  // why). The others, level loads too, are learned in the probe worker (probeclient.ts), without one by its host on
+  // the main thread.
   private learner: ResultLearner;
   private cacheTimer = 0;
   private closed = false; // project closed: nothing is written to the browser any more
@@ -1077,9 +1079,18 @@ export class App {
     return { levels, pending: missing.length + (state === 'pending' ? 1 : 0), open: state };
   }
   private openTiles = new OpenLevelTiles(); // the open level's tiles, the last known while they are learned
-  // a level's BG tilemap from its load (the open one as shown), where it is the game's own (tilemove.ts)
-  loadedBg(n: number): Uint16Array {
-    return bgFromWram(n === this.level.number ? this.render.wram : this.learner.emu().load(n).wram);
+  // A level's BG tilemap from its load (the open one as shown), where it is the game's own (tilemove.ts): another
+  // level's learned in the probe worker and kept in the result cache, undefined while that runs (then done is called;
+  // null: the load failed or was dropped). Urgent: the remap dialog waits for it.
+  loadedBg(n: number, done: (bg: Uint16Array | null) => void): Uint16Array | null | undefined {
+    if (n === this.level.number) return bgFromWram(this.render.wram);
+    const r = this.probes.learnOrFailed<Uint16Array>(gameBgKey(n), { kind: 'gameBg', level: n },
+      { lane: 'gamebg', urgent: true, label: (k) => `Game BGs (${k})`, done, failed: () => done(null), dropped: () => done(null) });
+    return r === FAILED ? null : r;
+  }
+  // the game BG loads asked for are not wanted any more (the dialog closed)
+  dropLoadedBgs(): void {
+    this.probes.unlearn('gamebg');
   }
   // the tilesets in which FG Map16 tile t is the open level's tile (all for the standard tiles): the
   // pointers each tileset loads (tilesets.ts), learned once and kept in the result cache
@@ -1087,14 +1098,20 @@ export class App {
     if (!isTilesetTile(t)) return Array.from({ length: TILESETS }, (_, i) => i);
     return sharingTilesets(this.tilesetPointerTable(), this.level.header.tileset, t);
   }
-  // per tileset the pointers of FG Map16 tiles 000-1FF (tilesets.ts), learned once and kept in the result cache
+  // Per tileset the pointers of FG Map16 tiles 000-1FF (tilesets.ts), learned once and kept in the result cache. Learned
+  // on the main thread when not stored: they are needed at once (what a tileset tile applies to, a package's tiles) and
+  // so is what they are part of on both threads (the display data's skip mask, jobrunner.ts); the probe worker learns
+  // them for its own first jobs and hands them back, so here they are mostly stored already.
   tilesetPointerTable(): number[][] {
     return this.learner.tilesetPointers();
   }
-  // the entrance actions that make a level slippery (slippery.ts), learned once and kept in the result cache
-  slipperyActions(): number[] {
-    return this.learner.now('slip1', slipperyActions, { picture: false });
+  // the entrance actions that make a level slippery (slippery.ts), learned in the probe worker once and kept in the
+  // result cache: undefined while that runs ('slippery' when known; none when it failed)
+  slipperyActions(): number[] | undefined {
+    const r = this.probes.learnOrFailed<number[]>(slipperyKey, { kind: 'slippery' }, { lane: 'slippery', urgent: true, label: 'Slippery entrances', done: this.slipperyLearned, failed: this.slipperyLearned });
+    return r === FAILED ? [] : r;
   }
+  private slipperyLearned = () => this.emit('slippery');
   // what Mario does on each overworld layer 1 tile 00–FF (owpaths.ts): learned in the probe worker once and kept in
   // the result cache while the game's code is unchanged; null while that runs, then `done` is called
   pathKinds(done: () => void): PathKind[] | null {
@@ -1244,10 +1261,13 @@ export class App {
   private thumbsLearned = () => this.emit('thumbs');
 
   private objectNamesSeen = ''; // the user's object names as last told ('object-names')
-  // the object table of a tileset's standard objects (objectnames.ts), learned once and kept in the result cache
+  // the object table of a tileset's standard objects (objectnames.ts), learned in the probe worker once and kept in the
+  // result cache: null while that runs (names as without a table, 'object-names' when known) and when there is none
   objectTable(ts = this.level.header.tileset): number | null {
-    return this.learner.now(`otab1:${ts}`, (emu) => objectTable(emu, ts), { picture: false });
+    const r = this.probes.learnOrFailed<number | null>(objectTableKey(ts), { kind: 'objectTable', tileset: ts }, { lane: 'otab', label: 'Object tables', done: this.objectTableLearned, failed: this.objectTableLearned });
+    return r === FAILED || r === undefined ? null : r;
   }
+  private objectTableLearned = () => this.emit('object-names');
   // the name of an object in the open level's tileset: the user's, else the built-in one (objectnames.ts)
   objectName(num: number, ext: number): string {
     return objectName(this.rom, num, ext, this.objectTableOf(num));
@@ -1521,16 +1541,20 @@ export class App {
     return this.query.tileCut(this.model.mode === 'l2', this.model.currentObjects(), (o) => this.model.selection.has(o.uid));
   }
 
-  // where the arrangement of prefab s already is as Direct Map16 objects (prefabplaces.ts): the open level as
-  // edited (not its selected objects, unless all) and all other levels as saved
-  prefabPlaces(s: Prefab, all = false): LevelPlaces[] {
-    const open = this.level.number, layer = this.model.mode === 'l2' ? 2 : 1, sel = new Set(all ? [] : this.selectedIndices());
-    return planPrefabPlaces(this.rom, s, {
-      levels: usedLevels(this.rom),
-      level: (n) => (n === open ? this.level : loadLevel(this.rom, n)),
-      load: (n, ov) => this.learner.emu().load(n, ov),
-      skip: (n, l, i) => n === open && l === layer && sel.has(i),
-    });
+  // Where the arrangement of prefab s already is as Direct Map16 objects (prefabplaces.ts): the open level as edited
+  // (not its selected objects, unless all) and all other levels as saved. Learned in the probe worker (a level's load
+  // where objects lie between those of a place), done called with them; a later request replaces it. Urgent: the
+  // dialog asking waits for it.
+  prefabPlaces(s: Prefab, all: boolean, done: (places: LevelPlaces[]) => void): void {
+    const lv = this.level, levels = usedLevels(this.rom), layer: 1 | 2 = this.model.mode === 'l2' ? 2 : 1;
+    const skip = { level: lv.number, layer, objects: all ? [] : this.selectedIndices() };
+    const r = this.probes.learnOrFailed<LevelPlaces[]>('places', { kind: 'prefabPlaces', prefab: s, levels, open: lv, skip },
+      { lane: 'prefab-places', input: { s, levels, open: lv, skip }, replace: true, urgent: true, label: 'Looking for the arrangement', done, failed: () => done([]) });
+    if (r !== undefined) done(r === FAILED ? [] : r);
+  }
+  // the places asked for are not wanted any more (the dialog closed)
+  dropPrefabPlaces(): void {
+    this.probes.unlearn('prefab-places');
   }
   private selectedIndices(): number[] {
     return this.model.currentObjects().flatMap((o, i) => (this.model.selection.has(o.uid) ? [i] : []));
@@ -1639,18 +1663,30 @@ export class App {
     try { this.romEdit(`Prefab ${hex(n, 2)} deleted`, () => deletePrefab(this.rom, n, usedLevels(this.rom))); } catch (e) { toast(String(e instanceof Error ? e.message : e), 'error'); }
   }
 
-  // a prefab object becomes the objects it was made from where they draw the level as it does, else Direct Map16
-  // objects (rectangles of one tile), at its place in the object list (prefabsources.ts)
+  // A prefab object becomes the objects it was made from where they draw the level as it does, else Direct Map16
+  // objects (rectangles of one tile), at its place in the object list (prefabsources.ts). Whether they draw it the same
+  // is learned in the probe worker (two loads of the level as edited); the level edited meanwhile, nothing is broken up.
   explodePrefab(o: LevelObject): void {
-    const r = breakUpPrefab(this.rom, this.level, o, this.vertical, (lv) => this.learner.emu().load(lv.number, this.buildOverrides(lv)));
-    if (!r) { toast('The prefab does not exist (anymore).', 'error'); return; }
-    this.editLevel((lv) => {
-      const { objects, layer2Objects } = replaced(lv, o, r.parts);
-      lv.objects = objects;
-      if (layer2Objects) lv.layer2Objects = layer2Objects;
-      this.model.selection = new Set(r.parts.map((p) => p.uid));
-    });
-    if (r.differs) toast('Its objects would look different here: broken up into single tiles.', 'info');
+    const p = breakUpParts(this.rom, o, this.vertical);
+    if (!p) { toast('The prefab does not exist (anymore).', 'error'); return; }
+    const lv = this.level, gen = this.edits.levelGen, src = p.sources;
+    const apply = (parts: LevelObject[], differs: boolean) => {
+      if (this.level !== lv || this.edits.levelGen !== gen) { toast('The level changed meanwhile: break up the prefab again.', 'error'); return; }
+      this.editLevel((l) => {
+        const { objects, layer2Objects } = replaced(l, o, parts);
+        l.objects = objects;
+        if (layer2Objects) l.layer2Objects = layer2Objects;
+        this.model.selection = new Set(parts.map((q) => q.uid));
+      });
+      if (differs) toast('Its objects would look different here: broken up into single tiles.', 'info');
+    };
+    if (!src) { apply(p.tiles, false); return; }
+    let a: LevelOverride, b: LevelOverride;
+    try { a = this.buildOverrides(lv); b = this.buildOverrides(replaced(lv, o, src)); } catch { apply(p.tiles, true); return; } // (not serializable there)
+    const alike = (same: boolean) => (same ? apply(src, false) : apply(p.tiles, true));
+    const r = this.probes.learnOrFailed<boolean>('same', { kind: 'sameTiles', level: lv.number, a, b },
+      { lane: 'breakup', input: [levelInput(lv.number, a), levelInput(lv.number, b)], replace: true, label: 'Breaking up the prefab', done: alike, failed: () => alike(false) });
+    if (r !== undefined) alike(r === true);
   }
 
   // resize: width/height nibbles of settings byte by one step each; the left and top edges stay where they

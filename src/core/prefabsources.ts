@@ -8,7 +8,7 @@
 
 import type { Rom } from './rom.ts';
 import { newUid, type Level, type LevelObject } from './level.ts';
-import type { LevelRender } from './levelemu.ts';
+import type { LevelEmulator, LevelOverride, LevelRender } from './levelemu.ts';
 import { MAP_BASE, MAP_SIZE, MAP_HI } from './ram.ts';
 import { inputHash } from './inputs.ts';
 import { readPrefab, type Prefab } from './prefabs.ts';
@@ -55,24 +55,39 @@ export function prefabSources(rom: Rom, n: number, s: Prefab, x: number, y: numb
   return e.objects.map((o) => ({ ...structuredClone(o), uid: newUid(), x: o.x + x, y: o.y + y }));
 }
 
+// what prefab object o (placed in a level of that orientation) breaks up into: its tiles as Direct Map16 objects, and the
+// objects it was made from (null: none kept); null: the prefab doesn't exist
+export function breakUpParts(rom: Rom, o: LevelObject, vertical: boolean): { tiles: LevelObject[]; sources: LevelObject[] | null } | null {
+  const s = o.prefab !== undefined ? readPrefab(rom, o.prefab) : null;
+  if (!s) return null;
+  return { tiles: prefabDm16Objects(s, o.x, o.y, vertical), sources: prefabSources(rom, o.prefab!, s, o.x, o.y) };
+}
+
+// whether two loads of a level both succeeded and draw both layers' maps the same
+export function sameTiles(a: LevelRender, b: LevelRender): boolean {
+  if (!a.ok || !b.ok) return false;
+  for (let i = MAP_BASE; i < MAP_BASE + MAP_SIZE; i++) if (a.wram[i] !== b.wram[i] || a.wram[i + MAP_HI] !== b.wram[i + MAP_HI]) return false;
+  return true;
+}
+
+// the same for level n loaded with a and with b, as a job (the result learner's, no picture, CONTEXT.md) learned in the
+// probe worker: a single step
+export function* sameTilesJob(emu: LevelEmulator, n: number, a: LevelOverride, b: LevelOverride): Generator<never, boolean> {
+  return sameTiles(emu.load(n, a), emu.load(n, b));
+}
+
 // what prefab object o in lv breaks up into: its sources when they draw both layers' maps as it does (load: lv
 // emulated), else its tiles as Direct Map16 objects; null: the prefab doesn't exist
 export function breakUpPrefab(rom: Rom, lv: Level, o: LevelObject, vertical: boolean, load: (lv: Level) => LevelRender):
   { parts: LevelObject[]; sources: boolean; differs: boolean } | null {
-  const s = o.prefab !== undefined ? readPrefab(rom, o.prefab) : null;
-  if (!s) return null;
-  const tiles = () => prefabDm16Objects(s, o.x, o.y, vertical);
-  const src = prefabSources(rom, o.prefab!, s, o.x, o.y);
-  if (!src) return { parts: tiles(), sources: false, differs: false };
+  const p = breakUpParts(rom, o, vertical);
+  if (!p) return null;
+  const src = p.sources;
+  if (!src) return { parts: p.tiles, sources: false, differs: false };
   const alike = (() => {
-    try {
-      const a = load(lv), b = load(replaced(lv, o, src));
-      if (!a.ok || !b.ok) return false;
-      for (let i = MAP_BASE; i < MAP_BASE + MAP_SIZE; i++) if (a.wram[i] !== b.wram[i] || a.wram[i + MAP_HI] !== b.wram[i + MAP_HI]) return false;
-      return true;
-    } catch { return false; } // (not serializable there)
+    try { return sameTiles(load(lv), load(replaced(lv, o, src))); } catch { return false; } // (not serializable there)
   })();
-  return alike ? { parts: src, sources: true, differs: false } : { parts: tiles(), sources: false, differs: true };
+  return alike ? { parts: src, sources: true, differs: false } : { parts: p.tiles, sources: false, differs: true };
 }
 
 // lv with object o (of either layer) replaced by parts, at its place in the object list

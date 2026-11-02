@@ -932,20 +932,26 @@ export function openSavePrefab(app: App, sug?: { prefab: Prefab; places?: LevelP
         : `Saves space from the ${nth(c.breakEven)} placement on (${c.dm16Bytes - c.perPlacement} bytes per placement).`));
   };
   name.addEventListener('input', updCost);
-  // the same arrangement elsewhere as Direct Map16 objects (prefabplaces.ts), replaced on request
-  const places = sug?.places ?? app.prefabPlaces({ ...r, name: '' }, !!from);
-  const found = places.reduce((k, p) => k + p.places.length, 0);
-  const saved = places.reduce((k, p) => k + p.places.reduce((b, q) => b + q.bytes, 0), 0);
+  // the same arrangement elsewhere as Direct Map16 objects (prefabplaces.ts), replaced on request: a suggestion's
+  // current places, else looked for in the probe worker (none until they are known)
+  let places: LevelPlaces[] = [], open = true;
   const replaceAll = h('input', { type: 'checkbox', checked: !!from });
   const plural = (k: number, w: string) => `${k} ${w}${k === 1 ? '' : 's'}`;
-  const elsewhere = found
-    ? h('div', null,
-      usedInList(app, from ? 'Where these Direct Map16 objects are' : 'The same Direct Map16 objects elsewhere', places.map((p) => ({
-        level: p.level, at: { x: p.places[0].x, y: p.places[0].y },
-        text: `${plural(p.places.length, 'place')}, ${plural(p.places.reduce((b, q) => b + q.bytes, 0), 'byte')} saved`,
-      })), 0, ''),
-      h('label', { class: 'row small' }, replaceAll, ` Replace ${found === 1 ? 'it' : `all ${found}`} with the prefab (saves ${plural(saved, 'byte')} of level data)`))
-    : h('div', { class: 'hint' }, 'The same tiles as Direct Map16 objects are nowhere else.');
+  const elsewhere = h('div', null, h('div', { class: 'hint' }, 'Looking for the same Direct Map16 objects elsewhere …'));
+  const showPlaces = (found: LevelPlaces[]) => {
+    if (!open) return;
+    places = found;
+    const count = places.reduce((k, p) => k + p.places.length, 0);
+    const saved = places.reduce((k, p) => k + p.places.reduce((b, q) => b + q.bytes, 0), 0);
+    elsewhere.replaceChildren(count
+      ? h('div', null,
+        usedInList(app, from ? 'Where these Direct Map16 objects are' : 'The same Direct Map16 objects elsewhere', places.map((p) => ({
+          level: p.level, at: { x: p.places[0].x, y: p.places[0].y },
+          text: `${plural(p.places.length, 'place')}, ${plural(p.places.reduce((b, q) => b + q.bytes, 0), 'byte')} saved`,
+        })), 0, ''),
+        h('label', { class: 'row small' }, replaceAll, ` Replace ${count === 1 ? 'it' : `all ${count}`} with the prefab (saves ${plural(saved, 'byte')} of level data)`))
+      : h('div', { class: 'hint' }, 'The same tiles as Direct Map16 objects are nowhere else.'));
+  };
   const upd = () => {
     const n = Number(target.value);
     const users = all.has(n) ? app.prefabUsers(n) : [];
@@ -969,7 +975,10 @@ export function openSavePrefab(app: App, sug?: { prefab: Prefab; places?: LevelP
     cost,
     elsewhere,
     h('div', { class: 'hint' }, 'Prefabs (SMWS) only use extended object 04 (free in the game and in Lunar Magic) and change no game code.'));
-  const dlg = modal(from ? 'Suggestion as prefab' : 'Selection as prefab', body, [{ label: 'Cancel' }, { label: 'Save', primary: true, onClick: save }]);
+  const dlg = modal(from ? 'Suggestion as prefab' : 'Selection as prefab', body, [{ label: 'Cancel' }, { label: 'Save', primary: true, onClick: save }],
+    () => { open = false; app.dropPrefabPlaces(); });
+  if (sug?.places) showPlaces(sug.places);
+  else app.prefabPlaces({ ...r, name: '' }, !!from, showPlaces);
   name.addEventListener('keydown', (e) => { if (e.key === 'Enter' && save()) dlg.close(); });
   setTimeout(() => name.focus(), 0);
 }
@@ -1067,6 +1076,7 @@ export class Properties {
     app.on('objkinds', () => this.build());
     app.on('object-names', () => this.build());
     app.on('probes', () => { if (this.probePending) this.build(); });
+    app.on('slippery', () => { if (app.model.mode === 'exit') this.build(); });
     app.on('rom-change', () => { if (app.model.mode === 'exit') this.build(); });
     app.on('picked-item', () => { if (app.model.mode === 'spr' && !app.model.selectedSprites().length) this.build(); });
   }

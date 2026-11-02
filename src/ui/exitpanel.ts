@@ -118,7 +118,8 @@ function exitPanel(app: App, body: HTMLElement): boolean {
       !!(e.flags & EXIT_MIDWAY), (on) => upd((e) => { e.flags = on ? e.flags | EXIT_MIDWAY : e.flags & ~EXIT_MIDWAY; }))));
   }
   // where Mario arrives (and whether the entrance makes the level slippery)
-  const slippery = (x: Parameters<typeof arrivesSlippery>[0]) => (arrivesSlippery(x, app.slipperyActions()) ? ', arrives slippery' : '');
+  // (while the actions are learned: by its own option only; the panel is built again once they are known)
+  const slippery = (x: Parameters<typeof arrivesSlippery>[0]) => (arrivesSlippery(x, app.slipperyActions() ?? []) ? ', arrives slippery' : '');
   const arrive = e.secondary ? (() => {
     const s = app.entrances.get(t.entrance);
     return g.entrancesOf(t.to).includes(t.entrance)
@@ -267,9 +268,11 @@ function mainPanel(app: App, body: HTMLElement, kind: 'main' | 'midway'): boolea
 
 
 // which entrances of the open level (s: its secondary header) make it slippery, by their option or their
-// action: it depends on the entrance, not on the level
+// action: it depends on the entrance, not on the level (while the actions are learned, it says so)
 export function slipperyText(app: App, s: SecondaryHeader): string {
-  const names = slipperyEntrances(app.rom, s, app.entrances.inOpenLevel(), app.slipperyActions()).map((e) => (e.kind === 'sec' ? `secondary entrance ${hex3(e.index)}`
+  const actions = app.slipperyActions();
+  if (!actions) return 'Which entrances make the level slippery is being learned …';
+  const names = slipperyEntrances(app.rom, s, app.entrances.inOpenLevel(), actions).map((e) => (e.kind === 'sec' ? `secondary entrance ${hex3(e.index)}`
     : e.kind === 'midway' ? 'the midway entrance' : s.midwayOwn ? 'the main entrance' : 'the main entrance (also at the midway point)'));
   return names.length ? `The level is slippery when Mario enters it through ${names.join(', ')}.` : 'No entrance makes the level slippery.';
 }

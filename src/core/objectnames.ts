@@ -48,7 +48,7 @@ const EDITOR_EXTENDED: Record<number, string> = { 0x04: 'Prefab', 0x05: 'Direct 
 const PROBE_LEVEL = 0x105; // the level loaded (its own objects and sprites left out)
 const PROBE_OBJECTS = 13; // 01–0D: one routine of the game for all of them, which does not crash on size 0
 
-export function objectTable(emu: LevelEmulator, ts: number): { result: number | null; reads: RomReads } {
+function findTable(emu: LevelEmulator, ts: number): number | null {
   const rom = emu.rom;
   const h = rom.bytes(rom.r24(L1_PTRS + PROBE_LEVEL * 3), 5);
   const objs: LevelObject[] = Array.from({ length: PROBE_OBJECTS }, (_, i) => ({ uid: newUid(), num: i + 1, ext: 0, size: 0, x: i * 16 + 4, y: 0x10 }));
@@ -59,13 +59,23 @@ export function objectTable(emu: LevelEmulator, ts: number): { result: number | 
   layer1.set(body, 5);
   const byteOwner = new Int32Array(0x10000).fill(-1);
   owners.forEach((o, i) => (byteOwner[OV_L1 + i] = o));
-  return emu.tracked(() => {
-    const r = emu.load(PROBE_LEVEL, { layer1, sprites: Uint8Array.of(0, 0xff), byteOwner, trace: true });
-    // per object the ROM offsets it read, less 3 × (n − 1): the table's start is in all of them
-    const starts = Array.from({ length: PROBE_OBJECTS }, (_, i) => new Set([...r.trace?.reads.get(i) ?? []].map((v) => readOffset(v) - 3 * i)));
-    const common = [...starts[0]].filter((o) => starts.every((s) => s.has(o)));
-    return common.length ? pcToSnes(Math.min(...common)) & 0x7fffff : null;
-  });
+  const r = emu.load(PROBE_LEVEL, { layer1, sprites: Uint8Array.of(0, 0xff), byteOwner, trace: true });
+  // per object the ROM offsets it read, less 3 × (n − 1): the table's start is in all of them
+  const starts = Array.from({ length: PROBE_OBJECTS }, (_, i) => new Set([...r.trace?.reads.get(i) ?? []].map((v) => readOffset(v) - 3 * i)));
+  const common = [...starts[0]].filter((o) => starts.every((s) => s.has(o)));
+  return common.length ? pcToSnes(Math.min(...common)) & 0x7fffff : null;
+}
+
+// the same with what the load read
+export function objectTable(emu: LevelEmulator, ts: number): { result: number | null; reads: RomReads } {
+  return emu.tracked(() => findTable(emu, ts));
+}
+
+// the same as a job (the result learner's, no picture, CONTEXT.md) learned in the probe worker under objectTableKey: a
+// single step
+export const objectTableKey = (ts: number) => `otab1:${ts}`;
+export function* objectTableJob(emu: LevelEmulator, ts: number): Generator<never, number | null> {
+  return findTable(emu, ts);
 }
 
 // the built-in name of an object (num 0: extended object ext; table: of the level's tileset, objectTable), null

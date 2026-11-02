@@ -12,21 +12,45 @@ import { planRemap, applyRemap, type Layer, type LevelSource, type TileMap, type
 import { remapEditor } from './remaplist.ts';
 import { usedInList } from './usedin.ts';
 
-// the levels (default: all) with the open one as edited; a game BG from the level's load (kept in `loaded`)
-// where the usage index does not already know it lacks the map's tiles
-export function levelSource(app: App, map: TileMap, levels = usedLevels(app.rom), loaded = new Map<number, Uint16Array>()): LevelSource {
+// game BGs from the levels' loads (null: the load failed), kept while a dialog is open
+export type LoadedBgs = Map<number, Uint16Array | null>;
+
+// The levels (default: all) with the open one as edited; a game BG from the level's load (kept in `loaded`) where the
+// usage index does not already know it lacks the map's tiles. Another level's load runs in the probe worker: until it
+// is known its game BG counts as none, `pending` holds the level and `changed` is called with it once it is known.
+export function levelSource(app: App, map: TileMap, levels = usedLevels(app.rom), loaded: LoadedBgs = new Map(), changed: (n: number) => void = () => {}):
+  LevelSource & { pending: Set<number> } {
   const known = new Map(app.levelTiles().levels.map((l) => [l.level, l]));
+  const pending = new Set<number>();
   return {
     levels,
+    pending,
     level: (n) => (n === app.level.number ? app.level : loadLevel(app.rom, n)),
     gameBg: (n) => {
       const t = known.get(n);
       if (t && n !== app.level.number && !t.bg.some((b) => map.has(b.tile))) return null;
-      let bg = loaded.get(n);
-      if (!bg) loaded.set(n, bg = app.loadedBg(n));
+      if (loaded.has(n)) return loaded.get(n)!;
+      const bg = app.loadedBg(n, (b) => { loaded.set(n, b); changed(n); });
+      if (bg === undefined) { pending.add(n); return null; }
+      loaded.set(n, bg);
       return bg;
     },
   };
+}
+
+// A plan made from a level source (with `changed`) once the game BGs it needs are all known: made again when those its
+// last making waited for have come
+export function whenLoaded<T>(make: (changed: (n: number) => void) => { value: T; pending: Set<number> }): Promise<T> {
+  return new Promise((resolve) => {
+    let waiting = new Set<number>();
+    const came = (n: number) => { if (waiting.delete(n) && !waiting.size) again(); };
+    const again = () => {
+      const r = make(came);
+      waiting = new Set(r.pending);
+      if (!waiting.size) resolve(r.value);
+    };
+    again();
+  });
 }
 
 // what a plan rewrites: the levels (clicking one opens it), prefabs, blocks
@@ -53,18 +77,25 @@ export function openRemapUses(app: App, layer: Layer, fill: { line?: string; all
   let all = fill.all ?? false;
   const list = h('div', { class: 'ru-list' }), scopes = h('div', { class: 'row' });
   // (the apply reuses the preview's levels: their game BGs were loaded then, not during the ROM edit)
-  let plan: { uses: UsesPlan; src: LevelSource } | null = null;
-  const loaded = new Map<number, Uint16Array>();
+  let plan: { uses: UsesPlan; src: LevelSource } | null = null, open = true;
+  const loaded: LoadedBgs = new Map();
+  // the levels whose game BGs the plan shown waits for: drawn again once they have all come
+  let waiting = new Set<number>();
+  const came = (k: number) => { if (waiting.delete(k) && !waiting.size && open) draw(); };
   const draw = () => {
     const scope = (v: boolean, label: string) => h('label', { class: 'toggle' },
       h('input', { type: 'radio', name: 'ru-scope', checked: all === v, onchange: () => { all = v; draw(); } }), label);
     scopes.replaceChildren(scope(false, `This level (${hex(n, 3)})`), scope(true, 'All levels'));
     const { remap } = ed.parsed();
-    const src = levelSource(app, remap.tiles, all ? undefined : [n], loaded);
+    const src = levelSource(app, remap.tiles, all ? undefined : [n], loaded, came);
     plan = ed.valid() && remap.tiles.size ? { uses: planRemap(app.rom, layer, remap.tiles, src), src } : null;
+    waiting = plan ? src.pending : new Set();
+    const k = waiting.size;
     list.replaceChildren(!ed.valid() ? h('div', { class: 'hint' }, 'Fix the marked lines first.')
       : !plan ? h('div', { class: 'hint' }, `Which Map16 tiles become which: ${NAMES[layer].what} using them are rewritten.`)
-        : planList(app, plan.uses, `No ${NAMES[layer].what.replace(/s$/, '')} ${all ? 'in any level' : 'here'} uses these tiles.`));
+        : h('div', null,
+          k ? h('div', { class: 'hint' }, `Loading the game BG${k > 1 ? 's' : ''} of ${k} level${k > 1 ? 's' : ''} …`) : '',
+          planList(app, plan.uses, `No ${NAMES[layer].what.replace(/s$/, '')} ${all ? 'in any level' : 'here'} uses these tiles.`)));
   };
   const ed = remapEditor('numbers', draw);
   if (fill.line) ed.setText(fill.line);
@@ -77,6 +108,7 @@ export function openRemapUses(app: App, layer: Layer, fill: { line?: string; all
   modal(`${NAMES[layer].title}`, body, [
     { label: 'Apply', primary: true, onClick: () => {
       const { remap } = ed.parsed();
+      if (waiting.size) { toast('The levels\' game BGs are still being loaded', 'error'); return false; }
       if (!plan?.uses.levels.length) { toast(ed.valid() ? 'Nothing changes' : 'Fix the marked lines first', 'error'); return false; }
       const { uses, src } = plan;
       try {
@@ -85,5 +117,5 @@ export function openRemapUses(app: App, layer: Layer, fill: { line?: string; all
       } catch (e) { toast(String(e instanceof Error ? e.message : e), 'error'); return false; }
     } },
     { label: 'Cancel' },
-  ]);
+  ], () => { open = false; app.dropLoadedBgs(); });
 }

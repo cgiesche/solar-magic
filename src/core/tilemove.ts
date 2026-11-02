@@ -18,7 +18,8 @@ import type { Rom } from './rom.ts';
 import { hex } from './names.ts';
 import { L2_PTRS, loadLevel, storedBgAddr, type Level, type LevelObject } from './level.ts';
 import { saveLevel } from './save.ts';
-import { decodeBg } from './bg.ts';
+import { decodeBg, bgFromWram } from './bg.ts';
+import type { LevelEmulator } from './levelemu.ts';
 import { isDm16, prefabTiles, COND_ADD } from './cdm16.ts';
 import { listPrefabs, writePrefab, type Prefab } from './prefabs.ts';
 import { moveNames } from './usernames.ts';
@@ -66,6 +67,13 @@ export function storedBg(rom: Rom, lv: Level): Uint16Array | null {
   const a = storedBgAddr(rom, lv.number);
   if (!a || lv.layer2Objects || lv.layer2Pointer !== rom.r24(L2_PTRS + lv.number * 3)) return null;
   return decodeBg(rom.bytes(a, Math.min(0x1000, 0x10000 - (a & 0xffff))));
+}
+
+// A level's game BG: the BG tilemap of its load as saved (a job of one step, learned in the probe worker; its result
+// cache key gameBgKey)
+export const gameBgKey = (n: number) => `gbg1:${n}`;
+export function* gameBgJob(emu: LevelEmulator, n: number): Generator<never, Uint16Array> {
+  return bgFromWram(emu.load(n).wram);
 }
 
 // a level's BG tilemap as edited, stored or (when `game`) the game's; null: none (layer 2 objects) or not known

@@ -1,7 +1,8 @@
-// Learning emulated results on the editor's main thread, at once (now: what the editor needs at once), on an emulator
-// of the learner's job runner (jobrunner.ts); the editor learns its background jobs in the probe worker instead
-// (probeclient.ts). A result holds while its key, its input (state outside the ROM it depends on, inputs.ts) and the
-// ROM bytes it read (romdeps.ts) are unchanged.
+// Learning emulated results on the editor's main thread, at once (now), on an emulator of the learner's job runner
+// (jobrunner.ts); the editor learns its jobs in the probe worker instead (probeclient.ts), level loads too, and here only
+// the tilesets' pointers (App.tilesetPointerTable says why); now and emu serve the tools comparing with the worker. A
+// result holds while its key, its input (state outside the ROM it depends on, inputs.ts) and the ROM bytes it read
+// (romdeps.ts) are unchanged.
 // A result that is no picture (picture: false) doesn't read the display data either (the Map16 tiles'
 // quarters, the colors: gfxDisplaySkipMask, as the probe worker's results, ADR 0008): drawing a tile or
 // changing a color keeps it. It runs from a boot snapshot that leaves them out too, booted on an own
