@@ -3,7 +3,7 @@
 // export). Only its colors differing from the clean game's are the package's – kept by the editor when it
 // opens the clean game, as the ROM's own may have been edited since: 3 colors of BG palette 0 (14–16).
 // Installed they change exactly those; removed they are as before (also when one was edited by hand
-// before). A second package changing one of them is a conflict.
+// before). A second package changing one of them is a conflict, shown in the preview's plan.
 import { unzipSync, zipSync } from 'fflate';
 import { readFileSync } from 'node:fs';
 import { Rom, snesToPc } from '../src/core/rom.ts';
@@ -89,7 +89,10 @@ check(sharedColorNames(OTHERS).join('; ') === 'Back area color 0; BG palette 0: 
   const other = clean.bytes(SHARED_PALETTES, SHARED_PAL_SIZE);
   other[CHANGED[1] * 2] ^= 0x1f;
   other[0x40 * 2] ^= 0x1f;
-  const r2 = await installPackage(rom, upload('other-palettes', { 'shared_palettes.pal': other }), opt);
+  const p2 = upload('other-palettes', { 'shared_palettes.pal': other });
+  const conflicts = planUpload(rom, p2, opt.blank).conflicts;
+  check(conflicts.length === 1 && conflicts[0].includes('baserom-palettes') && conflicts[0].includes('color 15') && !conflicts[0].includes('14'), `the preview's plan shows the conflict (${conflicts.join(' ')})`);
+  const r2 = await installPackage(rom, p2, opt);
   check(!r2.ok && r2.errors.some((e) => /conflict/i.test(e) && e.includes('baserom-palettes') && e.includes('color 15') && !e.includes('14')), `a second package changing one: conflict (${r2.errors.join(' ')})`);
   check(listPackages(rom).length === 1, 'not installed');
 

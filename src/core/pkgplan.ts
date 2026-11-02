@@ -6,6 +6,7 @@
 // - detectBlocks / detectGraphics: what an upload holds, without a ROM;
 // - planPackage: where it goes in a ROM – Map16 tiles and ExGFX keep the author's position or number
 //   when free, else the next free ones; which tiles show which block; which slot each ExGFX file is for;
+//   the conflicts with installed packages (pkgsections.ts: the same shared palette colors, global GFX files);
 // - applyBlocks / applyGraphics / applyLevelSetup: the ROM side.
 // Graphics go where the level graphics placement (levelgfx.ts) says, as in a level import. The defines
 // naming a sprite of the package are linked by pixipkg.ts.
@@ -34,6 +35,7 @@ import { isGlobalAnimBps, globalAnimList } from './globalanim.ts';
 import { cleanGameBytes } from './cleangame.ts';
 import { globalGfxNum, globalGfxName, cleanGlobalGfx, fromBin, isCleanGlobalGfx, setGlobalGfx, same } from './globalgfx.ts';
 import { listPackages } from './pkgreg.ts';
+import { sharedPalConflicts, globalGfxConflicts } from './pkgsections.ts';
 
 const dec = new TextDecoder();
 const base = (f: string) => f.slice(f.lastIndexOf('/') + 1);
@@ -161,6 +163,7 @@ export interface PackagePlan {
   // the level setup copies them into the level's Anim graphic (exanim.ts localizeFrames)
   frames: FrameSources;
   notes: string[];
+  conflicts: string[]; // with installed packages changing the same shared palette colors or global GFX files (installing fails)
 }
 
 // tilesets: this ROM's words of FG tiles 000-1FF per tileset (tilesets.ts tilesetWords), when known: a
@@ -306,8 +309,10 @@ export function planPackage(rom: Rom, input: PlanInput, blank: number[]): Packag
   });
 
   const palettes = packPalettes(files, graphics.pal, graphics.palmask, notes);
-  return { blocks, map16, romMap16, gfx, palettes, sharedPal: planSharedPal(rom, files, graphics.sharedpal, notes), globalAnim,
-    globalGfx: planGlobalGfx(rom, files, graphics.globalgfx, notes), samples, sample, exanim, frames, notes };
+  const sharedPal = planSharedPal(rom, files, graphics.sharedpal, notes), globalGfx = planGlobalGfx(rom, files, graphics.globalgfx, notes);
+  const installed = sharedPal || globalGfx.length ? listPackages(rom) : [];
+  const conflicts = [...(sharedPal ? sharedPalConflicts(installed, [...sharedPal.colors.keys()]) : []), ...globalGfxConflicts(installed, globalGfx.map((g) => g.num))];
+  return { blocks, map16, romMap16, gfx, palettes, sharedPal, globalAnim, globalGfx, samples, sample, exanim, frames, notes, conflicts };
 }
 
 // the FG Map16 tiles a plan's .map16 (or whole-ROM .map16) draws
@@ -442,14 +447,10 @@ export function applyBlocks(rom: Rom, upload: UploadCode, blocks: PlannedBlock[]
 // global GFX files, the ExGFX files and the global animation slots
 export function applyGraphics(rom: Rom, files: Map<string, Uint8Array>, plan: PackagePlan, blank: number[]): ApplyResult {
   const prints: string[] = [], warnings: string[] = [];
+  // (a conflict with an installed package: nothing goes in)
+  if (plan.conflicts.length) return { ok: false, errors: plan.conflicts, warnings, prints };
   if (plan.sharedPal) {
     const { file, colors } = plan.sharedPal;
-    // a color another package changed is a conflict
-    const errors = listPackages(rom).flatMap((p) => {
-      const both = (p.sharedPal ?? []).map(([i]) => i).filter((i) => colors.has(i));
-      return both.length ? [`Conflict with package “${p.name}”: both change the shared palettes' ${sharedColorNames(both).join('; ')}.`] : [];
-    });
-    if (errors.length) return { ok: false, errors, warnings: [], prints };
     for (const [i, c] of colors) setSharedColor(rom, i, c);
     prints.push(`${colors.size} shared palette color(s) from ${base(file)}: ${sharedColorNames([...colors.keys()]).join('; ')}`);
   }
@@ -467,13 +468,6 @@ export function applyGraphics(rom: Rom, files: Map<string, Uint8Array>, plan: Pa
     prints.push(`${m.fg.size} FG Map16 tile(s) (pages ${pages(m.fg, 0)}) and ${m.bg.size} BG tile(s) (pages ${pages(m.bg, 0x80)}) from ${base(m.file)}`);
   }
   if (plan.globalGfx.length) {
-    // a file another package changed is a conflict
-    const nums = new Set(plan.globalGfx.map((g) => g.num));
-    const errors = listPackages(rom).flatMap((p) => {
-      const both = (p.globalGfx ?? []).map(([n]) => n).filter((n) => nums.has(n));
-      return both.length ? [`Conflict with package “${p.name}”: both change ${both.map(globalGfxName).join(', ')}.`] : [];
-    });
-    if (errors.length) return { ok: false, errors, warnings, prints };
     for (const g of plan.globalGfx) {
       if (isCleanGlobalGfx(rom, g.num) === false) warnings.push(`${globalGfxName(g.num)}: this ROM's own changes are replaced by ${base(g.file)} (removing the package sets back the clean game's)`);
       setGlobalGfx(rom, g.num, g.data);

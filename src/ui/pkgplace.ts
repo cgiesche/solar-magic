@@ -1,8 +1,8 @@
 // The placement part of the upload preview (ADR 0002): where the package's Map16 tiles, blocks and
 // ExGFX go in this ROM and how they link up – which block each Map16 tile shows, which slot each ExGFX
 // file is for – as planUpload works it out, changeable before installing; the level setup for the
-// current level (its slots and colors), which can be unchecked; and the sample level in its place – or,
-// of several, each as the level of its own number (pkgsamples.ts).
+// current level (its slots and colors), which can be unchecked; the sample level in its place – or, of
+// several, each as the level of its own number (pkgsamples.ts); and the conflicts with installed packages.
 
 import type { App } from './app.ts';
 import { h, clear, hexInput } from './dom.ts';
@@ -102,6 +102,8 @@ export function placementEditor(app: App, p: ReadyPreview, blank: number[]): Pla
       : h('label', { class: 'row small' }, h('input', { type: 'checkbox', onchange: (e: Event) => { if ((e.target as HTMLInputElement).checked) samples.add(x.file); else samples.delete(x.file); } }),
         ` Replace level ${hex(x.level, 3)} by the sample level ${file(x.file)}: layer 1, layer 2, sprites, header, screen exits, graphics slots and colors, its tiles and sprites where the package's went`)),
     plan.samples.some((x) => x.left) ? h('ul', { class: 'hint' }, plan.samples.filter((x) => x.left).map((x) => h('li', null, `${file(x.file)} not offered: ${x.left}`))) : '',
+    // (installing fails on them)
+    plan.conflicts.length ? h('ul', { class: 'hint error' }, plan.conflicts.map((t) => h('li', null, t))) : '',
     plan.notes.length ? h('ul', { class: 'hint' }, plan.notes.map((t) => h('li', null, t))) : '',
     status);
   refresh();

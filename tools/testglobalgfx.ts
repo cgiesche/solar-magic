@@ -6,7 +6,7 @@
 // other code reading the file gets it as 3bpp, GFX31 still replaces half of GFX01 after the special world (the other half stays 4bpp). They replace the game's file (GFX33, the animated
 // tiles, by the game's loader at $00:B888, which shares its bank with GFX32); removed, the game's files
 // are as before. resources/original_graphics/ (the baserom's backup copy) is not part of the package, and
-// no GFX##.bin becomes an ExGFX file. A second package changing one of them is a conflict; a file changed
+// no GFX##.bin becomes an ExGFX file. A second package changing one of them is a conflict (shown in the preview's plan); a file changed
 // since the package was installed is reported and left as it is when the package is removed.
 import { unzipSync, zipSync } from 'fflate';
 import { readFileSync } from 'node:fs';
@@ -171,7 +171,10 @@ const tiles01 = (rom: Rom) => new LevelEmulator(rom).load(0x105).vram.slice(0xd0
 
   // a second package changing one of them
   const other = cleanGlobalGfx(rom, 0x14)!.slice(); other[0] ^= 0xff;
-  const r2 = await installPackage(rom, upload('other-gfx', { 'GFX14.bin': convertBpp(other, 3, 4), 'GFX15.bin': bin(0x15) }), opt);
+  const p2 = upload('other-gfx', { 'GFX14.bin': convertBpp(other, 3, 4), 'GFX15.bin': bin(0x15) });
+  const conflicts = planUpload(rom, p2, opt.blank).conflicts;
+  check(conflicts.length === 1 && conflicts[0].includes('baserom-graphics') && conflicts[0].includes('GFX14'), `the preview's plan shows the conflict (${conflicts.join(' ')})`);
+  const r2 = await installPackage(rom, p2, opt);
   check(!r2.ok && r2.errors.some((e) => /conflict/i.test(e) && e.includes('baserom-graphics') && e.includes('GFX14')), `a second package changing one: conflict (${r2.errors.join(' ')})`);
   check(listPackages(rom).length === 1, 'not installed');
 

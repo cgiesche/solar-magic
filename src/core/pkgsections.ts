@@ -301,7 +301,7 @@ const bgMap16 = tileSection('BG Map16', (rom) => Array.from({ length: BG_EXT_TIL
   });
 
 // shared palette colors it changed, with the color each had before: set back to it (two packages never
-// change the same color, see pkgplan.ts applyGraphics)
+// change the same color, see sharedPalConflicts)
 const sharedPal: PartSection<number[], [number, number][]> = {
   none: () => [],
   read: sharedColors,
@@ -354,8 +354,8 @@ const globalAnim: PartSection<{ slots: string[]; sizes: number[] }, GlobalAnimPa
 };
 
 // global GFX files it replaced, with the hash of its file: set back to the clean game's – unless changed
-// since, which is reported and left as it is (two packages never change the same file, see pkgplan.ts
-// applyGraphics). read: each file's hash
+// since, which is reported and left as it is (two packages never change the same file, see globalGfxConflicts).
+// read: each file's hash
 const globalGfx: PartSection<number[], [number, number][]> = {
   none: () => [],
   read: (rom) => Array.from({ length: GLOBAL_GFX }, (_, n) => globalGfxHash(rom, n)),
@@ -375,6 +375,26 @@ const globalGfx: PartSection<number[], [number, number][]> = {
     return warnings;
   },
 };
+
+// ---------- conflicts with installed packages ----------
+// (two packages never change the same shared palette color or global GFX file: removing one sets back
+// what it found, which would undo or keep the other's)
+
+// installing a package changing these shared palette colors: a conflict with each package changing one too
+export function sharedPalConflicts(installed: Package[], colors: number[]): string[] {
+  return installed.flatMap((p) => {
+    const both = (p.sharedPal ?? []).map(([i]) => i).filter((i) => colors.includes(i));
+    return both.length ? [`Conflict with package “${p.name}”: both change the shared palettes' ${sharedColorNames(both).join('; ')}.`] : [];
+  });
+}
+
+// installing a package replacing these global GFX files: a conflict with each package replacing one too
+export function globalGfxConflicts(installed: Package[], nums: number[]): string[] {
+  return installed.flatMap((p) => {
+    const both = (p.globalGfx ?? []).map(([n]) => n).filter((n) => nums.includes(n));
+    return both.length ? [`Conflict with package “${p.name}”: both change ${both.map(globalGfxName).join(', ')}.`] : [];
+  });
+}
 
 // ---------- what of the tool projects is a package's ----------
 
