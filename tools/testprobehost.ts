@@ -27,7 +27,7 @@ import { gfxSkipMask, gfxDisplaySkipMask } from '../src/core/gfxpages.ts';
 import { tilesetPointers, pointersKey, TILESETS } from '../src/core/tilesets.ts';
 import { setActsLike, extTileWords, setExtTileWords } from '../src/core/map16ext.ts';
 import { bgTileAddr } from '../src/core/bgmap16.ts';
-import { FG_PALS, BACK_AREA } from '../src/core/sharedpal.ts';
+import { FG_PALS, BACK_AREA, SHARED_PALETTES, SHARED_PAL_SIZE } from '../src/core/sharedpal.ts';
 import { setCustomPalette } from '../src/core/patches.ts';
 import { captureSprites, captureSpriteAt, spriteSetJob, spriteSetParts, spriteLoad, spriteLoads, type SpriteLevel } from '../src/core/spritegfx.ts';
 import { storeKey, bytePages, type CacheEntry } from '../src/core/romdeps.ts';
@@ -277,16 +277,19 @@ check(host.pending === 0, 'new ROM: tasks dropped');
 
 // what blocks look like is no input of what they do: drawing a Map16 tile (FG of the tilesets' shared and own pages,
 // extended FG, BG) or changing colors (shared palettes, a level's own) drops no block, collision or sprite result; a
-// changed acts-like drops the results of that tile
+// changed acts-like drops the results of that tile. The shared palettes' first and last page hold code too (the goal
+// tape's and the goal sphere's palette fade at $00:B000, the boot's from $00:B888): a color there drops nothing, that
+// code changed drops what ran it (#190)
 {
   const r = new Rom(file), h = new ProbeHost(), ed = new ResultCache(new RomFingerprint(r));
   h.setRom(1, r.data.slice());
   const keep = (d: ProbeReply | null) => { for (const [k, e] of d?.put ?? []) ed.set(k, e.data, e.deps); return d; };
   const tiles = [0x025, 0x040, 0x0a0, 0x130, 0x200];
-  const jobs: ProbeJob[] = [...tiles.flatMap((t): ProbeJob[] => [{ kind: 'block', ts: 0, tile: t }, { kind: 'collision', ts: 0, tile: t }]), { kind: 'sprite', ts: 0, num: 0x0d }, { kind: 'runs', ts: 0 }];
+  const sprites = [0x0d, 0x4a, 0x7b]; // (the goal sphere and tape run the palette fade's code at $00:B000)
+  const jobs: ProbeJob[] = [...tiles.flatMap((t): ProbeJob[] => [{ kind: 'block', ts: 0, tile: t }, { kind: 'collision', ts: 0, tile: t }]), ...sprites.map((num): ProbeJob => ({ kind: 'sprite', ts: 0, num })), { kind: 'runs', ts: 0 }];
   h.ask(jobs);
   while (h.pending) keep(h.next());
-  const keys = [...tiles.flatMap((t) => [blockKey(0, t), collisionKey(0, t)]), spriteKey(0, 0x0d), runsKey(0)];
+  const keys = [...tiles.flatMap((t) => [blockKey(0, t), collisionKey(0, t)]), ...sprites.map((n) => spriteKey(0, n)), runsKey(0)];
   const ptrs = tilesetPointers(ptrEmu, 0).result;
   let gen = 1;
   const send = (change: () => void) => {
@@ -312,12 +315,16 @@ check(host.pending === 0, 'new ROM: tasks dropped');
   edit('BG tile 025 drawn', () => draw(bgTileAddr(r, 0x025)!));
   edit('shared FG palette 0 changed', () => draw(FG_PALS + 2));
   edit('back area color changed', () => draw(BACK_AREA));
+  edit('last shared color changed', () => draw(SHARED_PALETTES + SHARED_PAL_SIZE - 2));
   const colors = new Uint8Array(0x200).fill(0x21);
   edit('own palette of level 106 set', () => setCustomPalette(r, 0x106, colors));
   edit('own palette of the probe level set', () => setCustomPalette(r, 0x105, colors));
   edit('own palette of the probe level changed', () => setCustomPalette(r, 0x105, colors.map((c) => c ^ 3)));
   edit('own palette of the probe level removed', () => setCustomPalette(r, 0x105, null));
 
+  send(() => draw(0x00b000));
+  const faded = keys.filter((k) => ed.get(k) === undefined);
+  check(faded.join() === [spriteKey(0, 0x4a), spriteKey(0, 0x7b)].join(), `the palette fade's code changed: the goal sphere and tape dropped only (${faded.join(', ')})`);
   send(() => setActsLike(r, 0x025, 0x130));
   check(ed.get(blockKey(0, 0x025)) === undefined && ed.get(collisionKey(0, 0x025)) === undefined, 'acts-like of 025 changed: its results dropped');
 }
