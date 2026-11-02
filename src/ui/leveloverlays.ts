@@ -26,6 +26,7 @@ import { tideLines, type TideLines, type TideRange } from '../core/layer3.ts';
 import { GAME_VIEW_W, GAME_VIEW_H, MARIO_W, MARIO_H, type CameraBands } from '../core/camerabands.ts';
 import { gameViewAt, type CameraReach } from '../core/camerareach.ts';
 import { projectId } from '../core/projectid.ts';
+import type { ArcSpeed, JumpArc } from '../core/jumparcs.ts';
 import { loadDeaths, killerTile, levelVersion, type DeathMark } from './deathmarks.ts';
 
 // ---------------- what the overlays are drawn from ----------------
@@ -141,7 +142,7 @@ export interface OverlayDraw {
   tideLabelX: number; // where the tide's labels start
   spriteAlpha: number; // the sprites' and what they give (the level view: ghosted while BG or layer 3 is edited)
   sprites: SpriteDraw;
-  arcs?: () => void; // the level view's jump arcs
+  arcs?: ArcsDraw; // the jump arcs from a tile (while show.arcs)
   gameView?: GameViewFrame; // while show.gameView
 }
 
@@ -170,7 +171,7 @@ export function paintOverlays(ctx: CanvasRenderingContext2D, app: App, src: Over
   if (show.sprites) paintSprites(ctx, src.level.sprites, d.sprites, d.spriteAlpha, d.lw, d.px);
   if (show.sprites && show.items) paintSpriteItems(ctx, src, d.spriteAlpha);
   if (show.deaths) paintDeaths(ctx, src, d.lw);
-  if (show.arcs) d.arcs?.();
+  if (show.arcs && d.arcs) paintArcs(ctx, d.arcs, d.px);
   if (show.gameView && d.gameView) paintGameView(ctx, src, d.gameView, show.scrollBands, d.px);
 }
 
@@ -665,5 +666,52 @@ function paintCameraReach(ctx: CanvasRenderingContext2D, src: OverlayLevel): voi
     const [from, to] = s ?? [across, across];
     rect(i * 16, (j - i) * 16, 0, from);
     rect(i * 16, (j - i) * 16, to, across);
+  }
+}
+
+// ---------------- jump arcs ----------------
+
+export const ARC_STYLE: Record<ArcSpeed, { color: string; label: string; dash?: boolean }> = {
+  stand: { color: '#ffffff', label: 'from standing' },
+  walk: { color: '#7fe0ff', label: 'walking' },
+  run: { color: '#ffd84c', label: 'running' },
+  p: { color: '#ff6bd5', label: 'P-speed', dash: true },
+};
+
+// the jump arcs from a tile (tx, ty; pinned: they stay there instead of following the mouse; arcs: undefined while
+// they are emulated, jumparcs.ts)
+export interface ArcsDraw { tx: number; ty: number; pinned: boolean; arcs: JumpArc[] | undefined }
+
+// Jump arcs from their tile: a line per speed and direction, a dot where Mario lands, a red cross where he dies
+function paintArcs(ctx: CanvasRenderingContext2D, d: ArcsDraw, px: number): void {
+  const lw = 1.5 * px;
+  ctx.strokeStyle = 'rgba(255,255,255,0.9)';
+  ctx.lineWidth = lw;
+  ctx.strokeRect(d.tx * 16, d.ty * 16, 16, 16);
+  if (d.pinned) { ctx.fillStyle = 'rgba(255,255,255,0.25)'; ctx.fillRect(d.tx * 16, d.ty * 16, 16, 16); }
+  for (const a of d.arcs ?? []) {
+    const st = ARC_STYLE[a.speed], p = a.pts;
+    if (p.length < 4) continue;
+    ctx.strokeStyle = st.color;
+    ctx.lineWidth = 2 * lw;
+    ctx.setLineDash(st.dash ? [4 * lw, 3 * lw] : []);
+    ctx.beginPath();
+    ctx.moveTo(p[0], p[1]);
+    for (let i = 2; i < p.length; i += 2) ctx.lineTo(p[i], p[i + 1]);
+    ctx.stroke();
+    ctx.setLineDash([]);
+    const ex = p[p.length - 2], ey = p[p.length - 1];
+    if (a.end === 'land') {
+      ctx.fillStyle = st.color;
+      ctx.beginPath();
+      ctx.arc(ex, ey, 2.5, 0, Math.PI * 2);
+      ctx.fill();
+    } else if (a.end === 'dead') {
+      ctx.strokeStyle = '#ff4040';
+      ctx.beginPath();
+      ctx.moveTo(ex - 3, ey - 3); ctx.lineTo(ex + 3, ey + 3);
+      ctx.moveTo(ex + 3, ey - 3); ctx.lineTo(ex - 3, ey + 3);
+      ctx.stroke();
+    }
   }
 }

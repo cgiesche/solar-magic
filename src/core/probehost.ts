@@ -124,6 +124,7 @@ function learnJob(j: LearnJob, state: LearnState, show: (items: unknown[] | null
     case 'sameTiles': return (emu) => sameTilesJob(emu, j.level, j.a, j.b);
     case 'slippery': return (emu) => slipperyJob(emu);
     case 'objectTable': return (emu) => objectTableJob(emu, j.tileset);
+    case 'scan': return (emu) => levelScanJob(emu, j.level);
   }
 }
 

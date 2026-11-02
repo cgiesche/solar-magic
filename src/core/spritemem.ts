@@ -8,7 +8,7 @@
 // moved as a whole is played the same: its result is kept by its sprites' places relative to each other).
 
 import { LevelEmulator } from './levelemu.ts';
-import { loadLevel, spriteSizes, SPRITE_MEMORY, type LevelSprite, type PrimaryHeader } from './level.ts';
+import { loadLevel, spriteSizes, SPRITE_MEMORY, type Level, type LevelSprite, type PrimaryHeader } from './level.ts';
 import { record, rootSlot, sortPlaced, SlotTracker, testLevel, testSpriteData } from './spritegfx.ts';
 import { runJob } from './jobrunner.ts';
 import { KeptResults } from './keptresults.ts';
@@ -248,6 +248,22 @@ export function* spriteMemJob(ctx: SpriteMemContext, m: number, candidates: numb
 // between sessions: the result is kept by their indices)
 export interface SpriteMemLevel { number: number; header: PrimaryHeader; bgPointer: number; mem: number; candidates: number[]; sprites: LevelSprite[] }
 export interface SpriteMemResult { lost: number[]; suggestion: number | null } // lost: indices of sprites drawn incompletely
+
+// The sprite memory check of a level as edited (lv) as a learn job: its result's key and input, the level it checks
+// (candidates: the values a suggestion tries, usedSpriteMemory) and checked: key and input in one (whether a check
+// shown is this one). The test level it plays: the level's header and BG, its sprites in canonical order (the result
+// is kept by their indices, uids differ between sessions).
+export function spriteMemSpec(lv: Level, candidates: number[]): { key: string; input: object; checked: string; level: SpriteMemLevel } {
+  const mem = lv.spriteHeader & SPRITE_MEMORY;
+  const sprites = [...lv.sprites].sort((a, b) => a.x - b.x || a.y - b.y || a.num - b.num || a.extra - b.extra);
+  const bg = lv.layer2Pointer >> 16 === 0xff ? lv.layer2Pointer : 0xffd900, header = { ...lv.header };
+  const input = { mem, header, bg, candidates, sprites: sprites.map((q) => [q.num, q.x, q.y, q.extra, q.bytes ?? []]) };
+  const key = `sm3:${lv.number}`;
+  return { key, input, checked: `${key}#${inputHash(input)}`, level: { number: lv.number, header, bgPointer: bg, mem, candidates, sprites } };
+}
+
+// the uids of the level's sprites a check (spriteMemSpec's level) found drawn incompletely
+export const lostSprites = (l: SpriteMemLevel, r: SpriteMemResult): number[] => r.lost.map((i) => l.sprites[i].uid);
 
 // spriteMemJob with the result by the sprites' indices
 export function* spriteMemCheckJob(emu: LevelEmulator, l: SpriteMemLevel, groupResults?: SpriteGroupResults): Generator<void, SpriteMemResult> {

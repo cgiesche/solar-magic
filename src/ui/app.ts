@@ -19,7 +19,7 @@ import { objectUserNames } from '../core/usernames.ts';
 import { loadPixiProject, customSpriteList, type CustomSprite } from '../core/pixi.ts';
 import { renderLevel, type LevelImages, composite, animatedPixels, TileAnimation, type AnimStep } from '../core/render.ts';
 import type { SpriteImage } from '../core/spritegfx.ts';
-import { usedSpriteMemory, type SpriteMemLevel, type SpriteMemResult } from '../core/spritemem.ts';
+import { usedSpriteMemory, spriteMemSpec, lostSprites, type SpriteMemResult } from '../core/spritemem.ts';
 import { DM16_EXT, levelGfx, levelExtGfx, customPalette, levelMusic } from '../core/patches.ts';
 import { gfxSkipMask, gfxFilesHash } from '../core/gfxpages.ts';
 import { flagBytes, usedFlags, isDm16, dm16Tiles } from '../core/cdm16.ts';
@@ -797,20 +797,13 @@ export class App {
   }
 
   private checkSpriteMem(): void {
-    const lv = this.level, mem = lv.spriteHeader & SPRITE_MEMORY, gen = this.edits.levelGen;
-    // canonical order: results are stored by index, uids differ between sessions
-    const sprites = [...lv.sprites].sort((a, b) => a.x - b.x || a.y - b.y || a.num - b.num || a.extra - b.extra);
-    if (this.usedMem.gen !== this.rom.gen) this.usedMem = { gen: this.rom.gen, list: usedSpriteMemory(this.rom) };
-    const candidates = this.usedMem.list;
-    const bg = lv.layer2Pointer >> 16 === 0xff ? lv.layer2Pointer : 0xffd900, header = { ...lv.header };
-    // the test level it plays: the level's header and BG, its sprites
-    const input = { mem, header, bg, candidates, sprites: sprites.map((q) => [q.num, q.x, q.y, q.extra, q.bytes ?? []]) };
-    const key = `sm3:${lv.number}`, checked = `${key}#${inputHash(input)}`;
+    const lv = this.level, gen = this.edits.levelGen;
+    const { key, input, checked, level } = this.spriteMemCheck(lv), mem = level.mem;
     if (this.spriteMem?.key === checked) return;
     const run = ++this.spriteMemRun;
     const done = (r: SpriteMemResult) => {
       if (run !== this.spriteMemRun || this.level !== lv) return;
-      const cur = { key: checked, level: lv.number, mem, gen, conflicts: new Set(r.lost.map((i) => sprites[i].uid)), suggestion: r.suggestion };
+      const cur = { key: checked, level: lv.number, mem, gen, conflicts: new Set(lostSprites(level, r)), suggestion: r.suggestion };
       this.spriteMem = cur;
       this.emit('sprite-mem');
       if (gen !== this.edits.levelGen) return; // edited meanwhile: checked again
@@ -818,9 +811,14 @@ export class App {
       this.spriteMemBase = cur;
       if (base) this.autoSpriteMem(base, cur);
     };
-    const level: SpriteMemLevel = { number: lv.number, header, bgPointer: bg, mem, candidates, sprites };
     const stored = this.probes.learn<SpriteMemResult>(key, { kind: 'spriteMem', level }, { input, lane: 'spritemem', replace: true, label: 'Checking sprite memory', done });
     if (stored) done(stored);
+  }
+
+  // the sprite memory check of a level as edited (spritemem.ts spriteMemSpec), with the values the ROM uses
+  spriteMemCheck(lv: Level): ReturnType<typeof spriteMemSpec> {
+    if (this.usedMem.gen !== this.rom.gen) this.usedMem = { gen: this.rom.gen, list: usedSpriteMemory(this.rom) };
+    return spriteMemSpec(lv, this.usedMem.list);
   }
 
   // An edit (committed since the previous check, same sprite memory) that makes further sprites
@@ -981,12 +979,12 @@ export class App {
     const stored = this.results.get<ScanResult>(key);
     if (stored) { done(stored); return; }
     // played in the probe worker
-    this.probes.requestScan(run, key, this.scanLevel(ov), (r) => { if (r) done(r); });
+    this.probes.requestScan(run, key, this.scanLevel(lv, ov, this.images), (r) => { if (r) done(r); });
   }
 
-  // the open level as edited (ov), to be played in the probe worker
-  private scanLevel(ov: LevelOverride): ScanLevel {
-    return { number: this.level.number, ov, vertical: this.vertical, width: this.images.width, height: this.images.height };
+  // a level as edited (ov: its load's overrides, images: its load's) to be played in the probe worker
+  scanLevel(lv: Level, ov: LevelOverride, images: Pick<LevelImages, 'width' | 'height'>): ScanLevel {
+    return { number: lv.number, ov, vertical: isL1Vertical(this.rom, lv.header.mode), width: images.width, height: images.height };
   }
 
   // What of the level the camera can show (camerareach.ts), from the level scan: undefined while the level has
@@ -1022,7 +1020,7 @@ export class App {
     if (m.key === key && (m.camera === undefined || m.camera === null || this.results.get(key) !== undefined)) return;
     m.key = key;
     m.camera = this.results.get<CameraAt>(key);
-    if (m.camera === undefined) this.probes.requestCamera(++this.cameraRun, key, this.scanLevel(ov), m.x, m.y, (r) => {
+    if (m.camera === undefined) this.probes.requestCamera(++this.cameraRun, key, this.scanLevel(this.level, ov, this.images), m.x, m.y, (r) => {
       if (this.view.gameViewMario !== m || m.key !== key) return;
       m.camera = r;
       this.emit('game-view');

@@ -73,7 +73,8 @@ export type ProbeReply = ProbeDone | KindsDone | ScanDone | CameraDone | Learned
 // its load as saved has it (tilemove.ts gameBgJob), where a prefab's arrangement already is (prefabplaces.ts
 // prefabPlacesJob; open: the open level as edited, skip: the objects that are no place's), whether two loads of a level
 // draw the same tiles (prefabsources.ts sameTilesJob: a prefab broken up into its sources), the entrance actions that
-// make a level slippery (slippery.ts slipperyJob), the object table of a tileset (objectnames.ts objectTableJob)
+// make a level slippery (slippery.ts slipperyJob), the object table of a tileset (objectnames.ts objectTableJob), the level
+// scan of a level an image draws (levelscan.ts; the open level's own scan is a task, its result under the same key)
 export type LearnJob =
   | { kind: 'sprites'; level: SpriteLevel; nums: number[]; input?: string } // (input: of each test level load, spriteSetJob)
   | { kind: 'spriteAt'; level: SpriteLevel; id: number; x: number; y: number }
@@ -104,7 +105,8 @@ export type LearnJob =
   | { kind: 'prefabPlaces'; prefab: Prefab; levels: number[]; open?: Level; skip?: PrefabSkip }
   | { kind: 'sameTiles'; level: number; a: LevelOverride; b: LevelOverride }
   | { kind: 'slippery' }
-  | { kind: 'objectTable'; tileset: number };
+  | { kind: 'objectTable'; tileset: number }
+  | { kind: 'scan'; level: ScanLevel };
 
 // The level as edited a job is learned on (inputs.ts EditState; levelTiles, preview): the probe client sends it whole
 // with the first request to a host, later ones name it by its id; a host keeps the latest EDIT_STATES sent whole (the
@@ -160,6 +162,7 @@ export const LEARN_KINDS: { [K in LearnJob['kind']]: { keep: Keep; picture: bool
   sameTiles: { keep: false, picture: false },
   slippery: { keep: true, picture: false },
   objectTable: { keep: true, picture: false },
+  scan: { keep: true, picture: false },
 };
 export const learnKeep = (j: LearnJob): Keep => LEARN_KINDS[j.kind].keep;
 

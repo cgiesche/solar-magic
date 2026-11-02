@@ -2,14 +2,13 @@
 
 import { App, isBrushMode, type Marker, type LevelEdit, type Brush, type PreviewPart } from './app.ts';
 import { h, attachPanZoom, toast } from './dom.ts';
-import { paintOverlays, openOverlay, boxLayers, deathsAt, gameViewLabelBox, gameViewIn, BAND_STYLE, type SpriteDraw, MARKER_STYLE, type GameViewFrame } from './leveloverlays.ts';
+import { paintOverlays, openOverlay, boxLayers, deathsAt, gameViewLabelBox, gameViewIn, BAND_STYLE, type SpriteDraw, MARKER_STYLE, type GameViewFrame, ARC_STYLE, type ArcsDraw } from './leveloverlays.ts';
 import { hex2, hex3 } from '../core/names.ts';
 import { type Grab } from '../core/objresize.ts';
 import type { MoveDrag, ResizeDrag } from '../core/levelmodel.ts';
 import { probeAt, spriteProbeAt, enterText, collisionText, collisionIn, switchText, SWITCH_STATES, SWITCH_NAME } from '../core/blockprobe.ts';
 import { type LevelObject, type LevelSprite, newUid, serializeLayer1, serializeLayer2, serializeLevelSprites, spriteSizes, spriteId, EXIT_NEW } from '../core/level.ts';
 import { layer3CellAt, layer3WordText } from '../core/layer3map.ts';
-import type { ArcSpeed } from '../core/jumparcs.ts';
 import { contextMenu, type MenuItem } from './menu.ts';
 import { isPlacedPrefab, openSavePrefab } from './panels.ts';
 import { openInsertDialog, openScreenDialog } from './tools.ts';
@@ -30,13 +29,6 @@ type Drag =
   | { kind: 'paint'; edit: LevelEdit; changed: boolean; x0: number; y0: number; lastX: number; lastY: number } // BG/layer 3 brush, stamped on a grid of cells from (x0, y0)
   | { kind: 'pick'; x0: number; y0: number; x1: number; y1: number } // BG/layer 3 cells taken into the brush
   | { kind: 'gameView'; offX: number; offY: number }; // the game view frame, held at (offX, offY) inside it
-
-const ARC_STYLE: Record<ArcSpeed, { color: string; label: string; dash?: boolean }> = {
-  stand: { color: '#ffffff', label: 'from standing' },
-  walk: { color: '#7fe0ff', label: 'walking' },
-  run: { color: '#ffd84c', label: 'running' },
-  p: { color: '#ff6bd5', label: 'P-speed', dash: true },
-};
 
 export class LevelView {
   app: App;
@@ -234,7 +226,7 @@ export class LevelView {
         ring: app.model.mode === 'exit' && app.exitMarker?.kind === m.kind && app.exitMarker.index === m.index,
       }),
       layer2: app.model.mode === 'l2', tideLabelX: this.scroller.scrollLeft / app.view.zoom + 8 / app.view.zoom, spriteAlpha: this.spriteAlpha(),
-      sprites: this.spriteDraw(), arcs: () => this.paintArcs(ctx), gameView: app.view.show.gameView ? this.gameViewFrame() : undefined,
+      sprites: this.spriteDraw(), arcs: app.view.show.arcs ? this.arcsDraw() : undefined, gameView: app.view.show.gameView ? this.gameViewFrame() : undefined,
     });
     // selection
     if (app.model.mode === 'l1' || app.model.mode === 'l2') {
@@ -352,41 +344,10 @@ export class LevelView {
     return this.arcPin ?? (this.hover && !this.drag ? { tx: this.hover.tx, ty: this.hover.ty } : null);
   }
 
-  // Jump arcs from the arc tile (emulated, see jumparcs.ts): a line per speed and direction,
-  // a dot where Mario lands, a red cross where he dies
-  paintArcs(ctx: CanvasRenderingContext2D): void {
+  // what the jump arcs are drawn from: the arc tile, whether it is pinned and its arcs (undefined while emulated)
+  arcsDraw(): ArcsDraw | undefined {
     const at = this.arcTile();
-    if (!at) return;
-    const arcs = this.app.jumpArcs(at.tx, at.ty), lw = 1.5 / this.app.view.zoom;
-    ctx.strokeStyle = 'rgba(255,255,255,0.9)';
-    ctx.lineWidth = lw;
-    ctx.strokeRect(at.tx * 16, at.ty * 16, 16, 16);
-    if (this.arcPin) { ctx.fillStyle = 'rgba(255,255,255,0.25)'; ctx.fillRect(at.tx * 16, at.ty * 16, 16, 16); }
-    for (const a of arcs ?? []) {
-      const st = ARC_STYLE[a.speed], p = a.pts;
-      if (p.length < 4) continue;
-      ctx.strokeStyle = st.color;
-      ctx.lineWidth = 2 * lw;
-      ctx.setLineDash(st.dash ? [4 * lw, 3 * lw] : []);
-      ctx.beginPath();
-      ctx.moveTo(p[0], p[1]);
-      for (let i = 2; i < p.length; i += 2) ctx.lineTo(p[i], p[i + 1]);
-      ctx.stroke();
-      ctx.setLineDash([]);
-      const ex = p[p.length - 2], ey = p[p.length - 1];
-      if (a.end === 'land') {
-        ctx.fillStyle = st.color;
-        ctx.beginPath();
-        ctx.arc(ex, ey, 2.5, 0, Math.PI * 2);
-        ctx.fill();
-      } else if (a.end === 'dead') {
-        ctx.strokeStyle = '#ff4040';
-        ctx.beginPath();
-        ctx.moveTo(ex - 3, ey - 3); ctx.lineTo(ex + 3, ey + 3);
-        ctx.moveTo(ex + 3, ey - 3); ctx.lineTo(ex - 3, ey + 3);
-        ctx.stroke();
-      }
-    }
+    return at ? { ...at, pinned: !!this.arcPin, arcs: this.app.jumpArcs(at.tx, at.ty) } : undefined;
   }
 
   // which line is which, in the top left corner of the view

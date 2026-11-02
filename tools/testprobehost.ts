@@ -518,6 +518,13 @@ for (const changeRead of [false, true]) {
   check(same(check1.put.get(storeKey('sm-test', smInput)), results.entry('sm-test', smInput) && { ...results.entry('sm-test', smInput)!, input: smInput }),
     'sprite memory: its entry as on the main thread (key, input, bytes read)');
 
+  // a level's scan as a learn job (#258: a level's image): as played directly, its entry as on the main thread, under
+  // its key without an input as a scan task keeps it (no picture)
+  const scl = run({ type: 'learn', lane: 'level-images', key: 'scan-learn', job: { kind: 'scan', level: scanLevel }, replace: true });
+  const sclDone = atOnce({ key: 'scan-learn', ...LEARN_KINDS.scan, start: (emu) => levelScanJob(emu, scanLevel) });
+  check(scl.done?.type === 'learned' && JSON.stringify(scl.done.result) === JSON.stringify(scanned) && JSON.stringify(sclDone) === JSON.stringify(scanned), 'level scan learned: as played directly');
+  check(same(scl.put.get(storeKey('scan-learn', undefined)), results.entry('scan-learn')), 'level scan learned: its entry as on the main thread (key, no input, bytes read)');
+
   // the animated tiles and colors of level 105: in memory only
   const anInput = inputHash({ an: 'test' });
   const an = run({ type: 'learn', lane: 'animated', key: 'anim:test', input: anInput, job: { kind: 'animated', level: 0x105, ov: {} }, replace: true });

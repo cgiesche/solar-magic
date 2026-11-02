@@ -1,38 +1,32 @@
 // Levels as image files: File → "Level as PNG" (the open level) and "Levels as images" (Lunar Magic's "Export
 // Multiple Levels to Image Files", LM help: file_export_directory_bitmap.htm): each level drawn as the level view
 // shows it with the View menu's settings – its layers, sprites and every overlay (leveloverlays.ts, the level view's
-// own drawing, with that level's probes), without the selection, hover and drag previews – one PNG per level in a .zip.
+// own drawing, with that level's probes, level scan and sprite memory check, levelpicture.ts; the open level's with
+// its pinned jump arcs), without the selection, hover and drag previews – one PNG per level in a .zip.
 // Better than Lunar Magic: a list of levels, a zoom, file names with the level's name; cropping to the screens a
 // level uses (Lunar Magic's "Auto-Set Number of Screens") leaves the level as it is.
 
 import { zipSync } from 'fflate';
 import type { App } from './app.ts';
-import type { LearnSpec } from '../core/learnspecs.ts';
 import { h, modal, toast, log } from './dom.ts';
 import { downloadBytes } from './platform.ts';
 import { levelNameOf } from './panels.ts';
 import { hex3 } from '../core/names.ts';
-import { composite, type LevelImages } from '../core/render.ts';
-import { loadLevel, spriteId, type Level, type LevelSprite } from '../core/level.ts';
-import { LevelEmulator, type LevelRender } from '../core/levelemu.ts';
-import { scanKey, type ScanResult } from '../core/levelscan.ts';
-import { paintOverlays, levelOverlay, overlayPending, gameViewIn, wholeLevel, type OverlayLevel } from './leveloverlays.ts';
+import { composite } from '../core/render.ts';
+import { loadLevel } from '../core/level.ts';
+import { LevelEmulator } from '../core/levelemu.ts';
+import { paintOverlays, gameViewIn, wholeLevel } from './leveloverlays.ts';
 import { renderLevelImages, usedScreens, screensSize, levelImageName, parseLevelList } from '../core/levelimage.ts';
-import type { SpriteImage } from '../core/spritegfx.ts';
-import { incompleteSprites } from './spritemem.ts';
-import type { LearnLane } from '../core/probeprotocol.ts';
+import { levelPicture, cancelWait, SPRITE_GFX, type LevelPicture, type ArcPin, type ExportWait } from './levelpicture.ts';
 
 // ---------------- a level's image ----------------
 
 const MAX_CANVAS = 32767; // pixels a canvas may be wide or high (Chrome, Firefox)
 
-// a level as drawn: its layers' images, its sprites' images and what its overlays are drawn from
-export interface LevelPicture { level: Level; images: LevelImages; sprite: (s: LevelSprite) => HTMLCanvasElement | undefined; overlay: OverlayLevel }
-
 // The level as the level view shows it with the View menu's settings (layers, sprites, the overlays; no layer
 // ghosted), `zoom` times its size, its first `screens` screens only
 export function drawLevelImage(app: App, p: LevelPicture, zoom = 1, screens = p.level.header.screens): HTMLCanvasElement {
-  const show = app.view.show, im = p.images, lv = p.level;
+  const show = app.view.show, im = p.images;
   const { width, height } = screensSize(im, screens);
   if (Math.max(width, height) * zoom > MAX_CANVAS) throw new Error(`${width * zoom}×${height * zoom} pixels is too large for an image – a smaller zoom fits`);
   const full = document.createElement('canvas');
@@ -49,10 +43,9 @@ export function drawLevelImage(app: App, p: LevelPicture, zoom = 1, screens = p.
   paintOverlays(ctx, app, p.overlay, {
     show, lw: 1 / zoom, px: 1, area: wholeLevel(im.geom1), width, height, screens,
     exits: show.exits, chosenExit: -1, layer2: app.model.mode === 'l2', tideLabelX: 8, spriteAlpha: 1,
-    // (the sprites as outside sprite mode, their images opaque; drawn incompletely: the open level's, the only one
-    // whose sprite memory is checked)
-    sprites: { image: p.sprite, imageAlpha: 1, active: false, selected: () => false, incomplete: new Set(lv === app.level ? incompleteSprites(app) : []) },
-    gameView: show.gameView ? gameViewIn(app, p.overlay) : undefined,
+    // (the sprites as outside sprite mode, their images opaque)
+    sprites: { image: p.sprite, imageAlpha: 1, active: false, selected: () => false, incomplete: p.incomplete },
+    arcs: p.arcs, gameView: show.gameView ? gameViewIn(app, p.overlay) : undefined,
   });
   return c;
 }
@@ -64,9 +57,10 @@ const pngBytes = (c: HTMLCanvasElement) => new Promise<Uint8Array>((ok, fail) =>
 
 const SHOW_WAIT = 300; // ms Level as PNG waits before it shows what it waits for
 
-// File → Level as PNG: the open level as edited, at its size (once its sprites' images and probes are known). A wait
-// one notices shows in a dialog, as Levels as images shows it, with a Cancel (then nothing is saved).
-export async function exportLevelPng(app: App): Promise<void> {
+// File → Level as PNG: the open level as edited, at its size (once its sprites' images, probes, level scan, sprite
+// memory check and pinned jump arcs are known). A wait one notices shows in a dialog, as Levels as images shows it,
+// with a Cancel (then nothing is saved).
+export async function exportLevelPng(app: App, arcPin: ArcPin = null): Promise<void> {
   const lv = app.level;
   let ended = false;
   const shown: { dlg?: { close(force?: boolean): void } } = {};
@@ -79,7 +73,7 @@ export async function exportLevelPng(app: App): Promise<void> {
   // (the probes run while the dialog is open)
   const release = app.probes.urge();
   try {
-    const p = await levelPicture(app, lv, app.images, app.render, wait).finally(() => {
+    const p = await levelPicture(app, lv, app.images, app.render, wait, arcPin).finally(() => {
       ended = true;
       clearTimeout(show);
       release();
@@ -92,95 +86,6 @@ export async function exportLevelPng(app: App): Promise<void> {
     console.error(e);
     toast(`Level as PNG: ${e instanceof Error ? e.message : String(e)}`, 'error');
   }
-}
-
-// ---------------- what a level is drawn with ----------------
-
-const SPRITE_GFX = 'Sprite graphics …'; // (what an export waits for while its sprites' images are learned)
-const PROBE_WAIT = 30000; // ms a level waits for its probes at most (then: drawn with those known)
-
-// An export's waits: lane: the learn jobs of its sprites' images (each export its own, dropped when it ends);
-// cancelled, wake: ends the wait it is in; status: tells what it waits for now
-type ExportWait = { lane: LearnLane; cancelled: boolean; wake: (() => void) | null; status?: (what: string) => void };
-const cancelWait = (w: ExportWait) => { w.cancelled = true; w.wake?.(); };
-
-// what the export waits for, unless it is cancelled before (then: null)
-function until<T>(cancel: ExportWait, p: Promise<T>): Promise<T | null> {
-  return new Promise((ok) => {
-    const wake = () => ok(null);
-    cancel.wake = wake;
-    p.then(ok, () => ok(null)).finally(() => { if (cancel.wake === wake) cancel.wake = null; });
-  });
-}
-
-// while probes are pending (their count; looked at again when the asked probes are all done, or after half a
-// second): false when cancelled
-async function probed(app: App, cancel: ExportWait, what: string, pending: () => number): Promise<boolean> {
-  const t0 = performance.now();
-  for (let n = pending(); n > 0 && performance.now() - t0 < PROBE_WAIT; n = pending()) {
-    cancel.status?.(`${what} (${n}) …`);
-    await until(cancel, new Promise<void>((ok) => { const off = app.on('probes', () => { off(); ok(); }); setTimeout(() => { off(); ok(); }, 500); }));
-    if (cancel.cancelled) return false;
-  }
-  return !cancel.cancelled;
-}
-
-// a sprite image learned (null: it failed, or its job was dropped)
-function learned(app: App, cancel: ExportWait, j: LearnSpec): Promise<unknown> {
-  return new Promise((ok) => {
-    const r = app.probes.learn(j.key, j.job, { input: j.input, lane: cancel.lane, urgent: true, label: 'Level images: sprite graphics', done: ok, failed: () => ok(null), dropped: () => ok(null) });
-    if (r !== undefined) ok(r);
-  });
-}
-
-// The images of the level's sprites, as the level view's (App.spriteImage) for this level: learned, the sprites'
-// probes waited for (their variants; placed: the placed sprites' own images, else only those by sprite id – the
-// items blocks and sprites give)
-async function levelSprites(app: App, lv: Level, cancel: ExportWait, placed: boolean): Promise<Pick<LevelPicture, 'sprite'> & Pick<OverlayLevel, 'thumb'> | null> {
-  const jobs = app.spriteJobs(lv), ts = lv.header.tileset;
-  cancel.status?.(SPRITE_GFX);
-  const all = await until(cancel, learned(app, cancel, jobs.all)) as [number, SpriteImage][] | null;
-  if (cancel.cancelled) return null;
-  const base = new Map((all ?? []).map(([n, img]) => [n, app.spriteCanvas(img)]));
-  const thumb = (id: number) => base.get(id);
-  if (!placed) return { sprite: () => undefined, thumb };
-  // the variants: once every sprite's probe is known (or failed)
-  const plain = lv.sprites.filter((s) => !(s.extra >= 2 && s.bytes?.some((b) => b)));
-  if (!await probed(app, cancel, 'Sprite probes', () => plain.filter((s) => app.spriteVariant(spriteId(s), s.x, s.y, ts) === undefined).length)) return null;
-  cancel.status?.(SPRITE_GFX);
-  const own = new Map<LevelSprite, HTMLCanvasElement>();
-  for (const s of lv.sprites) {
-    const id = spriteId(s), bytes = s.extra >= 2 ? s.bytes : undefined;
-    let j = null;
-    if (bytes?.some((b) => b)) j = jobs.bytes(id, [...bytes]);
-    else {
-      const at = app.spriteVariant(id, s.x, s.y, ts);
-      if (at) j = jobs.at(id, at.x, at.y);
-    }
-    if (!j) continue;
-    const img = await until(cancel, learned(app, cancel, j)) as SpriteImage | null;
-    if (cancel.cancelled) return null;
-    if (img) own.set(s, app.spriteCanvas(img));
-  }
-  return { sprite: (s) => own.get(s) ?? base.get(spriteId(s)), thumb };
-}
-
-// The level's scan as the level view takes it: the open level's (App.levelScan), another level's when the result
-// cache holds one of it as it is (none is played for an image)
-function scanOf(app: App, lv: Level): ScanResult | undefined {
-  if (lv === app.level) return app.levelScan?.level === lv.number ? app.levelScan.result : undefined;
-  return app.results.get<ScanResult>(scanKey(lv.number, app.buildOverrides(lv)));
-}
-
-// What the level is drawn with: its load (render, images), its sprites' images, its overlays with its probes
-// (in its tileset) – waited for; null: cancelled
-async function levelPicture(app: App, lv: Level, images: LevelImages, render: LevelRender, cancel: ExportWait): Promise<LevelPicture | null> {
-  const show = app.view.show;
-  const imgs = show.sprites || show.items ? await levelSprites(app, lv, cancel, show.sprites) : { sprite: () => undefined, thumb: () => undefined };
-  if (!imgs) return null;
-  const overlay = levelOverlay(app, lv, render, images, imgs.thumb, scanOf(app, lv));
-  if (!await probed(app, cancel, 'Block behavior for the overlays', () => overlayPending(overlay, show))) return null;
-  return { level: lv, images, sprite: imgs.sprite, overlay };
 }
 
 type Which = 'all' | 'used' | 'list';
@@ -197,8 +102,9 @@ function ranges(nums: number[]): string {
   return out.join(', ');
 }
 
-// File → Levels as images: the dialog, then the export with its progress; listed: the levels the level list shows
-export function openLevelImages(app: App, listed: () => number[]): void {
+// File → Levels as images: the dialog, then the export with its progress; listed: the levels the level list shows;
+// arcPin: where the open level's jump arcs are pinned
+export function openLevelImages(app: App, listed: () => number[], arcPin: ArcPin = null): void {
   let which: Which = 'used';
   let zoom = 1, crop = true;
   const listInput = h('input', { type: 'text', class: 'li-list', spellcheck: false, value: hex3(app.level.number),
@@ -292,7 +198,7 @@ export function openLevelImages(app: App, listed: () => number[]): void {
           const lv = n === app.level.number ? app.level : loadLevel(app.rom, n);
           const r = renderLevelImages(app.rom, emu, lv, app.buildOverrides(lv));
           if ('error' in r) { fail(n, r.error); continue; }
-          const p = await levelPicture(app, lv, r.images, r.render, cancel);
+          const p = await levelPicture(app, lv, r.images, r.render, cancel, arcPin);
           if (!p) break;
           const c = drawLevelImage(app, p, zoom, crop ? usedScreens(r.images, lv) : lv.header.screens);
           files[levelImageName(n, levelNameOf(app, n))] = [await pngBytes(c), { level: 0 }]; // (PNG is compressed)
