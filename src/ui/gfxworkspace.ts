@@ -12,7 +12,7 @@ import { Map16Tab, type RemapFill } from './gfx/map16tab.ts';
 import { gfxTarget, type GfxTarget, type Map16Target } from './gfx/target.ts';
 import { GfxTab } from './gfx/gfxtab.ts';
 import { AnimTab } from './gfx/animtab.ts';
-import { MAP_NAMES, gameL2, type OwRender } from '../core/overworld.ts';
+import { MAP_NAMES, gameL2, owTileAt, type OwRender } from '../core/overworld.ts';
 import { drawOwMap } from './overworld.ts';
 import { cgramToRGBA } from '../core/gfx.ts';
 
@@ -35,8 +35,9 @@ export interface WsPanel {
 }
 
 // what the workspace edits: the open level's graphics (submap null) or those of a submap (0–6); progress: the
-// overworld's event progress its preview is shown at
-export interface WsTarget { submap: number | null; progress: number }
+// overworld's event progress its preview is shown at; special: a submap shown (and its colors edited) after the
+// special world
+export interface WsTarget { submap: number | null; progress: number; special?: boolean }
 
 // the current level image, scaled; marks every place of the highlighted Map16 tiles
 export class LevelPreview {
@@ -57,7 +58,7 @@ export class LevelPreview {
   private app: App;
   // a submap shown instead of the level: its map at the event progress (its load, the image drawn from it; null while
   // it is emulated)
-  private ow: { submap: number; progress: number; r: OwRender | null; img: Uint32Array | null; fresh: boolean } | null = null;
+  private ow: { submap: number; progress: number; special: boolean; r: OwRender | null; img: Uint32Array | null; fresh: boolean } | null = null;
   // called when the submap's load came (it shows the ROM as it is now)
   private mapListeners: (() => void)[] = [];
   onMap(fn: () => void): void { this.mapListeners.push(fn); }
@@ -76,8 +77,8 @@ export class LevelPreview {
       this.box.classList.toggle('pipette', !!(p && this.colorAt));
       if (p && this.colorAt && !(e.buttons & 4)) { const c = this.colorAt(p.px, p.py); showColorLoupe(e, c.rgba, c.label); } else hideColorLoupe();
       if (!p) { this.info.textContent = this.hint; return; }
-      const t = this.ow ? -1 : this.tileAt(p.px, p.py);
-      this.info.textContent = `X ${hex(p.px >> 4, 2)} Y ${hex(p.py >> 4, 2)}${t >= 0 ? ` · Map16 ${hex(t, 3)}` : ''}${this.hint ? ` — ${this.hint}` : ''}`;
+      const t = this.ow ? -1 : this.tileAt(p.px, p.py), q = this.owTileAt(p.px, p.py);
+      this.info.textContent = `X ${hex(p.px >> 4, 2)} Y ${hex(p.py >> 4, 2)}${t >= 0 ? ` · Map16 ${hex(t, 3)}` : ''}${q ? ` · 8x8 tile ${hex(q.word & 0x3ff, 3)} (layer ${q.layer})` : ''}${this.hint ? ` — ${this.hint}` : ''}`;
     });
     this.scroller.addEventListener('mouseleave', () => { this.info.textContent = this.hint; hideColorLoupe(); });
     this.scroller.addEventListener('mousedown', (e) => {
@@ -95,8 +96,8 @@ export class LevelPreview {
   // shows submap `map` at event progress `progress` (null: the level)
   showSubmap(t: WsTarget): void {
     const was = this.ow?.submap;
-    this.ow = t.submap === null ? null : { submap: t.submap, progress: t.progress, r: null, img: null, fresh: false };
-    this.title.textContent = this.ow ? `${MAP_NAMES[this.ow.submap]} (overworld)` : 'Level preview';
+    this.ow = t.submap === null ? null : { submap: t.submap, progress: t.progress, special: !!t.special, r: null, img: null, fresh: false };
+    this.title.textContent = this.ow ? `${MAP_NAMES[this.ow.submap]} (overworld${this.ow.special ? ', after the special world' : ''})` : 'Level preview';
     if (this.ow) this.loadMap();
     else this.update();
     if (this.ow && was !== this.ow.submap && this.root.isConnected) this.scrollToSubmap();
@@ -113,7 +114,7 @@ export class LevelPreview {
       this.info.textContent = this.hint;
       // (the image had no size to scroll in before)
       if (first) this.scrollToSubmap();
-    });
+    }, undefined, o.special);
     o.fresh = !!r;
     if (r) this.drawMap(o, r);
     this.update();
@@ -193,6 +194,12 @@ export class LevelPreview {
     const tx = px >> 4, ty = py >> 4;
     if (tx >= g.width || ty >= g.height) return -1;
     return im.tiles1[ty * g.width + tx];
+  }
+
+  // the 8x8 tile of the submap shown at (px, py) (overworld.ts owTileAt; the load the image is drawn from), null: none
+  // there, a level shown or no map yet
+  owTileAt(px: number, py: number): { word: number; layer: 1 | 2 } | null {
+    return this.ow?.r ? owTileAt(this.ow.r, px, py) : null;
   }
 
   setHint(s: string): void {
@@ -276,6 +283,9 @@ export class GfxWorkspace {
   active = false;
   target: WsTarget = { submap: null, progress: 0 };
   private targetSel: HTMLSelectElement;
+  // a submap's preview and colors after the special world
+  private specialBox = h('input', { type: 'checkbox' });
+  private specialLabel = h('label', { class: 'toggle', title: 'The submap as the game shows it once the special world is passed (its last level\'s passed flag): its second set of colors, which the Palettes tab then edits' }, this.specialBox, 'After the special world');
   private note = h('div', { class: 'ws-note' });
   // set by the host: a tab was opened (jump: a jump to something in it, Ctrl+click or a link)
   onNav: (jump: boolean) => void = () => {};
@@ -290,11 +300,14 @@ export class GfxWorkspace {
     this.anim = new AnimTab(app, this);
     const tabBtn = (t: WsTab, label: string, key: string) => h('button', { 'data-tab': t, title: `${label} (${key})`, onclick: () => this.open(t) }, label);
     this.targetSel = h('select', { class: 'ws-target', title: 'Whose graphics are edited: the open level\'s or those of a submap of the overworld' });
-    this.targetSel.addEventListener('change', () => this.setTarget({ submap: this.targetSel.value === 'level' ? null : Number(this.targetSel.value), progress: this.target.progress }));
+    this.targetSel.addEventListener('change', () => this.setTarget({ ...this.target, submap: this.targetSel.value === 'level' ? null : Number(this.targetSel.value) }));
     app.on('level', () => this.fillTargets());
     this.fillTargets();
+    this.specialBox.addEventListener('change', () => this.setTarget({ ...this.target, special: this.specialBox.checked }));
+    this.specialLabel.hidden = true;
     this.bar = h('div', { class: 'ctxbar ws-tabs' },
       this.targetSel,
+      this.specialLabel,
       h('div', { class: 'btn-group' }, tabBtn('pal', 'Palettes', 'P'), tabBtn('map16', 'Map16 tiles', 'M'), tabBtn('gfx', 'Graphics', 'G'), tabBtn('anim', 'Animations', 'A')),
       h('span', { class: 'spacer' }),
       h('span', { class: 'hint', title: 'Exception: the palette choice in the header (Palettes tab, below) belongs to the level and is written with “Save level”.' }, 'Changes go straight into the ROM · Ctrl+Z / Ctrl+Y'),
@@ -321,9 +334,12 @@ export class GfxWorkspace {
   setTarget(t: WsTarget): void {
     const locked = gfxTarget(this.app, t).locked();
     if (locked) { toast(`The overworld is replaced by ${locked}: its graphics can't be edited here`); t = { ...t, submap: null }; }
-    const same = t.submap === this.target.submap && t.progress === this.target.progress;
-    this.target = { ...t };
+    t = { ...t, special: t.submap !== null && !!t.special };
+    const same = t.submap === this.target.submap && t.progress === this.target.progress && t.special === !!this.target.special;
+    this.target = t;
     this.targetSel.value = t.submap === null ? 'level' : String(t.submap);
+    this.specialBox.checked = t.special!;
+    this.specialLabel.hidden = t.submap === null;
     if (same) return;
     this.preview.showSubmap(this.target);
     this.pal.targetChanged();
@@ -380,7 +396,7 @@ export class GfxWorkspace {
   showMap16(tile: number, target: Map16Target = 'fg', at?: WsTarget): void {
     this.open('map16');
     const progress = at?.progress ?? this.target.progress;
-    this.setTarget({ submap: target === 'ow' ? at?.submap ?? this.target.submap ?? this.map16.lastSubmap : null, progress });
+    this.setTarget({ ...this.target, submap: target === 'ow' ? at?.submap ?? this.target.submap ?? this.map16.lastSubmap : null, progress });
     this.map16.select(tile, target);
     this.onNav(true);
   }

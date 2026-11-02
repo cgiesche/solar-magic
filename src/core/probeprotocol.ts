@@ -89,7 +89,7 @@ export type LearnJob =
   | { kind: 'revealWalks' }
   | { kind: 'suggest'; levels: number[]; open?: Level }
   | { kind: 'sizes'; level: KindLevel; layer2Pointer: number; specs: SizeSpec[] }
-  | { kind: 'owMap'; map: number; progress: number }
+  | { kind: 'owMap'; map: number; progress: number; special?: boolean }
   | { kind: 'owViews' }
   | { kind: 'owSprites'; map: number; progress: number }
   | { kind: 'owCustom'; map: number; progress: number }

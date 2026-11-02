@@ -64,7 +64,8 @@ export interface GfxTarget {
   // the SNES address of its own 256 colors when it always has them (a submap's), null: the level's (traced,
   // shared or its own palette)
   ownColors(special: boolean): number | null;
-  // the colors the game keeps rewriting (cgram: the submap's load as shown, null while it is emulated)
+  // the colors the game keeps rewriting (cgram: the submap's load as shown, after the special world when `special`;
+  // null while it is emulated)
   animatedColors(cgram: Uint8Array | null, special: boolean): Set<number> | null;
 
   // ---- its Map16 tiles
@@ -222,11 +223,11 @@ function submapTarget(app: App, at: WsTarget, m: number): GfxTarget {
     animList: (global) => (global ? { kind: 'owGlobal' } : { kind: 'submap', n: m }),
     owAnims: true,
     ownColors: (special) => submapPaletteAddr(rom, m, special),
-    // (the colors its load's CGRAM has other than its palette; with the special world's colors none: the preview
-    // shows the submap before it)
+    // (the colors its load's CGRAM has other than its palette; the preview loads it after the special world when its
+    // colors after it are shown)
     animatedColors: (c, special) => {
-      if (special || !c) return null;
-      const pal = submapPalette(rom, m);
+      if (!c) return null;
+      const pal = submapPalette(rom, m, special);
       return new Set(Array.from({ length: 256 }, (_, i) => i).filter((i) => c[i * 2] !== pal[i * 2] || c[i * 2 + 1] !== pal[i * 2 + 1]));
     },
 

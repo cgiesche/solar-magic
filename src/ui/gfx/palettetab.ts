@@ -77,8 +77,8 @@ export class PaletteTab implements WsPanel {
   private swatches: HTMLElement[] = [];
   private rowLabels: HTMLElement[] = [];
   private visible = false;
-  // a submap's colors: those after the special world
-  private special = false;
+  // a submap's colors: those after the special world (the workspace's target, its preview shows them)
+  private get special(): boolean { return !!this.ws.target.special; }
 
   constructor(app: App, ws: GfxWorkspace) {
     this.app = app;
@@ -276,16 +276,10 @@ export class PaletteTab implements WsPanel {
   private buildBar(): void {
     clear(this.bar);
     const own = this.custom !== 0, t = this.t;
-    const special = () => {
-      const cb = h('input', { type: 'checkbox', checked: this.special });
-      cb.addEventListener('change', () => { this.special = cb.checked; this.buildBar(); this.paint(); });
-      return h('label', { class: 'toggle', title: 'The submap\'s second set of colors, shown once the special world is passed (its last level\'s passed flag)' }, cb, 'After the special world');
-    };
     this.bar.append(
       ...(this.fixed !== null ? [
-        h('span', { class: 'prop-title' }, t.title),
-        h('span', { class: 'badge', title: 'All 256 colors of this submap are its own (Lunar Magic\'s custom overworld palettes)' }, 'own palette'),
-        special(),
+        h('span', { class: 'prop-title' }, `${t.title}${this.special ? ' (after the special world)' : ''}`),
+        h('span', { class: 'badge', title: 'All 256 colors of this submap are its own (Lunar Magic\'s custom overworld palettes); the colors after the special world are chosen in the bar above' }, 'own palette'),
       ] : [
         h('span', { class: 'prop-title' }, t.title),
         own ? h('span', { class: 'badge' }, 'own palette') : h('span', { class: 'badge muted', title: 'Colors come from the shared palette tables (FG/BG/sprite palette of the header)' }, 'shared palettes'),

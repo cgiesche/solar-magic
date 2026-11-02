@@ -204,7 +204,7 @@ export class Map16Tab implements WsPanel {
   private setLayer(target: Map16Target): void {
     if (target !== 'ow') this.layer = target;
     const submap = target === 'ow' ? this.ws.target.submap ?? this.lastSubmap : null;
-    if (submap !== this.ws.target.submap) this.ws.setTarget({ submap, progress: this.ws.target.progress });
+    if (submap !== this.ws.target.submap) this.ws.setTarget({ ...this.ws.target, submap });
     else this.retarget();
   }
 
@@ -423,7 +423,7 @@ export class Map16Tab implements WsPanel {
   private owMapSelect(): HTMLElement {
     const s = h('select', { title: 'The overworld\'s tiles are drawn with this map\'s graphics and colors' },
       MAP_NAMES.map((n, i) => h('option', { value: String(i), selected: i === this.ws.target.submap }, n)));
-    s.addEventListener('change', () => this.ws.setTarget({ submap: Number(s.value), progress: this.ws.target.progress }));
+    s.addEventListener('change', () => this.ws.setTarget({ ...this.ws.target, submap: Number(s.value) }));
     return h('span', { class: 'row', style: 'gap:4px' }, h('span', { class: 'hint' }, 'Drawn as on'), s);
   }
 

@@ -5,7 +5,8 @@ import { Snes, type SnesState } from './snes.ts';
 import { RomReads, record, countReads, bySince, type Since } from './romdeps.ts';
 import { KeptResults } from './keptresults.ts';
 import { rleDecode, rleEncode } from './rle.ts';
-import { GM, RAM } from './ram.ts';
+import { GM, RAM, SPECIAL_FLAG } from './ram.ts';
+import { decodeTile } from './gfx.ts';
 import { assemble } from './asar.ts';
 import { missingPatch } from './patches.ts';
 import { lz2Compress, lz2Decompress } from './lz2.ts';
@@ -713,6 +714,30 @@ export function gameL2(r: OwRender): Uint16Array {
   const at = (r.ppuRegs[0x08] & 0xfc) << 9;
   return Uint16Array.from({ length: 0x1000 }, (_, k) => r.vram[at + k * 2] | (r.vram[at + k * 2 + 1] << 8));
 }
+// the word of the 8x8 cell (x, y) of a 64x64 tilemap in VRAM (four 32x32 screens) based at PPU register `reg`
+// ($2107 BG1SC, $2108 BG2SC)
+function tilemapWord(r: OwRender, reg: number, x: number, y: number): number {
+  const a = ((r.ppuRegs[reg] & 0xfc) << 9) + (((y >> 5) * 2 + (x >> 5)) * 0x400 + (y & 31) * 32 + (x & 31)) * 2;
+  return r.vram[a] | (r.vram[a + 1] << 8);
+}
+// the color index of pixel (x, y) of tilemap word `w`'s 8x8 tile (4bpp in VRAM from 0, as drawOwMap draws it; flips
+// applied)
+const pixelBuf = new Uint8Array(64);
+function tilePixel(r: OwRender, w: number, x: number, y: number): number {
+  decodeTile(r.vram, (w & 0x3ff) * 32, 4, pixelBuf);
+  return pixelBuf[((w & 0x8000) ? 7 - y : y) * 8 + ((w & 0x4000) ? 7 - x : x)];
+}
+// The 8x8 tile shown at pixel (x, y) of the loaded region's 512x512 map (r: its load), from the BG1 and BG2 tilemaps
+// as the game shows them: layer 1's word where its pixel is not transparent, else layer 2's; null where neither has a
+// pixel (the back area color) or outside the map
+export function owTileAt(r: OwRender, x: number, y: number): { word: number; layer: 1 | 2 } | null {
+  if (x < 0 || y < 0 || x >= 512 || y >= 512) return null;
+  for (const [layer, reg] of [[1, 0x07], [2, 0x08]] as const) {
+    const word = tilemapWord(r, reg, x >> 3, y >> 3);
+    if (tilePixel(r, word, x & 7, y & 7)) return { word, layer };
+  }
+  return null;
+}
 
 export class OverworldEmulator {
   rom: Rom;
@@ -738,8 +763,9 @@ export class OverworldEmulator {
   }
   // map `map` at event progress `progress` (events 0 … progress-1 passed), as after loading a save: the game draws
   // their layer 2 tiles when the file is loaded (file select) and applies them to layer 1 in their number order
-  // while it loads the overworld (a new file's events are set again there)
-  load(map: number, progress: number): OwRender {
+  // while it loads the overworld (a new file's events are set again there). special: the special world passed (its
+  // last translevel's passed flag, set as the overworld loads)
+  load(map: number, progress: number, special = false): OwRender {
     this.sync();
     const s = this.snes;
     this.after = null;
@@ -768,6 +794,7 @@ export class OverworldEmulator {
           w[RAM.submap] = map;
           w[RAM.submap + 1] = map;
           w.set(eventBits(progress), RAM.owEvents);
+          if (special) w[SPECIAL_FLAG] |= 0x80;
         }
         s.joy1 = (n % 16) < 4 ? (w[RAM.gameMode] === GM.title ? 0x1000 : 0x0080) : 0;
         s.runFrame();
@@ -788,8 +815,8 @@ export class OverworldEmulator {
     return r;
   }
   // load, with the ROM bytes it read (reaching the title screen, too): what the map shown depends on
-  loadRecorded(map: number, progress: number): { result: OwRender; reads: RomReads } {
-    const result = this.load(map, progress);
+  loadRecorded(map: number, progress: number, special = false): { result: OwRender; reads: RomReads } {
+    const result = this.load(map, progress, special);
     return { result, reads: this.lastReads! };
   }
   // the console right after the load that gave `r` (the game run on from there: restore), while nothing ran since;
@@ -827,8 +854,9 @@ export class OverworldLoads {
     this.kept = new KeptResults({ validity: bySince(emu.rom), limit: max, inputsPerKey: 1 });
     this.derived = new KeptResults({ validity: bySince(emu.rom), inputsPerKey: 1 });
   }
-  get(map: number, progress: number): OwRender {
-    return this.load(map, progress).r;
+  // (special: after the special world, OverworldEmulator.load)
+  get(map: number, progress: number, special = false): OwRender {
+    return this.load(map, progress, true, special).r;
   }
   // the emulator's console as right after loading map `map` at event progress `progress` (to run the game on); the
   // load keeps it from the first time it is asked for (taken while the console is still right after the load, else
@@ -857,11 +885,11 @@ export class OverworldLoads {
     countReads(this.emu.rom, this.emu.snes, reads);
   }
   // the kept load, else a new one (kept when `keep`; one kept is kept as the latest used)
-  private load(map: number, progress: number, keep = true): KeptLoad {
-    const key = loadKey(map, progress);
+  private load(map: number, progress: number, keep = true, special = false): KeptLoad {
+    const key = `${loadKey(map, progress)}${special ? ':special' : ''}`;
     let k = this.kept.entry<KeptLoad>(key);
     if (!k) {
-      const gen = this.emu.rom.gen, { result, reads } = this.emu.loadRecorded(map, progress);
+      const gen = this.emu.rom.gen, { result, reads } = this.emu.loadRecorded(map, progress, special);
       k = { data: { r: result, state: null }, deps: { gen, reads } };
       if (keep) this.kept.set(key, k.data, k.deps);
     }
@@ -873,8 +901,8 @@ export class OverworldLoads {
 // The map `map` at event progress `progress` as a job of the result learner (probe worker: the overworld view asks for
 // it there), from `loads` (the learner's own, kept between jobs). One step: the loads' emulator is shared by the
 // overworld's jobs (owSpritesJob, submapViewsJob), so none may stop halfway. Its reads go to the job's (the ROM's
-// recorder, OverworldLoads.count).
-export function* overworldMapJob(loads: OverworldLoads, map: number, progress: number): Job<OwRender> {
-  return loads.get(map, progress);
+// recorder, OverworldLoads.count). special: after the special world (the graphics workspace's preview of a submap).
+export function* overworldMapJob(loads: OverworldLoads, map: number, progress: number, special = false): Job<OwRender> {
+  return loads.get(map, progress, special);
 }
 export const OW_LOADS_KEPT = 16; // emulated overworlds kept (map and event progress: a slider moved through them)

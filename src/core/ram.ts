@@ -246,6 +246,9 @@ export const wramName = (i: number): string => '$' + (i < 0x2000 ? i.toString(16
 export const map16Tile = (w: Uint8Array, a: number) => get16(w, a, a + MAP_HI);
 export const bgTile = (w: Uint8Array, o: number) => get16(w, RAM.bgMapLo + o, RAM.bgMapHi + o);
 export const map16Pointer = (w: Uint8Array, t: number) => get16(w, RAM.map16Pointers + t * 2);
+// the special world passed: bit 7 of $1EEB, translevel 49's passed flag (the game's LDA $1EEA in 16 bit, its sign): the
+// submaps have their colors after the special world then (submapgfx.ts)
+export const SPECIAL_FLAG = RAM.levelFlags + 0x49;
 
 export const spriteX = (w: Uint8Array, i: number) => get16(w, SPR.xLo + i, SPR.xHi + i);
 export const spriteY = (w: Uint8Array, i: number) => get16(w, SPR.yLo + i, SPR.yHi + i);

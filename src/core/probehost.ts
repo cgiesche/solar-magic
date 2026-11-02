@@ -100,7 +100,7 @@ function learnJob(j: LearnJob, state: LearnState, show: (items: unknown[] | null
       state.sizes.probe.emu = emu;
       return sizesJob(state.sizes.probe, j.specs);
     };
-    case 'owMap': return () => overworldMapJob(owLoads(state), j.map, j.progress);
+    case 'owMap': return () => overworldMapJob(owLoads(state), j.map, j.progress, !!j.special);
     case 'owViews': return () => submapViewsJob(owLoads(state));
     case 'owSprites': return () => owSpritesJob(owLoads(state), j.map, j.progress);
     case 'owCustom': return () => owCustomJob(owLoads(state), j.map, j.progress);

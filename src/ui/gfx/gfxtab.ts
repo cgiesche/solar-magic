@@ -142,7 +142,8 @@ export class GfxTab implements WsPanel {
   }
 
   previewHint(): string {
-    return this.t.levelPreview ? 'Click: the 8x8 graphics of the tile under the mouse (top left quarter) in the pixel editor' : '';
+    return this.t.levelPreview ? 'Click: the 8x8 graphics of the tile under the mouse (top left quarter) in the pixel editor'
+      : 'Click: the 8x8 graphics under the mouse (layer 1, else layer 2) in the pixel editor';
   }
 
   // whose slots are shown: the workspace's target (the level's or a submap's)
@@ -162,14 +163,21 @@ export class GfxTab implements WsPanel {
     return { tiles: t.drawnTiles(), words: (x) => t.words(x) };
   }
 
+  // a level's Map16 tile under the mouse (its top left quarter), a submap's 8x8 tile shown there
   previewClick(px: number, py: number): void {
-    if (!this.t.levelPreview) return;
-    const m = this.ws.preview.tileAt(px, py);
-    if (m < 0) return;
-    const w = this.t.words(m)[0];
+    let w: number;
+    if (this.t.levelPreview) {
+      const m = this.ws.preview.tileAt(px, py);
+      if (m < 0) return;
+      w = this.t.words(m)[0];
+    } else {
+      const q = this.ws.preview.owTileAt(px, py);
+      if (!q) return;
+      w = q.word;
+    }
     const num = w & 0x3ff;
     const slot = slotOfTile(this.gfxSlots(), num);
-    if (!slot) { toast(`8x8 tile ${hex(num, 3)} is in none of this level's graphics slots`); return; }
+    if (!slot) { toast(`8x8 tile ${hex(num, 3)} is in none of ${this.t.short}'s graphics slots`); return; }
     this.ws.showGfx(slot.file, num - slot.first, (w >> 10) & 7);
   }
 

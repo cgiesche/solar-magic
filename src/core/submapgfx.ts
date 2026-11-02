@@ -15,7 +15,7 @@
 import { Rom, snesToPc } from './rom.ts';
 import { assemble } from './asar.ts';
 import { OverworldEmulator } from './overworld.ts';
-import { RAM } from './ram.ts';
+import { RAM, SPECIAL_FLAG } from './ram.ts';
 import { levelGfx, setLevelGfx, defaultGfx, submapGfxEntry, GFX_NONE, SUBMAPS } from './patches.ts';
 export { SUBMAPS };
 import { levelSlots as entrySlotsOf, assignSlot, type GfxSlot } from './gfxslots.ts';
@@ -31,8 +31,6 @@ const PAL_ROUTINE = 0x00ad25;
 const ROUTINE_LEN = 35;
 const ROUTINE_ADC = 18; // the ADC's operand: the table's low 16 bits
 const ROUTINE_BANK = 30; // the MVN's source bank: the table's bank
-// the special world passed: bit 7 of $1EEB (the game's LDA $1EEA in 16 bit, its sign: translevel 49's passed flag)
-const SPECIAL_FLAG = RAM.levelFlags + 0x49;
 const COLORS = RAM.palettes + 2; // the palette buffer: the colors after the back area color
 
 const routineAsm = () => `lorom
