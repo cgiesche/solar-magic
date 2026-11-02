@@ -74,15 +74,17 @@ function heard(rom: Rom, map: number): { song: number; peak: number; owBank: boo
   cpu.exec = (op: number) => { exec(op); if (w[RAM.musicRequest]) last = w[RAM.musicRequest]; };
   emu.loadOverworldOn(map);
   let peak = 0;
-  for (let f = 0; f < 120; f++) { s.runFrame(); for (const v of s.audio!) peak = Math.max(peak, Math.abs(v)); }
+  for (let f = 0; f < 40; f++) s.runFrame(); // (as the player: then only the SPC700 runs on)
   cpu.exec = exec;
+  const song = amk ? w[RAM.amkSong] : last;
+  for (let f = 0; f < 80; f++) { for (const v of s.apu.play(1066)) peak = Math.max(peak, Math.abs(v)); }
   const ram = s.apu.ram();
   let owBank = rom.r16(0x0e98b1) > 0;
   for (let a = 0x0e98b1, len; (len = rom.r16(a)); a += 4 + len) {
     const dst = rom.r16(a + 2), src = snesToPc(a + 4);
     if (!ram.subarray(dst, dst + len).every((v, i) => v === rom.data[src + i])) owBank = false;
   }
-  return { song: amk ? w[RAM.amkSong] : last, peak, owBank };
+  return { song, peak, owBank };
 }
 const listened = (rom: Rom, want: number[], what: string) => {
   for (const k of [0, 1, 5]) {
@@ -147,6 +149,10 @@ check(submapMusic(rom, 1) === custom.num && list(songs(rom).filter((_, i) => i !
 {
   const p = played(rom);
   check(p.load[1] === custom.num && p.walk === custom.num, `Yoshi's Island plays the custom song: loaded ${hx(p.load[1])}, walked onto ${hx(p.walk)}`);
+}
+{
+  const h = heard(rom, 1);
+  check(h.song === custom.num && h.peak > 1000, `listening to Yoshi's Island plays the custom song ${hx(h.song)} (peak ${h.peak})`);
 }
 
 // ---- AddmusicK removed: the original numbers back, the custom song's submap its own song ----

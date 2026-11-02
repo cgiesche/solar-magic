@@ -36,7 +36,7 @@ import { mainTranslevel } from '../core/level.ts';
 import { RAM, map16Pointer } from '../core/ram.ts';
 import { loadMusicProject, submapSongs, submapMusic, setSubmapMusic, songHex, type SongInfo } from '../core/music.ts';
 import { songLabel, playButton } from './musicdialog.ts';
-import { musicPlayer } from './musicplayer.ts';
+import { musicPlayer, submapMusicLabel } from './musicplayer.ts';
 import type { Rom } from '../core/rom.ts';
 import { OW_OPTIONS, owOption, owOptionValue, setOwOption, revealSpeed, setRevealSpeed, revealStepFrames, MAX_REVEAL_SPEED, DEFAULT_REVEAL_SPEED, submapLightning, setSubmapLightning, LIGHTNING_TITLE, lightningEditLabel } from '../core/owoptions.ts';
 
@@ -1152,7 +1152,7 @@ export class OverworldView {
     const opts = songs.map((s): [number, string] => [s.num, songLabel(s)]);
     if (!songs.some((s) => s.num === cur)) opts.push([cur, songHex(cur)]);
     // listening: the overworld loaded on this map at the event progress shown, as the game plays its song
-    const label = `submap:${map}`;
+    const label = submapMusicLabel(map);
     const listen = () => void musicPlayer.playSubmap(this.app, map, label, eventBits(this.progress)).then(() => {
       if (musicPlayer.error) toast(`Could not play: ${musicPlayer.error}`, 'error');
     });

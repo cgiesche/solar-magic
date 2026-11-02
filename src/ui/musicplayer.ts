@@ -18,6 +18,9 @@ type Listener = (label: string | null) => void;
 
 // the label of the open level's music, looped by the app bar's toggle while editing
 export const LEVEL_MUSIC = 'level-music';
+// the label of submap `map`'s song, listened to in the overworld workspace (isSubmapMusic: any of them)
+export const submapMusicLabel = (map: number): string => `submap:${map}`;
+export const isSubmapMusic = (label: string | null): boolean => !!label?.startsWith('submap:');
 
 class MusicPlayer {
   private audio: AudioOut | null = null;

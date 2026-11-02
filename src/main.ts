@@ -28,7 +28,7 @@ import { openResources } from './ui/resources.ts';
 import { OverworldView } from './ui/overworld.ts';
 import { overworldReplacement } from './core/overworld.ts';
 import { openTestPlay, openOverworldTestPlay } from './ui/testplay.ts';
-import { musicPlayer, LEVEL_MUSIC } from './ui/musicplayer.ts';
+import { musicPlayer, LEVEL_MUSIC, isSubmapMusic } from './ui/musicplayer.ts';
 import { MessagePanel, levelMessages } from './ui/messagepanel.ts';
 import { NavHistory, fromHash, type NavLoc } from './ui/navhistory.ts';
 import { initLanding } from './ui/landing.ts';
@@ -263,7 +263,7 @@ function buildUi(app: App): { start: (at: NavLoc | null) => Promise<void> } {
     musicBtn.disabled = workspace === 'ow';
     musicBtn.title = workspace === 'ow' ? 'The level\'s music plays in the level editor' : musicTitle;
     if (workspace === 'ow' && musicPlayer.label === LEVEL_MUSIC) musicPlayer.stop();
-    if (workspace !== 'ow' && musicPlayer.label?.startsWith('submap:')) musicPlayer.stop(); // (a submap's song, listened to in the overworld)
+    if (workspace !== 'ow' && isSubmapMusic(musicPlayer.label)) musicPlayer.stop();
     menus.refresh();
   };
   app.on('mode', updateToolbar);

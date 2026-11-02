@@ -436,7 +436,7 @@ export class LevelEmulator {
   loadOverworldOn(map: number, events?: Uint8Array): void {
     this.startGameAt(-1, events);
     const w = this.snes.wram;
-    w[RAM.submap] = w[RAM.submap + 1] = map;
+    w[RAM.submap] = w[RAM.submap + 1] = map; // (Mario's and Luigi's; Mario stays on his tile, which the song doesn't depend on)
     this.reloadOverworld(events);
   }
   // frames until the overworld runs (newGame: through the title screen and file select, buttons pressed), no intro
