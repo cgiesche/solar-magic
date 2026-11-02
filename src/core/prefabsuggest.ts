@@ -23,7 +23,6 @@ import { runJob } from './jobrunner.ts';
 import { KeptResults } from './keptresults.ts';
 import { inputHash } from './inputs.ts';
 import { RomReads, record, byFingerprint, always, type RomDeps, type RomFingerprint } from './romdeps.ts';
-import { objectLength2D } from './obj2d.ts';
 
 export interface PrefabSuggestion {
   key: string; // the arrangement (arrangementKey)
@@ -44,23 +43,23 @@ export interface SuggestSource {
 // the levels of a run and the open level as edited (what decides whether the latest run holds)
 export type SuggestLevels = Pick<SuggestSource, 'levels' | 'open'>;
 
-// a finished run: what it read, its levels, the one it took as edited, object 2D's length, each level's content it took
+// a finished run: what it read, its levels, the one it took as edited, each level's content it took
 // (inputs) and its suggestions
-export interface SuggestRun { deps: RomDeps; levels: string; edited: number | null; len2d: number; inputs: Map<number, string>; list: PrefabSuggestion[] }
+export interface SuggestRun { deps: RomDeps; levels: string; edited: number | null; inputs: Map<number, string>; list: PrefabSuggestion[] }
 
 // a level's arrangements (arrangementKey and prefab of each group, in dm16Groups' order) and the Direct Map16
 // tiles it has (tileKey)
 interface Arrangements { list: [string, Prefab][]; tiles: Set<string> }
 
 const PLACES = 4096; // place searches kept (a level and an arrangement each, with its latest used contents), the latest used; a run keeps all it used, also more
-const CONTENTS = 0x200; // levels whose contents as saved are kept (every level's, by object 2D's length)
+const CONTENTS = 0x200; // levels whose contents as saved are kept (every level's)
 
 // The latest finished run and whether it holds (the editor's, SuggestionList): a level's content as saved is kept
-// while the ROM bytes its load read are unchanged (and object 2D's length, which the load takes from emulation), so
+// while the ROM bytes its load read are unchanged (object 2D's length among them, obj2d.ts), so
 // another level opened loads the one edited before only once.
 export class SuggestRuns {
   protected fp: RomFingerprint;
-  protected contents: KeptResults<RomDeps>; // a level's content as saved, by object 2D's length
+  protected contents: KeptResults<RomDeps>; // a level's content as saved
   protected last: SuggestRun | null = null; // the latest finished run's
 
   constructor(fp: RomFingerprint) {
@@ -78,17 +77,17 @@ export class SuggestRuns {
   // saved doesn't, an undo back brings them back). The open level counts only if it is among the levels. Another
   // level opened: the one the run took as edited is compared as saved, and from then on it is the latest run's.
   held(rom: Rom, src: SuggestLevels): PrefabSuggestion[] | null {
-    const l = this.last, len2d = objectLength2D(rom);
-    if (!l || l.levels !== src.levels.join() || l.len2d !== len2d || !this.fp.valid(l.deps)) return null;
+    const l = this.last;
+    if (!l || l.levels !== src.levels.join() || !this.fp.valid(l.deps)) return null;
     const edited = editedOf(src);
     if (edited !== null && l.inputs.get(edited) !== levelContent(rom, src.open!)) return null;
     if (l.edited !== null && l.edited !== edited) {
-      let e = this.savedEntry(l.edited, len2d);
+      let e = this.savedEntry(l.edited);
       if (!e) {
         const s = loadSaved(rom, l.edited);
         if (!s) return null;
         e = { data: s.input, deps: this.fp.deps(s.reads) };
-        this.contents.set(`${l.edited}`, e.data, e.deps, `${len2d}`);
+        this.contents.set(`${l.edited}`, e.data, e.deps);
       }
       if (e.data !== l.inputs.get(l.edited)) return null;
       const read = new RomReads(rom);
@@ -100,7 +99,7 @@ export class SuggestRuns {
     return l.list;
   }
 
-  protected savedEntry(n: number, len2d: number) { return this.contents.entry<string>(`${n}`, `${len2d}`); }
+  protected savedEntry(n: number) { return this.contents.entry<string>(`${n}`); }
 }
 
 // The results of single levels kept between runs (the probe worker's, where the runs are): a level's arrangements are
@@ -111,7 +110,7 @@ export class SuggestRuns {
 export class KeptSuggestions extends SuggestRuns {
   private arrangements = new KeptResults({ validity: always }); // by level and content
   private places: KeptResults<RomDeps>;
-  private run: { read: RomReads; levels: string; edited: number | null; len2d: number } | null = null; // the running run's (what it read: its levels' loads, its places' searches)
+  private run: { read: RomReads; levels: string; edited: number | null } | null = null; // the running run's (what it read: its levels' loads, its places' searches)
 
   constructor(fp: RomFingerprint, limit = PLACES) {
     super(fp);
@@ -119,10 +118,10 @@ export class KeptSuggestions extends SuggestRuns {
   }
 
   // a run starts or is finished: the places a finished run used are all kept for the next one
-  startRun(rom: Rom, src: SuggestLevels, len2d: number): void {
+  startRun(rom: Rom, src: SuggestLevels): void {
     this.places.startRound();
     this.contents.startRound();
-    this.run = { read: new RomReads(rom), levels: src.levels.join(), edited: editedOf(src), len2d };
+    this.run = { read: new RomReads(rom), levels: src.levels.join(), edited: editedOf(src) };
   }
   endRun(inputs: Map<number, string>, list: PrefabSuggestion[]): void {
     this.places.endRound();
@@ -132,11 +131,11 @@ export class KeptSuggestions extends SuggestRuns {
     this.run = null;
   }
 
-  savedContent(n: number, len2d: number): string | undefined {
-    return this.used(this.savedEntry(n, len2d));
+  savedContent(n: number): string | undefined {
+    return this.used(this.savedEntry(n));
   }
-  setSavedContent(n: number, len2d: number, input: string, reads: RomReads): void {
-    this.contents.set(`${n}`, input, this.fp.deps(reads), `${len2d}`);
+  setSavedContent(n: number, input: string, reads: RomReads): void {
+    this.contents.set(`${n}`, input, this.fp.deps(reads));
     this.run?.read.add(reads);
   }
 
@@ -282,21 +281,21 @@ export function dm16Groups(lv: Level): { layer: Layer; objects: number[] }[] {
 }
 
 export function* prefabSuggestions(rom: Rom, src: SuggestSource): Generator<void, PrefabSuggestion[]> {
-  const kept = src.kept, len2d = kept ? objectLength2D(rom) : 0;
-  kept?.startRun(rom, src, len2d);
+  const kept = src.kept;
+  kept?.startRun(rom, src);
   // the arrangements of the groups, with how often they occur
   const levels = new Map<number, { lv: Level | null; input: string; a: Arrangements }>(); // (lv: loaded when needed)
   const found = new Map<string, { prefab: Prefab; count: number }>();
   for (const n of src.levels) {
     // the open level as edited; another as saved, loaded only when the bytes its kept content's load read changed
-    let lv = n === src.open?.number ? src.open : null, input = lv || !kept ? undefined : kept.savedContent(n, len2d);
+    let lv = n === src.open?.number ? src.open : null, input = lv || !kept ? undefined : kept.savedContent(n);
     if (lv) input = kept ? levelContent(rom, lv) : '';
     else if (input === undefined) {
       if (kept) {
         const s = loadSaved(rom, n);
         if (!s) continue; // unreadable level
         ({ lv, input } = s);
-        kept.setSavedContent(n, len2d, input, s.reads);
+        kept.setSavedContent(n, input, s.reads);
       } else {
         try { lv = loadLevel(rom, n); } catch { continue; }
         input = '';

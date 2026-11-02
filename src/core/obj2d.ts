@@ -5,7 +5,7 @@
 // object and how far it moves the level data pointer is taken. On the bare CPU (ROM and WRAM, no other
 // hardware): level parsing needs it, which the full emulator (levelemu.ts) builds on.
 
-import { Rom, snesToPc } from './rom.ts';
+import { Rom, snesToPc, type RomRange } from './rom.ts';
 import { CPU } from './cpu.ts';
 import { RAM } from './ram.ts';
 
@@ -19,28 +19,47 @@ const MAX_EXTENSION = 8; // more is no extension but a hook gone wrong
 const MAX_STEPS = 200000;
 const PROBED = [0x00, 0xff]; // the custom numbers (and settings) a hook is given
 
-// once per ROM state
-const memo = new WeakMap<Rom, { gen: number; len: number }>();
+// once per ROM state: the length and the ROM ranges finding it read
+const memo = new WeakMap<Rom, { gen: number; len: number; ranges: RomRange[] }>();
 
-// the bytes of object 2D in the level data of this ROM (3, or more with a hook)
+// the bytes of object 2D in the level data of this ROM (3, or more with a hook). What finding it read (the
+// dispatcher, a hook's code) counts as read by the computation running (Rom.reads), also when the length is kept:
+// whatever reads a level depends on it, so a hook installed or removed drops what read a level as the ROM had it.
 export function objectLength2D(rom: Rom): number {
-  const had = memo.get(rom);
-  if (had?.gen === rom.gen) return had.len;
-  // (a hook may move the pointer only for the numbers it handles: the most any of these does)
-  const len = 3 + Math.max(...PROBED.map((c) => emulatedExtension(rom, c)));
-  memo.set(rom, { gen: rom.gen, len });
-  return len;
+  let had = memo.get(rom);
+  if (had?.gen !== rom.gen) {
+    // (a hook may move the pointer only for the numbers it handles: the most any of these does)
+    const offsets = new Set<number>();
+    const len = 3 + Math.max(...PROBED.map((c) => emulatedExtension(rom, c, offsets)));
+    had = { gen: rom.gen, len, ranges: rangesOf(offsets) };
+    // (kept before counting: the recorder's byte pages take level data ranges, which ask this again, unrecorded)
+    memo.set(rom, had);
+  }
+  const recorder = rom.reads;
+  if (recorder) for (const [start, end] of had.ranges) recorder.read(start, end - start);
+  return had.len;
+}
+
+// offsets as ranges of consecutive ones
+function rangesOf(offsets: Set<number>): RomRange[] {
+  const out: RomRange[] = [];
+  for (const o of [...offsets].sort((a, b) => a - b)) {
+    const last = out.at(-1);
+    if (last && last[1] === o) last[1]++;
+    else out.push([o, o + 1]);
+  }
+  return out;
 }
 
 // how many bytes past the object's 3 the dispatcher moves the level data pointer ($65) for an object 2D whose
-// following bytes are all `fill`
-function emulatedExtension(rom: Rom, fill: number): number {
+// following bytes are all `fill`; the ROM bytes it reads (PC offsets) are added to offsets
+function emulatedExtension(rom: Rom, fill: number, offsets: Set<number>): number {
   const data = rom.data, wram = new Uint8Array(0x20000), sram = new Uint8Array(0x8000);
   const cpu = new CPU({
     read(a) {
       const bank = a >> 16, off = a & 0xffff;
       if ((bank & 0xfe) === 0x7e) return wram[a - 0x7e0000];
-      if (off >= 0x8000) return data[snesToPc(a) % data.length];
+      if (off >= 0x8000) { const o = snesToPc(a) % data.length; offsets.add(o); return data[o]; }
       if ((bank & 0x7f) >= 0x70) return sram[off & 0x7fff];
       return (bank & 0x7f) < 0x40 && off < 0x2000 ? wram[off] : 0;
     },

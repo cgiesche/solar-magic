@@ -27,6 +27,8 @@ import { SizeProbe, drivers } from '../src/core/objresize.ts';
 import { EditSession } from '../src/core/editsession.ts';
 import { LevelModel } from '../src/core/levelmodel.ts';
 import { L2_PTRS } from '../src/core/level.ts';
+import { record, holds, RomFingerprint } from '../src/core/romdeps.ts';
+import { uninstallPackage } from '../src/core/pkgreg.ts';
 import { editorImage } from './fixture.ts';
 
 await loadAsar();
@@ -207,6 +209,40 @@ check(objectLength2D(hooked) === 5, `once the hook is installed (the same ROM): 
   check(kept.length === 2 && kept[0].num === 0x2d && kept[0].extension?.join() === '7,129' && kept[1].num === 1 && !notes.length, '.mwl: 2D kept with its extension');
   const left = parseLmObjects(d, 0, false, notes).objects;
   check(left.length === 1 && left[0].num === 1 && notes.some((n) => n.includes('2D')), '.mwl without the hook: 2D left out with a note');
+}
+
+// ---------- what reads a level depends on object 2D's length (#213) ----------
+// Reading a level (the open level's follow-up, views drawing levels, results with a level as saved as their input)
+// takes object 2D's length from emulating the dispatcher: what that read counts as read by the level's reading, so a
+// package adding or removing the hook drops what read a level, a change elsewhere doesn't
+{
+  const rom = new Rom(await editorImage()), fp = new RomFingerprint(rom);
+  const emu = new LevelEmulator(rom); emu.boot();
+  const src = map16Source(rom, emu.load(0x105));
+  const blank = src.fg(0x025);
+  installEditorPatch(rom); enableBlocks(rom, blank);
+  const readLevel = () => { const rec = record(rom, () => loadLevel(rom, 0x105)); return { rec, deps: fp.deps(rec.reads) }; };
+  // the object kinds (they probe 2D's custom numbers only with a hook): no level read, but object 2D's length
+  const kindsDeps = () => {
+    const lv = loadLevel(rom, 0x105), probe = new ObjKindProbe(emu, lv, rom.r24(L2_PTRS + 0x105 * 3));
+    probe.result();
+    return fp.deps(probe.reads());
+  };
+  const a = readLevel(), ka = kindsDeps();
+  const other = loadLevel(rom, 0x106);
+  other.objects.push(obj(0x14, 3, 0x14, 0));
+  saveLevel(rom, other);
+  check(holds(rom, a.rec) && fp.valid(a.deps) && fp.valid(ka), 'another level saved: level 105 as read and the object kinds still hold');
+  const pkg = inspectUpload('obj2d.asm', new TextEncoder().encode(HOOK.replace('|!addr', ''))) as ReadyPreview;
+  const r = await installPackage(rom, pkg, { level: 0x105, blank, tileWords: (t) => src.fg(t), setup: false });
+  check(r.ok && objectLength2D(rom) === 5, `package with the hook installed: 5 bytes (${objectLength2D(rom)})`);
+  check(!holds(rom, a.rec) && !fp.valid(a.deps), 'level 105 as read before no longer holds');
+  check(!fp.valid(ka), 'the object kinds learned before no longer hold');
+  const b = readLevel(), kb = kindsDeps();
+  await uninstallPackage(rom, r.pkg!.id, blank);
+  check(objectLength2D(rom) === 3, `package removed: 3 bytes (${objectLength2D(rom)})`);
+  check(!holds(rom, b.rec) && !fp.valid(b.deps), 'level 105 as read with the hook no longer holds');
+  check(!fp.valid(kb), 'the object kinds learned with the hook no longer hold');
 }
 
 // ---------- the Romhack Races baserom: the Retry System's custom midway bars ----------

@@ -14,7 +14,7 @@ import { ramEffect } from './objeffects.ts';
 import { OV_L1, MAP_BASE, readOffset } from './levelemu.ts';
 import { layerGeom } from './render.ts';
 import { encodePrimaryHeader, serializeObjects, newUid, type LevelObject, type Level } from './level.ts';
-import { RomReads } from './romdeps.ts';
+import { RomReads, record } from './romdeps.ts';
 import { objectLength2D, fitExtension, OBJ_2D } from './obj2d.ts';
 
 export interface ObjKind {
@@ -108,6 +108,7 @@ export class ObjKindProbe {
   private aloneBase: Uint8Array | null = null; // (RAM after a load without objects)
   private atFirst = new Set<number>();
   private len2d: number;
+  private len2dReads: RomReads; // what finding object 2D's length read (the specs depend on it)
   private runs: Run[] = [];
   private code = new Set<number>();
   private romRead = new Set<number>();
@@ -126,7 +127,9 @@ export class ObjKindProbe {
     for (let y = 0; y < g.height; y++) for (let x = 0; x < g.width; x++) inv.set(g.addr(x, y) - MAP_BASE, [x, y]);
     this.pos = (off) => inv.get(off);
     for (let n = 1; n < 0x40; n++) for (const size of nibbleValues()) this.specs.push({ num: n, size });
-    this.len2d = objectLength2D(emu.rom);
+    const found = record(emu.rom, () => objectLength2D(emu.rom), { counted: false });
+    this.len2d = found.result;
+    this.len2dReads = found.reads;
     if (this.len2d > 3) {
       this.firstAt = this.specs.length;
       for (let c = 0; c < 0x100; c++) for (const [size, ext5] of DRAW_TRIES) this.specs.push({ num: OBJ_2D, size, extension: this.extension(c, ext5) });
@@ -234,9 +237,9 @@ export class ObjKindProbe {
   }
 
   // what the result depends on: the single ROM bytes the object routines read (not the level load
-  // around them, so saving a level doesn't drop it)
+  // around them, so saving a level doesn't drop it) and what finding object 2D's length read
   reads(): RomReads {
-    const r = new RomReads(this.emu.rom);
+    const r = new RomReads(this.emu.rom, this.len2dReads);
     for (const o of this.romRead) r.bytes.add(o);
     return r;
   }
