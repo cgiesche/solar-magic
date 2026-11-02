@@ -150,11 +150,18 @@ export const LIGHTNING_MASK = 0x04f709;
 const SUBMAP_BITS = 0x04f875;
 const SUBMAPS = 7; // the main map … Star Road (overworld.ts MAP_NAMES; not imported, see LF_SAVE_SWITCH)
 export const LIGHTNING_TITLE = 'The game\'s lightning flashes of color 4·7 on this submap (in the game on the Valley of Bowser only)';
-export function submapLightning(rom: Pick<Rom, 'r8'>, submap: number): boolean {
-  return !(rom.r8(LIGHTNING_MASK) & rom.r8(SUBMAP_BITS + submap));
+export const lightningEditLabel = (name: string, on: boolean): string => `${name}: lightning ${on ? 'on' : 'off'}`;
+// the game's LDA #mask : JSR $F882 around the mask (as the other options, a patch may have changed it)
+const gameCode = (rom: Pick<Rom, 'r8'>) =>
+  rom.r8(LIGHTNING_MASK - 1) === 0xa9 && [0x20, 0x82, 0xf8].every((v, k) => rom.r8(LIGHTNING_MASK + 1 + k) === v);
+// whether the lightning is on on the submap; null: the game's code there was changed by a patch
+export function submapLightning(rom: Pick<Rom, 'r8'>, submap: number): boolean | null {
+  return gameCode(rom) ? !(rom.r8(LIGHTNING_MASK) & rom.r8(SUBMAP_BITS + submap)) : null;
 }
+// throws when a patch changed the game's code there
 export function setSubmapLightning(rom: Rom, submap: number, on: boolean): void {
   if (submap < 0 || submap >= SUBMAPS) throw new RangeError(`no submap ${submap}`);
+  if (!gameCode(rom)) throw new Error('The lightning: its code in the ROM was changed by a patch');
   const bit = rom.r8(SUBMAP_BITS + submap), v = rom.r8(LIGHTNING_MASK);
   rom.w8(LIGHTNING_MASK, on ? v & ~bit : v | bit);
 }

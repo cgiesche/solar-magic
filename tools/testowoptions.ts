@@ -5,7 +5,7 @@ import { Rom } from '../src/core/rom.ts';
 import { LevelEmulator } from '../src/core/levelemu.ts';
 import { RomEditSession } from '../src/core/romedit.ts';
 import { readL1, readTranslevels, setInitialFlags, FLAG, OverworldEmulator, MAP_NAMES } from '../src/core/overworld.ts';
-import { OW_OPTIONS, owOptionValue, setOwOption, submapLightning, setSubmapLightning, LIGHTNING_MASK, revealSpeed, setRevealSpeed, DEFAULT_REVEAL_SPEED, MAX_REVEAL_SPEED, revealStepFrames, type OwOptionId } from '../src/core/owoptions.ts';
+import { OW_OPTIONS, owOptionValue, setOwOption, submapLightning, setSubmapLightning, lightningEditLabel, LIGHTNING_MASK, revealSpeed, setRevealSpeed, DEFAULT_REVEAL_SPEED, MAX_REVEAL_SPEED, revealStepFrames, type OwOptionId } from '../src/core/owoptions.ts';
 import { GM, RAM, PAD, get16, set16 } from '../src/core/ram.ts';
 import { PlaySession } from '../src/core/playsession.ts';
 import { cleanImage, editorImage } from './fixture.ts';
@@ -264,11 +264,12 @@ function gameOver(rom: Rom): { max: number; player: number } {
   const flashes = (m: number) => {
     const emu = new OverworldEmulator(rom), c = new Set<number>();
     emu.load(m, 0);
-    for (let f = 0; f < 900; f++) { emu.snes.runFrame(); c.add(emu.snes.cgram[0x8e] | (emu.snes.cgram[0x8f] << 8)); }
+    const C = 0x47 * 2; // color 4·7 in CGRAM
+    for (let f = 0; f < 900; f++) { emu.snes.runFrame(); c.add(emu.snes.cgram[C] | (emu.snes.cgram[C + 1] << 8)); }
     return c.size;
   };
   const mask = () => rom.r8(LIGHTNING_MASK);
-  const set = (m: number, on: boolean) => s.edit(`Lightning on ${MAP_NAMES[m]}: ${on ? 'on' : 'off'}`, () => setSubmapLightning(rom, m, on));
+  const set = (m: number, on: boolean) => s.edit(lightningEditLabel(MAP_NAMES[m], on), () => setSubmapLightning(rom, m, on));
   check(mask() === 0xf7 && clean.r8(LIGHTNING_MASK) === 0xf7 && MAP_NAMES.every((_, m) => submapLightning(rom, m) === (m === 4)),
     'lightning: on the Valley of Bowser only, as in the game (F7)');
   const before = flashes(4);
@@ -295,6 +296,11 @@ function gameOver(rom: Rom): { max: number; player: number } {
   let threw = false;
   try { setSubmapLightning(rom, 7, true); } catch { threw = true; }
   check(threw && mask() === 0xf7, 'lightning: no submap 7');
+  // a patch's code there: unknown, not written
+  rom.w8(LIGHTNING_MASK - 1, 0xad);
+  threw = false;
+  try { setSubmapLightning(rom, 4, false); } catch { threw = true; }
+  check(submapLightning(rom, 4) === null && threw && mask() === 0xf7, 'lightning: changed by a patch: unknown, not written');
 }
 
 if (bad) { console.log(`${bad} failed`); process.exit(1); }
