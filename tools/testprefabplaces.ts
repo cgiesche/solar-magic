@@ -8,12 +8,13 @@ import { loadLevel, newUid, isL1Vertical, type LevelObject } from '../src/core/l
 import { saveLevel } from '../src/core/save.ts';
 import { usedLevels, levelOverride } from '../src/core/levelusage.ts';
 import { DM16_EXT } from '../src/core/patches.ts';
-import { flagBytes } from '../src/core/cdm16.ts';
+import { flagBytes, isDm16, dm16Tiles } from '../src/core/cdm16.ts';
+import type { TileCut } from '../src/core/renderquery.ts';
 import { EditSession } from '../src/core/editsession.ts';
 import { installPrefabPatch, writePrefab, readPrefab, PREFAB_EXT, TRANSPARENT, type Prefab } from '../src/core/prefabs.ts';
 import { prefabDm16Objects } from '../src/core/prefabcost.ts';
 import { findPrefabPlaces, planPrefabPlaces, applyPrefabPlaces, replaceWithPrefab, deletePrefab } from '../src/core/prefabplaces.ts';
-import { editorImage } from './fixture.ts';
+import { editorImage, levelQuery } from './fixture.ts';
 
 let fail = 0;
 const check = (ok: boolean, what: string) => { if (!ok) { fail++; console.log('FAIL', what); } };
@@ -80,6 +81,32 @@ const L2 = usedLevels(rom).find((n) => loadLevel(rom, n).layer2Objects)!; // a l
   const r = load(H2, levelOverride(rom, lv));
   const k = lv.objects.findIndex((o) => o.num === 5 && o.x === 0x30);
   check((r.touched.get(k)?.size ?? 0) > 0, 'the coin writes a tile');
+}
+
+// ---- prefab from the selection (renderquery.ts tileCut): the Direct Map16 objects of a place give the prefab ----
+{
+  // the place's objects selected: its Direct Map16 objects in its rectangle
+  const cut = (n: number, l2: boolean, x: number, y: number) => {
+    const lv = loadLevel(rom, n), objs = (l2 ? lv.layer2Objects : lv.objects) ?? [];
+    const r = load(n, levelOverride(rom, lv));
+    const inside = (o: LevelObject) => isDm16(o) && dm16Tiles(o).every((t) => {
+      const tx = t & 0xffff, ty = t >> 16;
+      return tx >= x && tx < x + s.w && ty >= y && ty < y + s.h;
+    });
+    return levelQuery(rom, r, lv).tileCut(l2, objs, inside);
+  };
+  const same = (c: TileCut | string, x: number, y: number, tiles = s.tiles) => typeof c !== 'string' && c.x === x && c.y === y && c.w === s.w && c.h === s.h &&
+    JSON.stringify(c.tiles) === JSON.stringify(tiles) && JSON.stringify(c.conds) === JSON.stringify(s.conds);
+  check(same(cut(H1, false, 0x22, 8), 0x22, 8), 'cut of A: the prefab, with its condition');
+  check(same(cut(H1, false, 0x2e, 6), 0x2e, 6), 'cut of B (across a screen border): the prefab');
+  check(same(cut(H2, false, 0x30, 7), 0x30, 7), 'cut of G: the coin drawn over is not in it');
+  check(same(cut(H2, false, 0x40, 7), 0x40, 7, s.tiles.map((t, i) => (i === 4 ? T : t))), 'cut of I: the coin on top leaves its cell transparent');
+  // the vertical level is 2 screens tall: of the place across both borders only its top row is in the level (its
+  // transparent cell cut off)
+  const v = cut(V, false, 0x0e, 0x1f);
+  check(typeof v !== 'string' && v.x === 0x0e && v.y === 0x1f && v.w === 2 && v.h === 1 && JSON.stringify(v.tiles) === JSON.stringify(s.tiles.slice(0, 2)) && !v.conds,
+    `cut in the vertical level: the place's part in the level (${JSON.stringify(v)})`);
+  check(same(cut(L2, true, 0x22, 8), 0x22, 8), 'cut on layer 2: the prefab');
 }
 
 // ---- finding ----

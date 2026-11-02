@@ -2,7 +2,7 @@
 
 import { makeProjectId } from '../core/projectid.ts';
 import { Rom } from '../core/rom.ts';
-import { LevelEmulator, type LevelRender, type LevelOverride, type Animated, MAP_BASE, MAP_SIZE } from '../core/levelemu.ts';
+import { LevelEmulator, type LevelRender, type LevelOverride, type Animated } from '../core/levelemu.ts';
 import {
   type Level, type LevelObject, type LevelSprite, type ScreenExit, loadLevel, spriteLoadOrder, serializeLayer1, serializeSprites, serializeLevelSprites, spriteId,
   isL1Vertical, hasLayer2Objects, hasObjects, SEC_HDR,
@@ -19,8 +19,9 @@ import type { SpriteImage, SpriteLevel } from '../core/spritegfx.ts';
 import { usedSpriteMemory, type SpriteMemLevel, type SpriteMemResult } from '../core/spritemem.ts';
 import { DM16_EXT, levelGfx, levelExtGfx, customPalette, levelMusic, defaultGfx } from '../core/patches.ts';
 import { gfxSkipMask, gfxFilesHash } from '../core/gfxpages.ts';
-import { flagBytes, usedFlags, isDm16, dm16Tiles, type Dm16Cond } from '../core/cdm16.ts';
-import { PREFAB_EXT, PREFAB_MAX, TRANSPARENT, listPrefabs, writePrefab, type Prefab } from '../core/prefabs.ts';
+import { flagBytes, usedFlags, isDm16, dm16Tiles } from '../core/cdm16.ts';
+import { RenderQuery, type TileCut } from '../core/renderquery.ts';
+import { PREFAB_EXT, listPrefabs, writePrefab, type Prefab } from '../core/prefabs.ts';
 import { breakUpPrefab, replaced, setPrefabSources } from '../core/prefabsources.ts';
 import { PasteCounter, findPasted, arrangementKey, type PasteHint } from '../core/pastehint.ts';
 import { KeptSuggestions, SuggestionList, type PrefabSuggestion, type SuggestLevels, type SuggestRun } from '../core/prefabsuggest.ts';
@@ -144,6 +145,8 @@ export class App {
   get dirty(): boolean { return this.edits.dirty; }
   get romHistory(): RomHistory { return this.edits.romHistory; }
   render!: LevelRender;
+  // what the render answers about its tiles (renderquery.ts): built with it
+  query!: RenderQuery;
   images!: LevelImages;
   compositeImg!: Uint32Array;
   // the level editing model (levelmodel.ts): the edit mode, selection, picked item, clipboard and the object/sprite edits
@@ -204,9 +207,6 @@ export class App {
   get suggestionsCurrent(): boolean { return this.suggestions.current; }
   private suggestTimer = 0;
   private suggestRun = 0;
-  // tile (x,y) lookup from map offset
-  offsetToTile1 = new Int32Array(MAP_SIZE);
-  offsetToTile2 = new Int32Array(MAP_SIZE);
   private listeners = new Map<AppEvent, Set<Listener>>();
   renderError: string | null = null;
   // block behaviour probes (emulated hits), object kinds and level scan, run in a Web Worker;
@@ -462,7 +462,7 @@ export class App {
     const c = this.images.backdrop;
     document.documentElement.style.setProperty('--level-backdrop', `rgb(${c & 0xff},${(c >> 8) & 0xff},${(c >> 16) & 0xff})`);
     this.compositeImg = this.compose();
-    this.buildOffsetMaps();
+    this.query = new RenderQuery(this.render, this.images.geom1, this.images.geom2);
     this.startAnimation();
     this.emit('render');
     this.scheduleScan();
@@ -697,21 +697,6 @@ export class App {
     if (!m) return;
     this.reveal = { x: m.x + 8, y: m.y + 24 };
     this.emit('reveal');
-  }
-
-  buildOffsetMaps(): void {
-    const g1 = this.images.geom1;
-    this.offsetToTile1.fill(-1);
-    for (let y = 0; y < g1.height; y++) for (let x = 0; x < g1.width; x++) {
-      const a = g1.addr(x, y) - MAP_BASE;
-      if (a >= 0 && a < MAP_SIZE) this.offsetToTile1[a] = (y << 16) | x;
-    }
-    this.offsetToTile2.fill(-1);
-    const g2 = this.images.geom2;
-    if (g2) for (let y = 0; y < g2.height; y++) for (let x = 0; x < g2.width; x++) {
-      const a = g2.addr(x, y) - MAP_BASE;
-      if (a >= 0 && a < MAP_SIZE) this.offsetToTile2[a] = (y << 16) | x;
-    }
   }
 
   // ------------- sprite images (captured from the running game) -------------
@@ -968,16 +953,14 @@ export class App {
     // the boxes of objects that draw nothing lie on top
     const box = boxAt(this.boxedObjects(l2), tx, ty);
     if (box) return box;
-    const a = g.addr(tx, ty);
-    if (a >= 0) {
-      const off = a - MAP_BASE;
-      const k = this.render.owner[off];
+    if (g.addr(tx, ty) >= 0) {
+      const k = this.query.ownerAt(tx, ty, l2);
       if (k >= 0 && ((k & 0x8000) !== 0) === l2) {
         const o = objs[k & 0x7fff];
         if (o) return o;
       }
       // tiles later overwritten by another object still belong to this one
-      for (let i = objs.length - 1; i >= 0; i--) if (this.render.touched.get(this.objectKey(l2, i))?.has(off)) return objs[i];
+      for (let i = objs.length - 1; i >= 0; i--) if (this.query.wrote(l2, i, tx, ty)) return objs[i];
     }
     // a hidden conditional Direct Map16 object's tiles
     const at = (ty << 16) | tx;
@@ -987,20 +970,18 @@ export class App {
 
   // tiles covered by an object: array of packed (y<<16|x)
   objectTiles(o: LevelObject): number[] {
-    const l2 = this.mode === 'l2';
     const objs = this.currentObjects();
-    const idx = objs.indexOf(o);
-    const set = this.render.touched.get(this.objectKey(l2, idx));
-    const map = l2 ? this.offsetToTile2 : this.offsetToTile1;
-    const out: number[] = [];
-    if (set) for (const off of set) { const t = map[off]; if (t >= 0) out.push(t); }
-    if (!out.length) out.push(...(isDm16(o) && o.cond ? dm16Tiles(o) : [(o.y << 16) | o.x]));
-    return out;
+    return this.query.objectTiles(this.mode === 'l2', o, objs.indexOf(o));
+  }
+
+  // the objects of the mode's layer with a tile (objectTiles) in the tile rectangle x0..x1, y0..y1
+  objectsInBox(x0: number, y0: number, x1: number, y1: number): LevelObject[] {
+    return this.query.objectsInBox(this.mode === 'l2', this.currentObjects(), x0, y0, x1, y1);
   }
 
   // whether the object wrote a tile in the level's load
   objectDrawn(o: LevelObject): boolean {
-    return !!this.render.touched.get(this.objectKey(this.mode === 'l2', this.currentObjects().indexOf(o)))?.size;
+    return this.query.drawn(this.mode === 'l2', this.currentObjects().indexOf(o));
   }
 
   // the objects of layer 1 (or 2) that wrote no tile in the level's load: shown as boxes (objboxes.ts)
@@ -1017,16 +998,7 @@ export class App {
 
   // Map16 tile numbers an object left in the level (tiles overwritten by later objects excluded)
   objectMap16(o: LevelObject): number[] {
-    const l2 = this.mode === 'l2';
-    const key = this.objectKey(l2, this.currentObjects().indexOf(o));
-    const set = this.render.touched.get(key);
-    const out = new Set<number>();
-    if (set) for (const off of set) {
-      if (this.render.owner[off] !== key) continue;
-      const a = MAP_BASE + off;
-      out.add(map16Tile(this.render.wram, a));
-    }
-    return [...out].sort((a, b) => a - b);
+    return this.query.objectMap16(this.mode === 'l2', this.currentObjects().indexOf(o));
   }
 
   // finished probes only (nothing is queued)
@@ -1601,37 +1573,10 @@ export class App {
     return listPrefabs(this.rom);
   }
 
-  // what the selected objects left in the level as a block of tiles; cells of other objects are
-  // transparent, empty rows and columns at the border are cut off. A conditional Direct Map16 object gives its
-  // tiles with its condition whatever the view's flags (cdm16.ts); a cell holds one tile, the topmost
-  prefabFromSelection(): { x: number; y: number; w: number; h: number; tiles: number[]; conds?: (Dm16Cond | null)[] } | string {
-    const objs = this.selectedObjects();
-    if (!objs.length || (this.mode !== 'l1' && this.mode !== 'l2')) return 'Select objects in the level first (layer 1 or 2).';
-    const l2 = this.mode === 'l2';
-    const g = l2 ? this.images.geom2 : this.images.geom1;
-    if (!g) return 'Layer without objects';
-    const all = this.currentObjects();
-    let x0 = Infinity, y0 = Infinity, x1 = -1, y1 = -1;
-    const cells = new Map<number, { tile: number; cond?: Dm16Cond }>();
-    // in drawing order: each object's cells over those of the objects before it
-    for (const o of all) {
-      if (!this.selection.has(o.uid)) continue;
-      const cond = isDm16(o) ? o.cond : undefined, key = this.objectKey(l2, all.indexOf(o));
-      for (const t of cond ? dm16Tiles(o) : this.objectTiles(o)) {
-        const x = t & 0xffff, y = t >> 16;
-        const a = g.addr(x, y);
-        if (a < 0 || (!cond && this.render.owner[a - MAP_BASE] !== key)) continue;
-        cells.set(t, cond ? { tile: o.tile ?? 0, cond: { ...cond } } : { tile: map16Tile(this.render.wram, a) });
-        x0 = Math.min(x0, x); y0 = Math.min(y0, y); x1 = Math.max(x1, x); y1 = Math.max(y1, y);
-      }
-    }
-    if (x1 < 0) return 'The selected objects have no visible tiles.';
-    const w = x1 - x0 + 1, h = y1 - y0 + 1;
-    if (w > PREFAB_MAX || h > PREFAB_MAX) return `Selection is ${w}×${h} tiles, a prefab can be at most ${PREFAB_MAX}×${PREFAB_MAX}.`;
-    const cell = (i: number) => cells.get(((y0 + Math.floor(i / w)) << 16) | (x0 + (i % w)));
-    const tiles = Array.from({ length: w * h }, (_, i) => cell(i)?.tile ?? TRANSPARENT);
-    const conds = Array.from({ length: w * h }, (_, i) => cell(i)?.cond ?? null);
-    return { x: x0, y: y0, w, h, tiles, ...(conds.some((c) => c) ? { conds } : {}) };
+  // what the selected objects left in the level as a block of tiles (RenderQuery.tileCut)
+  prefabFromSelection(): TileCut | string {
+    if (!this.selectedObjects().length || (this.mode !== 'l1' && this.mode !== 'l2')) return 'Select objects in the level first (layer 1 or 2).';
+    return this.query.tileCut(this.mode === 'l2', this.currentObjects(), (o) => this.selection.has(o.uid));
   }
 
   // where the arrangement of prefab s already is as Direct Map16 objects (prefabplaces.ts): the open level as

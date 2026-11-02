@@ -5,12 +5,14 @@ import { readFileSync } from 'node:fs';
 import { Rom } from '../src/core/rom.ts';
 import { LevelEmulator, type LevelRender } from '../src/core/levelemu.ts';
 import { loadLevel, serializeLayer1, newUid, isL1Vertical, type LevelObject } from '../src/core/level.ts';
-import { installPrefabPatch, writePrefab, readPrefab, listPrefabs, PREFAB_EXT, PREFAB_SLOT, EXT_OBJ_TABLE, TRANSPARENT, prefabPatch } from '../src/core/prefabs.ts';
+import { installPrefabPatch, writePrefab, readPrefab, listPrefabs, PREFAB_EXT, PREFAB_MAX, PREFAB_SLOT, EXT_OBJ_TABLE, TRANSPARENT, prefabPatch } from '../src/core/prefabs.ts';
 import { saveLevel } from '../src/core/save.ts';
 import { exportLevelFile, importLevelFile } from '../src/core/levelfile.ts';
 import { loadAsar } from '../src/core/asar.ts';
 import { applyPatch, type PatchSource } from '../src/core/patchapply.ts';
-import { editorImage, cleanImage } from './fixture.ts';
+import { levelOverride } from '../src/core/levelusage.ts';
+import { objectKey } from '../src/core/objboxes.ts';
+import { editorImage, cleanImage, levelQuery } from './fixture.ts';
 
 const EDITOR_IMAGE = await editorImage(); // the fixture as the editor opens it
 
@@ -93,6 +95,60 @@ const vl = levels.find((n) => isL1Vertical(rom, loadLevel(rom, n).header.mode))!
 place(vl, [obj(0x0f, 0x1f, 5)], exp(0x0f, 0x1f, s5!));
 // unknown prefab number places nothing
 place(0x105, [obj(0x30, 5, 99)], new Map());
+
+// prefab from the selection (renderquery.ts tileCut): what the selected objects left in the level; replacing them
+// with the prefab (at the last one's place) keeps how the level looks
+{
+  const n = 0x105, lv = loadLevel(rom, n);
+  const query = (objs: LevelObject[]) => {
+    const r = e1.load(n, levelOverride(rom, { ...lv, objects: objs }));
+    return { r, q: levelQuery(rom, r, lv) };
+  };
+  const { r: r0, q } = query(lv.objects);
+  const W = PREFAB_MAX;
+  // a run of objects (not the first: the screen setup) whose cut fits in a prefab
+  let sel: Set<LevelObject> | null = null;
+  for (let i = 1; i < lv.objects.length && !sel; i++) for (let k = 3; k >= 2 && !sel; k--) {
+    const run = new Set(lv.objects.slice(i, i + k).filter((o) => o.num !== 0));
+    if (run.size !== k) continue;
+    const c = q.tileCut(false, lv.objects, (o) => run.has(o));
+    if (typeof c !== 'string' && c.tiles.filter((t) => t !== T).length > 4 && c.w <= W && c.h <= W) sel = run;
+  }
+  check(!!sel, 'a selection to cut');
+  const cut = q.tileCut(false, lv.objects, (o) => sel!.has(o));
+  if (sel && typeof cut !== 'string') {
+    check(!cut.conds, 'no conditions without conditional objects');
+    // each cell: the tile there when a selected object is its owner, else transparent
+    const keys = new Set(lv.objects.flatMap((o, i) => (sel!.has(o) ? [objectKey(false, i)] : [])));
+    let bad = 0;
+    cut.tiles.forEach((t, i) => {
+      const x = cut.x + (i % cut.w), y = cut.y + Math.floor(i / cut.w);
+      const want = keys.has(q.ownerAt(x, y)) ? q.tileAt(x, y) : T;
+      if (t !== want) bad++;
+    });
+    check(bad === 0, `cut cells are the selected objects' tiles (${bad} differ)`);
+    writePrefab(rom, 6, { w: cut.w, h: cut.h, tiles: cut.tiles, name: 'cut' });
+    const last = Math.max(...[...sel].map((o) => lv.objects.indexOf(o)));
+    const objs = lv.objects.flatMap((o, i) => (i === last ? [obj(cut.x, cut.y, 6)] : sel!.has(o) ? [] : [o]));
+    const { r: r1 } = query(objs);
+    let d = 0;
+    for (let i = 0xc800; i < 0x10000; i++) if (r0.wram[i] !== r1.wram[i] || r0.wram[i + 0x10000] !== r1.wram[i + 0x10000]) d++;
+    check(d === 0, `the selection replaced by its prefab: ${d} tiles differ`);
+    writePrefab(rom, 6, null);
+  }
+  check(q.tileCut(false, lv.objects, () => false) === 'The selected objects have no visible tiles.', 'empty selection: no tiles');
+  const all = q.tileCut(false, lv.objects, () => true);
+  check(typeof all === 'string' && all.startsWith('Selection is '), 'the whole level: too large for a prefab');
+  check(q.tileCut(true, lv.objects, () => true) === 'Layer without objects', 'a layer without objects');
+  // the tile at a tile, the objects in a box by their tiles
+  check(q.tileAt(0, 0) === tileAt(r0, rom, lv.header.mode, 0, 0) && q.tileAt(-1, 0) === -1, 'tile at a tile');
+  const i = lv.objects.findIndex((o) => o.num !== 0 && q.written(false, lv.objects.indexOf(o)).length > 1);
+  const t = q.objectTiles(false, lv.objects[i], i), tx = t[t.length - 1] & 0xffff, ty = t[t.length - 1] >> 16;
+  check(q.objectsInBox(false, lv.objects, tx, ty, tx, ty).includes(lv.objects[i]), 'an object is caught by a box over one of its tiles');
+  const away = { ...lv.objects[i], x: 0x3fe, y: 2 };
+  check(JSON.stringify(q.objectTiles(true, away, -1)) === JSON.stringify([(2 << 16) | 0x3fe]), 'an object not in the load: its own tile');
+  check(q.objectsInBox(false, lv.objects, 0x3ff, 0x3ff, 0x3ff, 0x3ff).length === 0, 'nothing in a box outside the level');
+}
 
 // save/load round trip
 const lv = loadLevel(rom, 0x105);

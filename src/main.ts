@@ -30,7 +30,6 @@ import { overworldReplacement } from './core/overworld.ts';
 import { openTestPlay, openOverworldTestPlay } from './ui/testplay.ts';
 import { musicPlayer, LEVEL_MUSIC } from './ui/musicplayer.ts';
 import { MessagePanel, levelMessages } from './ui/messagepanel.ts';
-import { map16Tile } from './core/ram.ts';
 import { NavHistory, fromHash, type NavLoc } from './ui/navhistory.ts';
 import { initLanding } from './ui/landing.ts';
 
@@ -530,8 +529,7 @@ function buildUi(app: App): { start: (at: NavLoc | null) => Promise<void> } {
 }
 
 function hoverTile(app: App, tx: number, ty: number): number {
-  const a = app.images.geom1.addr(tx, ty);
-  return a < 0 ? 0 : map16Tile(app.render.wram, a);
+  return Math.max(0, app.query.tileAt(tx, ty));
 }
 
 // the playable ROM: without the editor data (sources of patches, packages, UberASM/blocks/sprites/music)

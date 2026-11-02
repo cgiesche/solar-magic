@@ -16,7 +16,6 @@ import { openInsertDialog, openScreenDialog } from './tools.ts';
 import { incompleteSprites } from './spritemem.ts';
 import { problemsButton } from './problems.ts';
 import { spriteOpens, messageOfBox, messageLabel, showMessageHover, hideMessageHover } from './messagepanel.ts';
-import { map16Tile } from '../core/ram.ts';
 import { GAME_VIEW_W, GAME_VIEW_H, MARIO_H } from '../core/camerabands.ts';
 import { gameViewAt } from '../core/camerareach.ts';
 import { paintBoxName } from './objbox.ts';
@@ -702,13 +701,7 @@ export class LevelView {
         }
       } else if (d.far) {
         // an object is caught by its tiles (its outline), not its bounding box: slopes reach far diagonally
-        for (const o of app.currentObjects()) {
-          const hit = app.objectTiles(o).some(t => {
-            const x = t & 0xffff, y = t >> 16;
-            return x >= x0 && x <= x1 && y >= y0 && y <= y1;
-          });
-          if (hit) caught.push(o.uid);
-        }
+        for (const o of app.objectsInBox(x0, y0, x1, y1)) caught.push(o.uid);
       }
       // a click into nothing (no item of any shown layer there): nothing placed by a right click any more
       if (!d.far && !d.add) app.clearPickedItem();
@@ -759,7 +752,6 @@ export class LevelView {
 
   updateStatus(tx: number, ty: number): void {
     const app = this.app;
-    const g = app.images.geom1;
     this.pos.textContent = `X ${hex3(tx)}  Y ${hex3(ty)}  Screen ${hex2(app.vertical ? ty >> 4 : tx >> 4)}`;
     if (this.drag?.kind === 'resize') { this.resizeStatus(); return; }
     if (app.mode === 'l3') {
@@ -769,9 +761,8 @@ export class LevelView {
       return;
     }
     let txt = '';
-    const a = g.addr(tx, ty);
-    if (a >= 0) {
-      const t = map16Tile(app.render.wram, a);
+    const t = app.query.tileAt(tx, ty);
+    if (t >= 0) {
       txt += `Map16 ${hex3(t)}`;
       const p = app.mode === 'bg' ? undefined : app.probes.block(t); // result arrives via 'probes'
       const sum = [p && probeAt(p, tx).summary, p && enterText(p.enter)].filter(Boolean).join(', ');

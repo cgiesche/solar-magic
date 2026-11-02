@@ -6,7 +6,17 @@ import { installEditorPatches } from '../src/core/editorpatches.ts';
 import type { Package } from '../src/core/pkgreg.ts';
 import { ResultCache, RomFingerprint } from '../src/core/romdeps.ts';
 import { JobRunner } from '../src/core/jobrunner.ts';
+import { RenderQuery } from '../src/core/renderquery.ts';
+import { renderLevel } from '../src/core/render.ts';
+import { levelRows, type Level } from '../src/core/level.ts';
+import type { LevelRender } from '../src/core/levelemu.ts';
 import { pathKindsJob, levelTileTest, type PathKind, type LevelTileTest } from '../src/core/owpaths.ts';
+
+// the render query of level lv's load r, its layers' geometry as the editor draws it (App.refresh)
+export function levelQuery(rom: Rom, r: LevelRender, lv: Level): RenderQuery {
+  const im = renderLevel(rom, r, lv.header.mode, lv.header.screens, levelRows(lv.secondary));
+  return new RenderQuery(r, im.geom1, im.geom2);
+}
 
 export const cleanImage = (): Uint8Array => new Uint8Array(readFileSync('test/fixtures/smw.smc'));
 
