@@ -157,6 +157,17 @@ export function rewriteDefines(text: string, defines: Record<string, string>): {
   return { text: lines.join('\n'), rest };
 }
 
+// defines to set, per file: a part's number another part's code names (a sprite's, a sound effect's)
+export type FileDefines = Map<string, Record<string, string>>;
+
+// the files with their defines set (the same map when there are none to set)
+export function withDefines(files: Map<string, Uint8Array>, defines: FileDefines): Map<string, Uint8Array> {
+  if (!defines.size) return files;
+  const out = new Map(files);
+  for (const [f, d] of defines) if (files.has(f)) out.set(f, new TextEncoder().encode(rewriteDefines(new TextDecoder().decode(files.get(f)!), d).text));
+  return out;
+}
+
 // the Asar input for a package: defines of the main file are rewritten, the rest are passed on
 export function uploadSource(upload: Upload, main: string, defines: Record<string, string>): PatchSource {
   const files = new Map<string, Uint8Array | string>(upload.files);

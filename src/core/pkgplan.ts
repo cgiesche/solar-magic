@@ -12,9 +12,9 @@
 
 import type { ToolFolder } from './callisto.ts';
 import type { Rom } from './rom.ts';
-import type { Upload } from './patchpkg.ts';
+import type { Upload, FileDefines } from './patchpkg.ts';
 import type { ApplyResult } from './patchapply.ts';
-import { rewriteDefines } from './patchpkg.ts';
+import { withDefines } from './patchpkg.ts';
 import { parseBlockList, loadBlockProject, saveBlockProject, assignBlock, type BlockProject } from './blocks.ts';
 import { parseMap16File, parseRomMap16, romActsLike, map16Targets, exgfxName, type Map16File, type RomMap16 } from './map16file.ts';
 import { EXT_FIRST, EXT_TILES, setExtTileWords } from './map16ext.ts';
@@ -429,14 +429,12 @@ export function routinesCalled(upload: Upload, routines: string[], callers: stri
 // adds the blocks to the GPS project, each on its tiles; defines: per block file, defines to set (a
 // sprite's number); tileWords: graphics of a block's tile when the package has none for it (from its
 // acts like); extra: further files for the project (a Callisto project's header and shared code). Map16 graphics of the package come with applyGraphics.
-export function applyBlocks(rom: Rom, upload: Upload, blocks: PlannedBlock[], defines: Map<string, Record<string, string>>, routines: string[],
+export function applyBlocks(rom: Rom, upload: Upload, blocks: PlannedBlock[], defines: FileDefines, routines: string[],
   blank: number[], tileWords: (acts: number) => number[], drawn: Set<number>, claim: (file: string) => void, extra?: Map<string, Uint8Array>): ApplyResult {
   const proj: BlockProject = loadBlockProject(rom) ?? { files: new Map(), list: [] };
   for (const [f, c] of extra ?? []) { proj.files.set(f, c); claim(f); }
-  const content = (f: string) => {
-    const d = defines.get(f);
-    return d ? enc.encode(rewriteDefines(dec.decode(upload.files.get(f)!), d).text) : upload.files.get(f)!;
-  };
+  const files = withDefines(upload.files, defines);
+  const content = (f: string) => files.get(f)!;
   for (const b of blocks) {
     for (const [f, c] of blockFiles(upload, b.file, content)) { proj.files.set(f, c); claim(f); }
     for (const t of b.tiles) assignBlock(proj, { tile: t, file: 'blocks/' + base(b.file), acts: b.acts });

@@ -5,7 +5,7 @@
 // number – the sprites' own files here, other parts' (blocks) by the caller.
 
 import type { Rom } from './rom.ts';
-import { scanDefines, rewriteDefines, type Upload } from './patchpkg.ts';
+import { scanDefines, withDefines, type FileDefines, type Upload } from './patchpkg.ts';
 import { FOLDER, MISC_KINDS, numberRange, sharesNumbers, assignSprite, loadPixiProject, savePixiProject, parseCfg, parseJsonCfg, type PixiEntry, type PixiProject } from './pixi.ts';
 import type { ApplyResult } from './patchapply.ts';
 import type { SpriteFolder } from './pixirt.ts';
@@ -136,8 +136,8 @@ export function hexNum(n: number): string {
 export function applyPixiUpload(rom: Rom, upload: Upload, plan: PixiPlan, others: Set<string>, claim: (file: string) => void): ApplyResult {
   const proj: PixiProject = loadPixiProject(rom) ?? { files: new Map(), list: [] };
   // define values from the chosen numbers
-  const defs = linkedDefines(plan);
-  const content = (f: string) => (defs.has(f) ? enc.encode(rewriteDefines(dec.decode(upload.files.get(f)!), defs.get(f)!).text) : upload.files.get(f)!);
+  const files = withDefines(upload.files, linkedDefines(plan));
+  const content = (f: string) => files.get(f)!;
 
   // the files of a sprite: those in its folder, except what belongs to a deeper folder of another one,
   // the other sprites' own files, the routines and the files of other parts
@@ -161,8 +161,8 @@ export function applyPixiUpload(rom: Rom, upload: Upload, plan: PixiPlan, others
 }
 
 // per file, the defines naming a sprite of the plan, set to its number
-export function linkedDefines(plan: PixiPlan): Map<string, Record<string, string>> {
-  const byFile = new Map<string, Record<string, string>>();
+export function linkedDefines(plan: PixiPlan): FileDefines {
+  const byFile: FileDefines = new Map();
   for (const l of plan.links) {
     const d = byFile.get(l.file) ?? {};
     d[l.define] = hexNum(plan.sprites[l.sprite].num);

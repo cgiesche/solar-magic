@@ -14,7 +14,7 @@ import { Rom } from './rom.ts';
 import { reapplyPatch, type ApplyResult } from './patchapply.ts';
 import type { PartKind, ToolKind } from './parts.ts';
 import { PART_LABEL } from './parts.ts';
-import { uploadFiles, uploadFromFiles, type Upload } from './patchpkg.ts';
+import { uploadFiles, uploadFromFiles, withDefines, type Upload } from './patchpkg.ts';
 import { suggestMapping, placed, suggestCalls, packageDocs, type PkgSuggestion } from './pkgmap.ts';
 import { detectGraphics, includedFiles, applyLevelSetup } from './pkgplan.ts';
 import { setCustomPalette } from './patches.ts';
@@ -34,8 +34,8 @@ import { uploadObjectText, objectTextNotes, isObjectTextFile } from './objtext.t
 import { allOrNothing } from './romedit.ts';
 import { callistoProject, includesCallistoHeader, sharedCode, type CallistoProject } from './callisto.ts';
 import { replacedPatch, replacedNote } from './replaced.ts';
-import { partAdapter, DETECT_ORDER, PART_ORDER, SHARED_CODE, planInstall, planUpload, applyParts, pixiListed, applyAssignment, patchSource, partsOf, sfxLinkedFiles,
-  type PreviewPart, type PreviewBase, type ReadyPreview, type Detection, type FileClaim, type InstallOptions, type InstallContext, type ManualAssignment } from './pkgparts.ts';
+import { partAdapter, DETECT_ORDER, PART_ORDER, SHARED_CODE, planInstall, planSfx, sfxDefines, planUpload, applyParts, pixiListed, applyAssignment, patchSource, partsOf,
+  type PreviewPart, type PreviewBase, type ReadyPreview, type Detection, type FileClaim, type InstallOptions, type InstallContext, type ManualAssignment, type SfxPlan } from './pkgparts.ts';
 
 export type { PreviewPart, ReadyPreview, InstallOptions, ManualAssignment };
 export { planUpload };
@@ -201,7 +201,8 @@ export interface InstallResult extends ApplyResult { pkg: Package | null; sample
 // one number of it in the level, or a PIXI list.txt of the package naming the number); its background with
 // the package's BG Map16 tiles, its own colors and animations. The current level's slots are the level
 // setup's.
-function placeSample(rom: Rom, preview: ReadyPreview, ctx: InstallContext, file: string, into: Level, opt: InstallOptions, own: boolean): SampleLevel {
+function placeSample(rom: Rom, ctx: InstallContext, file: string, into: Level, own: boolean): SampleLevel {
+  const { preview, opt } = ctx;
   const d = preview.files.get(file)!;
   const m = ctx.plan.map16;
   const from = m ? map16Targets(m.data, m.from) : [], to = m ? map16Targets(m.data, m.at) : [];
@@ -269,6 +270,17 @@ function placeEntrances(rom: Rom, sample: SampleLevel, entrances: MwlSections['e
   }
 }
 
+// the preview with the links between its parts set in its files before planning: code playing a sound
+// effect of the package that gets another number than the author's has its define set to that number
+// (the package's parts read anew from those files); with the sound effects' numbers. A string: it failed.
+function linkedPreview(rom: Rom, preview: ReadyPreview): { preview: ReadyPreview; sfx: SfxPlan } | string {
+  const sfx = planSfx(rom, preview);
+  const files = withDefines(preview.files, sfxDefines(sfx));
+  if (files === preview.files) return { preview, sfx };
+  const again = inspectFiles(preview.fileName, files);
+  return again.status === 'ready' ? { preview: again, sfx } : `The package with its sound effects' numbers set: ${again.status === 'failed' ? again.reason : again.status}`;
+}
+
 const failed = (errors: string[], warnings: string[] = [], prints: string[] = []): InstallResult => ({ ok: false, errors, warnings, prints, pkg: null });
 
 // applies every part and records the package; ok false when it failed (run it in an edit session,
@@ -291,16 +303,9 @@ export async function installPackage(rom: Rom, preview: ReadyPreview | ManualPre
       const a = opt.assignment ?? defaultAssignment(preview, opt.level ?? 0x105);
       rec = recordPackageChange(rom, target, (claim) => applyAssignment(rom, preview.files, a, claim));
     } else {
-      const planned = planInstall(rom, preview, opt);
-      // code playing a sound effect of the package that gets another number than the author's: its
-      // define set to that number (the package's parts read anew from those files)
-      const linked = sfxLinkedFiles(preview, planned.sfx);
-      let parts = planned;
-      if (linked) {
-        const again = inspectFiles(preview.fileName, linked);
-        if (again.status !== 'ready') return failed([`The package with its sound effects' numbers set: ${again.status === 'failed' ? again.reason : again.status}`]);
-        parts = { ...planInstall(rom, again, opt), sfx: planned.sfx };
-      }
+      const linked = linkedPreview(rom, preview);
+      if (typeof linked === 'string') return failed([linked]);
+      const parts = planInstall(rom, linked.preview, opt, linked.sfx);
       ctx = parts;
       rec = await recordPackageChangeAsync(rom, target, (claim) => applyParts(rom, parts, claim));
     }
@@ -308,15 +313,15 @@ export async function installPackage(rom: Rom, preview: ReadyPreview | ManualPre
     prints.push(...rec.result.prints);
     if (!rec.result.ok) return failed(rec.result.errors, warnings, prints);
     if (!rec.pkg) return failed(['Nothing changed – everything in the package is already in the ROM.']);
-    if (ctx && preview.status === 'ready') {
+    if (ctx) {
       // the sample level needs the package's ExGFX in its slots: the level setup comes with it
       if (opt.level !== null && (opt.setup !== false || opt.sample) && (ctx.plan.gfx.some((g) => g.slot) || ctx.plan.palettes.length || ctx.plan.exanim.length)) {
         const s = applyLevelSetup(rom, opt.level, ctx.plan, { cgram: opt.cgram ?? null, wram: opt.wram });
         warnings.push(...s.warnings);
         prints.push(...s.prints);
       }
-      if (opt.sample && preview.samples.length === 1) {
-        sample = placeSample(rom, preview, ctx, preview.samples[0], opt.sample, opt, false);
+      if (opt.sample && ctx.preview.samples.length === 1) {
+        sample = placeSample(rom, ctx, ctx.preview.samples[0], opt.sample, false);
         warnings.push(...sample.notes);
       }
       // sample levels at their own numbers: written (level edits of levels not open)
@@ -326,7 +331,7 @@ export async function installPackage(rom: Rom, preview: ReadyPreview | ManualPre
         // (one that cannot be taken over leaves the others and the package)
         let s: SampleLevel;
         try {
-          s = allOrNothing(rom, () => { const x = placeSample(rom, preview, ctx, f, loadLevel(rom, at), opt, true); saveLevel(rom, x.level); return x; });
+          s = allOrNothing(rom, () => { const x = placeSample(rom, ctx, f, loadLevel(rom, at), true); saveLevel(rom, x.level); return x; });
         } catch (e) { warnings.push(`Level ${hx(at)}: the sample level ${f.split('/').pop()} not taken over – ${e instanceof Error ? e.message : e}`); continue; }
         warnings.push(...s.notes.map((t) => `Level ${hx(at)}: ${t}`));
         prints.push(`Level ${hx(at)}: the sample level ${f.split('/').pop()}`);

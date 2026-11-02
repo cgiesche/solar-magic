@@ -17,7 +17,7 @@ import type { Rom } from './rom.ts';
 import type { ApplyResult, PatchSource } from './patchapply.ts';
 import { applyPatch } from './patchapply.ts';
 import type { PartKind } from './parts.ts';
-import { uploadSource, effectiveDefines, packUpload, rewriteDefines, type Upload } from './patchpkg.ts';
+import { uploadSource, effectiveDefines, packUpload, type FileDefines, type Upload } from './patchpkg.ts';
 import { suggestCalls, placed, type PkgRules } from './pkgmap.ts';
 import { isSongText, songsFromFiles, loadMusicProject, emptyMusicProject, addSongs, addSfx, nextFreeSong, folders as musicFolders, saveMusicProject, hasAmk, musicEntry } from './music.ts';
 import { pixiParts, planPixiUpload, applyPixiUpload, linkedDefines, hexNum, type PixiPlan } from './pixipkg.ts';
@@ -98,7 +98,7 @@ export interface InstallOptions {
 
 // what the adapters apply: the preview, the options and where the parts go in this ROM
 export interface InstallContext {
-  preview: ReadyPreview;
+  preview: ReadyPreview; // (installPackage: with the links between its parts set in its files, linkedPreview)
   opt: InstallOptions;
   plan: PackagePlan; // blocks, Map16 tiles, ExGFX and their links
   sprites: PixiPlan | null; // the sprites' numbers and the defines naming them
@@ -302,7 +302,7 @@ const block: PartAdapter<'block'> = {
     return out;
   },
   apply(rom, _mine, { preview, opt, plan, sprites }, claim) {
-    const defines = sprites ? linkedDefines(sprites) : new Map<string, Record<string, string>>();
+    const defines: FileDefines = sprites ? linkedDefines(sprites) : new Map();
     const drawn = new Set(plannedFgTiles(plan));
     const extra = preview.callisto ? toolFiles(preview.callisto, preview.files) : undefined;
     return applyBlocks(rom, preview.upload!, plan.blocks, defines, partRoutines(preview, 'block'), opt.blank, opt.tileWords, drawn, (f) => claim('block', f), extra);
@@ -422,19 +422,16 @@ export function planSfx(rom: Rom, preview: ReadyPreview): SfxPlan {
   return { sfx: found.map((f, i) => ({ ...f, num: nums[i] })), links: sfxLinks(preview.files, found) };
 }
 
-// the files of the package whose defines play one of its sound effects under another number than the
-// author's, with them set to its number (null: none)
-export function sfxLinkedFiles(preview: ReadyPreview, plan: SfxPlan): Map<string, Uint8Array> | null {
-  const byFile = new Map<string, Record<string, string>>();
+// per file of the package, the defines playing one of its sound effects under another number than the
+// author's, set to its number
+export function sfxDefines(plan: SfxPlan): FileDefines {
+  const byFile: FileDefines = new Map();
   for (const l of plan.links) {
     const s = plan.sfx[l.sfx];
     if (s.num < 0 || s.num === s.author) continue;
     byFile.set(l.file, { ...byFile.get(l.file), [l.define]: hexNum(s.num) });
   }
-  if (!byFile.size) return null;
-  const files = new Map(preview.files);
-  for (const [f, defs] of byFile) files.set(f, new TextEncoder().encode(rewriteDefines(dec.decode(files.get(f)!), defs).text));
-  return files;
+  return byFile;
 }
 
 // ---------- graphics ----------
@@ -481,14 +478,15 @@ export function planUpload(rom: Rom, preview: ReadyPreview, blank: number[], til
   return planPackage(rom, { files: preview.files, blocks: partsOf(preview, 'block').flatMap((b) => b.found), graphics: previewGraphics(preview), tilesets }, blank);
 }
 
-// where every part goes in this ROM
-export function planInstall(rom: Rom, preview: ReadyPreview, opt: InstallOptions): InstallContext {
+// where every part goes in this ROM; sfx: the sound effects' numbers when planned before (the preview's
+// files then have their defines set, sfxDefines: its links are those of the author's files)
+export function planInstall(rom: Rom, preview: ReadyPreview, opt: InstallOptions, sfx: SfxPlan = planSfx(rom, preview)): InstallContext {
   const sprites = partsOf(preview, 'sprite').map((s) => s.file);
   return {
     preview, opt,
     plan: opt.plan ?? planUpload(rom, preview, opt.blank),
     sprites: sprites.length && preview.upload ? planPixiUpload(rom, preview.upload, (f) => sprites.includes(f), pixiListed(preview)) : null,
-    sfx: planSfx(rom, preview),
+    sfx,
   };
 }
 
