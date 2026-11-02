@@ -16,6 +16,11 @@ export const GM = {
   level: 0x14,
 } as const;
 
+// overworld processes ($13D9, RAM.owProcess) the editor tells apart by value
+export const OW_PROCESS = {
+  noRevealWalk: 0x05, // a passed level's exit handled without the reveal walk (revealwalk.ts)
+} as const;
+
 export const RAM = {
   scratchEnd: 0x10, // the game's scratch RAM is $00-$0F
   stack: 0x0100, stackEnd: 0x0200, // the stack page

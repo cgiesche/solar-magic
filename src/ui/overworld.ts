@@ -21,6 +21,7 @@ import {
   paintEventL1, eventL1Tiles, exitChanges, type EventData, type EventRunner, type Rect, type ExitChanges,
 } from '../core/owevents.ts';
 import { isPathKind, PATH_KIND_NAMES, type PathKind } from '../core/owpaths.ts';
+import { skipsRevealWalk } from '../core/revealwalk.ts';
 import type { OwSpriteView } from '../core/owsprites.ts';
 import { LinkLayer } from './owlinkview.ts';
 import { SpriteLayer } from './owspriteview.ts';
@@ -86,6 +87,9 @@ function freeNote(rom: Rom, tl: number): string {
   const has = [hasLevelName(rom, tl) && 'name', baseEvent(rom, tl) !== NO_EVENT && 'event', hasMessages(rom, tl) && 'message'].filter(Boolean);
   return has.length ? `free · has ${has.join(', ')}` : 'free';
 }
+
+// what an exit the game skips the reveal walk for does (revealwalk.ts)
+const NO_REVEAL_WALK = 'the level tile the path leads to gets no way back here (as after Yoshi\'s House and the switch palaces in the clean game)';
 
 export class OverworldView {
   app: App;
@@ -393,6 +397,8 @@ export class OverworldView {
     }
     return this.kinds.kinds;
   }
+  // (the selected level tile's settings say which exits skip the reveal walk once that is learned)
+  private revealWalksLearned = () => { if (this.root.isConnected) this.buildSide(); };
   // whether layer 1 tile t is a level tile (owpaths.ts levelTileTest; none while the path tiles are learned)
   isLevelTile = (t: number): boolean => this.pathKinds()?.[t] === 'level';
 
@@ -1278,7 +1284,9 @@ export class OverworldView {
     return `${names.get(e) ?? 'No level runs it'} · ${hex(e, 2)}`;
   }
 
-  // the base event, the direction each exit enables, the initial flags of translevel tl (each change one ROM edit)
+  // the base event, the direction each exit enables, the initial flags of translevel tl (each change one ROM edit).
+  // An exit the game skips the reveal walk for (revealwalk.ts) still enables its direction but reveals no path: said
+  // so beside it (nothing while that is learned)
   levelSettings(tl: number): HTMLElement[] {
     const rom = this.app.rom, lvl = hex(translevelToLevel(tl), 3), ev = baseEvent(rom, tl), names = eventNames(rom);
     const edit = (what: string, f: () => void) => this.app.romEdit(`Level ${lvl}: ${what}`, f);
@@ -1286,11 +1294,15 @@ export class OverworldView {
       (v) => edit('base event', () => setBaseEvent(rom, tl, v)));
     events.title = 'The event passing the level runs: its normal exit this one, secret exit n the one n after it';
     const dirs = exitDirections(rom, tl);
+    const skips = this.app.revealWalkSkips(this.revealWalksLearned);
     const exits = EXIT_NAMES.map((name, k) => {
       const run = ev === NO_EVENT ? 'no event' : ev + k < OW_EVENTS ? `event ${hex(ev + k, 2)}` : 'no event (past the last)';
       const s = select(DIR_NAMES.map((n, d) => [d, `${DIR_ARROWS[d]} ${n}`] as [number, string]), dirs[k], (v) => edit(`${name.toLowerCase()} direction`, () => setExitDirection(rom, tl, k, v)));
-      s.title = `${name}: runs ${run} and enables walking in this direction from the tile`;
-      return h('div', { class: 'prop' }, h('label', { title: `Runs ${run}` }, name), s);
+      const skip = !!skips && skipsRevealWalk(skips, tl, k);
+      s.title = `${name}: runs ${run} and enables walking in this direction from the tile` +
+        (skip ? `; ${NO_REVEAL_WALK}` : '; when first passed, the level tile the path leads to gets the way back');
+      return h('div', { class: 'prop' }, h('label', { title: `Runs ${run}` }, name), s,
+        skip ? h('span', { class: 'hint', title: `The game skips the reveal walk for this level: ${NO_REVEAL_WALK}` }, 'no reveal walk') : null);
     });
     const flags = initialFlags(rom, tl);
     const flag = (label: string, bit: number, title: string) => checkbox(label, title, (flags & bit) !== 0,

@@ -80,6 +80,7 @@ export type LearnJob =
   | { kind: 'arcs'; level: string; load: [number, LevelOverride, number, number]; tx: number; ty: number; runs: RunStates }
   | { kind: 'layer2Motions'; level: number; ov: LevelOverride }
   | { kind: 'pathKinds' }
+  | { kind: 'revealWalks' }
   | { kind: 'suggest'; levels: number[]; open?: Level }
   | { kind: 'sizes'; level: KindLevel; layer2Pointer: number; specs: SizeSpec[] }
   | { kind: 'owMap'; map: number; progress: number }
@@ -120,6 +121,7 @@ export const LEARN_KINDS: { [K in LearnJob['kind']]: { keep: Keep; picture: bool
   arcs: { keep: 'memory', picture: false },
   layer2Motions: { keep: true, picture: false },
   pathKinds: { keep: true, picture: false },
+  revealWalks: { keep: true, picture: false },
   suggest: { keep: false, picture: false },
   sizes: { keep: false, picture: false },
   owMap: { keep: 'memory', picture: true, boot: false },
@@ -138,7 +140,7 @@ export const learnKeep = (j: LearnJob): Keep => LEARN_KINDS[j.kind].keep;
 export type LearnLane =
   | 'sprites' | 'variants' | 'bytes' | 'spritemem' | 'animated' | 'layer3' | 'l2' | 'lt' | 'uses' | 'arcs' | 'thumbs'
   | 'placement' | 'sizes' | 'prefab-suggest' | 'msgr' | 'level-png' | 'level-images'
-  | 'ow' | 'owpick' | 'owpk1' | 'owlw' | 'owps' | 'owv' | 'ows' | 'owl' | `owc${number}`;
+  | 'ow' | 'owpick' | 'owpk1' | 'owrw' | 'owlw' | 'owps' | 'owv' | 'ows' | 'owl' | `owc${number}`;
 
 // what the probe client shows as busy: the probes, the tasks, the learn jobs' lanes
 export type ProbeBusyKey = 'probe' | TaskType | LearnLane;

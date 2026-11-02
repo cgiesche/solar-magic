@@ -30,6 +30,7 @@ import { objectThumbsJob, placementPreviewJob } from './objthumbs.ts';
 import { jumpArcsJob } from './jumparcs.ts';
 import { layer2MotionsJob } from './l2scroll.ts';
 import { pathKindsJob } from './owpaths.ts';
+import { revealWalkJob } from './revealwalk.ts';
 import { KeptSuggestions, prefabSuggestionsJob } from './prefabsuggest.ts';
 import { SizeProbe, sizesJob } from './objresize.ts';
 import { OverworldEmulator, OverworldLoads, overworldMapJob, OW_LOADS_KEPT } from './overworld.ts';
@@ -84,6 +85,7 @@ function learnJob(j: LearnJob, state: LearnState, show: (items: unknown[] | null
     case 'arcs': return (emu, prepare) => jumpArcsJob(emu, prepare, j.level, j.load, j.tx, j.ty, j.runs);
     case 'layer2Motions': return function* (emu) { return (yield* layer2MotionsJob(emu, j.level, j.ov)).result; };
     case 'pathKinds': return (emu) => pathKindsJob(emu);
+    case 'revealWalks': return (emu) => revealWalkJob(emu);
     case 'suggest': return (emu) => prefabSuggestionsJob(state.rom, emu, state.suggest, j.levels, j.open);
     case 'sizes': return (emu) => {
       const key = `${j.level.number}:${inputHash(j.level.header)}:${j.layer2Pointer}`;
