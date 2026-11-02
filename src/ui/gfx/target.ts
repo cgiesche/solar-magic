@@ -17,6 +17,7 @@ import { MAP_NAMES, overworldReplacement, OW_L1_TILES, owTileAddr, owTileWords, 
 import { namesOf, type NameKind } from '../../core/usernames.ts';
 import { fgTileUsers, bgTileUsers, tileLinks, isTilesetTile, TILE_SOURCES } from '../../core/levelusage.ts';
 import type { ExListRef } from '../../core/exanim.ts';
+import type { Animated } from '../../core/levelemu.ts';
 import { tileMatches } from '../tilesearch.ts';
 import { tileBehaviors } from '../tilebehaviors.ts';
 import { blockFilesByTile } from '../blockdialog.ts';
@@ -57,8 +58,11 @@ export interface GfxTarget {
   readonly layer3: number;
   lt3Dest(dest: number): boolean;
   readonly lt3Title: string;
-  // the animations shown on it: the game's own (app.animated) and the own ones linked (animsAt, colorAnimsAt)
+  // the own animations linked on it (animsAt, colorAnimsAt: the level's lists)
   readonly anims: boolean;
+  // the 8x8 tiles (its Map16 tiles' numbers) and colors the game keeps rewriting there – the level's (app.animated), the
+  // submap's (app.owAnimated, at the workspace's event progress) –, null while they are emulated
+  animated(): Animated | null;
   // its ExAnimation lists (own, global); the overworld's engine (its triggers 01–08 are events)
   animList(global: boolean): ExListRef;
   readonly owAnims: boolean;
@@ -88,7 +92,8 @@ export interface GfxTarget {
   addr(t: number): number; // -1: an extended tile not created yet
   // the tiles it draws (the level's: those placed in it, else the standard pages)
   drawnTiles(): number[];
-  // the 8x8 graphics its tiles are made of, by slot (the overworld's: VRAM after the submap's load)
+  // the graphics slots its tiles' 8x8 tiles are in (map16: the layer's; the submap's FG1–FG4 as its load puts them into VRAM,
+  // tools/testowanimated.ts)
   vram(): GfxSlot[];
   range(t: number): string;
   pageTitle(p: number): string;
@@ -101,9 +106,6 @@ export interface GfxTarget {
 
 // "tileset 1", "tilesets 0, 7, C"
 export const tilesetNames = (ts: number[]): string => `tileset${ts.length > 1 ? 's' : ''} ${ts.map((x) => hex(x, 1)).join(', ')}`;
-
-// the overworld's 8x8 graphics as in VRAM after its load: four slots of 128 (no file behind them here)
-const OW_SLOTS: GfxSlot[] = [0, 1, 2, 3].map((k) => ({ name: `VRAM ${k + 1}`, kind: 'gfx', k, file: -1, def: -1, custom: false, first: k * 0x80, sprite: false, map16: true }));
 
 // the descriptor of the workspace's target `at`; for the level, `layer` chooses its FG or BG tiles
 export function gfxTarget(app: App, at: WsTarget, layer: 'fg' | 'bg' = 'fg'): GfxTarget {
@@ -127,6 +129,7 @@ function levelTarget(app: App, at: WsTarget, layer: 'fg' | 'bg'): GfxTarget {
     lt3Dest: () => true,
     lt3Title: 'Where the file goes: “Under the status bar” keeps the status bar\'s tilemap, the others overwrite (part of) it',
     anims: fg,
+    animated: () => (fg ? app.animated() : null),
     animList: (global) => (global ? { kind: 'global' } : { kind: 'level', n }),
     owAnims: false,
     ownColors: () => null,
@@ -221,6 +224,7 @@ function submapTarget(app: App, at: WsTarget, m: number): GfxTarget {
     lt3Dest: (d) => d === SUBMAP_LT3_DEST,
     lt3Title: 'On the overworld the file replaces the border from the start of layer 3',
     anims: false,
+    animated: () => app.owAnimated(m, at.progress),
     animList: (global) => (global ? { kind: 'owGlobal' } : { kind: 'submap', n: m }),
     owAnims: true,
     ownColors: (special) => submapPaletteAddr(rom, m, special),
@@ -247,7 +251,7 @@ function submapTarget(app: App, at: WsTarget, m: number): GfxTarget {
     words: (t) => (t < OW_L1_TILES ? owTileWords(rom, t) : [0, 0, 0, 0]),
     setWords: (t, ws) => setOwTileWords(rom, t, ws),
     addr: (t) => owTileAddr(t),
-    vram: () => OW_SLOTS,
+    vram: () => submapSlots(rom, m),
     drawnTiles: () => Array.from({ length: OW_L1_TILES }, (_, i) => i),
     range: () => `overworld layer 1 tile (all maps; drawn as on ${name})`,
     pageTitle: () => '',

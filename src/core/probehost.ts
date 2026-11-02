@@ -29,6 +29,7 @@ import { spriteSetJob, spriteAtJob, spriteBytesJob } from './spritegfx.ts';
 import { LevelUses, levelUsesJob, levelTilesJob, levelOverride } from './levelusage.ts';
 import { layer3KindsJob } from './layer3.ts';
 import { SpriteGroupResults, spriteMemCheckJob } from './spritemem.ts';
+import { owAnimatedJob } from './owanimated.ts';
 import { animatedJob } from './levelemu.ts';
 import { objectThumbsJob, placementPreviewJob, withPlaced } from './objthumbs.ts';
 import { jumpArcsJob } from './jumparcs.ts';
@@ -119,6 +120,7 @@ function learnJob(j: LearnJob, state: LearnState, show: (items: unknown[] | null
     case 'owSprites': return () => owSpritesJob(owLoads(state), j.map, j.progress);
     case 'owCustom': return () => owCustomJob(owLoads(state), j.map, j.progress);
     case 'owLooks': return () => owLooksJob(owLoads(state), j.ids);
+    case 'owAnimated': return () => owAnimatedJob(owLoads(state), j.map, j.progress);
     case 'owSave': return (emu) => progressSaveJob(owLoads(state), j.progress, { uses: state.uses, emu, prober: state.prober });
     case 'owL1Without': return () => layer1WithoutJob(state.l1Copy ??= new EventL1Copy(), state.rom, j.event);
     case 'msgRoutine': return (emu) => messageRoutineJob(state.rom, emu);

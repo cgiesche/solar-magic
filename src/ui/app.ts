@@ -1219,6 +1219,17 @@ export class App {
     const later = new Promise<ProgressSave | undefined>((ok) => { learned = ok; });
     return this.probes.learn<ProgressSave>('owps1', { kind: 'owSave', progress }, { lane: 'owps', input: { progress }, label: 'Overworld progress', done: learned, failed: () => learned() }) ?? later;
   }
+  // the 8x8 tiles (layer 1 tile numbers) and colors the game keeps rewriting on submap `map` at event progress
+  // `progress` (owanimated.ts), learned in the probe worker and kept in memory while the ROM bytes it read are
+  // unchanged: null until known ('animated' when done), the submap's previous ones meanwhile
+  owAnimated(map: number, progress: number): Animated | null {
+    const res = this.probes.learn<Animated>(`owan1:${map}`, { kind: 'owAnimated', map, progress },
+      { lane: 'owan', input: { progress }, replace: true, label: 'Overworld animations', done: this.animatedLearned });
+    if (res) this.owAnimatedShown = { map, res };
+    return res ?? (this.owAnimatedShown?.map === map ? this.owAnimatedShown.res : null);
+  }
+  // the last submap's tiles and colors learned, shown while the submap's are learned again
+  private owAnimatedShown: { map: number; res: Animated } | null = null;
   submapViews(done: (v: Rect[]) => void): Rect[] | undefined {
     return this.probes.learn<Rect[]>('owv1', { kind: 'owViews' }, { lane: 'owv', label: 'Submap views', done });
   }

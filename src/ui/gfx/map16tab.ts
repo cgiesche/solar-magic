@@ -700,7 +700,7 @@ export class Map16Tab implements WsPanel {
     // own animations on the quarters, each once
     const all = words.flat();
     const own = !d.anims ? [] : all.flatMap((w) => animsAt(app, w & 0x3ff)).filter((a, i, l) => l.findIndex((x) => x.global === a.global && x.slot === a.slot) === i);
-    const animated = !d.anims ? 0 : all.filter((w) => app.animated()?.tiles.has(w & 0x3ff)).length;
+    const anim = d.animated(), animated = !anim ? 0 : all.filter((w) => anim.tiles.has(w & 0x3ff)).length;
     const used = !d.acts || !one ? 0 : this.ws.preview.count(t);
     const last = tiles[tiles.length - 1];
     this.bInfo.replaceChildren(
@@ -747,7 +747,7 @@ export class Map16Tab implements WsPanel {
     const w = this.wordAt(k), num8 = w & 0x3ff;
     const slot = slotOfTile(this.t.vram(), num8);
     const where = this.selW * this.selH > 1 ? `${this.num(this.selection()[tile])} ` : '';
-    const from = slot && slot.file >= 0 ? ` from ${slot.name} (${gfxName(slot.file)})` : '';
+    const from = slot ? ` from ${slot.name} (${gfxName(slot.file)})` : '';
     this.qInfo.textContent = `${this.hoverQ !== null ? 'Under the mouse' : 'Quarter'}: ${where}${QUARTER_NAMES[q]}, 8x8 tile ${hex(num8, 3)}${from}, palette ${(w >> 10) & 7}`;
   }
 
@@ -804,7 +804,7 @@ export class Map16Tab implements WsPanel {
       for (let y = 2; y < g.rows; y += 2) { ctx.moveTo(0, Math.round(y * sy) + 0.5); ctx.lineTo(c.width, Math.round(y * sy) + 0.5); }
       ctx.stroke();
     }
-    const anim = this.t.anims ? this.app.animated() : null;
+    const anim = this.t.animated();
     if (anim?.tiles.size) {
       const a = Math.max(3, Math.min(16, sx / 3));
       ctx.fillStyle = '#ff4fd8';
@@ -964,8 +964,7 @@ export class Map16Tab implements WsPanel {
   private editGfx(w: number): void {
     const num = w & 0x3ff;
     const slot = slotOfTile(this.t.vram(), num);
-    if (slot && slot.file < 0) { toast('The overworld\'s 8x8 graphics can\'t be opened in the Graphics tab yet'); return; }
-    if (!slot) { toast(`8x8 tile ${hex(num, 3)} is in none of this level's graphics slots`); return; }
+    if (!slot) { toast(`8x8 tile ${hex(num, 3)} is in none of this ${this.t.where}'s graphics slots`); return; }
     this.ws.showGfx(slot.file, num - slot.first, (w >> 10) & 7);
   }
 
@@ -1362,7 +1361,7 @@ export class Map16Tab implements WsPanel {
     for (const n of new Set([...this.marked()].map((k) => { const { tile, q } = g.locate(k); return words[tile][q] & 0x3ff; }))) mark(n, false);
     mark(fw & 0x3ff, true);
     // tiles the game animates: hatched corner
-    const anim = this.t.anims ? app.animated() : null;
+    const anim = this.t.animated();
     if (anim?.tiles.size) {
       ctx.fillStyle = '#ff4fd8';
       slots.forEach((s, si) => {
@@ -1383,8 +1382,7 @@ export class Map16Tab implements WsPanel {
     c.style.width = `${W * z}px`; c.style.height = `${Hh * z}px`;
     this.gfxLabels.replaceChildren(...slots.map((s) => h('div', { class: 'mt-slot', style: { height: `${64 * z}px` } },
       h('span', { class: 'mt-slot-name' }, s.name),
-      s.file < 0 ? h('span', { class: 'hint', title: 'The overworld\'s 8x8 graphics as in VRAM after its load' }, this.t.owner)
-        : h('a', { href: '#', class: 'mt-slot-file', title: 'Open in the Graphics tab (sheet and pixel editor)', onclick: (e: Event) => { e.preventDefault(); this.ws.showGfx(s.file); } }, gfxName(s.file)),
+      h('a', { href: '#', class: 'mt-slot-file', title: 'Open in the Graphics tab (sheet and pixel editor)', onclick: (e: Event) => { e.preventDefault(); this.ws.showGfx(s.file); } }, gfxName(s.file)),
       s.custom ? h('span', { class: 'hint' }, 'custom') : '',
       h('span', { class: 'hint mono' }, `${hex(s.first, 3)}–${hex(s.first + 0x7f, 3)}`))));
     this.gfxTitle.replaceChildren(`8x8 graphics in palette ${pal}`);
@@ -1505,7 +1503,7 @@ export class Map16Tab implements WsPanel {
     c.addEventListener('mousemove', (e) => {
       if (this.drag) return;
       const n = tileOf(cell(e));
-      c.title = n >= 0 ? `8x8 tile ${hex(n, 3)}${this.t.anims && this.app.animated()?.tiles.has(n) ? ' – animated (the game keeps overwriting it)' : ''}` : '';
+      c.title = n >= 0 ? `8x8 tile ${hex(n, 3)}${this.t.animated()?.tiles.has(n) ? ' – animated (the game keeps overwriting it)' : ''}` : '';
     });
   }
 

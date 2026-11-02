@@ -93,8 +93,14 @@ export function shapeOf(type: number): { w: number; h: number } {
 // VRAM tiles (numbers from the layer character base charWord) the tile slots of a level's list and
 // the global one overwrite, with the slots that do it
 export function exanimTiles(rom: Rom, level: number, charWord: number): Map<number, { global: boolean; slot: number }[]> {
+  return listTiles([[false, readLevelList(rom, level)], [true, readGlobalList(rom)]], charWord);
+}
+// the same for a submap's list and the overworld's global one
+export function owExanimTiles(rom: Rom, submap: number, charWord: number): Map<number, { global: boolean; slot: number }[]> {
+  return listTiles([[false, readSubmapList(rom, submap)], [true, readOwGlobalList(rom)]], charWord);
+}
+function listTiles(lists: [boolean, ExList | null][], charWord: number): Map<number, { global: boolean; slot: number }[]> {
   const out = new Map<number, { global: boolean; slot: number }[]>();
-  const lists: [boolean, ExList | null][] = [[false, readLevelList(rom, level)], [true, readGlobalList(rom)]];
   for (const [global, l] of lists) {
     if (!l) continue;
     for (const [slot, sl] of l.slots) {
