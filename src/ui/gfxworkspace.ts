@@ -12,8 +12,7 @@ import { Map16Tab, type RemapFill } from './gfx/map16tab.ts';
 import { gfxTarget, type GfxTarget, type Map16Target } from './gfx/target.ts';
 import { GfxTab } from './gfx/gfxtab.ts';
 import { AnimTab } from './gfx/animtab.ts';
-import { MAP_NAMES, gameL2, owTileAt, type OwRender } from '../core/overworld.ts';
-import { drawOwMap } from './overworld.ts';
+import { MAP_NAMES, gameL2, owTileAt, drawOwMap, type OwRender } from '../core/overworld.ts';
 import { cgramToRGBA } from '../core/gfx.ts';
 
 export type WsTab = 'pal' | 'map16' | 'gfx' | 'anim';

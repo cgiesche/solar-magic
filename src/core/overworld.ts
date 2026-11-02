@@ -7,6 +7,7 @@ import { KeptResults } from './keptresults.ts';
 import { rleDecode, rleEncode } from './rle.ts';
 import { GM, RAM, SPECIAL_FLAG } from './ram.ts';
 import { decodeTile } from './gfx.ts';
+import { TileCache, blit8 } from './render.ts';
 import { assemble } from './asar.ts';
 import { missingPatch } from './patches.ts';
 import { lz2Compress, lz2Decompress } from './lz2.ts';
@@ -793,6 +794,27 @@ export const gameL1 = (r: OwRender): Uint16Array => {
 export function gameL2(r: OwRender): Uint16Array {
   const at = (r.ppuRegs[0x08] & 0xfc) << 9;
   return Uint16Array.from({ length: 0x1000 }, (_, k) => r.vram[at + k * 2] | (r.vram[at + k * 2 + 1] << 8));
+}
+// the 512x512 image of a map region (0 the main map, 1 the submaps) drawn with a load's graphics: layer 2 (`l2`), then
+// layer 1 (`l1`, null: the state after the events in `r`) with its Map16 tiles from the ROM; undefined leaves a layer out
+export function drawOwMap(rom: RomRead, r: OwRender, region: number, l1: Uint16Array | null | undefined, l2: Uint16Array | undefined): Uint32Array {
+  const W = 512;
+  const img = new Uint32Array(W * W);
+  const tc = new TileCache(r.vram, r.cgram, 0);
+  if (l2) for (let y = 0; y < 64; y++) for (let x = 0; x < 64; x++) blit8(img, W, W, tc.get(l2[l2Index(region, x, y)]), x * 8, y * 8);
+  if (l1 !== undefined) {
+    const src = l1 ?? gameL1(r);
+    for (let y = 0; y < 32; y++) for (let x = 0; x < 32; x++) drawL1Tile(rom, img, tc, src[l1Index(region, x, y)], x * 16, y * 16);
+  }
+  return img;
+}
+// layer 1 tile t (its Map16 tile's four 8x8 tiles, tc: a load's graphics) drawn at (px, py) of a W×H image
+export function drawL1Tile(rom: RomRead, img: Uint32Array, tc: TileCache, t: number, px: number, py: number, W = 512, H = 512): void {
+  const w = owTileWords(rom, t);
+  blit8(img, W, H, tc.get(w[0]), px, py);
+  blit8(img, W, H, tc.get(w[1]), px, py + 8);
+  blit8(img, W, H, tc.get(w[2]), px + 8, py);
+  blit8(img, W, H, tc.get(w[3]), px + 8, py + 8);
 }
 // the word of the 8x8 cell (x, y) of a 64x64 tilemap in VRAM (four 32x32 screens) based at PPU register `reg`
 // ($2107 BG1SC, $2108 BG2SC)

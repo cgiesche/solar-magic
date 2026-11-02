@@ -424,3 +424,13 @@ export function hideColorLoupe(): void {
 export function emptyState(text: string): HTMLElement {
   return h('div', { class: 'empty' }, text);
 }
+
+// an image W pixels wide (RGBA words) drawn into a canvas of its size, its transparent pixels black
+export function putImage(canvas: HTMLCanvasElement, img: Uint32Array, W = 512): void {
+  canvas.width = W; canvas.height = img.length / W;
+  const ctx = canvas.getContext('2d')!;
+  const id = ctx.createImageData(W, img.length / W);
+  const px = new Uint32Array(id.data.buffer);
+  for (let i = 0; i < px.length; i++) px[i] = img[i] || 0xff000000;
+  ctx.putImageData(id, 0, 0);
+}

@@ -3,12 +3,11 @@
 // teleport location picked on the overworld map – the editor finds or assigns its index (owteleport.ts).
 
 import type { App } from './app.ts';
-import { h, modal, select, checkbox, toast } from './dom.ts';
+import { h, modal, select, checkbox, toast, putImage } from './dom.ts';
 import { hex2, hex3 } from '../core/names.ts';
 import { OW_ACTIONS, owActionName, type OverworldExit } from '../core/level.ts';
-import { MAP_NAMES, OW_EVENTS, eventNames, readL1, readL2, readTranslevels, translevelToLevel, l1Index } from '../core/overworld.ts';
+import { MAP_NAMES, OW_EVENTS, eventNames, readL1, readL2, readTranslevels, translevelToLevel, l1Index, drawOwMap } from '../core/overworld.ts';
 import { readTeleport, readTeleports, locationText, tileText, overworldExitText, type OwTile } from '../core/owteleport.ts';
-import { drawOwMap, putImage } from './overworld.ts';
 
 type Rows = [string, HTMLElement][];
 type Edit = (label: string, f: (x: OverworldExit) => void) => void;

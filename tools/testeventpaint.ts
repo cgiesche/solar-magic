@@ -1,4 +1,6 @@
-// Painting a layer 2 event (owevents.ts paintEvent, ADR 0005): the map after the event becomes its steps. Every
+// Painting a layer 2 event (owevents.ts paintEvent, ADR 0005): the map after the event becomes its steps; a paint
+// stroke on the event (owstroke.ts) is one ROM edit; a level tile painted on layer 1 as after an event where none was
+// gets a translevel. Every
 // clean game's event painted as it is (its own map after it) and written back leaves the layer 2 of every event
 // progress as it was; a painted change is shown by the game – passing the level, the steps on its submap appear one
 // after the other in their order (VRAM, frame by frame), those on another submap at once in the tilemap (silent);
@@ -7,13 +9,17 @@ import { Rom } from '../src/core/rom.ts';
 import { LevelEmulator } from '../src/core/levelemu.ts';
 import { PlaySession } from '../src/core/playsession.ts';
 import { RomEditSession } from '../src/core/romedit.ts';
-import { OverworldEmulator, OverworldLoads, gameL2, readL2, readTranslevels, baseEvent, OW_EVENTS, l2Index } from '../src/core/overworld.ts';
+import {
+  OverworldEmulator, OverworldLoads, gameL1, gameL2, readL1, readL2, readMaps, readTranslevels, baseEvent, OW_EVENTS, l1XY, l2Index,
+  freeTranslevel, translevelUse,
+} from '../src/core/overworld.ts';
+import { OverworldStroke, type OwEventMaps } from '../src/core/owstroke.ts';
 import {
   readEvents, writeEvents, applyEvents, paintEvent, reorderSteps, eventRunners, eventTitle, submapViews, submapOf, eventPlace, pieceTiles,
-  STORAGE_MAX, type EventData,
+  layer1Without, l2XY, STORAGE_MAX, type EventData,
 } from '../src/core/owevents.ts';
 import { GM, RAM } from '../src/core/ram.ts';
-import { editorImage, romDiff } from './fixture.ts';
+import { editorImage, romDiff, levelTiles } from './fixture.ts';
 
 let bad = 0;
 const check = (ok: boolean, what: string) => { console.log((ok ? 'ok   ' : 'FAIL ') + what); if (!ok) bad++; };
@@ -52,22 +58,31 @@ check(views.slice(1).every((v) => v.w === 32 && v.h === 28), `the submaps' views
 const rom = new Rom(image.slice());
 const TL = 0x29, e = baseEvent(rom, TL), runners = eventRunners(rom), tile = readTranslevels(rom).indexOf(TL);
 check(eventTitle(runners, e) === 'Level 105 · normal exit', `event ${hx(e)}: “${eventTitle(runners, e)}”, its level tile on submap ${submapOf(views, tile)}`);
-const d = readEvents(rom), base = readL2(rom), before = applyEvents(base, d, 0, e), after = applyEvents(base, d, 0, e + 1);
+const d = readEvents(rom), base = readL2(rom), before = applyEvents(base, d, 0, e);
 const v = views[submapOf(views, tile)];
 // a path 2 tiles high from the view's left to its right (region 1), and 2x2 tiles on the main map (region 0)
 const word = 0x1000 | 0x8a; // a tile of the map with palette 4
 const onSub = Array.from({ length: 20 }, (_, k) => l2Index(1, v.x + 4 + (k >> 1), v.y + 6 + (k & 1)));
 const onMain = [l2Index(0, 10, 10), l2Index(0, 11, 10), l2Index(0, 10, 11), l2Index(0, 11, 11)];
-const painted = after.slice();
-for (const i of [...onSub, ...onMain]) painted[i] = word;
 const place = eventPlace(runners, views, e, 0);
-const d1 = paintEvent(d, base, e, painted, place);
+// a stroke on layer 2 as after event `ev` (the map after it from the ROM), cells l2Index painted with `v`; its ROM edit
+// (in `s`, or written without one) and the map painted
+function eventStroke(rom: Rom, ev: number, cells: number[], v: number, pl = eventPlace(eventRunners(rom), views, ev, 0), s?: RomEditSession): Uint16Array {
+  const dd = readEvents(rom), b = readL2(rom);
+  const em: OwEventMaps = { event: ev, after: applyEvents(b, dd, 0, ev + 1), l1: null, game: null, without: undefined, place: () => pl };
+  const st = new OverworldStroke(rom, 'l2', readMaps(rom), () => false, em);
+  for (const i of cells) { const { r, x, y } = l2XY(i); st.paint(r, x, y, v); }
+  const end = st.end();
+  if (s) s.edit(end.label, end.write!); else end.write!();
+  return em.after;
+}
 const s = new RomEditSession(rom);
 const loads = new OverworldLoads(new OverworldEmulator(rom), 4), kept = loads.get(0, e + 1);
-s.edit('Event: paint', () => writeEvents(rom, d1));
+const painted = eventStroke(rom, e, [...onSub, ...onMain], word, place, s);
+const d1 = readEvents(rom);
 const shown = gameL2(loads.get(0, e + 1));
 check(shown !== gameL2(kept) && onMain.every((i) => shown[i] === word), 'a kept overworld load: loaded again, the main map shows the painted tiles');
-check(s.history.undoStack.length === 1 && s.history.undoStack[0].label === 'Event: paint', 'one ROM edit');
+check(s.history.undoStack.length === 1 && s.history.undoStack[0].label === `${eventTitle(runners, e)}: paint`, `one ROM edit (“${s.history.undoStack[0]?.label}”)`);
 const subTiles = new Set(d1.steps[e].flatMap((p) => pieceTiles(d1, p)));
 const silentTiles = new Set(d1.silent[e].filter((p) => p.layer === 2).flatMap((p) => pieceTiles(d1, { at: p.tile, pos: p.loc })));
 check(onSub.every((i) => subTiles.has(i)) && onMain.every((i) => silentTiles.has(i)) && !onMain.some((i) => subTiles.has(i)),
@@ -124,13 +139,30 @@ check(romDiff(image, rom.data) === 0, 'undone: the ROM as before');
 
 // events 70–77 (Lunar Magic's 0x78): painted, the game shows them from their event progress on
 {
-  const r2 = new Rom(image.slice()), d0 = readEvents(r2), b0 = readL2(r2), ev = 0x75;
-  const after = applyEvents(b0, d0, 0, ev + 1), cells = [l2Index(0, 30, 30), l2Index(0, 31, 30), l2Index(0, 30, 31), l2Index(0, 31, 31)];
-  for (const i of cells) after[i] = word;
-  writeEvents(r2, paintEvent(d0, b0, ev, after, eventPlace(eventRunners(r2), views, ev, 0)));
+  const r2 = new Rom(image.slice()), ev = 0x75;
+  const cells = [l2Index(0, 30, 30), l2Index(0, 31, 30), l2Index(0, 30, 31), l2Index(0, 31, 31)];
+  eventStroke(r2, ev, cells, word);
   const em = new OverworldEmulator(r2), at = (n: number) => gameL2(em.load(0, n));
   check(cells.every((i) => at(ev + 1)[i] === word && at(OW_EVENTS)[i] === word) && cells.every((i) => at(ev)[i] !== word),
     `event ${hx(ev)}: shown from event progress ${hx(ev + 1)} on, not at ${hx(ev)} (emulated)`);
+}
+
+// a level tile painted on layer 1 as after level 105's normal exit, where none is: one ROM edit, the tile a layer 1
+// change of the event with a free translevel (the game shows it from the event on, not before)
+{
+  const r3 = new Rom(image.slice()), isLevel = levelTiles(r3), maps = readMaps(r3), em = new OverworldEmulator(r3);
+  const game = gameL1(em.load(0, e + 1)), without = layer1Without(r3, e);
+  const i = Array.from({ length: 0x400 }, (_, k) => k).find((k) => !isLevel(game[k]) && !maps.tls[k] && game[k] === readL1(r3)[k] && game[k] === without[k])!;
+  const lt = maps.l1[maps.tls.findIndex((t, k) => !!t && isLevel(maps.l1[k]))], free = freeTranslevel(maps.tls, (tl) => translevelUse(r3, tl));
+  const ev: OwEventMaps = { event: e, after: applyEvents(readL2(r3), readEvents(r3), 0, e + 1), l1: game.slice(), game, without, place: () => place };
+  const st = new OverworldStroke(r3, 'l1', maps, isLevel, ev), { x, y } = l1XY(i);
+  st.paint(0, x, y, lt);
+  const end = st.end(), s3 = new RomEditSession(r3);
+  s3.edit(end.label, end.write!);
+  const steps = readEvents(r3).silent[e].filter((p) => p.layer === 1 && p.loc === i);
+  check(s3.history.undoStack.length === 1 && end.label === `${eventTitle(runners, e)}: paint layer 1` && !end.warnings.length && readTranslevels(r3)[i] === free && readL1(r3)[i] === game[i]
+    && steps.length === 1 && steps[0].tile === lt, `layer 1 as after the event: the level tile a change of the event, with the free translevel ${hx(free)}, the map before events as it was`);
+  check(gameL1(em.load(0, e + 1))[i] === lt && gameL1(em.load(0, e))[i] === game[i], `the game shows it at event progress ${hx(e + 1)}, at ${hx(e)} not`);
 }
 
 if (bad) { console.log(`${bad} failed`); process.exit(1); }
