@@ -16,7 +16,7 @@ import { playButton, playSong, currentSongs } from './musicdialog.ts';
 import { isGfxData } from '../core/gfxfiles.ts';
 import { hex } from '../core/names.ts';
 import { ALL, type UberContext } from '../core/uberasm.ts';
-import { KIND_LABEL as SPRITE_KIND, spriteConfig, spriteAsm, type PixiProject } from '../core/pixi.ts';
+import { KIND_LABEL as SPRITE_KIND, spriteName, spriteAsm, type PixiProject } from '../core/pixi.ts';
 import { bowsieSpriteInfo, type BowsieProject } from '../core/bowsie.ts';
 import { removeCall, type UberProject } from '../core/uberproject.ts';
 import type { BlockProject } from '../core/blocks.ts';
@@ -86,7 +86,7 @@ export function packagesPane(app: App, host: PackagesHost): { el: HTMLElement; r
     const recs = items.map((i) => i.rec);
     const notes: [ToolKind, string][] = [];
     const count = (k: ToolKind, label: string) => {
-      const files = looseFiles(recs, k, host.panes[k].project() as ToolProjects[ToolKind]);
+      const files = looseFiles(recs, k, host.panes[k].project() as ToolProjects[typeof k]);
       if (files.length) notes.push([k, `${label}: ${files.length} file(s)`]);
     };
     count('uberasm', 'UberASM'); count('block', 'Blocks'); count('sprite', 'Sprites'); count('owsprite', 'Overworld sprites');
@@ -197,10 +197,9 @@ export function packagesPane(app: App, host: PackagesHost): { el: HTMLElement; r
     if (rec.sprite.list.length || rec.sprite.files.length) {
       const proj = host.panes.sprite.project() as PixiProject;
       const { entries: sprites, rest } = toolContent(rec, 'sprite', proj);
-      const nameOf = (e: PixiProject['list'][number]) => { try { return spriteConfig(proj, e).names[0]?.name ?? ''; } catch { return ''; } };
       out.push(section('sprite', 'Sprites', 'To insert: sprite mode, custom sprite with the number.',
         sprites.length ? h('table', { class: 'uber-table' }, h('tr', null, h('th', null, 'Type'), h('th', null, 'No.'), h('th', null, 'Name'), h('th')),
-          sprites.map((e) => h('tr', null, h('td', null, SPRITE_KIND[e.kind]), h('td', { class: 'mono' }, hex(e.num, 2)), h('td', { title: e.file }, nameOf(e)),
+          sprites.map((e) => h('tr', null, h('td', null, SPRITE_KIND[e.kind]), h('td', { class: 'mono' }, hex(e.num, 2)), h('td', { title: e.file }, spriteName(proj, e)),
             h('td', { class: 'actions' }, definesButton(proj.files, spriteAsm(proj, e), () => touch('sprite')), editButton(proj.files, spriteAsm(proj, e), () => touch('sprite')))))) : '',
         rest.length ? h('details', { class: 'pkg-files' }, h('summary', null, `More files (${rest.length})`),
           h('table', { class: 'uber-table' }, rest.map((f) => fileRow('sprite', proj.files, f)))) : ''));

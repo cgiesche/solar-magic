@@ -49,8 +49,8 @@ export interface PartSection<S, P> {
 const count = (n: number, one: string, many: string) => (!n ? null : n > 1 ? `${n} ${many}` : one);
 
 // sections of tool projects also tell which entries of the project are the package's (owned: the
-// Packages dialog shows them, removing takes them out) and the files each entry shows (shows)
-interface Owns<P, J, E> { owned(mine: P, project: J): E[]; shows(e: E, project: J): string[] }
+// Packages dialog shows them, removing takes them out) and the files each entry is made of (entryFiles)
+interface Owns<P, J, E> { owned(mine: P, project: J): E[]; entryFiles(e: E, project: J): string[] }
 
 const check = (r: { ok: boolean; errors: string[]; warnings: string[] }, what: string): string[] => {
   if (!r.ok) throw new Error(`${what}: ${r.errors.join(' ')}`);
@@ -145,7 +145,7 @@ export const uberasm = {
   removal: (p) => (p.files.length ? `${p.files.length} UberASM file(s) with their assignments` : null),
   // its calls still in the project
   owned: (mine: UberPart, p: UberProject) => mine.calls.filter(([ctx, num, file]) => p.list[ctx].get(num)?.some((c) => c.file === file)),
-  shows: ([, , file]) => [file],
+  entryFiles: ([, , file]) => [file],
   remove(rom, mine, others) {
     const p = loadProject(rom) ?? emptyProject();
     for (const [ctx, num, file] of mine.calls) removeCall(p, ctx, num, file);
@@ -175,7 +175,7 @@ export const block = {
   removal: (p) => (p.tiles.length ? `block(s) at ${p.tiles.map((t) => hex(t, 3)).join(', ')}` : null),
   // its blocks in the project (by tile): on one of its tiles with one of its files
   owned: (mine: BlocksPart, p: BlockProject) => p.list.filter((b) => mine.tiles.includes(b.tile) && mine.files.includes(b.file)).sort((a, b) => a.tile - b.tile),
-  shows: (b) => [b.file],
+  entryFiles: (b) => [b.file],
   remove(rom, mine, others, blank) {
     const p = loadBlockProject(rom);
     if (!p) return [];
@@ -208,7 +208,7 @@ export const sprite = {
     return p.list.filter((e) => keys.has(`${e.kind}:${e.num}`) && mine.files.includes(e.file));
   },
   // its cfg/json and the .asm that names
-  shows: (e, p) => [e.file, spriteAsm(p, e)],
+  entryFiles: (e, p) => [e.file, spriteAsm(p, e)],
   remove(rom, mine, others) {
     const p = loadPixiProject(rom);
     if (!p) return [];
@@ -236,7 +236,7 @@ export const owsprite = {
   owned(mine: OwSpritePart, p: BowsieProject) {
     return p.list.filter((e) => mine.list.includes(e.num) && mine.files.includes(e.file)).sort((a, b) => a.num - b.num);
   },
-  shows: (e) => [e.file],
+  entryFiles: (e) => [e.file],
   remove(rom, mine, others) {
     const p = loadBowsieProject(rom);
     if (!p) return [];
@@ -388,12 +388,12 @@ type AnyOwns = Owns<PackageParts[ToolKind], ToolProjects[ToolKind], unknown>;
 export function toolContent<K extends ToolKind>(rec: Package, k: K, project: ToolProjects[K]): { entries: ToolEntry<K>[]; rest: string[] } {
   const s = TOOL_SECTIONS[k] as unknown as AnyOwns;
   const entries = s.owned(rec[k], project) as ToolEntry<K>[];
-  const shown = new Set(entries.flatMap((e) => s.shows(e, project)));
+  const shown = new Set(entries.flatMap((e) => s.entryFiles(e, project)));
   return { entries, rest: rec[k].files.filter((f) => !shown.has(f)).sort() };
 }
 
 // the files of a tool project no package brought (added before packages were recorded, or by hand)
-export function looseFiles(recs: Package[], k: ToolKind, project: ToolProjects[ToolKind]): string[] {
+export function looseFiles<K extends ToolKind>(recs: Package[], k: K, project: ToolProjects[K]): string[] {
   return [...project.files.keys()].filter((f) => f !== 'list.txt' && !recs.some((r) => r[k].files.includes(f)));
 }
 

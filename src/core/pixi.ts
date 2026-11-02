@@ -216,6 +216,11 @@ export function spriteConfig(p: PixiProject, e: PixiEntry): SpriteConfig {
   return { type: 1, actlike: 0, tweak: [0, 0, 0, 0, 0, 0], prop: [0, 0], asm: e.file, bytes: 0, bytesExtra: 0, names: [{ name, extraBit: false }], description: '' };
 }
 
+// the name of a sprite's entry (its first in the cfg/json), '' when its cfg/json can't be read
+export function spriteName(p: PixiProject, e: PixiEntry): string {
+  try { return spriteConfig(p, e).names[0]?.name ?? ''; } catch { return ''; }
+}
+
 // the .asm of a sprite's entry: the one its cfg/json names (itself for a misc sprite, or when its
 // cfg/json can't be read)
 export function spriteAsm(p: PixiProject, e: PixiEntry): string {
