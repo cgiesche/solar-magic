@@ -2,7 +2,8 @@
 // table (owcustom.ts). Checked by emulation: the patch goes in beside the editor's patches; the overworld's load puts
 // the sprites of the submap Mario is on into BOWSIE's slots as the table says (its reader logic: number, position,
 // height, extra bytes); a sprite placed shows (its OAM tiles where it is) and runs (its animation goes on); the size
-// table follows the sprites' extra bytes and the placed sprites are rewritten for it; removing it gives the ROM back.
+// table follows the sprites' extra bytes and the placed sprites are rewritten for it; removing it gives the ROM back. With the event path fade off it goes in with MaxTile (#246), re-inserted when the fade
+// is switched or an overworld imported.
 import { unzipSync, zipSync } from 'fflate';
 import { inspectUpload, installPackage, type ReadyPreview } from '../src/core/packages.ts';
 import { packageSummary } from '../src/core/pkgreg.ts';
@@ -13,7 +14,9 @@ import { OverworldEmulator, OverworldLoads } from '../src/core/overworld.ts';
 import { customSpriteImages, customSpriteLooks } from '../src/core/owsprites.ts';
 import { readPpuOam } from '../src/core/spritegfx.ts';
 import { RAM, get16, getS16 } from '../src/core/ram.ts';
-import { saveBowsieProject, loadBowsieProject, removeBowsie, bowsieInstalled, bowsieSprites, type BowsieProject } from '../src/core/bowsie.ts';
+import { saveBowsieProject, loadBowsieProject, removeBowsie, bowsieInstalled, bowsieSprites, bowsieMaxTile, syncBowsieMaxTile, type BowsieProject } from '../src/core/bowsie.ts';
+import { setOwOption, owOptionValue } from '../src/core/owoptions.ts';
+import { importOverworld } from '../src/core/owimport.ts';
 import { readCustomSprites, writeCustomSprites, customSizeTable, customSpriteRanges, customEntryAddrs, type CustomOwSprite } from '../src/core/owcustom.ts';
 import { editorImage, romDiff } from './fixture.ts';
 
@@ -146,6 +149,62 @@ const slots = (w: Uint8Array) => Array.from({ length: 24 }, (_, k) => ({ num: ge
   const p = loadBowsieProject(r2);
   check(res.ok && !!res.pkg && JSON.stringify(p?.list.map((e) => [e.num, e.file]).sort()) === JSON.stringify([[0x01, 'sprites/originals/OWSpr04_PiranhaPlant.asm'], [0x20, 'sprites/originals/OWSpr05_Cloud.asm']].sort()),
     `installed: ${JSON.stringify(p?.list)} (${res.pkg && packageSummary(res.pkg).join(', ')})`);
+}
+
+// MaxTile (#246): BOWSIE runs with it while the event path fade is off (MaxTile needs that), without it with the fade on
+// – re-inserted when the fade is switched. Its setup is called at $009AA4 (JSL) with it, BRA over it without. Either
+// way the Piranha Plant shows where it is placed and animates.
+{
+  const shows = (r: Rom) => {
+    const e = new OverworldEmulator(new Rom(r.data.slice()));
+    const load = e.load(0, 0), sn = e.snes, seen = new Set<number>();
+    let at = '';
+    for (let f = 0; f < 40; f++) {
+      sn.runFrame();
+      const cx = getS16(sn.wram, RAM.layer1X), cy = getS16(sn.wram, RAM.layer1Y);
+      for (const t of readPpuOam(sn.oam)) if (t.tile === 0x2a || t.tile === 0x2c) { seen.add(t.tile); at = `${hx(t.x + cx)},${hx(t.y + cy)}`; }
+    }
+    return load.ok && seen.size === 2 && at === `${hx(0x14 * 8)},${hx(0x0c * 8)}`;
+  };
+  check(!bowsieMaxTile(rom) && rom.r8(0x009aa4) === 0x80, 'with the fade on: BOWSIE without MaxTile');
+  const r2 = new Rom(clean.slice());
+  setOwOption(r2, 'pathFade', false);
+  writeCustomSprites(r2, lists);
+  const res = saveBowsieProject(r2, proj);
+  check(res.ok && bowsieMaxTile(r2) && r2.r8(0x009aa4) === 0x22, `with the fade off: BOWSIE with MaxTile${res.ok ? '' : ': ' + res.errors.join(' | ')}`);
+  check(shows(r2), 'with MaxTile: the Piranha Plant shows and animates');
+  {
+    const loads = new OverworldLoads(new OverworldEmulator(new Rom(r2.data.slice())), 2);
+    const i = customSpriteImages(loads, 0, 0)[0]?.image, j = customSpriteImages(loads, 1, 0)[0]?.image;
+    check(!!i && i.ox === 0xa0 && i.oy === 0x60 && !!j && j.ox === 0x50 && j.oy === 0x60, `with MaxTile: drawn by emulation at ${i && `${hx(i.ox)},${hx(i.oy)}`} and ${j && `${hx(j.ox)},${hx(j.oy)}`}`);
+  }
+  check(syncBowsieMaxTile(r2).length === 0 && bowsieMaxTile(r2), 'nothing to re-insert while the fade is unchanged');
+  setOwOption(r2, 'pathFade', true);
+  syncBowsieMaxTile(r2);
+  check(!bowsieMaxTile(r2) && bowsieInstalled(r2) && shows(r2), 'fade switched on: re-inserted without MaxTile, the sprite shows');
+  check(JSON.stringify(readCustomSprites(r2)) === JSON.stringify(readCustomSprites(rom)), 'the placed sprites kept');
+  setOwOption(r2, 'pathFade', false);
+  syncBowsieMaxTile(r2);
+  check(bowsieMaxTile(r2) && shows(r2), 'fade switched off again: re-inserted with MaxTile');
+  // an overworld imported from a ROM with the fade on: BOWSIE re-inserted without MaxTile
+  {
+    const r4 = new Rom(r2.data.slice());
+    r4.extra = new Map(r2.extra);
+    const { warnings } = importOverworld(r4, new Rom(clean.slice()));
+    check(owOptionValue(r4, 'pathFade') === true && !bowsieMaxTile(r4) && bowsieInstalled(r4), `overworld imported with the fade on: BOWSIE without MaxTile (${warnings.filter((w) => /BOWSIE/.test(w)).join(' | ') || 'no BOWSIE warning'})`);
+  }
+  // without its sources (a ROM exported without the editor data): left as it is, with a warning
+  {
+    const r5 = new Rom(r2.data.slice());
+    setOwOption(r5, 'pathFade', true);
+    const w = syncBowsieMaxTile(r5);
+    check(bowsieMaxTile(r5) && w.length === 1 && /not re-inserted/.test(w[0]), `without its sources: not re-inserted, warned (${w.join(' | ')})`);
+  }
+  // without BOWSIE the switch changes nothing else
+  const r3 = new Rom(clean.slice());
+  setOwOption(r3, 'pathFade', false);
+  const before = r3.data.slice();
+  check(syncBowsieMaxTile(r3).length === 0 && romDiff(before, r3.data) === 0, 'without BOWSIE: nothing inserted');
 }
 
 if (bad) { console.log(`${bad} FAILED`); process.exit(1); }

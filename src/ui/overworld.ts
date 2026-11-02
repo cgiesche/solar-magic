@@ -3,6 +3,7 @@
 import type { App } from './app.ts';
 import type { Watch } from '../core/romwatch.ts';
 import { StateMemo } from '../core/romdeps.ts';
+import { syncBowsieMaxTile } from '../core/bowsie.ts';
 import { h, toast, select, checkbox, hexInput, attachPanZoom, zoomControl, pixelZoomSteps, snapZoom, attachRectPick, emptyState } from './dom.ts';
 import {
   type OwRender, gameL1, gameL2, readL1, writeL1, readL2, writeL2, l1Index, l1XY, l2Index, readTranslevels, writeTranslevels, readMaps,
@@ -1249,7 +1250,13 @@ export class OverworldView {
       if (o.sub && owOptionValue(rom, o.sub.of) !== o.sub.when) continue;
       const v = owOptionValue(rom, o.id);
       if (v === null) { rows.push(h('div', { class: 'row hint warn-text', title: o.title }, `⚠ ${o.label}: its code was changed by a patch`)); continue; }
-      const c = checkbox(o.label, o.title, v, (on) => this.app.romEdit(`${o.label}: ${on ? 'on' : 'off'}`, () => setOwOption(rom, o.id, on)));
+      // (the path fade: BOWSIE re-inserted with or without MaxTile; refused when that fails)
+      const c = checkbox(o.label, o.title, v, (on) => {
+        try {
+          const warnings = this.app.romEdit(`${o.label}: ${on ? 'on' : 'off'}`, () => { setOwOption(rom, o.id, on); return syncBowsieMaxTile(rom); });
+          if (warnings.length) toast(warnings.join(' '));
+        } catch (e) { toast(`Not changed: ${e instanceof Error ? e.message : e}`, 'error'); this.buildProps(); }
+      });
       if (o.needs && owOptionValue(rom, o.needs) === false) {
         c.querySelector('input')!.disabled = true;
         c.title += ` – no effect while "${owOption(o.needs).label}" is off`;

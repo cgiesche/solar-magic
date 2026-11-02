@@ -212,7 +212,7 @@ One of the game's 13 sprite slots of the overworld (Lakitu, bird, fish, Piranha 
 _Avoid_: event sprite, OW object
 
 **Custom overworld sprite**:
-A sprite of an overworld package (BOWSIE's format, Arinsu: an .asm with init and main) placed on one submap: its number (01–7E), a position and a height in 8px steps and its extra bytes, kept in Lunar Magic's custom overworld sprite table (`$0EF55D`, up to 0x18 a submap; the entry's size from the size table BOWSIE writes). The editor does BOWSIE's insertion itself (one patch, without MaxTile) and draws each placed sprite by emulation.
+A sprite of an overworld package (BOWSIE's format, Arinsu: an .asm with init and main) placed on one submap: its number (01–7E), a position and a height in 8px steps and its extra bytes, kept in Lunar Magic's custom overworld sprite table (`$0EF55D`, up to 0x18 a submap; the entry's size from the size table BOWSIE writes). The editor does BOWSIE's insertion itself (one patch, with MaxTile while the event path fade is off, else without; re-inserted when the fade is switched) and draws each placed sprite by emulation.
 _Avoid_: OW sprite (for these), BOWSIE sprite (in the UI)
 
 **Start position**:

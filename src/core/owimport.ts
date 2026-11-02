@@ -24,6 +24,7 @@ import { teleportDataRanges } from './owteleport.ts';
 import { koopaTeleport, setKoopaTeleport, KOOPAS } from './owlinks.ts';
 import { START, hasOwSpriteSlots, readOwSprite, writeOwSprite, OW_SPRITE_SLOTS, koopaKidPos, setKoopaKidPos, KOOPA_KIDS } from './owsprites.ts';
 import { readCustomSprites } from './owcustom.ts';
+import { syncBowsieMaxTile } from './bowsie.ts';
 import { OW_OPTIONS, owOptionValue, setOwOption, revealSpeed, setRevealSpeed, submapLightning, setSubmapLightning } from './owoptions.ts';
 import { levelNameTiles, setLevelNameTiles, NAME_TRANSLEVELS } from './levelnames.ts';
 import { readMessage, writeMessages, TRANSLEVELS, type MessageChange } from './messages.ts';
@@ -103,6 +104,8 @@ export function importOverworld(dst: Rom, src: Rom): OverworldImport {
     if (v !== null && d !== null) setOwOption(dst, o.id, v);
     else warn(`Overworld option "${o.label}" not copied: its code in ${v === null ? 'the other ROM' : 'this ROM'} was changed by a patch`);
   }
+  // (BOWSIE with MaxTile only while the fade is off: re-inserted when the fade changed; throws when that fails)
+  syncBowsieMaxTile(dst).forEach(warn);
   const speed = revealSpeed(src);
   if (speed !== null && revealSpeed(dst) !== null) setRevealSpeed(dst, speed);
   const lightning = (r: Rom) => submapLightning(r, 0) !== null;

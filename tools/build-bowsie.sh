@@ -3,7 +3,7 @@
 # BSD-2-Clause) from its release into src/vendor/bowsie/bowsie.ts: the sprite system for a vanilla overworld
 # (vldc9.asm with its defines, macro.asm, MaxTile's defines and code) and the shared routines, as strings. The tool
 # itself (C++) is not taken: the editor does its steps (src/core/bowsie.ts). Three changes (FIXES below) for BOWSIE
-# without MaxTile, which the editor runs (BOWSIE's default is with it): MaxTile's requirement of Lunar Magic's "disable
+# without MaxTile, which the editor runs while the event path fade is on (with it off, with MaxTile, BOWSIE's default): MaxTile's requirement of Lunar Magic's "disable
 # event path fade effect" is checked only when MaxTile is on (BOWSIE includes MaxTile's defines either way); the
 # priority OAM start is loaded as a word (`LDA #!oam_start_p` is `LDA #$00` with Asar: the define is a number 0, the
 # next byte then taken as an opcode – the overworld crashed); the tile size table is at !oam_tilesize_buffer ($0420),
