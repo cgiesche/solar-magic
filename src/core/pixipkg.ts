@@ -15,7 +15,6 @@ export interface PixiLink { file: string; define: string; sprite: number } // de
 export interface PixiPlan { sprites: PixiPlanSprite[]; links: PixiLink[]; routines: string[] }
 
 const dec = new TextDecoder();
-const enc = new TextEncoder();
 const base = (f: string) => f.slice(f.lastIndexOf('/') + 1);
 const dirOf = (p: string) => (p.includes('/') ? p.slice(0, p.lastIndexOf('/') + 1) : '');
 
@@ -137,7 +136,6 @@ export function applyPixiUpload(rom: Rom, upload: Upload, plan: PixiPlan, others
   const proj: PixiProject = loadPixiProject(rom) ?? { files: new Map(), list: [] };
   // define values from the chosen numbers
   const files = withDefines(upload.files, linkedDefines(plan));
-  const content = (f: string) => files.get(f)!;
 
   // the files of a sprite: those in its folder, except what belongs to a deeper folder of another one,
   // the other sprites' own files, the routines and the files of other parts
@@ -151,12 +149,12 @@ export function applyPixiUpload(rom: Rom, upload: Upload, plan: PixiPlan, others
   for (const s of plan.sprites) {
     const dir = dirOf(s.file);
     const destDir = dirOf(FOLDER[s.kind] + relIn(s.file, s.kind));
-    for (const f of filesOf(s.file)) { const to = destDir + f.slice(dir.length); proj.files.set(to, content(f)); claim(to); }
+    for (const f of filesOf(s.file)) { const to = destDir + f.slice(dir.length); proj.files.set(to, files.get(f)!); claim(to); }
     const entry: PixiEntry = { kind: s.kind, num: s.num, file: FOLDER[s.kind] + relIn(s.file, s.kind) };
     proj.list = proj.list.filter((e) => !(e.kind === s.kind && e.file === entry.file)); // its file under one number
     assignSprite(proj, entry);
   }
-  for (const f of plan.routines) { const to = f.slice(f.search(/routines\//i)); proj.files.set(to, content(f)); claim(to); }
+  for (const f of plan.routines) { const to = f.slice(f.search(/routines\//i)); proj.files.set(to, files.get(f)!); claim(to); }
   return savePixiProject(rom, proj);
 }
 

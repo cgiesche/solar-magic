@@ -37,7 +37,6 @@ import { globalGfxNum, globalGfxName, cleanGlobalGfx, fromBin, isCleanGlobalGfx,
 import { listPackages } from './pkgreg.ts';
 
 const dec = new TextDecoder();
-const enc = new TextEncoder();
 const base = (f: string) => f.slice(f.lastIndexOf('/') + 1);
 const dirOf = (p: string) => (p.includes('/') ? p.slice(0, p.lastIndexOf('/') + 1) : '');
 const hx = (v: number, d: number) => v.toString(16).toUpperCase().padStart(d, '0');
@@ -434,9 +433,8 @@ export function applyBlocks(rom: Rom, upload: Upload, blocks: PlannedBlock[], de
   const proj: BlockProject = loadBlockProject(rom) ?? { files: new Map(), list: [] };
   for (const [f, c] of extra ?? []) { proj.files.set(f, c); claim(f); }
   const files = withDefines(upload.files, defines);
-  const content = (f: string) => files.get(f)!;
   for (const b of blocks) {
-    for (const [f, c] of blockFiles(upload, b.file, content)) { proj.files.set(f, c); claim(f); }
+    for (const [f, c] of blockFiles(upload, b.file, (f) => files.get(f)!)) { proj.files.set(f, c); claim(f); }
     for (const t of b.tiles) assignBlock(proj, { tile: t, file: 'blocks/' + base(b.file), acts: b.acts });
   }
   for (const r of routines) { const f = r.slice(r.search(/routines\//i)); proj.files.set(f, upload.files.get(r)!); claim(f); }

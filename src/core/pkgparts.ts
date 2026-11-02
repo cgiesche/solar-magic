@@ -98,7 +98,7 @@ export interface InstallOptions {
 
 // what the adapters apply: the preview, the options and where the parts go in this ROM
 export interface InstallContext {
-  preview: ReadyPreview; // (installPackage: with the links between its parts set in its files, linkedPreview)
+  preview: ReadyPreview; // with the sound effects' defines set in its files
   opt: InstallOptions;
   plan: PackagePlan; // blocks, Map16 tiles, ExGFX and their links
   sprites: PixiPlan | null; // the sprites' numbers and the defines naming them
@@ -478,9 +478,9 @@ export function planUpload(rom: Rom, preview: ReadyPreview, blank: number[], til
   return planPackage(rom, { files: preview.files, blocks: partsOf(preview, 'block').flatMap((b) => b.found), graphics: previewGraphics(preview), tilesets }, blank);
 }
 
-// where every part goes in this ROM; sfx: the sound effects' numbers when planned before (the preview's
-// files then have their defines set, sfxDefines: its links are those of the author's files)
-export function planInstall(rom: Rom, preview: ReadyPreview, opt: InstallOptions, sfx: SfxPlan = planSfx(rom, preview)): InstallContext {
+// where every part goes in this ROM; preview: with the sound effects' defines set in its files, sfx: their
+// numbers and links, planned on the author's files (planSfx, sfxDefines)
+export function planInstall(rom: Rom, preview: ReadyPreview, opt: InstallOptions, sfx: SfxPlan): InstallContext {
   const sprites = partsOf(preview, 'sprite').map((s) => s.file);
   return {
     preview, opt,
