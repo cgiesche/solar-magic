@@ -34,11 +34,11 @@ export interface SnesState {
   [k: string]: unknown;
 }
 
-const STATE_ARRAYS = ['wram', 'sram', 'vram', 'cgram', 'oam', 'ppuRegs', 'dma', 'apuIn', 'apuOut', 'fifoSrc', 'fifoVal'] as const;
+const STATE_ARRAYS = ['wram', 'sram', 'vram', 'cgram', 'oam', 'ppuRegs', 'dma', 'apuIn', 'apuOut'] as const;
 const STATE_SCALARS = ['vmain', 'vaddr', 'vreadLatch', 'cgaddr', 'cgLatch', 'cgReadHigh', 'oamaddr', 'oamLatch', 'm7a', 'm7b',
   'm7latch', 'wmaddr', 'nmitimen', 'wrmpya', 'wrdiv', 'rddiv', 'rdmpy', 'htime', 'vtime', 'nmiFlag', 'irqFlag', 'joy1',
   'apuLastReadAddr', 'apuSpin', 'apuFrameStart', 'frame', 'line', 'lineCycle', 'openBus', 'hdmaen', 'hdmaDo', 'hdmaOn',
-  'fixedColor', 'fifoLen', 'cgLatchTaint', 'busyLines', 'sinceNmi', 'waited', 'memsel'] as const;
+  'fixedColor', 'cgLatchTaint', 'busyLines', 'sinceNmi', 'waited', 'memsel'] as const;
 const CPU_SCALARS = ['a', 'x', 'y', 's', 'd', 'dbr', 'pbr', 'pc', 'p', 'e', 'cycles', 'stopped', 'waiting', 'nmiPending', 'irqLine',
   'lastOp', 'lastOpPc'] as const;
 
@@ -61,13 +61,12 @@ export class Snes implements Bus {
   romSkip = new Set<number>(); // ROM offsets whose reads aren't recorded
   romSkipMask: Uint8Array | null = null; // the same per byte (1 = not recorded), e.g. GFX file data
   romMasked: RomReads | null = null; // when set: records the reads romSkipMask leaves out
-  // data provenance tracking (ROM offset each WRAM/CGRAM byte was copied from)
+  // data provenance tracking (ROM offset each WRAM/CGRAM byte was copied from, see trackSources)
   taintOn = false;
   taint = new Int32Array(0x20000).fill(-1);
   cgTaint = new Int32Array(0x200).fill(-1);
-  fifoSrc = new Int32Array(8);
-  fifoVal = new Int32Array(8);
-  fifoLen = 0;
+  private inDma = false; // the bus access is a DMA transfer's
+  private wtag = -1; // tracking sources: the tag of the byte written now
   // 64 KB overlay visible at $FE8000-$FEFFFF / $FF8000-$FFFFFF (editor scratch data)
   overlay: Uint8Array | null = null;
 
@@ -145,12 +144,13 @@ export class Snes implements Bus {
       v = this.romData[ro];
     } else if ((bank & 0xfe) === 0x7e) {
       v = this.wram[addr - 0x7e0000];
-      if (this.taintOn) this.tpush(this.taint[addr - 0x7e0000], v);
+      if (this.taintOn) this.cpu.noteRead(this.taint[addr - 0x7e0000]);
       if (this.hook?.onWramRead) this.hook.onWramRead(addr - 0x7e0000);
     } else if (off >= 0x8000) { // banks $FE/$FF
       if (this.overlay) {
         const oo = ((bank & 1) << 15) | (off & 0x7fff);
         if (this.hook?.onOverlayRead) this.hook.onOverlayRead(oo);
+        if (this.taintOn) this.cpu.noteRead(-1);
         this.openBus = this.overlay[oo];
         return this.overlay[oo];
       }
@@ -160,16 +160,16 @@ export class Snes implements Bus {
       v = this.romData[ro];
     } else {
       const b = bank & 0x7f;
-      if (b >= 0x70 && b < 0x7e) {
-        v = this.sram[off & 0x7fff];
-      } else if (b < 0x40) {
-        if (off < 0x2000) {
-          v = this.wram[off];
-          if (this.taintOn) this.tpush(this.taint[off], v);
-          if (this.hook?.onWramRead) this.hook.onWramRead(off);
-        } else v = this.readIO(off);
+      if (b < 0x40 && off < 0x2000) {
+        v = this.wram[off];
+        if (this.taintOn) this.cpu.noteRead(this.taint[off]);
+        if (this.hook?.onWramRead) this.hook.onWramRead(off);
       } else {
-        v = this.openBus;
+        // the port to WRAM carries the byte's source; SRAM and the other registers none
+        if (this.taintOn) this.cpu.noteRead(b < 0x40 && off === 0x2180 ? this.taint[this.wmaddr] : -1);
+        if (b >= 0x70 && b < 0x7e) v = this.sram[off & 0x7fff];
+        else if (b < 0x40) v = this.readIO(off);
+        else v = this.openBus;
       }
     }
     this.openBus = v;
@@ -199,18 +199,20 @@ export class Snes implements Bus {
   private readRomSlow(ro: number): number {
     if (this.hook?.onRomRead) this.hook.onRomRead(ro);
     const v = this.romData[ro];
-    if (this.taintOn) this.tpush(ro, v);
+    if (this.taintOn) this.cpu.noteRead(ro);
     this.openBus = v;
     return v;
   }
 
   write(addr: number, v: number): void {
+    // every write takes its tag, also one to a place without tags: a 16-bit store's next byte is the high byte
+    if (this.taintOn) this.wtag = this.inDma ? this.cpu.readTag() : this.cpu.writeTag();
     const bank = addr >> 16;
     const off = addr & 0xffff;
     if (bank === 0x7e || bank === 0x7f) {
       const a = addr - 0x7e0000;
       this.wram[a] = v;
-      if (this.taintOn) this.taint[a] = this.tpop(v);
+      if (this.taintOn) this.taint[a] = this.wtag;
       if (this.hook?.onWramWrite) this.hook.onWramWrite(a, v);
       return;
     }
@@ -223,7 +225,7 @@ export class Snes implements Bus {
     if (b < 0x40) {
       if (off < 0x2000) {
         this.wram[off] = v;
-        if (this.taintOn) this.taint[off] = this.tpop(v);
+        if (this.taintOn) this.taint[off] = this.wtag;
         if (this.hook?.onWramWrite) this.hook.onWramWrite(off, v);
       } else this.writeIO(off, v);
     }
@@ -231,23 +233,18 @@ export class Snes implements Bus {
 
   // ---------------- I/O ----------------
   cgLatchTaint = -1;
-  tpush(src: number, v: number): void {
-    if (this.fifoLen === 8) {
-      this.fifoSrc.copyWithin(0, 1); this.fifoVal.copyWithin(0, 1); this.fifoLen--;
-    }
-    this.fifoSrc[this.fifoLen] = src; this.fifoVal[this.fifoLen] = v; this.fifoLen++;
-  }
-  tpop(v: number): number {
-    for (let i = 0; i < this.fifoLen; i++) {
-      if (this.fifoVal[i] === v) {
-        const src = this.fifoSrc[i];
-        const rest = this.fifoLen - i - 1;
-        this.fifoSrc.copyWithin(0, i + 1, this.fifoLen); this.fifoVal.copyWithin(0, i + 1, this.fifoLen);
-        this.fifoLen = rest;
-        return src;
-      }
-    }
-    return -1;
+  // Source tracking: every byte of WRAM, CGRAM and the CPU's registers carries where it was loaded from
+  // (a ROM offset, -1 none). A byte read takes its place's tag (the CPU keeps it while the value is
+  // moved, see Cpu.execTracked), a byte written takes the tag of what is written (DMA: the byte read).
+  trackSources(on: boolean): void {
+    this.taintOn = on;
+    this.cpu.track = on;
+    if (!on) return;
+    this.taint.fill(-1);
+    this.cgTaint.fill(-1);
+    this.cgLatchTaint = -1;
+    this.inDma = false;
+    this.cpu.resetTags();
   }
 
   vramStep(): number {
@@ -367,16 +364,16 @@ export class Snes implements Bus {
       case 0x211c: this.m7b = v; this.m7latch = v; return;
       case 0x2121: this.cgaddr = v; this.cgLatch = -1; this.cgReadHigh = false; return;
       case 0x2122:
-        if (this.cgLatch < 0) { this.cgLatch = v; if (this.taintOn) this.cgLatchTaint = this.tpop(v); }
+        if (this.cgLatch < 0) { this.cgLatch = v; if (this.taintOn) this.cgLatchTaint = this.wtag; }
         else {
-          if (this.taintOn) { this.cgTaint[this.cgaddr * 2] = this.cgLatchTaint; this.cgTaint[this.cgaddr * 2 + 1] = this.tpop(v); }
+          if (this.taintOn) { this.cgTaint[this.cgaddr * 2] = this.cgLatchTaint; this.cgTaint[this.cgaddr * 2 + 1] = this.wtag; }
           this.cgram[this.cgaddr * 2] = this.cgLatch;
           this.cgram[this.cgaddr * 2 + 1] = v & 0x7f;
           this.cgaddr = (this.cgaddr + 1) & 0xff;
           this.cgLatch = -1;
         }
         return;
-      case 0x2180: this.wram[this.wmaddr] = v; if (this.hook?.onWramWrite) this.hook.onWramWrite(this.wmaddr, v); this.wmaddr = (this.wmaddr + 1) & 0x1ffff; return;
+      case 0x2180: this.wram[this.wmaddr] = v; if (this.taintOn) this.taint[this.wmaddr] = this.wtag; if (this.hook?.onWramWrite) this.hook.onWramWrite(this.wmaddr, v); this.wmaddr = (this.wmaddr + 1) & 0x1ffff; return;
       case 0x2181: this.wmaddr = (this.wmaddr & 0x1ff00) | v; return;
       case 0x2182: this.wmaddr = (this.wmaddr & 0x100ff) | (v << 8); return;
       case 0x2183: this.wmaddr = (this.wmaddr & 0x0ffff) | ((v & 1) << 16); return;
@@ -421,11 +418,19 @@ export class Snes implements Bus {
       const mode = ctrl & 7;
       const pattern = DMA_PATTERNS[mode];
       let i = 0;
+      this.inDma = true;
       while (count > 0) {
         const b = 0x2100 | ((bReg + pattern[i & 3]) & 0xff);
         const full = (aBank << 16) | aAddr;
-        if (toA) this.write(full, this.readIO(b));
-        else this.writeIO(b, this.read(full));
+        if (toA) {
+          const v = this.readIO(b);
+          if (this.taintOn) this.cpu.noteRead(-1);
+          this.write(full, v);
+        } else {
+          const v = this.read(full);
+          if (this.taintOn) this.wtag = this.cpu.readTag();
+          this.writeIO(b, v);
+        }
         this.cpu.cycles += 1;
         if (!fixed) aAddr = (aAddr + (dec ? -1 : 1)) & 0xffff;
         i++;
@@ -435,6 +440,7 @@ export class Snes implements Bus {
       this.dma[base + 3] = aAddr >> 8;
       this.dma[base + 5] = 0;
       this.dma[base + 6] = 0;
+      this.inDma = false;
     }
   }
 
@@ -485,6 +491,7 @@ export class Snes implements Bus {
             const na = (a + 1) & 0xffff;
             d[b + 5] = na & 0xff; d[b + 6] = na >> 8;
           } else v = this.hdmaTableByte(ch);
+          if (this.taintOn) this.wtag = this.cpu.readTag();
           this.writeIO(0x2100 | ((d[b + 1] + pattern[i]) & 0xff), v);
         }
       }

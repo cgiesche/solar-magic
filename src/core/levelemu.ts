@@ -348,10 +348,7 @@ export class LevelEmulator {
         r.add(cpu.opPc * 0x800000 + ro);
       } : undefined,
     };
-    s.taintOn = !!ov.trackSources;
-    s.taint.fill(-1);
-    s.cgTaint.fill(-1);
-    s.fifoLen = 0;
+    s.trackSources(!!ov.trackSources);
     let frames = 0;
     let ok = true;
     let error: string | undefined;
@@ -374,7 +371,7 @@ export class LevelEmulator {
       error = String(e);
     } finally {
       s.hook = null;
-      s.taintOn = false;
+      s.trackSources(false);
       for (let i = saved.length - 1; i >= 0; i--) rom.data[saved[i][0]] = saved[i][1];
       s.romSkip.clear();
     }
@@ -382,7 +379,7 @@ export class LevelEmulator {
       wram: s.wram.slice(),
       vram: s.vram.slice(),
       cgram: s.cgram.slice(),
-      cgramSrc: s.cgTaint.slice(),
+      cgramSrc: ov.trackSources ? s.cgTaint.slice() : new Int32Array(0x200).fill(-1),
       ppuRegs: s.ppuRegs.slice(),
       owner,
       touched,

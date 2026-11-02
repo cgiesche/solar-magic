@@ -44,12 +44,14 @@ check(fg !== undefined && fg >= 0x800000, 'level 105 loads colors of its FG pale
   check(shared.every((a) => { const f = tableOf(a), s = tableOf(a & 0x7fffff); return f.kind === s.kind && f.num === s.num; }), 'the same tables in the slow banks');
 }
 
-// a shared color changed: the same trace (a load traced afresh may find another source for some changed colors: the
-// tracing matches the values written to those read lately)
+// a shared color changed: the same trace – and a load traced afresh finds the same sources (the tracing carries each
+// byte's place with it, testsourcetrack.ts)
 rom.w16(fg!, rom.r16(fg!) ^ 0x1f);
 check(sources.trace(LEVEL, ov()) === first && sources.traces === 1, 'a shared color changed: not traced again');
+check(same(plain(ov()), first.cgramSrc), 'traced afresh: the same sources');
 for (const a of shared) rom.w16(a, rom.r16(a) ^ 0x3e0);
 check(sources.trace(LEVEL, ov()) === first && sources.traces === 1, 'every shared color it loads changed: not traced again');
+check(same(plain(ov()), first.cgramSrc), 'traced afresh: the same sources');
 
 // another FG palette in the header: traced again, its colors from the other palette
 {

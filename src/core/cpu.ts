@@ -15,6 +15,26 @@ const FLAG_M = 0x20;
 const FLAG_V = 0x40;
 const FLAG_N = 0x80;
 
+// source tracking: what an instruction's writes carry (W_*) and what it does to the registers' tags (R_*)
+const W_NONE = 0, W_REG = 1, W_PUSH = 2, W_COPY = 3;
+const R_OTHER = 0, R_LDA = 1, R_LDX = 2, R_LDY = 3, R_TAX = 4, R_TAY = 5, R_TXA = 6, R_TYA = 7, R_TXY = 8, R_TYX = 9, R_XBA = 10,
+  R_NOA = 11, R_NOX = 12;
+const TAG_A = 0, TAG_X = 2, TAG_Y = 4; // a register's low byte in CPU.tags, its high byte next
+const WRITES = new Uint8Array(256), WREG = new Uint8Array(256), REGS = new Uint8Array(256);
+const writes = (ops: number[], mode: number, reg = TAG_A) => { for (const op of ops) { WRITES[op] = mode; WREG[op] = reg; } };
+writes([0x81, 0x83, 0x85, 0x87, 0x8d, 0x8f, 0x91, 0x92, 0x93, 0x95, 0x97, 0x99, 0x9d, 0x9f], W_REG, TAG_A); // STA
+writes([0x86, 0x8e, 0x96], W_REG, TAG_X); // STX
+writes([0x84, 0x8c, 0x94], W_REG, TAG_Y); // STY
+writes([0x48], W_PUSH, TAG_A); // PHA
+writes([0xda], W_PUSH, TAG_X); // PHX
+writes([0x5a], W_PUSH, TAG_Y); // PHY
+writes([0x54, 0x44], W_COPY); // MVN, MVP
+for (const op of [0xa1, 0xa3, 0xa5, 0xa7, 0xa9, 0xad, 0xaf, 0xb1, 0xb2, 0xb3, 0xb5, 0xb7, 0xb9, 0xbd, 0xbf, 0x68]) REGS[op] = R_LDA; // LDA, PLA
+for (const op of [0xa2, 0xa6, 0xae, 0xb6, 0xbe, 0xfa]) REGS[op] = R_LDX; // LDX, PLX
+for (const op of [0xa0, 0xa4, 0xac, 0xb4, 0xbc, 0x7a]) REGS[op] = R_LDY; // LDY, PLY
+REGS[0xaa] = R_TAX; REGS[0xa8] = R_TAY; REGS[0x8a] = R_TXA; REGS[0x98] = R_TYA; REGS[0x9b] = R_TXY; REGS[0xbb] = R_TYX; REGS[0xeb] = R_XBA;
+REGS[0x7b] = REGS[0x3b] = R_NOA; REGS[0xba] = R_NOX; // TDC, TSC, TSX: values not from memory
+
 export class CPU {
   a = 0;
   x = 0;
@@ -40,6 +60,16 @@ export class CPU {
   lastOpPc = 0;
   idle = false; // in a wait loop (see branch()); the system may skip ahead to the next interrupt
   inFetch = false;
+  // Source tracking (Snes.trackSources): where each byte of A, X and Y was loaded from, carried through
+  // the instructions the way the bus carries it through memory. Off, instructions run without it.
+  track = false;
+  tags = new Int32Array(6).fill(-1); // A low, A high, X low, X high, Y low, Y high: a source tag each (-1 none)
+  private rtags = new Int32Array(8); // the tags of the latest bus reads, a ring
+  private nr = 0;
+  private wmode = W_NONE; // what the current instruction writes: see writeTag
+  private wbase = 0; // its register (index into tags)
+  private wwide = false; // pushed 16 bits
+  private wi = 0; // writes done
 
   constructor(bus: Bus) {
     this.bus = bus;
@@ -510,7 +540,77 @@ export class CPU {
     this.opPc = (this.pbr << 16) | this.pc;
     const op = this.fetch8();
     this.op = op;
+    if (this.track) this.execTracked(op);
+    else this.exec(op);
+  }
+
+  // ---- source tracking ----
+  // the bus reports the tag of every byte read (ROM offset, or what the memory byte carries)
+  noteRead(tag: number): void {
+    this.rtags[this.nr++ & 7] = tag;
+  }
+  // the tag of the k-th latest read (1: the latest)
+  readTag(k = 1): number {
+    return this.rtags[(this.nr - k) & 7];
+  }
+  // the tag of the byte the instruction writes now (stores and pushes of a register, block moves);
+  // other writes (results of arithmetic, return addresses, interrupts) have no source
+  resetTags(): void {
+    this.tags.fill(-1);
+  }
+  writeTag(): number {
+    switch (this.wmode) {
+      case W_REG: return this.tags[this.wbase + (this.wi++ & 1)]; // low byte first
+      case W_PUSH: return this.wwide ? this.tags[this.wbase + 1 - (this.wi++ & 1)] : this.tags[this.wbase]; // high byte first
+      case W_COPY: return this.readTag();
+      default: return -1;
+    }
+  }
+
+  // the index register at r loaded from memory (8 bits: its high byte is 0)
+  private loaded(r: number, x8: boolean): void {
+    if (x8) { this.tags[r] = this.readTag(); this.tags[r + 1] = -1; } else { this.tags[r] = this.readTag(2); this.tags[r + 1] = this.readTag(); }
+  }
+  // register from copied to register to, 8 bits wide or 16
+  private moved(from: number, to: number, to8: boolean): void {
+    this.tags[to] = this.tags[from];
+    if (!to8) this.tags[to + 1] = this.tags[from + 1];
+    else if (to !== TAG_A) this.tags[to + 1] = -1; // an 8-bit index register's high byte is 0; A's is kept
+  }
+  // index register at r after an instruction changed it from v0 to v, at the width it has now (SEP #$10 clears the high byte)
+  private changed(r: number, v: number, v0: number): void {
+    if (v === v0) return;
+    if (this.x8) { if ((v ^ v0) & 0xff) this.tags[r] = -1; this.tags[r + 1] = -1; } else this.tags[r] = this.tags[r + 1] = -1;
+  }
+
+  private execTracked(op: number): void {
+    const t = this.tags;
+    const a0 = this.a, x0 = this.x, y0 = this.y, m8 = this.m8, x8 = this.x8;
+    this.wmode = WRITES[op];
+    this.wbase = WREG[op];
+    this.wwide = this.wbase === TAG_A ? !m8 : !x8;
+    this.wi = 0;
     this.exec(op);
+    this.wmode = W_NONE;
+    switch (REGS[op]) {
+      case R_LDA: if (m8) t[TAG_A] = this.readTag(); else { t[TAG_A] = this.readTag(2); t[TAG_A + 1] = this.readTag(); } return;
+      case R_LDX: this.loaded(TAG_X, x8); return;
+      case R_LDY: this.loaded(TAG_Y, x8); return;
+      case R_TAX: this.moved(TAG_A, TAG_X, x8); return;
+      case R_TAY: this.moved(TAG_A, TAG_Y, x8); return;
+      case R_TXA: this.moved(TAG_X, TAG_A, m8); return;
+      case R_TYA: this.moved(TAG_Y, TAG_A, m8); return;
+      case R_TXY: this.moved(TAG_X, TAG_Y, x8); return;
+      case R_TYX: this.moved(TAG_Y, TAG_X, x8); return;
+      case R_XBA: { const lo = t[TAG_A]; t[TAG_A] = t[TAG_A + 1]; t[TAG_A + 1] = lo; return; }
+      case R_NOA: t[TAG_A] = t[TAG_A + 1] = -1; return;
+      case R_NOX: t[TAG_X] = t[TAG_X + 1] = -1; return;
+    }
+    // anything else: a register it changed (arithmetic, increments, block moves) has no source any more – both
+    // bytes of a 16-bit one, computed as one value; one left as it was keeps it
+    if (this.a !== a0) { if (m8 && !((this.a ^ a0) & 0xff00)) t[TAG_A] = -1; else t[TAG_A] = t[TAG_A + 1] = -1; }
+    this.changed(TAG_X, this.x, x0);
+    this.changed(TAG_Y, this.y, y0);
   }
 
   exec(op: number): void {
