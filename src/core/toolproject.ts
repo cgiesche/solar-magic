@@ -20,10 +20,12 @@ export interface ToolFormat<L> {
   keeps(rel: string): boolean; // a file of a folder (relative to its list.txt) that belongs to the project
   hasEntries(list: L): boolean;
   build(rom: Rom, p: ToolProject<L>): { source: PatchSource; warnings?: string[] };
-  // run before a save, reading what the save changes; the function it returns runs once the patch went in
-  // (removed: taken out, the project being empty) and gives the save's result
-  around?(rom: Rom, p: ToolProject<L>): (r: ApplyResult, removed: boolean) => ApplyResult;
+  // runs before a save, reading what the save changes; returns what runs once the patch went in (removed:
+  // taken out, the project being empty) and gives the save's result
+  beforeSave?(rom: Rom, p: ToolProject<L>): AfterSave;
 }
+
+export type AfterSave = (r: ApplyResult, removed: boolean) => ApplyResult;
 
 export interface ToolStore<L> {
   entry(rom: Rom): PatchEntry | null;
@@ -36,6 +38,7 @@ export interface ToolStore<L> {
 
 const enc = new TextEncoder();
 const dec = new TextDecoder();
+const done = (warnings: string[] = []): ApplyResult => ({ ok: true, errors: [], warnings, prints: [] });
 const fail = (err: unknown): ApplyResult => ({ ok: false, errors: [err instanceof Error ? err.message : String(err)], warnings: [], prints: [] });
 
 // the files of a zip by their paths ('/' separated), without folders and macOS's metadata
@@ -79,10 +82,10 @@ export function toolStore<L>(f: ToolFormat<L>): ToolStore<L> {
   const save = (rom: Rom, p: ToolProject<L>): ApplyResult => {
     const e = entry(rom);
     try {
-      const after = f.around?.(rom, p) ?? ((r) => r);
+      const after: AfterSave = f.beforeSave?.(rom, p) ?? ((r) => r);
       // without entries it keeps its files (to assign them again); without files too it is removed
       if (!f.hasEntries(p.list) && ![...p.files.keys()].some((k) => k !== 'list.txt')) {
-        return e ? after({ ok: true, errors: [], warnings: uninstallPatch(rom, e.id), prints: [] }, true) : { ok: true, errors: [], warnings: [], prints: [] };
+        return e ? after(done(uninstallPatch(rom, e.id)), true) : done();
       }
       const b = f.build(rom, p);
       const r = e ? reapplyPatch(rom, e.id, b.source) : applyPatch(rom, b.source);

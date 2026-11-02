@@ -255,7 +255,7 @@ const BOWSIE: ToolFormat<BowsieEntry[]> = {
   keeps: (rel) => rel !== 'list.txt',
   hasEntries: (l) => l.length > 0,
   build: (_rom, p) => ({ source: buildBowsiePatch(p).src }),
-  around: rewriteOwSprites,
+  beforeSave: rewriteOwSprites,
 };
 
 // the ROM's overworld sprites project; saving assembles it (replacing an installed one), a project without sprites

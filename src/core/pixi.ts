@@ -69,30 +69,31 @@ const dirOf = (p: string) => (p.includes('/') ? p.slice(0, p.lastIndexOf('/') + 
 // ---------------------------------------------------------------- list.txt
 
 // the entries of a list.txt with their file as written (relative to the folder of their type); a bad line
-// throws (strict) or is left out
+// throws (strict) or is skipped, with the lines of an unknown section
 function listLines(text: string, strict: boolean): PixiEntry[] {
   const out: PixiEntry[] = [];
-  let section: SpriteFolder = 'sprites';
+  let section: SpriteFolder | null = 'sprites';
   text.split(/\r?\n/).forEach((raw, i) => {
     const line = raw.replace(/;.*$/, '').trim();
     if (!line) return;
-    const err = (m: string) => { if (strict) throw new Error(`list.txt line ${i + 1}: ${m}`); };
+    const skipOrThrow = (m: string) => { if (strict) throw new Error(`list.txt line ${i + 1}: ${m}`); };
     const head = /^([A-Z]+):$/i.exec(line);
     if (head) {
-      const k = SECTION[head[1].toUpperCase()];
-      if (k) section = k; else err(`Unknown section “${head[1]}:”`);
+      section = SECTION[head[1].toUpperCase()] ?? null;
+      if (!section) skipOrThrow(`Unknown section “${head[1]}:”`);
       return;
     }
-    if (/^[0-9a-f]+:[0-9a-f]+\s/i.test(line)) return err('Per-level sprites (level:number) are not supported');
+    if (!section) return;
+    if (/^[0-9a-f]+:[0-9a-f]+\s/i.test(line)) return skipOrThrow('Per-level sprites (level:number) are not supported');
     const m = /^([0-9a-f]{1,2})\s+(.+?)(?:\s+(display|nodisplay))?$/i.exec(line);
-    if (!m) return err(`Unrecognized entry “${line}”`);
+    if (!m) return skipOrThrow(`Unrecognized entry “${line}”`);
     const num = parseInt(m[1], 16);
     const kind = section === 'sprites' ? levelKind(num) : section;
     const [lo, hi] = numberRange(kind);
-    if (num < lo || num > hi) return err(`Number ${m[1]} is outside ${lo.toString(16).toUpperCase()}–${hi.toString(16).toUpperCase()}`);
+    if (num < lo || num > hi) return skipOrThrow(`Number ${m[1]} is outside ${lo.toString(16).toUpperCase()}–${hi.toString(16).toUpperCase()}`);
     const file = m[2].trim();
     const isCfg = /\.(cfg|json)$/i.test(file);
-    if (section === 'sprites' ? !isCfg : !/\.asm$/i.test(file)) return err(section === 'sprites' ? `“${file}”: sprites need a .cfg or .json file` : `“${file}”: an .asm file is expected here`);
+    if (section === 'sprites' ? !isCfg : !/\.asm$/i.test(file)) return skipOrThrow(section === 'sprites' ? `“${file}”: sprites need a .cfg or .json file` : `“${file}”: an .asm file is expected here`);
     out.push({ kind, num, file });
   });
   return out;
@@ -425,7 +426,7 @@ const PIXI: ToolFormat<PixiEntry[]> = {
   keeps: (rel) => /^(sprites|shooters|generators|cluster|extended|misc_sprites|routines)\//.test(rel),
   hasEntries: (l) => l.length > 0,
   build: (_rom, p) => ({ source: buildPixiPatch(p) }),
-  around: rewriteLevels,
+  beforeSave: rewriteLevels,
 };
 
 // the ROM's custom sprites project (a PIXI folder, maybe one level down). Saving assembles it, levels whose

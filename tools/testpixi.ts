@@ -71,7 +71,7 @@ check(old.bytes === 0 && old.bytesExtra === 0, 'old cfg (assembler byte): no ext
 
 // list.txt: one parser – strict for a project, a package's list read as far as it is valid
 {
-  const text = '10 foo.cfg ; a comment\nC2 gun.json nodisplay\nbad line\n00:05 per.cfg\nCLUSTER:\n03 cl.asm\n';
+  const text = '10 foo.cfg ; a comment\nC2 gun.json nodisplay\nbad line\n00:05 per.cfg\nCLUSTER:\n03 cl.asm\nFOO:\n04 foo.asm\n';
   let threw = false;
   try { parsePixiList(text); } catch { threw = true; }
   check(threw, 'strict list: a bad line throws');

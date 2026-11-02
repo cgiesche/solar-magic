@@ -231,7 +231,7 @@ _Avoid_: redundant patch, built-in patch (that is an editor patch)
 
 **Tool project**:
 The ROM's project of one community tool – UberASM Tool, GPS (blocks), PIXI (sprites), BOWSIE (overworld sprites): the files in the tool's layout with its list.txt, stored as the sources of the one patch built from them (core/toolproject.ts, an adapter per tool for its list and build). Saving builds and applies it anew; one without entries keeps its files, one without files too removes the patch. Parts of packages go into it; the tool's tab edits it.
-_Avoid_: tool folder (that is the upload's), tool patch
+_Avoid_: tool patch, tool folder (for the ROM's project)
 
 **Part**:
 One typed piece of a package: a patch, an UberASM file, a block, a sprite, a song, a sound effect or a graphics part. A package's kind is simply the set of its parts. Which part a file belongs to is decided per file (folder, then content, then extension), never by which other files are in the upload.

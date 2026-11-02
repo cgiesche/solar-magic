@@ -139,7 +139,7 @@ const GPS: ToolFormat<BlockAssign[]> = {
   keeps: (rel) => /^(blocks|routines|callisto)\/|^callisto\.asm$/.test(rel),
   hasEntries: (l) => l.length > 0,
   build: (rom, p) => ({ source: buildBlockPatch(p, uberFreeRam(rom)) }),
-  around: (rom, p) => (r, removed) => enterBlocks(rom, p, r, removed),
+  beforeSave: (rom, p) => (r, removed) => enterBlocks(rom, p, r, removed),
 };
 
 // the ROM's blocks project (a GPS folder, maybe one level down). Saving assembles the blocks and enters
