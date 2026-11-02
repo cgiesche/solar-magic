@@ -675,6 +675,8 @@ button.danger:hover:not(:disabled) { border-color: var(--danger); }
 .at-pal.sel { outline: 2px solid #fff; }
 .at-pal.in { outline: 2px solid #ffb000; outline-offset: -1px; }
 .at-palgrid.rot { user-select: none; }
+/* a color the game itself keeps setting (on a submap): crossed */
+.at-pal.game { background-image: linear-gradient(to top right, transparent calc(50% - 1px), #ff4d4d calc(50% - 1px), #ff4d4d calc(50% + 1px), transparent calc(50% + 1px)) !important; }
 .at-rot-strip { display: flex; height: 40px; max-width: 480px; flex: 1; border: 1px solid var(--border); border-radius: 4px; overflow: hidden; }
 .tp { display: flex; flex-direction: column; gap: 6px; }
 .tp-row { display: flex; flex-direction: column; gap: 3px; padding: 6px 8px; border: 1px solid var(--border); border-radius: 4px; }

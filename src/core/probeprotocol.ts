@@ -18,6 +18,7 @@ import type { RunStates } from './blockprobe.ts';
 import type { SizeSpec } from './objresize.ts';
 import type { Prefab } from './prefabs.ts';
 import type { PrefabSkip } from './prefabplaces.ts';
+import type { OwTriggerSwitches } from './owanimview.ts';
 
 // a probe in tileset ts: what a Map16 tile does, how Mario collides with it, what a sprite does, Mario's
 // run speeds, the scroll bands in a level of that mode and vertical scroll setting
@@ -66,7 +67,8 @@ export type ProbeReply = ProbeDone | KindsDone | ScanDone | CameraDone | Learned
 // is loaded with), what the layer 2 scroll settings do in a level (l2scroll.ts), what Mario does on each overworld
 // layer 1 tile and how path tiles move him (owpaths.ts), the prefab suggestions (prefabsuggest.ts; open: the open level as edited) and the boxes
 // of objects at sizes (objresize.ts; layer2Pointer: the level's layer 2 objects as the probe loads take them); the
-// overworld's map at an event progress (overworld.ts overworldMapJob), the submaps' views (owevents.ts submapViews),
+// overworld's map at an event progress (overworld.ts overworldMapJob), it with the event triggers of its animations
+// switched and the colors the game keeps setting there (owanimview.ts), the submaps' views (owevents.ts submapViews),
 // the overworld sprites' images at a map and event progress (owsprites.ts owSpriteImages) and the save at an event
 // progress (owprogress.ts progressSaves), layer 1 as after an event without its layer 1 changes (owevents.ts
 // layer1Without); whether the game draws the editor's messages (messagedraw.ts messageRoutine); a level's game BG as
@@ -94,6 +96,8 @@ export type LearnJob =
   | { kind: 'suggest'; levels: number[]; open?: Level }
   | { kind: 'sizes'; level: KindLevel; layer2Pointer: number; specs: SizeSpec[] }
   | { kind: 'owMap'; map: number; progress: number; special?: boolean }
+  | { kind: 'owTriggers'; map: number; progress: number; special: boolean; switches: OwTriggerSwitches }
+  | { kind: 'owGameColors'; map: number; progress: number; special: boolean }
   | { kind: 'owViews' }
   | { kind: 'owSprites'; map: number; progress: number }
   | { kind: 'owCustom'; map: number; progress: number }
@@ -150,6 +154,8 @@ export const LEARN_KINDS: { [K in LearnJob['kind']]: { keep: Keep; picture: bool
   suggest: { keep: false, picture: false },
   sizes: { keep: false, picture: false },
   owMap: { keep: 'memory', picture: true, boot: false },
+  owTriggers: { keep: 'memory', picture: true, boot: false },
+  owGameColors: { keep: 'memory', picture: true, boot: false },
   owViews: { keep: 'memory', picture: true, boot: false },
   owSprites: { keep: 'memory', picture: true, boot: false },
   owCustom: { keep: 'memory', picture: true, boot: false },
@@ -179,7 +185,7 @@ export type LearnLane =
   | 'sprites' | 'variants' | 'bytes' | 'spritemem' | 'animated' | 'layer3' | 'l2' | 'lt' | 'uses' | 'arcs' | 'thumbs'
   | 'placement' | 'sizes' | 'prefab-suggest' | 'msgr' | 'level-png' | 'level-images' | 'gamebg' | 'prefab-places'
   | 'breakup' | 'slippery' | 'otab'
-  | 'ow' | 'owpick' | 'owpk1' | 'owsh' | 'owreach' | 'owrw' | 'owlw' | 'owps' | 'owv' | 'ows' | 'owl' | `owc${number}`;
+  | 'ow' | 'owpick' | 'owpk1' | 'owsh' | 'owreach' | 'owrw' | 'owlw' | 'owps' | 'owv' | 'owt' | 'owgc' | 'ows' | 'owl' | `owc${number}`;
 
 // what the probe client shows as busy: the probes, the tasks, the learn jobs' lanes
 export type ProbeBusyKey = 'probe' | TaskType | LearnLane;

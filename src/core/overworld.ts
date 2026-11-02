@@ -860,11 +860,11 @@ export class OverworldLoads {
   }
   // the emulator's console as right after loading map `map` at event progress `progress` (to run the game on); the
   // load keeps it from the first time it is asked for (taken while the console is still right after the load, else
-  // loaded again)
-  restore(map: number, progress: number): void {
-    const k = this.load(map, progress), emu = this.emu;
+  // loaded again). special: after the special world (OverworldEmulator.load)
+  restore(map: number, progress: number, special = false): void {
+    const k = this.load(map, progress, true, special), emu = this.emu;
     if (k.state) { emu.restore(k.state); return; }
-    k.state = emu.stateAfter(k.r) ?? emu.stateAfter(emu.loadRecorded(map, progress).result)!;
+    k.state = emu.stateAfter(k.r) ?? emu.stateAfter(emu.loadRecorded(map, progress, special).result)!;
   }
   // `make`'s result from the loads it asks for (`load`, or restore to run the game on), kept under `key` for `of`
   // (one per key) while the ROM edits since changed no byte it read: the loads', the frames it runs on from them

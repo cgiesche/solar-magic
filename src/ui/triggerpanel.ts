@@ -1,7 +1,8 @@
 // The ExAnimation triggers of the current level (extrigger.ts): every trigger its slots and the global ones
 // use, switched for the view and test play (the level loads, its Trigger Init sets its own, then these are
 // set and the game's animation code runs), each with its RAM, an ASM line that sets it and the slots using it.
-// The full panel sits in the Animations tab; the View menu switches the same (triggerMenu).
+// The full panel sits in the Animations tab; the View menu switches the same (triggerMenu). A submap's event triggers
+// have their own panel (owTriggerPanel).
 
 import type { App } from './app.ts';
 import { h, toast, hexInput } from './dom.ts';
@@ -10,6 +11,8 @@ import { hex } from '../core/names.ts';
 import {
   triggerRam, switchName, slotName, isCustom, isManual, isOneShot, ALL_SWITCHES, CUSTOM, MANUAL, ONE_SHOT, type SlotRef, type TriggerView,
 } from '../core/extrigger.ts';
+import { isEventTrigger, eventTriggerOf, kindOf, triggerName, type ExList } from '../core/exanim.ts';
+import { eventTriggerState } from '../core/owanimview.ts';
 
 // the switches shown: those the level's and the global slots (and Trigger Inits) use, and those the view sets
 export function shownSwitches(app: App): Map<number, SlotRef[]> {
@@ -91,4 +94,55 @@ export function triggerMenu(app: App): MenuItem[] {
       : { label: `${switchName(sw)}${isOneShot(sw) ? ' (fire)' : ''}`, title: `View and test play: ${toggleTitle(sw).toLowerCase()}`, checked: () => !!switchState(app, sw), onToggle: (v) => setSwitch(app, sw, v) }),
     ...(used.length ? [] : [{ label: 'None used in this level', onClick: () => {}, disabled: () => true }]),
   ];
+}
+
+// The overworld's part (a submap as the graphics workspace's target, #260): the event triggers 01–08 (Event Manual
+// 8–F) the submap's and the overworld global list's slots wait for or their Trigger Inits give an event, each with its
+// event and whether that is passed at the workspace's event progress (read from the console after the submap's load:
+// owanimview.ts eventTriggerState), switched for the map preview only (holds / doesn't / as the progress has it);
+// never saved, test play and the game go by the events.
+export interface OwTriggers {
+  lists: [submap: ExList | null, global: ExList | null];
+  loaded: Uint8Array | null; // the WRAM after the submap's load, null while it is emulated
+  progress: number;
+  switched: ReadonlyMap<number, boolean>;
+  pending: boolean; // the map with the switched triggers is still emulated
+  switchTrigger(t: number, holds: boolean | null): void;
+  reset(): void;
+  openSlot(r: SlotRef): void;
+}
+export function owTriggerPanel(p: OwTriggers): HTMLElement {
+  const used = new Map<number, SlotRef[]>();
+  p.lists.forEach((l, k) => {
+    if (!l) return;
+    for (const [slot, e] of [...l.slots].sort((a, b) => a[0] - b[0])) {
+      if (!isEventTrigger(e.trigger) || !kindOf(e.type)) continue;
+      if (!used.has(e.trigger)) used.set(e.trigger, []);
+      used.get(e.trigger)!.push({ global: k === 1, slot });
+    }
+    for (const n of l.manual.keys()) { const t = eventTriggerOf(n); if (isEventTrigger(t) && !used.has(t)) used.set(t, []); }
+  });
+  for (const t of p.switched.keys()) if (!used.has(t)) used.set(t, []);
+  const box = h('div', { class: 'tp' }, h('div', { class: 'panel-title' }, 'Triggers', h('span', { class: 'hint' }, 'map preview only')));
+  if (!used.size) {
+    box.append(h('p', { class: 'hint' }, 'No animation of this submap or the overworld global list waits for an event (Event Manual 8–F). Your code\'s triggers (custom, manual) are set by it in the game.'));
+    return box;
+  }
+  box.append(h('p', { class: 'hint' }, `The map is loaded at event progress ${p.progress} (the events before it passed). An event trigger holds while the event its Trigger Init gives is passed; switched here, the map shows its slots as then – the events and the ROM stay as they are.${p.pending ? ' The map is being emulated …' : ''}`));
+  for (const [t, slots] of [...used].sort((a, b) => a[0] - b[0])) {
+    const st = p.loaded ? eventTriggerState(p.loaded, t) : null, sw = p.switched.get(t);
+    const at = !st ? 'the map is being loaded …' : st.event === null ? 'no event in the Trigger Init: never holds' : `event ${hex(st.event, 2)}, ${st.holds ? 'passed' : 'not passed'} at progress ${p.progress}`;
+    const sel = h('select', { title: 'For the map preview only: as the event progress has it, or switched' },
+      h('option', { value: '', selected: sw === undefined }, `as the progress${st ? ` (${st.holds ? 'holds' : 'doesn\'t hold'})` : ''}`),
+      h('option', { value: 'on', selected: sw === true }, 'holds'),
+      h('option', { value: 'off', selected: sw === false }, 'doesn\'t hold'));
+    sel.addEventListener('change', () => p.switchTrigger(t, sel.value === '' ? null : sel.value === 'on'));
+    box.append(h('div', { class: `tp-row${sw ?? st?.holds ? ' on' : ''}` },
+      h('div', { class: 'row' }, h('b', null, triggerName(t, true)), h('span', { class: 'spacer' }), sel),
+      h('div', { class: 'hint' }, at),
+      h('div', { class: 'gt-users' }, h('span', { class: 'hint' }, slots.length ? 'used by' : 'no slot uses it'),
+        slots.map((r) => h('a', { href: '#', class: 'mono', title: 'Open the slot', onclick: (e: Event) => { e.preventDefault(); p.openSlot(r); } }, slotName(r, true))))));
+  }
+  if (p.switched.size) box.append(h('button', { title: 'Every event trigger as the event progress has it', onclick: () => p.reset() }, 'Reset'));
+  return box;
 }

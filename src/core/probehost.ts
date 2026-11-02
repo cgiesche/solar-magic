@@ -40,6 +40,7 @@ import { SizeProbe, sizesJob } from './objresize.ts';
 import { OverworldEmulator, OverworldLoads, overworldMapJob, OW_LOADS_KEPT } from './overworld.ts';
 import { submapViewsJob, layer1WithoutJob, EventL1Copy } from './owevents.ts';
 import { owSpritesJob, owCustomJob, owLooksJob } from './owsprites.ts';
+import { owTriggerJob, owGameColorsJob } from './owanimview.ts';
 import { progressSaveJob } from './owprogress.ts';
 import { messageRoutineJob } from './messagedraw.ts';
 import { gameBgJob } from './tilemove.ts';
@@ -112,6 +113,8 @@ function learnJob(j: LearnJob, state: LearnState, show: (items: unknown[] | null
       return sizesJob(state.sizes.probe, j.specs);
     };
     case 'owMap': return () => overworldMapJob(owLoads(state), j.map, j.progress, !!j.special);
+    case 'owTriggers': return () => owTriggerJob(owLoads(state), j.map, j.progress, j.special, j.switches);
+    case 'owGameColors': return () => owGameColorsJob(owLoads(state), j.map, j.progress, j.special);
     case 'owViews': return () => submapViewsJob(owLoads(state));
     case 'owSprites': return () => owSpritesJob(owLoads(state), j.map, j.progress);
     case 'owCustom': return () => owCustomJob(owLoads(state), j.map, j.progress);

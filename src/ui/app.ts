@@ -71,6 +71,7 @@ import { gameBgKey } from '../core/tilemove.ts';
 import { type PathKind, type PathShapes, type LevelTileTest, levelTileTest } from '../core/owpaths.ts';
 import type { RevealWalkSkips } from '../core/revealwalk.ts';
 import { OW_EVENTS, type OwRender } from '../core/overworld.ts';
+import type { OwTriggerSwitches } from '../core/owanimview.ts';
 import type { Rect } from '../core/owevents.ts';
 import type { OwSpriteView } from '../core/owsprites.ts';
 import type { ProgressSave } from '../core/owprogress.ts';
@@ -1146,6 +1147,20 @@ export class App {
   overworldMap(map: number, progress: number, done: (r: OwRender) => void, dialog?: { lane: LearnLane; failed: () => void }, special = false): OwRender | undefined {
     return this.probes.learn<OwRender>(`owm1:${map}${special ? ':special' : ''}`, { kind: 'owMap', map, progress, ...(special ? { special } : {}) },
       { lane: dialog?.lane ?? 'ow', urgent: !!dialog, failed: dialog?.failed, input: { progress }, replace: true, label: 'Overworld', done });
+  }
+  // Map `map` at event progress `progress` (special: after the special world) with the event triggers 01–08 of its
+  // animations switched for the graphics workspace's preview (owanimview.ts owTriggerRender), learned in the probe
+  // worker and kept in memory while the ROM bytes it read are unchanged: undefined while it runs (a new request drops
+  // the one still waiting), then `done` is called
+  overworldTriggers(map: number, progress: number, special: boolean, switches: OwTriggerSwitches, done: (r: OwRender) => void): OwRender | undefined {
+    return this.probes.learn<OwRender>(`owt1:${map}${special ? ':special' : ''}`, { kind: 'owTriggers', map, progress, special, switches },
+      { lane: 'owt', input: { progress, switches }, replace: true, label: 'Overworld animations', done });
+  }
+  // the colors the game keeps setting on map `map` at event progress `progress` (owanimview.ts owGameColors), learned
+  // and kept as overworldTriggers
+  overworldGameColors(map: number, progress: number, special: boolean, done: (c: number[]) => void): number[] | undefined {
+    return this.probes.learn<number[]>(`owgc1:${map}${special ? ':special' : ''}`, { kind: 'owGameColors', map, progress, special },
+      { lane: 'owgc', input: { progress }, replace: true, label: 'Overworld colors', done });
   }
   // layer 1 as after event e without its layer 1 changes (owevents.ts layer1Without: what a layer 1 stroke painted on
   // the event is compared with), learned in the probe worker and kept in memory while the ROM bytes it read are

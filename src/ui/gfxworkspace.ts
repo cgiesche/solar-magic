@@ -57,8 +57,11 @@ export class LevelPreview {
   hint = '';
   private app: App;
   // a submap shown instead of the level: its map at the event progress (its load, the image drawn from it; null while
-  // it is emulated)
-  private ow: { submap: number; progress: number; special: boolean; r: OwRender | null; img: Uint32Array | null; fresh: boolean } | null = null;
+  // it is emulated); switched: the console with the event triggers switched (null: none switched, or still emulated)
+  private ow: { submap: number; progress: number; special: boolean; r: OwRender | null; switched: OwRender | null; img: Uint32Array | null; fresh: boolean } | null = null;
+  // the event triggers 01–08 of the submap's animations switched for the preview (holds or not; the others as the
+  // event progress has them): the Animations tab's, never saved; kept while the submap stays
+  private switches = new Map<number, boolean>();
   // called when the submap's load came (it shows the ROM as it is now)
   private mapListeners: (() => void)[] = [];
   onMap(fn: () => void): void { this.mapListeners.push(fn); }
@@ -96,7 +99,8 @@ export class LevelPreview {
   // shows submap `map` at event progress `progress` (null: the level)
   showSubmap(t: WsTarget): void {
     const was = this.ow?.submap;
-    this.ow = t.submap === null ? null : { submap: t.submap, progress: t.progress, special: !!t.special, r: null, img: null, fresh: false };
+    if (t.submap !== was) this.switches.clear();
+    this.ow = t.submap === null ? null : { submap: t.submap, progress: t.progress, special: !!t.special, r: null, switched: null, img: null, fresh: false };
     this.title.textContent = this.ow ? `${MAP_NAMES[this.ow.submap]} (overworld${this.ow.special ? ', after the special world' : ''})` : 'Level preview';
     if (this.ow) this.loadMap();
     else this.update();
@@ -107,7 +111,8 @@ export class LevelPreview {
     const r = this.app.overworldMap(o.submap, o.progress, (x) => {
       if (this.ow !== o) return;
       const first = !o.img;
-      this.drawMap(o, x);
+      o.r = x;
+      this.loadSwitched(o);
       o.fresh = true;
       for (const fn of this.mapListeners) fn();
       this.update();
@@ -116,11 +121,43 @@ export class LevelPreview {
       if (first) this.scrollToSubmap();
     }, undefined, o.special);
     o.fresh = !!r;
-    if (r) this.drawMap(o, r);
+    if (r) { o.r = r; this.loadSwitched(o); }
     this.update();
   }
+  // the map with the switched triggers (as loaded while it is emulated, or none is switched)
+  private loadSwitched(o: NonNullable<LevelPreview['ow']>): void {
+    o.switched = null;
+    const switches = [...this.switches].sort((a, b) => a[0] - b[0]), key = JSON.stringify(switches);
+    if (switches.length) {
+      const t = this.app.overworldTriggers(o.submap, o.progress, o.special, switches, (x) => {
+        // (not when the switches changed since: the map they were switched for is no longer asked for)
+        if (this.ow !== o || JSON.stringify([...this.switches].sort((a, b) => a[0] - b[0])) !== key) return;
+        o.switched = x;
+        this.drawMap(o, x);
+        for (const fn of this.mapListeners) fn();
+        this.update();
+      });
+      if (t) o.switched = t;
+    }
+    this.drawMap(o, o.switched ?? o.r!);
+  }
+  // event trigger t (01–08) switched for the preview: holds or not, null: as the event progress has it
+  switchTrigger(t: number, holds: boolean | null): void {
+    if (holds === null) this.switches.delete(t); else this.switches.set(t, holds);
+    this.switchesChanged();
+  }
+  // every event trigger as the event progress has it
+  resetTriggers(): void {
+    this.switches.clear();
+    this.switchesChanged();
+  }
+  private switchesChanged(): void {
+    if (this.ow?.r) { this.loadSwitched(this.ow); this.update(); }
+    for (const fn of this.mapListeners) fn();
+  }
+  // the triggers switched (trigger: holds)
+  get switched(): ReadonlyMap<number, boolean> { return this.switches; }
   private drawMap(o: NonNullable<LevelPreview['ow']>, r: OwRender): void {
-    o.r = r;
     // (layer 2 of the loaded region as the game shows it, in readL2's order)
     const region = o.submap > 0 ? 1 : 0, l2 = new Uint16Array(0x2000);
     l2.set(gameL2(r), region * 0x1000);
@@ -150,9 +187,16 @@ export class LevelPreview {
   submapRender(): OwRender | null {
     return this.ow?.fresh ? this.ow.r : null;
   }
-  // the colors of what is shown (CGRAM as loaded)
+  // the console the submap's image is drawn from: after its load, or run on from there with the triggers switched
+  // (switchTrigger; as loaded while that is emulated); null as submapRender
+  submapShown(): OwRender | null {
+    return this.ow?.fresh ? this.ow.switched ?? this.ow.r : null;
+  }
+  // whether the image shows the triggers switched (false while that is emulated, or none is switched)
+  get switchesShown(): boolean { return !!this.ow?.switched; }
+  // the colors of what is shown (CGRAM as loaded, with the triggers switched)
   get cgram(): Uint8Array {
-    return this.ow ? this.ow.r?.cgram ?? new Uint8Array(0x200) : this.app.render.cgram;
+    return this.ow ? (this.ow.switched ?? this.ow.r)?.cgram ?? new Uint8Array(0x200) : this.app.render.cgram;
   }
   // the pixel at (px, py) of what is shown (RGBA) and the backdrop color there
   pixel(px: number, py: number): { rgba: number; backdrop: boolean } {
@@ -199,7 +243,8 @@ export class LevelPreview {
   // the 8x8 tile of the submap shown at (px, py) (overworld.ts owTileAt; the load the image is drawn from), null: none
   // there, a level shown or no map yet
   owTileAt(px: number, py: number): { word: number; layer: 1 | 2 } | null {
-    return this.ow?.r ? owTileAt(this.ow.r, px, py) : null;
+    const r = this.ow?.switched ?? this.ow?.r;
+    return r ? owTileAt(r, px, py) : null;
   }
 
   setHint(s: string): void {

@@ -152,6 +152,7 @@ export const RAM = {
   lifeExchange: 0x1b87, // the life exchange window of a 2-player game (set when L/R opens it, counts while it shows)
   owHardcodedPath: 0x1b78, // set while Mario walks one of the game's 5 hardcoded paths ($049369)
   owEventStep: 0x1deb, // 16-bit: the step of the event the overworld shows
+  owLightningTimer: 0x1ffc, // the frames (halved) until the game's next lightning flash on the overworld ($04F719)
   fileLevelFlags: 0x1f49, // the save file's copy of levelFlags, filled with the initial flags when a new file is made
   playerIndex: 0x0db3, // 0 Mario, 1 Luigi
   brightness: 0x0dae, mosaicDir: 0x0daf, mosaic: 0x0db0, // the screen's fade (the next game mode's start)
@@ -202,6 +203,8 @@ export const LM_RAM_BLOCK: [number, number] = [0x7fc000, 0x100];
 // shares with Lunar Magic, as Lunar Magic uses them ($7FC003-$7FC004 the frame counters, $7FC00A a submap's settings)
 export const EXANIM_OWN_RAM: [number, number] = [0x7fc05c, 4];
 export const EXANIM_SHARED_RAM = [0x7fc003, 0x7fc004, 0x7fc00a] as const;
+// of them, the submap's settings the engine runs with (exanim.ts NO_GAME_TILES …, read from the ROM at a load)
+export const EXANIM_OW_SETTINGS = 0x7fc00a;
 // Lunar Magic's conditional Direct Map16 flags (cdm16.ts), which community code sets: 128 bits, low to high
 export const CDM16_FLAGS: [number, number] = [0x7fc060, 16];
 // Lunar Magic's ExAnimation RAM (extrigger.ts), which community code sets and reads: the manual frames (16 bytes),

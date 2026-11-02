@@ -4,7 +4,9 @@
 // repeated frames. The level preview plays the real result (the engine runs in the emulator).
 // With a submap as the workspace's target: the submap's list and the overworld's global one, the submap's settings
 // (Lunar Magic's overworld ExAnimation), drawn with what the submap's load left in VRAM and CGRAM; its triggers 01–08
-// are the overworld's event triggers.
+// are the overworld's event triggers, switched for the map preview in the trigger panel (owanimview.ts: the game run on
+// from the load with them switched); the colors the game itself keeps setting there (owanimview.ts owGameColors) are
+// marked where a color slot or rotation takes them; a click into the map picks a tile slot's target.
 
 import type { App } from '../app.ts';
 import type { Watch } from '../../core/romwatch.ts';
@@ -39,7 +41,8 @@ import {
 // what the tab draws with: the level's render, or the console after the submap's load
 type Shown = { vram: Uint8Array; cgram: Uint8Array; wram: Uint8Array; ppuRegs: Uint8Array };
 const NOTHING_SHOWN: Shown = { vram: new Uint8Array(0x10000), cgram: new Uint8Array(0x200), wram: new Uint8Array(0x20000), ppuRegs: new Uint8Array(0x40) };
-import { triggerPanel } from '../triggerpanel.ts';
+import { triggerPanel, owTriggerPanel } from '../triggerpanel.ts';
+import { eventTriggerState } from '../../core/owanimview.ts';
 
 const TILE_TYPES = [0x01, 0x02, 0x04, 0x08, 0x10, 0x11, 0x12, 0x03, 0x05, 0x06, 0x07, 0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e];
 const COLOR_TYPES = [0x14, 0x13, 0x15, 0x16, 0x17];
@@ -67,6 +70,7 @@ function triggerHint(t: number, rotation: boolean, ow: boolean): string {
   return '';
 }
 const ALT = 0x8000;
+const GAME_SETS = ' – the game itself sets it every frame on this submap';
 // the bytes of Anim graphic k (A–D), null: none yet
 const animBytes = (rom: Rom, k: number) => gfxBytes(rom, ANIM_FILE + k)?.data ?? null;
 
@@ -86,6 +90,13 @@ export function animLinks(ws: GfxWorkspace, own: { global: boolean; slot: number
 // a slot's frames at the trigger's limit (extrigger.ts maxFrames), said so
 const full = (x: ExSlot, cs: number[][], ow: boolean) => { const max = maxFrames(x.trigger, ow); if (cs.length < max) return false; toast(`At most ${max} frames`); return true; };
 const fmt = (v: number) => String(+v.toFixed(3));
+const colorName = (c: number) => `${hex(c >> 4, 1)}·${hex(c & 15, 1)}`;
+// ascending colors as runs: "6·D, 8·6–8·F"
+function colorRuns(colors: number[]): string {
+  const runs: number[][] = [];
+  for (const c of colors) { const r = runs.at(-1); if (r && r[1] === c - 1) r[1] = c; else runs.push([c, c]); }
+  return runs.map(([a, b]) => (a === b ? colorName(a) : `${colorName(a)}–${colorName(b)}`)).join(', ');
+}
 const speedName = (delay: number) => `${fmt(stepsPerSecond(delay))} steps per second`;
 // a rotation's colors as row·column, first–last
 const rangeName = (s: ExSlot) => {
@@ -160,14 +171,34 @@ export class AnimTab implements WsPanel {
   // what the tab draws with: the level as rendered, or the console after the submap's load (nothing while it is
   // emulated)
   private shown(): Shown {
-    return this.t.levelPreview ? this.app.render : this.ws.preview.submapRender() ?? NOTHING_SHOWN;
+    return this.t.levelPreview ? this.app.render : this.ws.preview.submapShown() ?? NOTHING_SHOWN;
+  }
+  // on a submap: whether event trigger t holds in the map preview (switched there, else as the event progress has it)
+  private eventHolds(t: number): boolean {
+    const r = this.ws.preview.submapRender();
+    return this.ws.preview.switched.get(t) ?? (!!r && eventTriggerState(r.wram, t).holds);
+  }
+  // on a submap: whether the slot's event trigger holds in the map preview
+  private slotHolds(s: ExSlot): boolean {
+    return this.ow && isEventTrigger(s.trigger) && this.eventHolds(s.trigger);
+  }
+  // the frame set a slot's previews show: on a submap the second while its event trigger holds in the map preview
+  private shownSet(s: ExSlot): number {
+    return this.secondSet(s.trigger) && this.slotHolds(s) ? 1 : 0;
+  }
+  // on a submap: the colors the game itself keeps setting there (owanimview.ts owGameColors), null while emulated
+  private gameColors(): Set<number> | null {
+    const m = this.t.at.submap, { progress, special } = this.ws.target;
+    if (!this.ow || m === null) return null;
+    const c = this.app.overworldGameColors(m, progress, !!special, () => { if (this.visible && this.ow) { this.buildDetail(); this.buildSide(); } });
+    return c ? new Set(c) : null;
   }
   private triggerName(t: number): string { return triggerNameOf(t, this.ow); }
   private secondSet(t: number): boolean { return secondSetOf(t, this.ow); }
   private secondSetName(t: number): string { return secondSetNameOf(t, this.ow); }
 
   previewHint(): string {
-    return this.t.levelPreview ? 'Click: take the Map16 tile under the mouse as target (top left quarter)' : '';
+    return this.t.levelPreview ? 'Click: take the Map16 tile under the mouse as target (top left quarter)' : 'Click: take the 8x8 tile under the mouse as a tile animation\'s target';
   }
 
   // a slot's key there: the list's
@@ -328,7 +359,10 @@ export class AnimTab implements WsPanel {
         scope(true, 'Overworld global', 'Animations that run on every submap (a submap can turn them off via “Play on submap …”)')));
       const key = `s${m}`;
       if (this.flagsLevel !== key) { this.flagsMenu = this.submapFlagsMenu(m, this.t.owner); this.flagsLevel = key; }
-      b.append(h('span', { class: 'spacer' }), this.flagsMenu!);
+      const n = this.ws.preview.switched.size;
+      b.append(h('span', { class: 'spacer' }),
+        h('button', { class: this.triggers ? 'active' : '', title: 'The event triggers of the submap\'s animations: their events, switched for the map preview', onclick: () => { this.triggers = !this.triggers; this.picking = null; this.build(); } }, `Triggers${n ? ` (${n} switched)` : ''}`),
+        this.flagsMenu!);
       return;
     }
     b.append(h('span', { class: 'hint' }, 'List'), h('span', { class: 'btn-group' },
@@ -609,6 +643,8 @@ export class AnimTab implements WsPanel {
       hint ? h('p', { class: 'hint' }, hint) : '',
       ram?.asm ? h('div', { class: 'tp-asm' }, h('code', { class: 'mono', title: `${ram.ram}: ${ram.what}` }, ram.asm),
         ow ? '' : h('a', { href: '#', title: 'Switch it in the preview; RAM and ASM of all triggers', onclick: (e: Event) => { e.preventDefault(); this.triggers = true; this.picking = null; this.build(); } }, 'Triggers')) : '',
+      ow && isEventTrigger(s.trigger) ? h('div', { class: 'hint' }, `In the map preview it ${this.eventHolds(s.trigger) ? 'holds' : 'doesn\'t hold'}${this.ws.preview.switched.has(s.trigger) ? ' (switched)' : ''} – `,
+        h('a', { href: '#', title: 'Its event; switch it for the map preview', onclick: (e: Event) => { e.preventDefault(); this.triggers = true; this.picking = null; this.build(); } }, 'Triggers')) : '',
       this.secondSet(s.trigger) && kind !== 'rotation' ? h('p', { class: 'hint' }, `Two frame sequences: top normally, bottom while “${this.secondSetName(s.trigger)}”.`) : '',
     ];
     d.append(
@@ -681,19 +717,20 @@ export class AnimTab implements WsPanel {
     );
     const held = this.heldColors(s);
     if (held?.length) {
-      const name = (c: number) => `${hex(c >> 4, 1)}·${hex(c & 15, 1)}`;
-      const runs: number[][] = [];
-      for (const c of held) { const r = runs.at(-1); if (r && r[1] === c - 1) r[1] = c; else runs.push([c, c]); }
-      const names = runs.map(([a, b]) => (a === b ? name(a) : `${name(a)}–${name(b)}`)).join(', ');
-      d.append(h('p', { class: 'warn-box' }, `In the game, ${held.length === 1 ? `color ${names} does` : `colors ${names} do`} not rotate: the game sets ${held.length === 1 ? 'it' : 'them'} itself every frame (seen in the emulated level).`));
+      const names = colorRuns(held);
+      d.append(h('p', { class: 'warn-box' }, `In the game, ${held.length === 1 ? `color ${names} does` : `colors ${names} do`} not rotate: the game sets ${held.length === 1 ? 'it' : 'them'} itself every frame (seen in the emulated ${this.ow ? 'submap' : 'level'}).`));
     }
     this.animate();
   }
 
   // the colors of a rotation that do not turn in the emulated level (the game sets them itself), found
   // in the background once per level render and slot; null until known or when it waits for its trigger
+  // (on a submap: those of the colors the game keeps setting there)
   private heldColors(s: ExSlot): number[] | null {
-    if (this.ow) return null; // (learned in the emulated level only)
+    if (this.ow) {
+      const g = this.gameColors(), { first, count } = rotationRange(s);
+      return g && Array.from({ length: Math.min(count, 256 - first) }, (_, i) => first + i).filter((c) => g.has(c));
+    }
     const app = this.app, { first, count } = rotationRange(s), delay = s.framesLess1 + 1;
     const key = `${this.global}:${app.level.number}:${this.sel}:${s.type}:${s.trigger}:${s.dest}:${delay}`;
     const hd = this.held;
@@ -734,16 +771,25 @@ export class AnimTab implements WsPanel {
       if (f === first && n === count) { mark(first, first + count - 1); return; }
       void this.editSlot((x) => setRotationRange(x, f, n), `Colors ${hex(f, 2)}–${hex(f + n - 1, 2)}`);
     };
+    const game = this.gameColors();
     for (let i = 0; i < 256; i++) {
       const v = pal[i];
-      const c = h('div', { class: 'at-pal', title: `Color ${hex(i >> 4, 1)}·${hex(i & 15, 1)}`, style: { background: `rgb(${v & 255},${(v >> 8) & 255},${(v >> 16) & 255})` },
+      const c = h('div', { class: `at-pal${game?.has(i) ? ' game' : ''}`, title: `Color ${colorName(i)}${game?.has(i) ? GAME_SETS : ''}`, style: { background: `rgb(${v & 255},${(v >> 8) & 255},${(v >> 16) & 255})` },
         onmousedown: (e: MouseEvent) => { if (e.button) return; e.preventDefault(); from = to = i; mark(i, i); window.addEventListener('mouseup', up); },
         onmouseenter: () => { if (from < 0) return; to = i; mark(...range()); } });
       cells.push(c);
       grid.append(c);
     }
     mark(first, first + count - 1);
-    box.append(h('div', { class: 'panel-title' }, 'Colors', h('span', { class: 'hint' }, 'drag over the palette (2–128 colors)')), grid);
+    box.append(h('div', { class: 'panel-title' }, 'Colors', h('span', { class: 'hint' }, 'drag over the palette (2–128 colors)')), grid, this.gameColorList(game));
+  }
+  // on a submap: the colors the game itself keeps setting there, as the pickers mark them
+  private gameColorList(game: Set<number> | null): HTMLElement | string {
+    if (!this.ow) return '';
+    if (!game) return h('div', { class: 'hint' }, 'The colors the game itself sets on this submap are being emulated …');
+    return h('div', { class: 'hint' }, game.size
+      ? `Crossed: the game itself sets ${colorRuns([...game].sort((a, b) => a - b))} every frame on this submap (Mario's colors, the level dots' 6·D and 7·D, the lightning's 4·7 where it is on; seen in the emulated submap) – an animation of them doesn't show.`
+      : 'The game itself sets no color of this submap every frame.');
   }
 
   // 8x8 tiles (VRAM numbers) a tile slot overwrites
@@ -782,7 +828,7 @@ export class AnimTab implements WsPanel {
       h('div', { class: 'panel-title at-step' }, '1 · Target', h('span', { class: 'hint' }, 'which 8x8 tiles are replaced')),
       h('div', { class: 'prop' }, h('label', null, 'Target'),
         h('span', { class: 'mono' }, `8x8 tile ${hex(t, 3)}`), slot ? h('span', { class: 'hint' }, ` ${slot.name}`) : '',
-        h('button', { class: this.picking === 'target' ? 'active' : '', title: this.t.levelPreview ? 'Click in the VRAM grid on the right or in the level preview' : 'Click in the VRAM grid on the right', onclick: () => { this.picking = this.picking ? null : 'target'; this.triggers = false; this.buildSide(); this.buildDetail(); } }, 'Choose target')),
+        h('button', { class: this.picking === 'target' ? 'active' : '', title: `Click in the VRAM grid on the right or in the ${this.t.previewName}`, onclick: () => { this.picking = this.picking ? null : 'target'; this.triggers = false; this.buildSide(); this.buildDetail(); } }, 'Choose target')),
       h('div', { class: 'hint' }, `${shape.w}×${shape.h} tiles`, slot ? h('span', null, ' · ', h('a', { href: '#', title: `Open ${gfxName(slot.file)} in the Graphics tab`, onclick: (e: Event) => { e.preventDefault(); this.ws.showGfx(slot.file, t - slot.first); } }, `view in ${gfxName(slot.file)}`)) : ''),
       this.ow ? this.mapUse(s)
         : users.length
@@ -852,9 +898,12 @@ export class AnimTab implements WsPanel {
     const back = s.type === 0x16 || s.type === 0x17;
     if (!back) {
       const c = s.dest & 0xff;
-      d.append(h('div', { class: 'prop' }, h('label', null, 'Color'), h('span', { class: 'mono' }, `${hex(c >> 4, 1)}·${hex(c & 15, 1)}`),
+      d.append(h('div', { class: 'prop' }, h('label', null, 'Color'), h('span', { class: 'mono' }, colorName(c)),
         h('button', { class: this.picking === 'target' ? 'active' : '', onclick: () => { this.picking = this.picking ? null : 'target'; this.triggers = false; this.buildSide(); this.buildDetail(); } }, 'Choose color')));
-      d.append(this.colorUsers(Array.from({ length: Math.min(count, 256 - c) }, (_, i) => c + i)));
+      const colors = Array.from({ length: Math.min(count, 256 - c) }, (_, i) => c + i), game = this.gameColors();
+      d.append(this.colorUsers(colors));
+      const hit = game ? colors.filter((x) => game.has(x)) : [];
+      if (hit.length) d.append(h('p', { class: 'warn-box' }, `In the game, the game itself sets ${hit.length === 1 ? 'this color' : 'these colors'} (${hit.map(colorName).join(', ')}) every frame on this submap (seen in the emulated submap): the animation's colors don't show.`));
     } else d.append(h('div', { class: 'hint' }, 'Shows wherever no layer draws (the back area).'));
     if (count > 1) { d.append(h('p', { class: 'hint' }, `This animation sets ${count} colors at once (from data) – not editable here yet.`)); return; }
     const cols = this.columns(s);
@@ -891,7 +940,19 @@ export class AnimTab implements WsPanel {
     const box = this.side;
     clear(box);
     const s = this.slot();
-    if (this.ow && !s) { box.append(h('p', { class: 'hint' }, 'The overworld\'s triggers are its events (Event Manual 8–F, their numbers in the list\'s Trigger Init) and those your code sets.')); return; }
+    if (this.ow && (this.triggers || !s)) {
+      const pv = this.ws.preview;
+      box.append(owTriggerPanel({
+        lists: [readList(this.app.rom, this.ref(false)), readList(this.app.rom, this.ref(true))],
+        loaded: pv.submapRender()?.wram ?? null, progress: this.ws.target.progress, switched: pv.switched,
+        pending: pv.switched.size > 0 && !pv.switchesShown,
+        // (the tab is built again once the preview has switched: onMap)
+        switchTrigger: (t, v) => pv.switchTrigger(t, v),
+        reset: () => pv.resetTriggers(),
+        openSlot: (r) => this.select(r.global, r.slot),
+      }));
+      return;
+    }
     if (this.triggers || !s) {
       box.append(triggerPanel(this.app, (r: SlotRef) => this.select(r.global, r.slot)));
       return;
@@ -899,14 +960,14 @@ export class AnimTab implements WsPanel {
     const kind = kindOf(s.type);
     if (kind === 'colors') {
       if (this.picking !== 'target') { box.append(h('p', { class: 'hint' }, 'Use “Choose color” to set the palette color that is animated.')); return; }
-      const pal = cgramToRGBA(this.shown().cgram);
+      const pal = cgramToRGBA(this.shown().cgram), game = this.gameColors();
       const grid = h('div', { class: 'at-palgrid' });
       for (let i = 0; i < 256; i++) {
         const v = pal[i];
-        grid.append(h('div', { class: `at-pal${(s.dest & 0xff) === i ? ' sel' : ''}`, title: `Color ${hex(i >> 4, 1)}·${hex(i & 15, 1)}`, style: { background: `rgb(${v & 255},${(v >> 8) & 255},${(v >> 16) & 255})` },
+        grid.append(h('div', { class: `at-pal${(s.dest & 0xff) === i ? ' sel' : ''}${game?.has(i) ? ' game' : ''}`, title: `Color ${colorName(i)}${game?.has(i) ? GAME_SETS : ''}`, style: { background: `rgb(${v & 255},${(v >> 8) & 255},${(v >> 16) & 255})` },
           onclick: () => { this.picking = null; void this.editSlot((x) => { x.dest = (x.dest & 0xff00) | i; }, `Color ${hex(i, 2)}`); } }));
       }
-      box.append(h('div', { class: 'panel-title' }, 'Choose color'), grid);
+      box.append(h('div', { class: 'panel-title' }, 'Choose color'), grid, this.gameColorList(game));
       return;
     }
     if (kind === 'rotation') { this.rotationPicker(box, s); return; }
@@ -1071,7 +1132,7 @@ export class AnimTab implements WsPanel {
     const vram = this.shown().vram;
     const slots = layerSlots(this.gfxSlots());
     const shape = shapeOf(s.type);
-    box.append(h('div', { class: 'panel-title' }, 'Choose target in VRAM'), h('div', { class: 'hint' }, `Click a tile (top left of the ${shape.w}×${shape.h} tiles).${this.ow ? '' : ' A click into the level preview works too.'}`));
+    box.append(h('div', { class: 'panel-title' }, 'Choose target in VRAM'), h('div', { class: 'hint' }, `Click a tile (top left of the ${shape.w}×${shape.h} tiles). A click into the ${this.t.previewName} works too.`));
     for (const sl of slots) {
       const c = this.sheet(128, (t) => vram.subarray((base + (sl.first + t) * 32) & 0xffff, ((base + (sl.first + t) * 32) & 0xffff) + 32), row);
       const t0 = this.targetTile(s) - sl.first;
@@ -1091,19 +1152,30 @@ export class AnimTab implements WsPanel {
   }
 
   private setTarget(t: number): void {
+    this.setTargetWord(this.charWord() + t * 16);
+  }
+  // the target at VRAM word address `w` (a tile of another layer's graphics than layer 1's: named by its address)
+  private setTargetWord(w: number): void {
     this.picking = null;
-    void this.editSlot((x) => { x.dest = (x.dest & ALT) | (this.charWord() + t * 16); }, `Target tile ${hex(t, 3)}`);
+    const t = (w - this.charWord()) >> 4;
+    void this.editSlot((x) => { x.dest = (x.dest & ALT) | (w & 0x7fff); }, t >= 0 && t < 0x400 ? `Target tile ${hex(t, 3)}` : `Target VRAM $${hex(w & 0x7fff, 4)}`);
   }
 
   previewClick(px: number, py: number): void {
     const s = this.slot();
-    if (!s || !this.t.levelPreview) return;
-    if (kindOf(s.type) === 'tiles') {
+    if (!s || kindOf(s.type) !== 'tiles') return;
+    if (this.t.levelPreview) {
       const m = this.ws.preview.tileAt(px, py);
       if (m < 0) return;
       const w = map16Source(this.app.rom, this.app.render).fg(m)[0]; // top left quarter
       this.setTarget(w & 0x3ff);
+      return;
     }
+    // the submap's map: the 8x8 tile shown there (layer 1's, else layer 2's), as a VRAM tile from its layer's graphics
+    const q = this.ws.preview.owTileAt(px, py), r = this.ws.preview.submapShown();
+    if (!q || !r) return;
+    const base = ((q.layer === 1 ? r.ppuRegs[0x0b] : r.ppuRegs[0x0b] >> 4) & 0x0f) << 12; // its VRAM word address
+    this.setTargetWord(base + (q.word & 0x3ff) * 16);
   }
 
   // advances every preview to the frame of the current tick
@@ -1116,10 +1188,12 @@ export class AnimTab implements WsPanel {
     for (const p of this.previews) {
       const s = l.slots.get(p.slot);
       if (!s) continue;
-      if (kindOf(s.type) === 'tiles') this.drawFrame(p.c, s, frameOf(s, 0));
-      else if (kindOf(s.type) === 'colors') { p.c.width = p.c.height = 1; const ctx = p.c.getContext('2d')!; const v = snesColorToRGBA(frameOf(s, 0) ?? 0); ctx.fillStyle = `rgb(${v & 255},${(v >> 8) & 255},${(v >> 16) & 255})`; ctx.fillRect(0, 0, 1, 1); }
+      // (on a submap the set the map preview shows)
+      const set = this.shownSet(s);
+      if (kindOf(s.type) === 'tiles') this.drawFrame(p.c, s, frameOf(s, set));
+      else if (kindOf(s.type) === 'colors') { p.c.width = p.c.height = 1; const ctx = p.c.getContext('2d')!; const v = snesColorToRGBA(frameOf(s, set) ?? 0); ctx.fillStyle = `rgb(${v & 255},${(v >> 8) & 255},${(v >> 16) & 255})`; ctx.fillRect(0, 0, 1, 1); }
       else {
-        const c = this.rotationColors(s, rotationStep(s.type, s.trigger, false));
+        const c = this.rotationColors(s, rotationStep(s.type, s.trigger, this.slotHolds(s)));
         p.c.width = c.length; p.c.height = 1;
         const ctx = p.c.getContext('2d')!;
         c.forEach((v, i) => { ctx.fillStyle = cssOf(v); ctx.fillRect(i, 0, 1, 1); });
