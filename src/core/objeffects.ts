@@ -24,8 +24,8 @@ function skipped(i: number): boolean {
 }
 
 // the test level with the objects (one per screen, as thumbs.ts places them) loaded; withOwners: which object
-// wrote which tile (LevelRender.touched, by the objects' index)
-export function effectLoad(emu: LevelEmulator, level: Level, objs: LevelObject[], withOwners = false): LevelRender {
+// wrote which tile (LevelRender.touched, by the objects' index); trace: what their routines read (LevelRender.trace)
+export function effectLoad(emu: LevelEmulator, level: Level, objs: LevelObject[], withOwners = false, trace = false): LevelRender {
   const placed = objs.map((o, i) => ({ ...o, uid: newUid(), x: i * 16 + 3, y: 12 }));
   const owners: number[] = [-1, -1, -1, -1, -1];
   const body = serializeObjects(placed, [], false, owners);
@@ -43,6 +43,7 @@ export function effectLoad(emu: LevelEmulator, level: Level, objs: LevelObject[]
     layer2Pointer: levelBgPointer(emu.rom, level),
     sprites: new Uint8Array([0, 0xff]),
     byteOwner,
+    trace,
   });
 }
 

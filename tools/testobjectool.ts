@@ -85,6 +85,7 @@ const extended = (): ObjThumb[] => renderObjectThumbs(rom, emu, loadLevel(rom, 0
   const listed = (ns: number[]) => ns.filter((n) => byKey.has(hx(n)));
   check(listed(range(0x98, 0xdf)).length === 72 && range(0x98, 0xdf).every((n) => byKey.get(hx(n))?.effect), `98–DF listed for what they do (${listed(range(0x98, 0xdf)).length}, ${Date.now() - t0} ms)`);
   check(!listed(range(0xe0, 0xff)).length, `E0–FF not listed (${listed(range(0xe0, 0xff)).map(hx)})`);
+  check(!thumbs.some((t) => t.placeholder), 'with ObjecTool\'s handler: no placeholders');
   // each sets its bit of ObjecTool's flags ($7FA400 on), some do more at once (UberASM's init)
   const flag = (n: number) => `$${(0x7fa400 + ((n - 0x98) >> 3)).toString(16).toUpperCase()} bit ${(n - 0x98) & 7}`;
   check(byKey.get('98')?.effect === `sets ${flag(0x98)}` && byKey.get('A4')?.effect === `sets ${flag(0xa4)}` && byKey.get('DF')?.effect === `sets ${flag(0xdf)}`,
@@ -135,14 +136,17 @@ const extended = (): ObjThumb[] => renderObjectThumbs(rom, emu, loadLevel(rom, 0
   check(name(0x98) === 'Enable Free Vertical Scroll' && objectTooltip(rom, 0, 0x98)?.startsWith('UberASM Object 98') === true && name(0xe0) === 'Extended object E0', 'removed: the baserom\'s names again');
 }
 
-// the baserom removed: its names are gone; 98–DF stay listed, now as what the game's own code draws for them
-// (door parts from $0DA6D1's table; #110 may hide those, then this check changes)
+// the baserom removed: its names are gone; 98–FF stay listed, without a custom object handler as placeholders –
+// the game's leftover pointers to $0DA6D1 (47/48's routine) would draw door parts from past its table (#110),
+// while 47 and 48 keep their tiles
 {
   const pkg = listPackages(rom).find((x) => x.name === 'baserom')!;
   await uninstallPackage(rom, pkg.id, blank);
   check(!listPackages(rom).length && name(0x98) === 'Extended object 98' && !objectTooltip(rom, 0, 0x98), `removed: no names (98: ${name(0x98)})`);
   const byKey = new Map(extended().map((t) => [t.key, t]));
-  check(range(0x98, 0xdf).every((n) => byKey.get(hx(n))?.w), 'listed by emulation: 98–DF draw tiles');
+  const odd = range(0x98, 0xff).filter((n) => { const t = byKey.get(hx(n)); return !t?.placeholder || t.w || t.effect; });
+  check(!odd.length, `98–FF placeholders, no tiles (${odd.map(hx)})`);
+  check([0x47, 0x48, 0x10, 0x97].every((n) => byKey.get(hx(n))?.w && !byKey.get(hx(n))?.placeholder), 'the game\'s own 10–97 drawn, 47/48 too');
 }
 
 process.exit(fail ? 1 : 0);

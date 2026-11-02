@@ -65,7 +65,7 @@ What the picker says about an object beyond its name: an installed package's Lun
 _Avoid_: description, object name
 
 **Object box**:
-How the editor shows an object that writes no tile when the level loads (objboxes.ts): a tile at its position with its number, on top of other objects' tiles, its name beside it while hovered or selected; it is grabbed, moved and deleted there. Editor-only, never in the ROM; the picker's thumbnail of such an object is the same box. Lunar Magic shows a placeholder tile for unused extended objects.
+How the editor shows an object that writes no tile when the level loads (objboxes.ts): a tile at its position with its number, on top of other objects' tiles, its name beside it while hovered or selected; it is grabbed, moved and deleted there. Editor-only, never in the ROM; the picker's thumbnail of such an object is the same box, and so is that of a custom extended object (98–FF) without a handler, whose load runs the game's leftover entry of its pointer table (on the clean game door parts, #110). Lunar Magic shows a placeholder tile for unused extended objects.
 _Avoid_: placeholder (Lunar Magic's), marker
 
 **Object group**:
