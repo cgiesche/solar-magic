@@ -28,7 +28,7 @@ import { parseSprites, spriteSizes, loadLevel, readSecondaryEntrance, writeSecon
 import { ExitGraph, isBlank, isOverworldExit } from './exitgraph.ts';
 import { NO_FREE_ENTRANCE } from './entrances.ts';
 import { saveLevel } from './save.ts';
-import { sampleSlots } from './pkgsamples.ts';
+import { sampleSlots, placeSampleMessages } from './pkgsamples.ts';
 import { assignSlot } from './gfxslots.ts';
 import { recordPackageChange, recordPackageChangeAsync, listPackages, packageArchive, type Package } from './pkgreg.ts';
 import { uploadObjectText, objectTextNotes, isObjectTextFile } from './objtext.ts';
@@ -252,6 +252,9 @@ function placeSample(rom: Rom, ctx: InstallContext, file: string, into: Level, o
   writeLevelList(rom, n, sample.exanim);
   if (sample.exanim || levelSettings(rom, n)) setLevelSettings(rom, n, sample.exanimSettings);
   if (own) placeEntrances(rom, sample, sec.entrances);
+  // its messages: in a Callisto project's overworld, the translevel of the level it was exported from
+  const ow = preview.callisto?.overworld;
+  if (ow) placeSampleMessages(rom, { file: ow, bps: preview.files.get(ow)! }, sec.number, n, sample.notes);
   return sample;
 }
 

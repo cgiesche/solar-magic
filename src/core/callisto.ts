@@ -7,7 +7,8 @@
 //   "callisto.asm", with the defines Callisto passes to patches;
 // - the folders and list files of its UberASM Tool, GPS and PIXI;
 // - what is not part of the package: Callisto's initial patch (FastROM/SA-1) and its BPS of the overworld,
-//   title screen and credits (Lunar Magic data).
+//   title screen and credits (Lunar Magic data) – of the overworld's only the sample levels' messages are
+//   taken (pkgsamples.ts).
 
 import { isUberList } from './uberproject.ts';
 import { isGpsListText } from './blocks.ts';
@@ -20,6 +21,7 @@ export interface CallistoProject {
   header: string | null; // the project's callisto_header (upload path)
   tools: Record<CallistoTool, ToolFolder | null>;
   left: { file: string; what: string }[]; // files of the project that are not part of the package
+  overworld: string | null; // its BPS of the overworld (upload path, when the upload has it): the sample levels' messages
   graphics: string | null; // the folder of its global GFX files: Graphics/ next to the output ROM (upload path)
 }
 export type CallistoTool = 'uberasm' | 'gps' | 'pixi';
@@ -140,7 +142,7 @@ const LIST_OF: Record<CallistoTool, (text: string) => boolean> = {
 // Lunar Magic data Callisto applies as BPS: not part of the package
 const LEFT_OUT: [string, string][] = [
   ['initial_patch', 'Callisto’s initial patch (FastROM/SA-1 ROM base)'],
-  ['overworld', 'the overworld (Lunar Magic data)'],
+  ['overworld', 'the overworld (Lunar Magic data; the sample levels take their messages from it)'],
   ['titlescreen', 'the title screen (Lunar Magic data)'],
   ['credits', 'the credits (Lunar Magic data)'],
 ];
@@ -184,14 +186,16 @@ export function callistoProject(files: Map<string, Uint8Array>): CallistoProject
     tools[tool] = { folder: f, list: files.has(inside) ? inside : lists.length === 1 ? lists[0] : null };
   }
   const left: CallistoProject['left'] = [];
+  let overworld: string | null = null;
   for (const [k, what] of LEFT_OUT) {
     const p = path(conf.get(`resources.${k}`));
     if (p) left.push({ file: p, what });
+    if (p && k === 'overworld' && files.has(p)) overworld = p;
   }
   // Lunar Magic inserts the global GFX files from the folder Graphics/ next to the ROM
   const output = path(conf.get('output.output_rom'));
   const graphics = output === null ? null : output.slice(0, output.lastIndexOf('/') + 1) + 'Graphics/';
-  return { root, version: pinnedVersion(files), patches, missing, header, tools, left, graphics };
+  return { root, version: pinnedVersion(files), patches, missing, header, tools, left, overworld, graphics };
 }
 
 // the Callisto version the project's setup downloads (".../callisto/releases/download/v0.6.2/..."), else

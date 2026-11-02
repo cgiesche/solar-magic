@@ -12,6 +12,7 @@ import { Rom, snesToPc } from './rom.ts';
 import { assemble } from './asar.ts';
 import { RAM } from './ram.ts';
 import { missingPatch } from './patches.ts';
+import type { RomRead } from './exanim.ts';
 
 export const MSG_LINES = 8;
 export const MSG_COLS = 18;
@@ -141,8 +142,8 @@ End:
 `;
 
 export function messagePatch(rom: Rom): { text: number } | null {
-  if (rom.r8(HOOK) !== 0x22 || (rom.r24(HOOK + 1) & 0x7fffff) !== ROUTINE) return null;
-  const text = rom.r24(TEXT_OP);
+  const text = lmMessageText(rom);
+  if (text === null) return null;
   for (let i = 0; i < 4; i++) if (rom.r8(text - 4 + i) !== MAGIC[i]) return null;
   return { text };
 }
@@ -150,9 +151,19 @@ const patch = (rom: Rom) => messagePatch(rom) ?? missingPatch('Messages (SMWM)')
 
 const ptrAt = (tl: number, msg: number) => PTRS + (tl * 2 + msg - 1) * 2;
 
+// where Lunar Magic's routine (or SMWM, the same) has the messages' text, null when the ROM has none (no magic
+// asked for: a Lunar Magic ROM's text has none)
+export function lmMessageText(rom: RomRead): number | null {
+  return rom.r8(HOOK) === 0x22 && (rom.r24(HOOK + 1) & 0x7fffff) === ROUTINE ? rom.r24(TEXT_OP) : null;
+}
+
 // msg 1 or 2; lines end where the message does
 export function readMessage(rom: Rom, tl: number, msg: number): Message {
-  let p = patch(rom).text + rom.r16(ptrAt(tl, msg));
+  return readMessageAt(rom, patch(rom).text, tl, msg);
+}
+// the same in a ROM with Lunar Magic's layout read through `rom`, its text at `text` (lmMessageText)
+export function readMessageAt(rom: RomRead, text: number, tl: number, msg: number): Message {
+  let p = text + rom.r16(ptrAt(tl, msg));
   const codes: number[] = [];
   while (codes.length < MSG_LINES * MSG_COLS) {
     const c = rom.r8(p++);
@@ -206,6 +217,9 @@ function encodeMessage(m: Message): number[] {
   while (out.length && out[out.length - 1] === SPACE) out.pop();
   return [...out, END];
 }
+
+// two messages show the same (as stored: trailing spaces aside)
+export const sameMessage = (a: Message, b: Message): boolean => encodeMessage(a).join() === encodeMessage(b).join();
 
 // all messages, [translevel][msg - 1]
 function readAll(rom: Rom): Message[][] {

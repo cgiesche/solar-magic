@@ -9,6 +9,10 @@
 // on screen 7 leads into its own entrance 150, which its teleport block (2A4) takes Mario to – at another
 // free number when the ROM uses 150. Removing the package keeps them (a sample level is not part of it).
 // One .mwl alone stays the sample level replacing the current level.
+// Their messages come from the package's overworld (export/global/overworld.bps, Lunar Magic's): 13B's message 1
+// into translevel 5F, a note in the result; 105 has none there. One alone replacing the current level gives its
+// messages to the current level's translevel (a switch palace's with a note: its message 1 presses the switch); a
+// current level without one of its own gets a note instead.
 import { readFileSync } from 'node:fs';
 import { unzipSync, zipSync } from 'fflate';
 import { Rom } from '../src/core/rom.ts';
@@ -27,6 +31,7 @@ import { renderLevel } from '../src/core/render.ts';
 import { levelSlots } from '../src/core/gfxslots.ts';
 import { mwlSections, parseLmObjects } from '../src/core/mwl.ts';
 import { DM16_EXT } from '../src/core/patches.ts';
+import { readMessage, lineToText, isBlank, TRANSLEVELS } from '../src/core/messages.ts';
 import { inspectUpload, installPackage, planUpload, type UploadPreview, type ReadyPreview, type InstallOptions } from '../src/core/packages.ts';
 import { listPackages, uninstallPackage } from '../src/core/pkgreg.ts';
 import { editorImage, recordShape } from './fixture.ts';
@@ -37,6 +42,9 @@ let bad = 0;
 const check = (ok: boolean, what: string) => { console.log((ok ? 'ok   ' : 'FAIL ') + what); if (!ok) bad++; };
 const ready = (p: UploadPreview): ReadyPreview => { if (p.status !== 'ready') throw new Error(`${p.name}: ${p.status}${p.status === 'failed' ? ' – ' + p.reason : ''}`); return p; };
 const hx = (v: number) => v.toString(16).toUpperCase().padStart(3, '0');
+// a message's lines with text; all messages of a ROM
+const text = (rom: Rom, tl: number, m: number) => readMessage(rom, tl, m).map(lineToText).filter(Boolean).join(' / ');
+const allMessages = (rom: Rom) => Array.from({ length: TRANSLEVELS }, (_, tl) => [1, 2].map((m) => readMessage(rom, tl, m).join())).join();
 
 const files = unzipSync(new Uint8Array(readFileSync('test/fixtures/rhr-baserom-5.15.zip')));
 const L = (n: string) => `export/levels/level ${n}.mwl`;
@@ -189,9 +197,38 @@ function teleport(rom: Rom): number | null {
     `13B: its exit on screen 7 into its own secondary entrance 150 (level ${hx(into.destLevel)}, screen ${into.screen})`);
   check(teleport(rom) === 0x13b, `13B: its teleport block takes Mario into 13B (${hx(teleport(rom) ?? 0)})`);
 
+  // 13B's message (translevel 5F) from the package's overworld; 105 (translevel 29) has none there
+  check(text(rom, 0x5f, 1).startsWith('This demo level is / using  some custom') && isBlank(readMessage(rom, 0x5f, 2)), `13B: its message 1 from the package's overworld (${text(rom, 0x5f, 1)})`);
+  check(r.warnings.some((w) => w.startsWith('Level 13B: Its message 1 taken from overworld.bps')) && !r.warnings.some((w) => w.startsWith('Level 105: Its message')),
+    `13B: a note on its message (${r.warnings.find((w) => w.includes('overworld.bps'))})`);
+
   // removed: the sample levels stay
   await uninstallPackage(rom, listPackages(rom)[0].id, opt.blank);
   check(!listPackages(rom).length && same(loadLevel(rom, 0x105), l105) && same(loadLevel(rom, 0x13b), l13b), 'package removed: 105 and 13B stay (not part of it)');
+}
+
+{
+  // 13B alone, replacing the current level 106: its message goes to 106's translevel (2A), replacing the game's
+  const one: Record<string, Uint8Array> = {};
+  for (const [k, v] of Object.entries(keep)) if (!/\.mwl$/i.test(k) || k === L('13B')) one[k] = v;
+  const p = ready(inspectUpload('one.zip', zipSync(one)));
+  const { rom, opt } = await target();
+  const r = await installPackage(rom, p, { ...opt, plan: planUpload(rom, p, opt.blank), sample: loadLevel(rom, 0x106) });
+  const m1 = text(rom, 0x2a, 1);
+  check(r.ok && !!r.sample && m1.startsWith('This demo level is') && isBlank(readMessage(rom, 0x2a, 2)), `13B as the current level 106: its message as 106's (${m1})`);
+  check(r.warnings.some((w) => w.startsWith('Its messages 1 and 2 taken from overworld.bps') && w.includes("level 13B's there") && w.includes('replacing')),
+    `a note on it (${r.warnings.find((w) => w.includes('overworld.bps'))})`);
+  // the current level 1C7 (no translevel of its own): a note, no message changed
+  const t2 = await target();
+  const before = allMessages(t2.rom);
+  const r2 = await installPackage(t2.rom, p, { ...t2.opt, level: 0x1c7, plan: planUpload(t2.rom, p, t2.opt.blank), sample: loadLevel(t2.rom, 0x1c7) });
+  check(r2.ok && before === allMessages(t2.rom) && r2.warnings.some((w) => w.includes('not taken over: level 1C7 has no messages of its own')),
+    `13B as the current level 1C7: messages unchanged, a note (${r2.warnings.find((w) => w.includes('overworld.bps'))})`);
+  // the current level 014 (the yellow switch palace): its message 1, a note that it presses the switch
+  const t3 = await target();
+  const r3 = await installPackage(t3.rom, p, { ...t3.opt, level: 0x14, plan: planUpload(t3.rom, p, t3.opt.blank), sample: loadLevel(t3.rom, 0x14) });
+  check(r3.ok && text(t3.rom, 0x14, 1).startsWith('This demo level is') && r3.warnings.some((w) => w.includes('overworld.bps') && w.includes('switch palace: message 1 presses its switch')),
+    `13B as the current level 014: its message, a note on the switch palace (${r3.warnings.find((w) => w.includes('overworld.bps'))})`);
 }
 
 {

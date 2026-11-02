@@ -239,7 +239,7 @@ The files the user hands in for one package (a single file or a .zip), before an
 _Avoid_: Download, patch package
 
 **Callisto project**:
-An upload that is a project of Underrout's build tool Callisto (it has `tools/Callisto/*.toml`), e.g. the Romhack Races baserom: one package with all its parts, its patches applied in the project's order, and the header Callisto generates (`callisto.asm`) provided for its code. Its data meant for a Lunar Magic ROM (BPS of the overworld, title screen, credits) is not part of it.
+An upload that is a project of Underrout's build tool Callisto (it has `tools/Callisto/*.toml`), e.g. the Romhack Races baserom: one package with all its parts, its patches applied in the project's order, and the header Callisto generates (`callisto.asm`) provided for its code. Its data meant for a Lunar Magic ROM (BPS of the overworld, title screen, credits) is not part of it – except that its sample levels take their messages from the overworld's BPS (see Sample level).
 _Avoid_: baserom (that is one Callisto project), project import
 
 **Replaced patch**:
@@ -275,7 +275,7 @@ An upload with a Lunar Magic level file (.mwl) and no code or songs, applied to 
 _Avoid_: Graphics package, background package
 
 **Sample level**:
-The .mwl of a package that also has code: an example of the package in use. Optionally replaces the current level – or, when the package brings several, each the level of its own number, with its screen exits and graphics slots –, with its Map16 tiles, ExGFX and (where certain) sprite numbers rewritten to where the package's parts landed. Of several, those belonging to what is not part of the package are not offered: the title screen's level (the one the game loads for it) and a level the package's overworld moved (a level tile entering it where this ROM's enters another). A level edit (one at its own number written with the install and undone with it), not part of the package.
+The .mwl of a package that also has code: an example of the package in use. Optionally replaces the current level – or, when the package brings several, each the level of its own number, with its screen exits and graphics slots –, with its Map16 tiles, ExGFX and (where certain) sprite numbers rewritten to where the package's parts landed. Of several, those belonging to what is not part of the package are not offered: the title screen's level (the one the game loads for it) and a level the package's overworld moved (a level tile entering it where this ROM's enters another). Its messages, which a level file does not hold, come from a Callisto project's overworld: when that has text for the translevel of the level it was exported from, both messages are written as those of the translevel of the level it is placed as, told in the install's result. A level placed without a translevel of its own (a sub-level) takes none, which the result tells too; without text there this ROM's stay. A level edit (one at its own number written with the install and undone with it), not part of the package.
 _Avoid_: Demo level, test level
 
 **Level setup**:
