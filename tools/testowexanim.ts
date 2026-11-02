@@ -12,7 +12,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { Rom } from '../src/core/rom.ts';
 import { LevelEmulator } from '../src/core/levelemu.ts';
 import { OverworldEmulator, l1Index } from '../src/core/overworld.ts';
-import { RAM, PAD } from '../src/core/ram.ts';
+import { RAM, PAD, LM_RAM_BLOCK, EXANIM_OWN_RAM, EXANIM_SHARED_RAM } from '../src/core/ram.ts';
 import {
   owExanimLayout, readSubmapList, writeSubmapList, readOwGlobalList, writeOwGlobalList, submapAnimSettings, setSubmapAnimSettings,
   writeAltFile, emptyList, listBytes, exanimDataRanges, owExanimDataRanges, SUBMAP_LISTS,
@@ -95,12 +95,13 @@ const tiles = (shots: Shot[], word: number) => new Set(shots.map((x) => tile(x.v
 // reset through the title screen's level to Yoshi's Island's list, of $7FC000-$7FC05F it writes only the bytes it
 // shares with Lunar Magic ($7FC003/$7FC004, the settings $7FC00A) and its own at $7FC05C-$7FC05F
 {
-  const emu = new OverworldEmulator(rom), written = new Set<number>();
-  emu.snes.hook = { onWramWrite: (a) => { if (a >= 0x1c000 && a < 0x1c060) written.add(0x7e0000 + a); } };
+  const emu = new OverworldEmulator(rom), written = new Set<number>(), [ownAt, ownLen] = EXANIM_OWN_RAM;
+  const lo = LM_RAM_BLOCK[0], hi = ownAt + ownLen; // the block up to the engine's bytes
+  emu.snes.hook = { onWramWrite: (a) => { const at = 0x7e0000 + a; if (at >= lo && at < hi) written.add(at); } };
   emu.load(1, 0);
   for (let f = 0; f < 24; f++) emu.snes.runFrame();
-  const own = [0x7fc003, 0x7fc004, 0x7fc00a, 0x7fc05c, 0x7fc05d, 0x7fc05e, 0x7fc05f];
-  check(written.has(0x7fc05d) && [...written].every((a) => own.includes(a)), `the engine writes only its own bytes of $7FC000-$7FC05F (${[...written].sort().map((a) => hx(a, 6)).join(' ')})`);
+  const own = (a: number) => (a >= ownAt && a < hi) || (EXANIM_SHARED_RAM as readonly number[]).includes(a);
+  check(written.has(ownAt + 1) && [...written].every(own), `the engine writes only its own bytes of $${hx(lo, 6)}-$${hx(hi - 1, 6)} (${[...written].sort().map((a) => hx(a, 6)).join(' ')})`);
 }
 
 // the console after Mario walked from the main map onto Yoshi's Island (main map 02,14, whose path leads there),

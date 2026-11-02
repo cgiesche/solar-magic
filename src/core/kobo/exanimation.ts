@@ -85,9 +85,10 @@ incsrc "memory.asm"
 ; The engine's own bytes, where Lunar Magic and community code leave the block
 ; free (Kobo's at $7FC00B, $7FC019 and $7FC01A, which Lunar Magic uses
 ; otherwise: docs/research/lunar-magic-submap-graphics.md, "$7FC00B") [Solar Magic]
-!LastFrame = $7FC05C            ; the $14 the lists last ran for
+!LastFrame = $7FC05C            ; the $14 the lists last ran for [Solar Magic: Kobo's $7FC019]
 !OwSubmap = !LastFrame+1        ; the submap the lists were set up for; $FF in a level [Solar Magic]
 !QueueEnd = $7FC05E             ; 16-bit, the high byte 0: the queue's uploads end here, from !Queue [Solar Magic]
+                                ; (keep these three in step with EXANIM_OWN_RAM, ../ram.ts)
 !Manual = $7FC070
 !Counters = $7FC080             ; level slots, the global ones $20 on
 !Queue = $7FC0C0                ; up to 8 uploads of 7 bytes (see queue) [Solar Magic]
@@ -425,7 +426,7 @@ clear_memory:
     STA.l !Legacy-1             ; $7FC003-$7FC004
     STA.l !QueueEnd             ; [Solar Magic]
     DEC A                       ; no submap's lists, all off [Solar Magic]
-    SEP #$20
+    SEP #$20                    ; [Solar Magic]
     STA.l !OwSettings
     STA.l !OwSubmap
     REP #$20

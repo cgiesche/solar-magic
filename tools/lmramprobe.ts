@@ -7,7 +7,7 @@
 import { readFileSync } from 'node:fs';
 import { Rom } from '../src/core/rom.ts';
 import { LevelEmulator } from '../src/core/levelemu.ts';
-import { RAM, GM } from '../src/core/ram.ts';
+import { RAM, GM, LM_RAM_BLOCK } from '../src/core/ram.ts';
 import { Apu, loadApu } from '../src/core/apu.ts';
 
 const [file, range = '0-1ff', framesArg = '120'] = process.argv.slice(2);
@@ -19,7 +19,7 @@ const emu = new LevelEmulator(rom);
 const s = emu.snes;
 await loadApu();
 s.apu = new Apu(); // the sound unit itself: custom music engines wait for it at the boot
-const BASE = 0x1c000, SIZE = 0x100;
+const [BASE, SIZE] = [LM_RAM_BLOCK[0] - 0x7e0000, LM_RAM_BLOCK[1]]; // as a WRAM offset
 const reads = Array.from({ length: SIZE }, () => new Set<number>());
 const writes = Array.from({ length: SIZE }, () => new Set<number>());
 s.hook = {
@@ -49,12 +49,14 @@ for (let l = lo; l <= hi; l++) {
 const hex = (n: number, d: number) => n.toString(16).toUpperCase().padStart(d, '0');
 const list = (set: Set<number>) => [...set].sort((a, b) => a - b).slice(0, 6).map((p) => hex(p, 6)).join(' ') + (set.size > 6 ? ` +${set.size - 6}` : '');
 console.log(`${file}: ${overworld ? 'overworld and its submaps, ' : 'no overworld reached, '}levels ${hex(lo, 3)}-${hex(hi, 3)}, ${frames} frames each${failed ? `, ${failed} failed to load` : ''}`);
+const at = (i: number) => `$${hex(LM_RAM_BLOCK[0] + i, 6)}`;
+const used = (i: number) => reads[i].size > 0 || writes[i].size > 0;
 const free: string[] = [];
-let start = -1;
-for (let i = 0; i <= SIZE; i++) {
-  const used = i < SIZE && (reads[i].size || writes[i].size);
-  if (i < SIZE && used) console.log(`$7FC0${hex(i, 2)}  r ${list(reads[i]) || '-'}  w ${list(writes[i]) || '-'}`);
-  if (!used && i < SIZE && start < 0) start = i;
-  if ((used || i === SIZE) && start >= 0) { free.push(start === i - 1 ? `$7FC0${hex(start, 2)}` : `$7FC0${hex(start, 2)}-$7FC0${hex(i - 1, 2)}`); start = -1; }
+for (let i = 0; i < SIZE; i++) {
+  if (used(i)) { console.log(`${at(i)}  r ${list(reads[i]) || '-'}  w ${list(writes[i]) || '-'}`); continue; }
+  let end = i;
+  while (end + 1 < SIZE && !used(end + 1)) end++;
+  free.push(end === i ? at(i) : `${at(i)}-${at(end)}`);
+  i = end;
 }
 console.log(`untouched: ${free.join(', ') || 'none'}`);

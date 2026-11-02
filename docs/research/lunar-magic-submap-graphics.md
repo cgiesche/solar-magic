@@ -201,7 +201,7 @@ own bytes instead, so that it no longer depends on that: `!LastFrame`, `!OwSubma
 
 The evidence, from `tools/lmramprobe.ts` (each ROM booted with the sound unit, a new game to the overworld, each submap
 loaded and run 60 frames, then every level `000`–`1FF` loaded and played 120 frames, right held, jumping), which
-records every read and write of `$7FC000`–`$7FC0FF`:
+records every read and write of `$7FC000`–`$7FC0FF` (no level failed to load in any of them):
 
 | ROM | Lunar Magic | `$7FC000`–`$7FC05F` touched |
 |---|---|---|
@@ -214,7 +214,7 @@ records every read and write of `$7FC000`–`$7FC0FF`:
 In all five `$7FC005` and `$7FC01D`–`$7FC05F` stay untouched; above them only what Lunar Magic's help documents
 (`edit_cdm16.htm`, `level_ex20.htm`: `$7FC060` on), which content sets. Lunar Magic's help names nothing in
 `$7FC005`–`$7FC05F`. Lunar Magic's own use grew from the low end (2.53 up to `$7FC01A`, 3.31 on up to `$7FC01C`), so
-the engine's bytes are at the gap's top, away from it. Community code: none of the packages at hand (the archives in
+the engine's bytes are at the gap's top, away from it. Community code ran only as far as these ROMs contain it (their own patches); besides, none of the packages at hand (the archives in
 `resources_local` and `test/fixtures`, the RHR baserom's among them) names any address of `$7FC000`–`$7FC0FF`. The
 editor's patch registry still claims `$7FC003`–`$7FC0FF` for the engine (but the shared flags), so packages that
 declare their RAM don't get the new bytes either. `tools/testowexanim.ts` checks that the engine writes no other byte

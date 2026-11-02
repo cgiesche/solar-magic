@@ -188,6 +188,13 @@ export const SCROLL_FIX_RAM: [number, number] = [0x7f3683, 4];
 // upload copies as it is (bank 0: none), how many of its bytes an LZ2 file decompressed over it replaces (as
 // 4bpp, 16-bit) and the upload's VRAM address (16-bit; bit 15: not known)
 export const GFX_RAW_RAM: [number, number] = [0x7f3687, 8];
+// Lunar Magic's RAM block (its ExAnimation's and graphics code's; the flags and the ExAnimation RAM below are in it)
+export const LM_RAM_BLOCK: [number, number] = [0x7fc000, 0x100];
+// in it, the ExAnimation engine's own bytes (kobo/exanimation.ts: !LastFrame, !OwSubmap, !QueueEnd), where Lunar
+// Magic and community code leave it free (docs/research/lunar-magic-submap-graphics.md, "$7FC00B"), and those it
+// shares with Lunar Magic, as Lunar Magic uses them ($7FC003-$7FC004 the frame counters, $7FC00A a submap's settings)
+export const EXANIM_OWN_RAM: [number, number] = [0x7fc05c, 4];
+export const EXANIM_SHARED_RAM = [0x7fc003, 0x7fc004, 0x7fc00a] as const;
 // Lunar Magic's conditional Direct Map16 flags (cdm16.ts), which community code sets: 128 bits, low to high
 export const CDM16_FLAGS: [number, number] = [0x7fc060, 16];
 // Lunar Magic's ExAnimation RAM (extrigger.ts), which community code sets and reads: the manual frames (16 bytes),
