@@ -14,7 +14,7 @@
 import { zipSync, unzipSync } from 'fflate';
 import { Rom } from './rom.ts';
 import { reapplyPatch, type ApplyResult } from './patchapply.ts';
-import type { PartKind, ToolKind } from './parts.ts';
+import { PART_KINDS, type PartKind, type ToolKind } from './parts.ts';
 import { uploadFiles, uploadFromFiles, withDefines, type UploadCode } from './patchpkg.ts';
 import { suggestMapping, placed, suggestCalls, packageDocs, type PkgSuggestion } from './pkgmap.ts';
 import { detectGraphics, includedFiles, applyLevelSetup } from './pkgplan.ts';
@@ -35,7 +35,7 @@ import { uploadObjectText, objectTextNotes, isObjectTextFile } from './objtext.t
 import { allOrNothing } from './romedit.ts';
 import { callistoProject, includesCallistoHeader, sharedCode, type CallistoProject } from './callisto.ts';
 import { replacedPatch, replacedNote } from './replaced.ts';
-import { partAdapter, DETECT_ORDER, PART_ORDER, SHARED_CODE, planInstall, planSfx, sfxDefines, planUpload, applyParts, pixiListed, applyAssignment, patchSource, partsOf,
+import { partAdapter, DETECT_ORDER, SHARED_CODE, planInstall, planSfx, sfxDefines, planUpload, applyParts, pixiListed, applyAssignment, patchSource, partsOf,
   type PreviewPart, type PreviewBase, type ReadyPreview, type Detection, type FileClaim, type InstallOptions, type InstallContext, type ManualAssignment, type SfxPlan } from './pkgparts.ts';
 
 export type { PreviewPart, ReadyPreview, InstallOptions, ManualAssignment };
@@ -132,7 +132,7 @@ export function inspectFiles(fileName: string, files: Map<string, Uint8Array>): 
   // the main files of parts left out are not installed
   const mains = new Set(parts.flatMap((p) => (p.kind === 'patch' ? p.candidates : [p.file])));
   for (const p of won.parts) if (!mains.has(p.file)) won.files.delete(p.file);
-  parts = PART_ORDER.flatMap((k) => parts.filter((p) => p.kind === k));
+  parts = PART_KINDS.flatMap((k) => parts.filter((p) => p.kind === k));
   if (!parts.length) {
     if (replaced.size) return { ...head, status: 'replaced', notes: [...replaced.values()] };
     if (!asm.length) return { ...head, status: 'failed', reason: `Found ${describe(paths)}, but no .asm file (patch, UberASM code, block or sprite), no AddmusicK song (.txt), no graphics and no Lunar Magic level (.mwl).` };

@@ -16,7 +16,7 @@
 import type { Rom } from './rom.ts';
 import type { ApplyResult, PatchSource } from './patchapply.ts';
 import { applyPatch } from './patchapply.ts';
-import type { PartKind } from './parts.ts';
+import { PART_KINDS, type PartKind } from './parts.ts';
 import { uploadSource, effectiveDefines, packUpload, type FileDefines, type UploadCode } from './patchpkg.ts';
 import { suggestCalls, placed, type PkgRules } from './pkgmap.ts';
 import { isSongText, songsFromFiles, loadMusicProject, emptyMusicProject, addSongs, addSfx, nextFreeSong, folders as musicFolders, saveMusicProject, hasAmk, musicEntry } from './music.ts';
@@ -457,14 +457,8 @@ const graphics: PartAdapter<'graphics'> = {
 export const PART_ADAPTERS: { [K in PartKind]: PartAdapter<K> } = { patch, uberasm, block, sprite, owsprite, music, sfx, graphics };
 // an adapter by its kind, for loops over all kinds
 export const partAdapter = (k: PartKind) => PART_ADAPTERS[k] as PartAdapter<PartKind>;
-// who wins a file at equal rank
-export const DETECT_ORDER: PartKind[] = ['graphics', 'sfx', 'music', 'owsprite', 'uberasm', 'block', 'sprite', 'patch'];
-// the order of applying: the patch first, the sprites' numbers before the blocks spawning them, the
-// Map16 tiles after the blocks on them; AddmusicK after the UberASM code (as Callisto has it: it fits its
-// NMI changes to a hijack of UberASM's that is there)
-export const INSTALL_ORDER: PartKind[] = ['patch', 'uberasm', 'sprite', 'block', 'owsprite', 'music', 'sfx', 'graphics'];
-// the order of the preview's list
-export const PART_ORDER: PartKind[] = ['patch', 'uberasm', 'block', 'sprite', 'owsprite', 'music', 'sfx', 'graphics'];
+// who wins a file at equal rank: PART_KINDS the other way round
+export const DETECT_ORDER: PartKind[] = [...PART_KINDS].reverse();
 
 // the graphics parts and the sample levels of a preview, as pkgplan.ts takes them
 function previewGraphics(p: ReadyPreview): DetectedGraphics {
@@ -509,11 +503,11 @@ export function pixiListed(preview: ReadyPreview): Map<string, number> {
   return out;
 }
 
-// applies every part of the preview (run it in a package recording, pkgreg.ts, which gets `claim`);
+// applies every part of the preview in the order of PART_KINDS (run it in a package recording, pkgreg.ts, which gets `claim`);
 // stops at the first that fails
 export async function applyParts(rom: Rom, ctx: InstallContext, claim: Claim): Promise<ApplyResult> {
   const warnings: string[] = [], prints: string[] = [];
-  for (const k of INSTALL_ORDER) {
+  for (const k of PART_KINDS) {
     const mine = partsOf(ctx.preview, k);
     if (!mine.length) continue;
     const r = await partAdapter(k).apply(rom, mine, ctx, claim);

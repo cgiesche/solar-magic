@@ -4,9 +4,9 @@
 // projects under their part kind: uberasm, block, sprite). An adapter knows what of the ROM its section
 // observes (read), what came in between two reads (added), how that goes into a record (merge), when
 // there is nothing (empty), how to take it out of the ROM again (remove) and how to say so (summary,
-// removal). pkgreg.ts loops over them instead of naming each section; the order of SECTIONS is the
-// order of removing (songs and sound effects first: AddmusicK runs again; patches applied later first). The part adapters
-// of installing are in pkgparts.ts.
+// removal). pkgreg.ts loops over them instead of naming each section, removing in REMOVAL_KEYS' order
+// (the install order of their part kinds the other way round). The part adapters of installing are in
+// pkgparts.ts.
 
 import type { Rom } from './rom.ts';
 import { listPatches, hashBytes } from './patchreg.ts';
@@ -27,7 +27,7 @@ import { BG_EXT_FIRST, BG_EXT_TILES, bgExtTileWords, setBgExtTileWords, vanillaB
 import { CONTEXTS, OTHER, type UberContext, type Other } from './uberasm.ts';
 import type { SpriteFolder } from './pixirt.ts';
 import type { PackageParts, GlobalAnimPart, Package } from './pkgreg.ts';
-import type { ToolKind } from './parts.ts';
+import { PART_KINDS, type PartKind, type ToolKind } from './parts.ts';
 import { sharedColors, setSharedColor, sharedColorNames } from './sharedpal.ts';
 import { readGlobalList, writeGlobalList, readAltFile, writeAltFile, altFileExtent, altFileName, slotsUsed, SLOTS } from './exanim.ts';
 
@@ -399,6 +399,16 @@ export function looseFiles<K extends ToolKind>(recs: Package[], k: K, project: T
 
 // every field of PackageParts has its adapter (the compiler checks it)
 type Sections = { [K in keyof PackageParts]-?: PartSection<any, NonNullable<PackageParts[K]>> };
-export const SECTIONS = { music, sfx, sprite, owsprite, block, uberasm, patches, map16, bgMap16, gfx, globalGfx, sharedPal, globalAnim } satisfies Sections;
+export const SECTIONS = { patches, uberasm, sprite, block, owsprite, music, sfx, map16, bgMap16, gfx, globalGfx, sharedPal, globalAnim } satisfies Sections;
 export type SectionKey = keyof typeof SECTIONS;
-export const SECTION_KEYS = Object.keys(SECTIONS) as SectionKey[];
+// the part kind each section records
+const SECTION_KIND: Record<SectionKey, PartKind> = {
+  patches: 'patch', uberasm: 'uberasm', sprite: 'sprite', block: 'block', owsprite: 'owsprite', music: 'music', sfx: 'sfx',
+  map16: 'graphics', bgMap16: 'graphics', gfx: 'graphics', globalGfx: 'graphics', sharedPal: 'graphics', globalAnim: 'graphics',
+};
+const kindRank = (k: SectionKey) => PART_KINDS.indexOf(SECTION_KIND[k]);
+// the sections in the order of their part kinds (parts.ts PART_KINDS): what a package brought is said so
+export const SECTION_KEYS = (Object.keys(SECTIONS) as SectionKey[]).sort((a, b) => kindRank(a) - kindRank(b));
+// the order of removing: the other way round (the graphics first, songs and sound effects before the
+// UberASM code, the patches last – those applied later first)
+export const REMOVAL_KEYS = [...SECTION_KEYS].sort((a, b) => kindRank(b) - kindRank(a));

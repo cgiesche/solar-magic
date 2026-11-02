@@ -10,7 +10,7 @@ import { Rom, pcToSnes } from './rom.ts';
 import type { UberContext, Other } from './uberasm.ts';
 import type { SpriteFolder } from './pixirt.ts';
 import { TOOL_KINDS, type ToolKind } from './parts.ts';
-import { SECTIONS, SECTION_KEYS, type SectionKey, type PartSection } from './pkgsections.ts';
+import { SECTIONS, SECTION_KEYS, REMOVAL_KEYS, type SectionKey, type PartSection } from './pkgsections.ts';
 import type { ObjectText } from './objtext.ts';
 import { listPatches, type PatchEntry } from './patchreg.ts';
 
@@ -204,7 +204,7 @@ function startRecording(rom: Rom, target: PackageTarget) {
 
 // ---------- removing a package ----------
 
-// removes everything the package put into the ROM (each section by its adapter, in their order) and
+// removes everything the package put into the ROM (each section by its adapter, in REMOVAL_KEYS' order) and
 // its record; what another package brought as well stays. Throws when it fails (run it in an edit session,
 // romedit.ts, which puts the ROM back). Returns warnings.
 export async function uninstallPackage(rom: Rom, id: string, blank: number[]): Promise<string[]> {
@@ -213,7 +213,7 @@ export async function uninstallPackage(rom: Rom, id: string, blank: number[]): P
   if (!rec) throw new Error('Package is not installed');
   const mine = complete(rec) as unknown as Parts, others = all.filter((r) => r !== rec).map((r) => complete(r) as unknown as Parts);
   const warnings: string[] = [];
-  for (const k of SECTION_KEYS) {
+  for (const k of REMOVAL_KEYS) {
     if (section(k).empty(mine[k])) continue;
     warnings.push(...await section(k).remove(rom, mine[k], others.map((o) => o[k]), blank));
   }
