@@ -235,10 +235,17 @@ In all five `$7FC005` and `$7FC01D`–`$7FC05F` stay untouched; above them only 
 (`edit_cdm16.htm`, `level_ex20.htm`: `$7FC060` on), which content sets. Lunar Magic's help names nothing in
 `$7FC005`–`$7FC05F`. Lunar Magic's own use grew from the low end (2.53 up to `$7FC01A`, 3.31 on up to `$7FC01C`), so
 the engine's bytes are at the gap's top, away from it. Community code ran only as far as these ROMs contain it (their own patches); besides, none of the packages at hand (the archives in
-`resources_local` and `test/fixtures`, the RHR baserom's among them) names any address of `$7FC000`–`$7FC0FF`. The
-editor's patch registry still claims `$7FC003`–`$7FC0FF` for the engine (but the shared flags), so packages that
-declare their RAM don't get the new bytes either. `tools/testowexanim.ts` checks that the engine writes no other byte
-of `$7FC000`–`$7FC05F` than `$7FC003`, `$7FC004`, `$7FC00A` (shared with Lunar Magic, with its meaning) and its own.
+`resources_local` and `test/fixtures`, the RHR baserom's among them) names any address of `$7FC000`–`$7FC0FF`.
+
+Issue #310 narrowed the editor's patch registry claim to what the engine writes there: `$7FC003`–`$7FC004` and
+`$7FC00A` (Lunar Magic's, with its meaning), its own `$7FC05C`–`$7FC05F`, then (as before) the flags, shared, and
+`$7FC070`–`$7FC0FF`. The registry checks its entries against each other, and Lunar Magic is none of them: its other
+bytes (`$7FC000`–`$7FC002`, `$7FC006`–`$7FC01C`) are used by its graphics code whether or not the engine is installed
+(after Lunar Magic saves the ROM), so claiming them for the engine would protect them only in ROMs with ExAnimation,
+and would name the engine as their user, which it isn't. They are left to Lunar Magic, as all of its RAM is; `$7FC005`
+and `$7FC01D`–`$7FC05B` are free to a package that declares them (`tools/testconflicts.ts`). A ROM whose engine was
+installed before keeps its entry's wider claim (the editor does not replace an installed engine).
+`tools/testowexanim.ts` checks that the engine writes no other byte of `$7FC000`–`$7FC05F` than `$7FC003`, `$7FC004`, `$7FC00A` (shared with Lunar Magic, with its meaning) and its own.
 
 ### The lightning switch
 

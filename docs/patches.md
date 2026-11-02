@@ -238,7 +238,7 @@ themselves, external patches via `ram` in the `patch.json` (see below):
 | UberASM | `freeram` from the `list.txt` (2 bytes, default `$7FAC80`) |
 | Custom sprites | sprite tables `$7FAB10-$7FAB6F`, `$7FAB9E-$7FABA9`, `$7FAC00-$7FAC17` (interface, see below), `$7FAC18-$7FAC19` |
 | VRAM layout | `$7F0000-$7F3653` |
-| ExAnimation | `$7FC003-$7FC05F`, `$7FC070-$7FC0FF` (between them Lunar Magic's conditional Direct Map16 flags `$7FC060-$7FC06F`, shared: other code may write them) |
+| ExAnimation | `$7FC003-$7FC004`, `$7FC00A` (Lunar Magic's bytes, which the engine uses as Lunar Magic does), `$7FC05C-$7FC05F`, `$7FC070-$7FC0FF` (between them Lunar Magic's conditional Direct Map16 flags `$7FC060-$7FC06F`, shared: other code may write them). `$7FC000-$7FC002` and `$7FC006-$7FC01C` are left to Lunar Magic (its graphics and ExAnimation code), `$7FC005` and `$7FC01D-$7FC05B` are free |
 
 - If two entries occupy the same RAM, the second is rejected ("RAM conflict with …").
 - In addition, the editor searches each patch's code for long writes (`STA $7Fxxxx`,

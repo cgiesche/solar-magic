@@ -1,13 +1,15 @@
 // Conflicts between the kinds of patches: an external patch against the hooks of UberASM and the
-// custom sprites (both orders), free RAM claimed twice, long writes into RAM another patch claims,
-// the editor patch's extended object slot, two patches with the same fix (no conflict, removed in order),
-// and repeated re-applying leaves no RATS blocks behind.
+// custom sprites (both orders), free RAM claimed twice (and the ExAnimation engine's claim in Lunar Magic's
+// block), long writes into RAM another patch claims, the editor patch's extended object slot, two patches
+// with the same fix (no conflict, removed in order), and repeated re-applying leaves no RATS blocks behind.
 import { readFileSync } from 'node:fs';
 import { Rom } from '../src/core/rom.ts';
 import { loadAsar } from '../src/core/asar.ts';
 import { applyPatch, uninstallPatch, type PatchSource } from '../src/core/patchapply.ts';
 import { listPatches } from '../src/core/patchreg.ts';
 import { installEditorPatch } from '../src/core/patches.ts';
+import { installExAnim, exanimEntry } from '../src/core/exanim.ts';
+import { CDM16_FLAGS, EXANIM_OWN_RAM, EXANIM_SHARED_RAM } from '../src/core/ram.ts';
 import { uploadSource, uploadFromFiles } from '../src/core/patchpkg.ts';
 import { saveProject, emptyProject, type UberProject } from '../src/core/uberproject.ts';
 import { parseList } from '../src/core/uberasm.ts';
@@ -118,6 +120,24 @@ const blocks: BlockProject = { files: files({ 'blocks/b.asm': 'db $42\nJMP A : J
   }));
   const c = applyPatch(rom, uploadSource(upload, 'main.asm', {}));
   check(!c.ok && c.errors.some((x) => x.includes('RAM conflict')), 'low RAM claim $0DC4 vs $7E0DC5 rejected: ' + c.errors.join(' '));
+}
+{
+  // the ExAnimation engine claims of Lunar Magic's block $7FC000-$7FC05F only the bytes it writes (#310; the rest is
+  // Lunar Magic's or free: docs/research/lunar-magic-submap-graphics.md, "$7FC00B")
+  const rom = fresh();
+  check(installExAnim(rom).ok, 'ExAnimation engine installed');
+  const below = new Set<number>();
+  for (const [a, n] of exanimEntry(rom)?.ram ?? []) for (let i = a; i < a + n; i++) if (i < CDM16_FLAGS[0]) below.add(i);
+  const [ownAt, ownLen] = EXANIM_OWN_RAM;
+  const used = new Set<number>([...EXANIM_SHARED_RAM, ...Array.from({ length: ownLen }, (_, i) => ownAt + i)]);
+  check(below.size === used.size && [...used].every((a) => below.has(a)), `its claim below the flags is $7FC003-$7FC004, $7FC00A, $7FC05C-$7FC05F (${[...below].map((a) => a.toString(16)).join(' ')})`);
+  const claim = (addr: string, size: number) => applyPatch(new Rom(rom.data.slice()), uploadSource(uploadFromFiles('lmram.zip', files({
+    'patch.json': JSON.stringify({ name: 'LM RAM', main: 'main.asm', ram: [{ addr, size }] }),
+    'main.asm': 'lorom\norg $00A1DA\n  autoclean JSL Code\n  NOP #2\nfreecode\nCode:\n  RTL\n',
+  })), 'main.asm', {}));
+  const free = claim('$7FC01D', 0x3f), own = claim('$7FC05B', 2);
+  check(free.ok, 'a package claiming the free $7FC01D-$7FC05B applies ' + free.errors.join(' '));
+  check(!own.ok && own.errors.some((x) => x.includes('RAM conflict') && x.includes('$7FC05C')), 'one claiming the engine\'s $7FC05C rejected: ' + own.errors.join(' '));
 }
 
 // 3. the editor patch's extended object $05 slot: protected in an opened ROM; in a clean ROM a patch
