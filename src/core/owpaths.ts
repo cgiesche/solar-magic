@@ -32,10 +32,15 @@ const ENTER_FRAMES = 60; // A pressed on a tile he stopped at, until a level loa
 // editor writes isn't recorded as read (emu.skipMask, restored when it ends: not withSkipMask, the mask stays
 // set between the job's steps, each run in a tracked() that reads it).
 export function pathKindsJob(emu: LevelEmulator): Job<PathKind[]> {
+  return probeAll(emu, maskOverworldData(emu));
+}
+// the overworld's data (overworldDataRanges) not recorded as read from here on, for a result depending on the game's
+// code only; what restores the mask before
+export function maskOverworldData(emu: LevelEmulator): () => void {
   const base = emu.skipMask, mask = base?.()?.slice() ?? new Uint8Array(emu.rom.data.length);
   for (const [a, b] of overworldDataRanges(emu.rom)) mask.fill(1, a, Math.min(b, mask.length));
   emu.skipMask = () => mask;
-  return probeAll(emu, () => { emu.skipMask = base; });
+  return () => { emu.skipMask = base; };
 }
 
 function* probeAll(emu: LevelEmulator, end: () => void): Generator<string | void, PathKind[]> {

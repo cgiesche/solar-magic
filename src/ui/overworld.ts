@@ -89,7 +89,7 @@ function freeNote(rom: Rom, tl: number): string {
 }
 
 // what an exit the game skips the reveal walk for does (revealwalk.ts)
-const NO_REVEAL_WALK = 'the level tile the path leads to gets no way back here (as after Yoshi\'s House and the switch palaces in the clean game)';
+const NO_REVEAL_WALK = 'the level tile the path leads to gets no way back to this one (as after Yoshi\'s House and the switch palaces in the clean game)';
 
 export class OverworldView {
   app: App;
@@ -1300,7 +1300,7 @@ export class OverworldView {
       const s = select(DIR_NAMES.map((n, d) => [d, `${DIR_ARROWS[d]} ${n}`] as [number, string]), dirs[k], (v) => edit(`${name.toLowerCase()} direction`, () => setExitDirection(rom, tl, k, v)));
       const skip = !!skips && skipsRevealWalk(skips, tl, k);
       s.title = `${name}: runs ${run} and enables walking in this direction from the tile` +
-        (skip ? `; ${NO_REVEAL_WALK}` : '; when first passed, the level tile the path leads to gets the way back');
+        (skip ? `; ${NO_REVEAL_WALK}` : skips ? '; when first passed, the level tile the path leads to gets the way back' : '');
       return h('div', { class: 'prop' }, h('label', { title: `Runs ${run}` }, name), s,
         skip ? h('span', { class: 'hint', title: `The game skips the reveal walk for this level: ${NO_REVEAL_WALK}` }, 'no reveal walk') : null);
     });

@@ -24,6 +24,7 @@ import type { Job } from './jobrunner.ts';
 import type { LevelTileTest } from './owpaths.ts';
 
 export const OW_L1 = 0x0cf7df; // 0x800 bytes: 2 maps × 32×32 16x16 tiles (quadrant layout)
+export const OW_MAIN_TILES = 0x400; // the main map's tiles come first (l1Index), the submaps' after them
 const L2_TILE_PTR = 0x04dc72; // LDA #$A533 operand
 const L2_BANK = 0x04dc79; // LDA #$04 operand (shared bank of both streams)
 const L2_ATTR_PTR = 0x04dc8d; // LDA #$C02B operand

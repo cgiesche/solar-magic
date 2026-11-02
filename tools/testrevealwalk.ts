@@ -1,12 +1,13 @@
 // The reveal walk (revealwalk.ts): which translevels' exits skip it, learned by emulation. In the clean game the
 // list at $04906C (Yoshi's House, the switch palaces …) – read here only to check the result; the list changed in
 // a ROM copy (as a patch would), the result follows it. Passed as the game plays it, Yoshi's Island 1 enables the
-// way back on the level tile its path leads to, but no longer once it is on the list.
+// way back on the level tile its path leads to, but no longer once it is on the list – its own direction it still
+// enables. The result doesn't depend on the overworld's data (the base event of the level entered changed).
 import { Rom } from '../src/core/rom.ts';
 import { LevelEmulator } from '../src/core/levelemu.ts';
 import { runJob } from '../src/core/jobrunner.ts';
 import { revealWalkJob, skipsRevealWalk } from '../src/core/revealwalk.ts';
-import { MAX_TRANSLEVEL, readTranslevels } from '../src/core/overworld.ts';
+import { MAX_TRANSLEVEL, readTranslevels, setBaseEvent, NO_EVENT, DIR_FLAGS, exitDirections, FLAG } from '../src/core/overworld.ts';
 import { PlaySession } from '../src/core/playsession.ts';
 import { GM, RAM } from '../src/core/ram.ts';
 import { editorImage } from './fixture.ts';
@@ -21,15 +22,15 @@ const learned = (rom: Rom) => runJob(revealWalkJob(new LevelEmulator(rom)) as Ge
 const skipped = (s: number[]) => [...s.keys()].filter((tl) => s[tl]);
 
 // a new game, Yoshi's Island 1 entered and passed with its normal exit, the overworld until it has handled it: the
-// translevels other than 29 whose flags changed
-function passYI1(rom: Rom): number[] | null {
+// translevels other than 29 whose flags changed, 29's flags
+function passYI1(rom: Rom): { others: number[]; own: number } | null {
   const p = PlaySession.overworld(new LevelEmulator(rom), readTranslevels(rom).indexOf(0x29));
   if (!p.enter()) return null;
   const w = p.wram, before = w.slice(RAM.levelFlags, RAM.levelFlags + MAX_TRANSLEVEL + 1);
   w[RAM.levelExit] = 1; w[RAM.midwayTouched] = 1; w[RAM.levelBeaten] = 1; w[RAM.gameMode] = GM.overworldReturn;
   p.follow();
   for (let k = 0; k < 600; k++) p.frame();
-  return [...before.keys()].filter((tl) => tl !== 0x29 && w[RAM.levelFlags + tl] !== before[tl]);
+  return { others: [...before.keys()].filter((tl) => tl !== 0x29 && w[RAM.levelFlags + tl] !== before[tl]), own: w[RAM.levelFlags + 0x29] };
 }
 
 const rom = new Rom((await editorImage()).slice());
@@ -49,8 +50,17 @@ check(skipsRevealWalk(s, 0x28, 0) && !skipsRevealWalk(s, 0x29, 3), 'skipsRevealW
   const c = learned(r);
   check(k >= 0 && !c[0x28] && c[0x29] === 0xf && skipped(c).length === LIST_LEN, `a patched list is followed: ${skipped(c).map(hx).join(' ')}`);
   const walked = passYI1(rom), skippedWalk = passYI1(r);
-  check(!!walked?.length && !!skippedWalk && !skippedWalk.length,
-    `passing 29: the way back enabled on ${walked?.map(hx).join(' ')}; with 29 on the list on none (${skippedWalk?.map(hx).join(' ')})`);
+  check(!!walked?.others.length && !!skippedWalk && !skippedWalk.others.length,
+    `passing 29: the way back enabled on ${walked?.others.map(hx).join(' ')}; with 29 on the list on none (${skippedWalk?.others.map(hx).join(' ')})`);
+  const dir = DIR_FLAGS[exitDirections(r, 0x29)[0]] | FLAG.passed;
+  check(!!skippedWalk && (skippedWalk.own & dir) === dir, `with 29 on the list it still enables its own direction (flags ${hx(skippedWalk?.own ?? 0)})`);
+}
+
+// the overworld's data changed: the same result
+{
+  const r = new Rom(rom.data.slice());
+  for (let tl = 0; tl <= MAX_TRANSLEVEL; tl++) setBaseEvent(r, tl, NO_EVENT);
+  check(learned(r).join() === s.join(), 'no level runs an event: the same result');
 }
 
 if (bad) { console.log(`${bad} failed`); process.exit(1); }
