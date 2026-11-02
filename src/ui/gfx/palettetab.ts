@@ -7,6 +7,7 @@
 // those after the special world as a second set.
 
 import type { App } from '../app.ts';
+import type { Watch } from '../../core/romwatch.ts';
 import type { GfxWorkspace, WsPanel } from '../gfxworkspace.ts';
 import { menuButton } from '../menu.ts';
 import { h, clear, toast, choose, pickerOpen } from '../dom.ts';
@@ -66,6 +67,9 @@ export class PaletteTab implements WsPanel {
   // per level: change shared palettes for all levels without asking again
   private shareOk = new Set<number>();
   private headers: Map<number, PrimaryHeader> | null = null;
+  // the ROM bytes the colors were painted from, and those the levels' headers were read from (romwatch.ts)
+  private watch: Watch;
+  private headersWatch: Watch;
   private rows = h('div', { class: 'pt-rows' });
   private detail = h('div', { class: 'pt-detail' });
   private headerBox = h('div', { class: 'pt-header' });
@@ -82,14 +86,8 @@ export class PaletteTab implements WsPanel {
     this.sources = new ColorSources(app.rom);
     this.root = h('div', { class: 'pt' }, this.bar, h('div', { class: 'pt-main' }, h('div', { class: 'pt-left' }, this.rows, this.headerBox), this.detail));
     app.on('render', () => { if (this.visible && this.t.levelPreview) { this.retrace(); this.paint(); } });
-    app.on('rom-change', () => {
-      this.headers = null;
-      if (!this.visible) return;
-      if (this.fixed !== null) { this.paint(); return; }
-      const c = customPalette(app.rom, app.level.number);
-      if (c !== this.custom) { this.custom = c; this.buildBar(); }
-      this.paint();
-    });
+    this.watch = app.watchRom(() => { if (this.visible) this.paint(); });
+    this.headersWatch = app.watchRom(() => (this.headers = null));
     app.on('level', () => { this.trace = null; this.headers = null; });
     app.on('animated', () => { if (this.visible) this.paint(); });
     // (which colors the game rewrites on a submap is known from its load)
@@ -127,7 +125,19 @@ export class PaletteTab implements WsPanel {
     this.buildBar();
     this.paint();
   }
-  hide(): void { this.visible = false; }
+  hide(): void { this.visible = false; this.watch.stop(); }
+
+  // painted from the ROM, watching what it read: the level's own palette (another one set: the bar built again) and
+  // the colors
+  paint(): void {
+    this.watch.run(() => {
+      if (this.fixed === null) {
+        const c = customPalette(this.app.rom, this.app.level.number);
+        if (c !== this.custom) { this.custom = c; this.buildBar(); }
+      }
+      this.paintColors();
+    });
+  }
 
   get selected(): number { return this.sel; }
 
@@ -175,11 +185,14 @@ export class PaletteTab implements WsPanel {
   private levelHeaders(): Map<number, PrimaryHeader> {
     if (this.headers) return this.headers;
     const m = new Map<number, PrimaryHeader>();
-    for (const n of this.app.usedLevels()) {
-      if (customPalette(this.app.rom, n)) continue; // own palette: not affected by shared ones
-      try { m.set(n, parsePrimaryHeader(this.app.rom.bytes(this.app.rom.r24(L1_PTRS + n * 3), 5))); } catch { /* unreadable */ }
-    }
-    if (!customPalette(this.app.rom, this.app.level.number)) m.set(this.app.level.number, this.app.level.header);
+    // (read again once a ROM change changed what they were read from)
+    this.headersWatch.run(() => {
+      for (const n of this.app.usedLevels()) {
+        if (customPalette(this.app.rom, n)) continue; // own palette: not affected by shared ones
+        try { m.set(n, parsePrimaryHeader(this.app.rom.bytes(this.app.rom.r24(L1_PTRS + n * 3), 5))); } catch { /* unreadable */ }
+      }
+      if (!customPalette(this.app.rom, this.app.level.number)) m.set(this.app.level.number, this.app.level.header);
+    });
     return (this.headers = m);
   }
 
@@ -316,7 +329,7 @@ export class PaletteTab implements WsPanel {
     }
   }
 
-  paint(): void {
+  private paintColors(): void {
     const fixed = this.fixed;
     if (!this.trace && fixed === null) return;
     const lo = Math.min(this.sel, this.selEnd), hi = Math.max(this.sel, this.selEnd);

@@ -100,6 +100,7 @@ function rle1Decode(rom: Rom, at: number): number[] {
     if (c & 0x80) { const v = d[p++]; for (let i = 0; i <= (c & 0x7f); i++) out.push(v); }
     else for (let i = 0; i <= c; i++) out.push(d[p++]);
   }
+  rom.noteRead(snesToPc(at), Math.min(d.length, p + 2) - snesToPc(at)); // (with the end mark)
   return out;
 }
 const rle1Encode = (v: number[]) => Uint8Array.from([...rleEncode(v, true), 0xff, 0xff]);

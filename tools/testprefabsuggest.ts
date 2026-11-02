@@ -15,7 +15,7 @@ import { loadLevel, newUid, hasObjects, L1_PTRS, type LevelObject } from '../src
 import { saveLevel } from '../src/core/save.ts';
 import { usedLevels } from '../src/core/levelusage.ts';
 import { DM16_EXT } from '../src/core/patches.ts';
-import { installPrefabPatch, writePrefab } from '../src/core/prefabs.ts';
+import { installPrefabPatch, writePrefab, listPrefabs } from '../src/core/prefabs.ts';
 import { prefabCost } from '../src/core/prefabcost.ts';
 import { applyPrefabPlaces } from '../src/core/prefabplaces.ts';
 import { dm16Groups, prefabSuggestions, suggestPrefabs, KeptSuggestions, SuggestionList } from '../src/core/prefabsuggest.ts';
@@ -307,8 +307,9 @@ for (const reloadFirst of [false, true]) {
   let key = '';
   // the list shown as current with the saved suggestion in it while its places are replaced in the ROM
   const look = () => { list.check(); if (key && list.current && list.list!.some((q) => q.key === key)) stale++; };
-  const reload: FollowUp = { read: (r) => JSON.stringify(loadLevel(r, H2), (k, v) => (k === 'uid' ? undefined : v)), changed: () => { session.open(H2, true); look(); } };
-  const prefabs: FollowUp = { read: (r) => String(r.gen), changed: () => look() };
+  // (as the editor's: told when the edit changed a byte they read)
+  const reload: FollowUp = { read: (r) => loadLevel(r, H2), changed: () => { session.open(H2, true); look(); } };
+  const prefabs: FollowUp = { read: (r) => listPrefabs(r), changed: () => look() };
   session = new EditSession(r2, {
     written: () => look(), // ('rom-change': views of the ROM change, before the follow-ups)
     changed: () => look(),

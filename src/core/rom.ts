@@ -188,6 +188,10 @@ export class Rom {
   w24(snes: number, v: number): void {
     this.put(snesToPc(snes), Uint8Array.of(v & 0xff, (v >> 8) & 0xff, (v >> 16) & 0xff));
   }
+  // bytes read straight from data (by a decoder: LZ2, RLE) recorded as a read through r8 is (by file offset)
+  noteRead(pc: number, len: number): void {
+    this.reads?.read(pc, len);
+  }
   bytes(snes: number, len: number): Uint8Array {
     const o = snesToPc(snes);
     this.reads?.read(o, len);

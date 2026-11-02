@@ -11,6 +11,7 @@
 // target.ts: the overworld's tiles are the workspace's submap target, the level's FG or BG tiles its level target.
 
 import type { App } from '../app.ts';
+import type { Watch } from '../../core/romwatch.ts';
 import type { GfxWorkspace, WsPanel } from '../gfxworkspace.ts';
 import { menuButton } from '../menu.ts';
 import { h, clear, toast, modal, choose, attachPanZoom } from '../dom.ts';
@@ -146,6 +147,7 @@ export class Map16Tab implements WsPanel {
   // the visual mode: the marked source 8x8 tiles (cells of the graphics view), where they are dragged to
   private visualFrom: { x: number; y: number; w: number; h: number } | null = null;
   private visualTo: Cell | null = null;
+  private watch: Watch; // the ROM bytes the tab was drawn from (romwatch.ts)
 
 
   constructor(app: App, ws: GfxWorkspace) {
@@ -164,7 +166,8 @@ export class Map16Tab implements WsPanel {
     this.attachBig();
     this.attachName();
     const redraw = () => { this.unused = null; if (this.visible) this.redraw(); };
-    app.on('rom-change', redraw);
+    // (drawn again when a ROM change changed what it was drawn from)
+    this.watch = app.watchRom(redraw);
     app.on('render', redraw);
     app.on('probes', () => { if (this.visible) this.buildBuilder(); });
     onBehaviorProgress(app, () => { if (this.visible && this.matchPending) { this.findMatches(); this.drawSheet(); } });
@@ -210,7 +213,7 @@ export class Map16Tab implements WsPanel {
     this.redraw();
     if (this.scrollPending) requestAnimationFrame(() => this.scrollToSel());
   }
-  hide(): void { this.visible = false; }
+  hide(): void { this.visible = false; this.watch.stop(); }
 
   get selected(): { tile: number; target: Map16Target } { return { tile: this.sel, target: this.t.id }; }
 
@@ -423,7 +426,11 @@ export class Map16Tab implements WsPanel {
     return h('span', { class: 'row', style: 'gap:4px' }, h('span', { class: 'hint' }, 'Drawn as on'), s);
   }
 
+  // drawn from the ROM, watching what it read
   private redraw(): void {
+    this.watch.run(() => this.drawAll());
+  }
+  private drawAll(): void {
     this.shown();
     if (this.match) this.findMatches(); // the layer or the names may have changed
     this.drawSheet();

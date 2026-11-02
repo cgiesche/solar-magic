@@ -56,6 +56,7 @@ import { ProbeClient, FAILED } from '../core/probeclient.ts';
 import { messageRoutineInput, UNKNOWN_ROUTINE, type MessageRoutine } from '../core/messagedraw.ts';
 import { ResultLearner } from '../core/learner.ts';
 import { holds, perRomState, type Recorded } from '../core/romdeps.ts';
+import { RomWatch, type Watch } from '../core/romwatch.ts';
 import { thumbCanvas } from './thumbs.ts';
 import { thumbsKey, thumbsInput, previewInput, objKey, type ObjSpec, type ObjThumb, type PlacementPreview } from '../core/objthumbs.ts';
 import { levelInput, inputHash } from '../core/inputs.ts';
@@ -173,7 +174,9 @@ export class App {
   gfxImport: { file: File; into: Package | null } | null = null; // for 'import-gfx'
   wsGfx: number | null = null; // GFX file for 'open-gfx'
   private romTimer = 0;
-  holdRender = false; // while drawing: the debounced re-emulation waits (it would stall the stroke)
+  // the views' watches of the ROM bytes they read (romwatch.ts): told on a ROM change that changed one of them; while
+  // one is held (a stroke being drawn) the debounced re-emulation waits (it would stall the stroke)
+  readonly romWatch: RomWatch;
   private quietUntil = 0; // and after a stroke until then (the next one often follows quickly)
   private persistTimer = 0;
   // the arrangements of Direct Map16 objects pasted in the session (pastehint.ts); the hint to save the last
@@ -217,6 +220,7 @@ export class App {
   constructor(rom: Rom, name: string) {
     this.rom = rom;
     this.romName = name;
+    this.romWatch = new RomWatch(rom);
     // made now, outside any ROM edit (undo never takes it away), and stored with the ROM soon
     if (makeProjectId(rom)) this.persistTimer = window.setTimeout(() => { this.persistTimer = 0; this.persist(); }, 1000);
     this.emu = new LevelEmulator(rom);
@@ -240,12 +244,13 @@ export class App {
       written: () => this.romChanged(),
       // (the open level loaded again by then, whatever the order of the follow-ups)
       settled: () => this.checkSuggestions(),
+      // (each told when the edit changed a ROM byte its read read)
       followUps: [
         // the open level as stored (a patch rewrote its sprite data, a package its sample …): loaded again
-        { read: (r) => (this.level ? levelSignature(r, this.level.number) : ''), changed: () => this.reloadLevel() },
+        { read: (r) => { if (this.level) attempt(() => loadLevel(r, this.level.number)); }, changed: () => this.reloadLevel() },
         // its graphics slots, own palette or music: shown at once
-        { read: (r) => (this.level ? headerSignature(r, this.level.number) : ''), changed: () => { this.flushRomChange(); this.emit('level-header'); } },
-        { read: (r) => prefabsSignature(r), changed: () => { this.flushRomChange(); this.emit('prefabs'); this.emit('change'); } },
+        { read: (r) => { if (this.level) levelHeaderGfx(r, this.level.number); }, changed: () => { this.flushRomChange(); this.emit('level-header'); } },
+        { read: (r) => attempt(() => listPrefabs(r)), changed: () => { this.flushRomChange(); this.emit('prefabs'); this.emit('change'); } },
         // the secondary entrances (markers, the exit panel): shown at once, also after undo/redo
         { read: (r) => entranceTables(r), changed: () => this.emit('change') },
       ],
@@ -957,7 +962,7 @@ export class App {
   }
 
   private runScan(): void {
-    if (this.holdRender) { this.scheduleScan(); return; }
+    if (this.romWatch.held) { this.scheduleScan(); return; }
     const lv = this.level, vertical = this.vertical, run = ++this.scanRun;
     const ov = this.buildOverrides();
     const key = scanKey(lv.number, ov);
@@ -1835,7 +1840,7 @@ export class App {
     this.romNotice();
     clearTimeout(this.romTimer);
     const run = () => {
-      const wait = this.holdRender ? 150 : this.quietUntil - performance.now();
+      const wait = this.romWatch.held ? 150 : this.quietUntil - performance.now();
       if (wait > 0) { this.romTimer = window.setTimeout(run, wait); return; }
       this.romTimer = 0;
       this.refresh();
@@ -1846,6 +1851,7 @@ export class App {
   }
   private romNotice(): void {
     this.savedSprites = null;
+    this.romWatch.notify();
     this.emit('rom-change');
   }
 
@@ -1855,6 +1861,12 @@ export class App {
     clearTimeout(this.romTimer); // (openLevel draws it)
     this.romTimer = 0;
     this.openLevel(this.level.number, true);
+  }
+
+  // a view watching the ROM bytes it draws from (romwatch.ts): changed when a ROM change changed one of them (the view
+  // draws through the watch's run)
+  watchRom(changed: () => void): Watch {
+    return this.romWatch.watch(changed);
   }
 
   // a stroke ended: the re-emulation waits for a pause in drawing
@@ -1904,16 +1916,14 @@ export class App {
 
 export { hasLayer2Objects, SEC_HDR };
 
-// what the follow-ups of a ROM edit compare (see the edit session in the constructor)
-const noUids = (k: string, v: unknown) => (k === 'uid' ? undefined : v);
-function levelSignature(rom: Rom, n: number): string {
-  try { return JSON.stringify(loadLevel(rom, n), noUids); } catch (e) { return String(e); }
+// what the follow-ups of a ROM edit read (see the edit session in the constructor): a read that throws (a level the
+// editor can't read) counts what it read up to there
+function attempt(f: () => unknown): void {
+  try { f(); } catch { /* (read up to the error) */ }
 }
-function headerSignature(rom: Rom, n: number): string {
-  return JSON.stringify([levelGfx(rom, n), levelExtGfx(rom, n), customPalette(rom, n), levelMusic(rom, n)]);
-}
-function prefabsSignature(rom: Rom): string {
-  try { return JSON.stringify([...listPrefabs(rom)]); } catch (e) { return String(e); }
+// the level's graphics slots, own palette and music
+function levelHeaderGfx(rom: Rom, n: number): void {
+  levelGfx(rom, n); levelExtGfx(rom, n); customPalette(rom, n); levelMusic(rom, n);
 }
 
 function spriteCanvas(img: SpriteImage): HTMLCanvasElement {

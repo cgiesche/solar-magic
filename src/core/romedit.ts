@@ -3,8 +3,8 @@
 // - before the edit, `prepare` runs (the editor stores the open level there; not part of the step);
 // - the edit is all or nothing: when it throws or reports failure (returns `{ ok: false }`), the ROM
 //   image and the editor data are put back and no undo step is recorded;
-// - afterwards (and after undo/redo) each follow-up whose data differs from before runs, so callers
-//   never send notifications themselves;
+// - afterwards (and after undo/redo) each follow-up runs whose read ROM bytes the edit changed (they are recorded
+//   before it, romdeps.ts record), so callers never send notifications themselves;
 // - once the edit (also one that failed or changed nothing) or undo/redo and its follow-ups are done, `settled` runs:
 //   what depends on the ROM and the open level together is checked there, not by the order of the follow-ups. While
 //   an edit runs (its prepare and follow-ups too), the session is `running`.
@@ -13,10 +13,12 @@
 
 import type { Rom } from './rom.ts';
 import { RomHistory, type RomEdit } from './romhistory.ts';
+import { record, holds, type Recorded } from './romdeps.ts';
 
-// a consequence of a ROM edit: `read` what it depends on before and after; `changed` when it differs
+// a consequence of a ROM edit: `read` what it depends on (the ROM bytes it reads are recorded before the edit);
+// `changed` when the edit changed one of them
 export interface FollowUp {
-  read(rom: Rom): string;
+  read(rom: Rom): unknown;
   changed(): void;
 }
 
@@ -128,7 +130,7 @@ export class RomEditSession {
       return { rollback: () => this.rom.restore(s), finish: () => {} };
     }
     this.active++;
-    let before: string[];
+    let before: Recorded<unknown>[];
     try {
       this.hooks.prepare?.();
       before = this.readAll();
@@ -150,15 +152,16 @@ export class RomEditSession {
     };
   }
 
-  private readAll(): string[] {
-    return (this.hooks.followUps ?? []).map((f) => f.read(this.rom));
+  // what the follow-ups read, recorded (not counted for a recording around the edit)
+  private readAll(): Recorded<unknown>[] {
+    return (this.hooks.followUps ?? []).map((f) => record(this.rom, () => f.read(this.rom), { counted: false }));
   }
 
-  private done(label: string, recorded: boolean, before: string[]): void {
+  private done(label: string, recorded: boolean, before: Recorded<unknown>[]): void {
     this.hooks.written?.({ label, recorded });
     // (the edit is done either way: a failing follow-up is reported, not passed on to the caller)
     (this.hooks.followUps ?? []).forEach((f, i) => {
-      try { if (f.read(this.rom) !== before[i]) f.changed(); } catch (e) { console.error(e); }
+      try { if (!holds(this.rom, before[i])) f.changed(); } catch (e) { console.error(e); }
     });
   }
 }

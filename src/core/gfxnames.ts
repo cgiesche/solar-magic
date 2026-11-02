@@ -24,6 +24,7 @@ export function gfxNames(rom: Rom): Map<number, string> {
   if (p < 0) return new Map();
   if (rom.data[p + 4] > VERSION) throw new Error('GFX names in the ROM are from a newer editor version');
   const size = rom.isRatsAt(p - 8);
+  rom.noteRead(p - 8, size + 8);
   const all = JSON.parse(new TextDecoder().decode(inflateSync(rom.data.subarray(p + 5, p + size)))) as Record<string, string>;
   return new Map(Object.entries(all).map(([k, v]) => [parseInt(k, 16), v]));
 }

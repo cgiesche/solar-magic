@@ -36,7 +36,10 @@ export function gfxBytes(rom: Rom, num: number): { raw: boolean; data: Uint8Arra
   if (isAnimFile(num)) { const d = readAltFile(rom, num - ANIM_FILE); return d ? { raw: true, data: d.slice() } : null; }
   const e = gfxEntry(rom, num);
   if (!e) return null;
-  return e.raw ? { raw: true, data: rom.bytes(e.addr, e.size).slice() } : { raw: false, data: lz2Decompress(rom.data, snesToPc(e.addr)).data };
+  if (e.raw) return { raw: true, data: rom.bytes(e.addr, e.size).slice() };
+  const r = lz2Decompress(rom.data, snesToPc(e.addr));
+  rom.noteRead(snesToPc(e.addr), r.size);
+  return { raw: false, data: r.data };
 }
 
 // the file as pixels; bpp: read an LZ2 file as another format than the detected one
@@ -50,7 +53,7 @@ export function readGfx(rom: Rom, num: number, bpp: number | null = null): GfxFi
   if (!e) return none;
   let data: Uint8Array, packed: number;
   if (e.raw) { data = rom.bytes(e.addr, e.size); packed = e.size; }
-  else ({ data, size: packed } = lz2Decompress(rom.data, snesToPc(e.addr)));
+  else { ({ data, size: packed } = lz2Decompress(rom.data, snesToPc(e.addr))); rom.noteRead(snesToPc(e.addr), packed); }
   const auto = e.raw ? (e.size === 0x800 ? 2 : 4) : defaultBpp(num, data.length);
   return pixels(num, e.addr, e.raw, e.raw ? auto : bpp ?? auto, auto, packed, data);
 }

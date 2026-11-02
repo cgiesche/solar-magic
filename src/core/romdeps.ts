@@ -203,6 +203,21 @@ export function holds(rom: Rom, r: { gen: number; reads: RomReads }): boolean {
   return true;
 }
 
+// A value kept for one ROM state and key (the latest asked), its reads counted: a later ask of the same state and key
+// gets the kept value and counts what making it read for the recorders running (a view's watch, romwatch.ts), as if
+// read again. (perRomState keeps values whose reads don't count.)
+export class StateMemo<T> {
+  private kept: { rom: Rom; gen: number; key: unknown; r: Recorded<T> } | null = null;
+
+  get(rom: Rom, key: unknown, make: () => T): T {
+    const k = this.kept;
+    if (k && k.rom === rom && k.gen === rom.gen && k.key === key) { countReads(rom, null, k.r.reads); return k.r.result; }
+    const gen = rom.gen, r = record(rom, make);
+    this.kept = { rom, gen, key, r };
+    return r.result;
+  }
+}
+
 // hashes of all pages of the current ROM, rehashed where the ROM changed (Rom.changesSince) when its generation does
 export class RomFingerprint {
   gen = 0; // counts recomputations that changed a page; cached validity checks are redone when it changes

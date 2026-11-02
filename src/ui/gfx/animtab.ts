@@ -7,6 +7,7 @@
 // are the overworld's event triggers.
 
 import type { App } from '../app.ts';
+import type { Watch } from '../../core/romwatch.ts';
 import type { GfxWorkspace, WsPanel } from '../gfxworkspace.ts';
 import { h, clear, toast, pickerOpen, modal, hexInput } from '../dom.ts';
 import { menuButton, type MenuItem } from '../menu.ts';
@@ -117,13 +118,15 @@ export class AnimTab implements WsPanel {
   // what the ROM holds, read once per build (drawing reads it many times)
   private view: ExList = emptyList();
   private altBytes: Uint8Array | null = null;
+  private watch: Watch; // the ROM bytes the tab was built from (romwatch.ts)
 
   constructor(app: App, ws: GfxWorkspace) {
     this.app = app;
     this.ws = ws;
     this.root = h('div', { class: 'at' }, this.bar, h('div', { class: 'at-main' }, this.slotsBox, this.detail, this.side));
     const rebuild = () => { if (this.visible) this.build(); };
-    app.on('rom-change', rebuild);
+    // (built again when a ROM change changed what it was built from)
+    this.watch = app.watchRom(rebuild);
     app.on('level', () => { if (this.t.levelPreview) rebuild(); });
     app.on('render', () => { if (this.visible && this.t.levelPreview) this.buildSide(); });
     // (the submap's load came: what the tab draws with)
@@ -193,6 +196,7 @@ export class AnimTab implements WsPanel {
   }
   hide(): void {
     this.visible = false;
+    this.watch.stop();
     clearInterval(this.timer);
   }
 
@@ -300,7 +304,11 @@ export class AnimTab implements WsPanel {
   }
 
   // ---------- UI ----------
+  // built from the ROM, watching what it read
   private build(): void {
+    this.watch.run(() => this.buildAll());
+  }
+  private buildAll(): void {
     this.view = this.list();
     this.altBytes = animBytes(this.app.rom, this.view.altFile);
     this.buildBar();

@@ -1,9 +1,11 @@
 // Overworld editor view.
 
 import type { App } from './app.ts';
+import type { Watch } from '../core/romwatch.ts';
+import { StateMemo } from '../core/romdeps.ts';
 import { h, toast, select, checkbox, hexInput, attachPanZoom, zoomControl, pixelZoomSteps, snapZoom, attachRectPick, emptyState } from './dom.ts';
 import {
-  type OwRender, gameL1, gameL2, readL1, writeL1, readL2, writeL2, l1Index, l1XY, l2Index, readTranslevels, writeTranslevels,
+  type OwRender, gameL1, gameL2, readL1, writeL1, readL2, writeL2, l1Index, l1XY, l2Index, readTranslevels, writeTranslevels, readMaps,
   placeTile, sharedTranslevels, enterableLevels, translevelToLevel, MAP_NAMES,
   translevelUse, resetTranslevel, baseEvent, setBaseEvent, eventNames, exitDirections, setExitDirection, DIR_ARROWS, DIR_NAMES, EXIT_NAMES, NO_EVENT,
   initialFlags, setInitialFlags, FLAG, DIR_FLAGS, OW_EVENTS, revealEvents, setRevealEvents, revealAt, revealedTile, revealEventCount,
@@ -104,6 +106,7 @@ export class OverworldView {
   private eventsSlider = h('input', { type: 'range', class: 'ow-events', min: 0, max: OW_EVENTS, step: 1 });
   private eventsLabel = h('span', { class: 'ow-events-name' });
   map = 0;
+  private watch: Watch; // the ROM bytes the view was built from (romwatch.ts)
   // The map as the game shows it is emulated in the probe worker (App.overworldMap): until the load of the map at the
   // event progress comes, the map drawn last stays (last: its load, of map `map`, with the maps as in the ROM then;
   // stale: something was built from another load or none, built again when it comes; afterShown: what waits for the
@@ -192,12 +195,15 @@ export class OverworldView {
     window.addEventListener('mouseup', (e) => this.onUp(e));
     attachPanZoom(this.scroller, () => this.zoom, (z, ax, ay) => this.setZoom(z, ax, ay), undefined, undefined, pixelZoomSteps);
     this.eventsSlider.addEventListener('input', () => this.setProgress(+this.eventsSlider.value));
-    // a ROM edit (a stroke ended, a name chosen) or undo/redo: shown as in the ROM (a stroke being painted is dropped)
-    app.on('rom-change', () => {
+    // a ROM edit (a stroke ended, a name chosen) or undo/redo that changed what the view was built from (its watch):
+    // shown as in the ROM (a stroke being painted is dropped)
+    this.watch = app.watchRom(() => {
       if (!this.root.isConnected) return;
       if (this.drag?.kind === 'paint') this.drag = null;
       this.sync();
     });
+    // any ROM edit: the map's load asked for again if it no longer holds (drawn when it comes)
+    app.on('rom-change', () => { if (this.root.isConnected) this.render(); });
     // whether the game draws the editor's messages came (the level tile's message boxes)
     app.on('message-routine', () => { if (this.root.isConnected) this.sync(); });
   }
@@ -461,14 +467,14 @@ export class OverworldView {
   // what passing the selected level's exits does (per ROM change): the tiles each exit's event changes, the
   // locations its exits to the overworld teleport to (the levels' exits as the level editor knows them, its open
   // level as edited; read only when a location is used)
-  private exitInfo: { gen: number; tl: number; changes: ExitChanges[]; teleports: LevelTeleport[] } | null = null;
+  // (kept per ROM state and translevel, what they read counted for the view's watch)
+  private exitInfo = new StateMemo<{ changes: ExitChanges[]; teleports: LevelTeleport[] }>();
   exitResults(tl: number): { changes: ExitChanges[]; teleports: LevelTeleport[] } {
     const rom = this.app.rom;
-    if (this.exitInfo?.gen !== rom.gen || this.exitInfo.tl !== tl) {
+    return this.exitInfo.get(rom, tl, () => {
       const teleports = locationUses(rom).size ? levelTeleports(rom, this.app.entrances.graph(), tl) : [];
-      this.exitInfo = { gen: rom.gen, tl, changes: exitChanges(rom, tl), teleports };
-    }
-    return this.exitInfo;
+      return { changes: exitChanges(rom, tl), teleports };
+    });
   }
   // the selected level tile's exits on the map: the tiles each one's event changes outlined (labelled N, 1–3 at
   // the first), the teleports of its exits to the overworld as dashed arrows
@@ -748,12 +754,12 @@ export class OverworldView {
     this.redrawMap();
     this.updateStatus();
   }
-  private names: { gen: number; names: Map<number, string> } | null = null;
+  private names = new StateMemo<Map<number, string>>(); // the events' names (per ROM state, reads counted)
   // the slider, the last event passed with the exit that runs it, the badge on the map
   showProgress(): void {
     const rom = this.app.rom, n = this.progress;
-    if (this.names?.gen !== rom.gen) this.names = { gen: rom.gen, names: eventNames(rom) };
-    const e = n - 1, last = n ? `${hex(e, 2)} ${this.names.names.get(e) ?? '(run by no level exit)'}` : '';
+    const names = this.names.get(rom, null, () => eventNames(rom));
+    const e = n - 1, last = n ? `${hex(e, 2)} ${names.get(e) ?? '(run by no level exit)'}` : '';
     this.eventsSlider.value = String(n);
     this.eventsLabel.textContent = n === 0 ? 'none' : n === OW_EVENTS ? 'all' : `up to ${last}`;
     this.eventsLabel.title = last;
@@ -1423,11 +1429,16 @@ export class OverworldView {
   }
 
   // the maps again from the ROM (the kept loads stay where the ROM edits changed nothing they read)
+  // the view built from the ROM, watching what it read
   sync(): void {
-    this.l1 = readL1(this.app.rom);
-    this.l2 = readL2(this.app.rom);
+    this.watch.run(() => this.build());
+  }
+  private build(): void {
+    const m = readMaps(this.app.rom);
+    this.l1 = m.l1;
+    this.l2 = m.l2;
     this.rom = { l1: this.l1.slice(), l2: this.l2.slice() };
-    this.tls = readTranslevels(this.app.rom);
+    this.tls = m.tls;
     this.stopPlay();
     this.syncEvent();
     this.buildSide();

@@ -6,6 +6,7 @@
 // again and written in place when it fits, otherwise moved to free space.
 
 import type { App } from '../app.ts';
+import type { Watch } from '../../core/romwatch.ts';
 import type { GfxWorkspace, WsPanel } from '../gfxworkspace.ts';
 import { menuButton, type MenuItem } from '../menu.ts';
 import { h, clear, toast, modal, choose, attachPanZoom, zoomControl, zoomStep, showColorLoupe, hideColorLoupe } from '../dom.ts';
@@ -95,8 +96,9 @@ export class GfxTab implements WsPanel {
   private filter = '';
   private onlyLevel = false;
   private visible = false;
-  private stroke = false;
-  private ownEdit = false;
+  // the ROM bytes the tab drew from: read again when a ROM change changed one; held while a stroke is drawn, own
+  // strokes taken as seen (they already are in this.file: a reload would stall the end of every stroke)
+  private watch: Watch;
   private cards = h('div', { class: 'gt-cards' });
   private list = h('div', { class: 'gt-list' });
   private canvas = h('canvas', { class: 'gt-canvas' });
@@ -130,8 +132,7 @@ export class GfxTab implements WsPanel {
       const rc = this.view.getBoundingClientRect();
       this.setZoom(z, rc.left + ax, rc.top + ay);
     }, ZOOM_MIN, ZOOM_MAX);
-    // own strokes already are in this.file: no reload (it would stall the end of every stroke)
-    app.on('rom-change', () => { if (this.visible && !this.stroke && !this.ownEdit) this.reload(); });
+    this.watch = app.watchRom(() => { if (this.visible) this.reload(); });
     app.on('render', () => { this.autoRows = null; if (this.visible) { this.buildCards(); this.draw(); this.buildSide(); } });
     app.on('level', () => (this.palRow = -1));
     app.on('animated', () => { if (this.visible) this.present(); });
@@ -180,6 +181,7 @@ export class GfxTab implements WsPanel {
     this.dropFloat();
     hideColorLoupe();
     this.visible = false;
+    this.watch.stop();
   }
 
   get selected(): number { return this.cur; }
@@ -209,6 +211,9 @@ export class GfxTab implements WsPanel {
   }
 
   private reload(): void {
+    this.watch.run(() => this.build());
+  }
+  private build(): void {
     this.autoRows = null;
     this.file = readGfx(this.app.rom, this.cur, this.bppOverride);
     this.clampArea();
@@ -633,7 +638,8 @@ export class GfxTab implements WsPanel {
     inp.addEventListener('change', () => {
       const v = inp.value.trim();
       if (v === own) return;
-      try { app.romEdit(v ? `${gfxName(num)} named “${v}”` : `${gfxName(num)}: name removed`, () => setGfxName(app.rom, num, v)); }
+      // (the first name makes the names' block in free space, which nothing read before: built again here)
+      try { app.romEdit(v ? `${gfxName(num)} named “${v}”` : `${gfxName(num)}: name removed`, () => setGfxName(app.rom, num, v)); this.reload(); }
       catch (e) { toast(String(e instanceof Error ? e.message : e), 'error'); }
     });
     return h('div', { class: 'prop' }, h('label', null, 'Name'), inp);
@@ -886,11 +892,9 @@ export class GfxTab implements WsPanel {
   private commit(label: string): void {
     const f = this.file;
     if (!f || f.empty) { toast(f ? `${gfxName(f.num)} is empty – nothing to export` : 'Choose a file on the left first'); return; }
-    this.ownEdit = true;
     try {
-      this.app.romEdit(`${gfxName(f.num)}: ${label}`, () => writeGfx(this.app.rom, f));
-    } catch (e) { toast(String(e instanceof Error ? e.message : e), 'error'); this.ownEdit = false; this.reload(); }
-    this.ownEdit = false;
+      this.watch.own(() => this.app.romEdit(`${gfxName(f.num)}: ${label}`, () => writeGfx(this.app.rom, f)));
+    } catch (e) { toast(String(e instanceof Error ? e.message : e), 'error'); this.reload(); }
   }
 
   private fill(x: number, y: number, v: number): void {
@@ -952,7 +956,7 @@ export class GfxTab implements WsPanel {
     });
     let lastHover = -1;
     c.addEventListener('mousemove', (e) => {
-      if (this.stroke || !this.file) return;
+      if (this.watch.held || !this.file) return;
       const p = tileAt(e), t = p.y * 16 + p.x;
       if (t === lastHover) return;
       lastHover = t;
@@ -972,8 +976,7 @@ export class GfxTab implements WsPanel {
     const r = this.paneRect();
     const pix = new Uint8Array(r.w * r.h);
     for (let y = 0; y < r.h; y++) for (let x = 0; x < r.w; x++) pix[y * r.w + x] = this.get(r.x + x, r.y + y);
-    this.stroke = true;
-    this.app.holdRender = true;
+    this.watch.hold();
     let last = -1;
     const put = (t: { x: number; y: number }) => {
       if (t.y * 16 + t.x === last) return;
@@ -987,8 +990,7 @@ export class GfxTab implements WsPanel {
     const up = () => {
       window.removeEventListener('mousemove', move);
       window.removeEventListener('mouseup', up);
-      this.stroke = false;
-      this.app.holdRender = false;
+      this.watch.release();
       this.app.renderPause();
       this.commit(this.area.w * this.area.h > 1 ? 'Tiles pasted' : 'Tile pasted');
     };
@@ -1024,8 +1026,7 @@ export class GfxTab implements WsPanel {
       const v = tool === 'erase' ? 0 : right ? this.bg : this.fg;
       this.warnAnimated(p.x, p.y);
       if (tool === 'fill') { this.fill(p.x, p.y, v); this.requestPresent(); this.app.renderPause(); this.commit('Fill'); return; }
-      this.stroke = true;
-      this.app.holdRender = true;
+      this.watch.hold();
       if (e.shiftKey && this.lastPt) this.line(this.lastPt.x, this.lastPt.y, p.x, p.y, v); else this.paint(p.x, p.y, v);
       let last = p;
       this.lastPt = p;
@@ -1040,8 +1041,7 @@ export class GfxTab implements WsPanel {
       const up = () => {
         window.removeEventListener('mousemove', move);
         window.removeEventListener('mouseup', up);
-        this.stroke = false;
-        this.app.holdRender = false;
+        this.watch.release();
         this.app.renderPause();
         this.commit(tool === 'erase' ? 'Erase' : 'Draw');
       };
@@ -1050,7 +1050,7 @@ export class GfxTab implements WsPanel {
     });
     let lastHover = -1;
     c.addEventListener('mousemove', (e) => {
-      if (this.stroke || !this.file) return;
+      if (this.watch.held || !this.file) return;
       const p = pos(e);
       // eyedropper (tool or Alt held): pipette cursor and the color under it
       const picking = this.tool === 'pick' || e.altKey;
@@ -1075,13 +1075,13 @@ export class GfxTab implements WsPanel {
       if (!this.float && !this.canWrite()) return;
       if (!this.float) this.lift('Selection moved');
       const fl = this.float!, ox = p.x - fl.x, oy = p.y - fl.y;
-      this.stroke = true;
+      this.watch.hold();
       move = (ev) => {
         const n = pos(ev);
         fl.x = clampX(n.x - ox, fl.w); fl.y = clampY(n.y - oy, fl.h);
         this.draw();
       };
-      up = () => { this.stroke = false; };
+      up = () => { this.watch.release(); };
     } else {
       this.dropFloat();
       const a = { x: clampX(p.x, 1), y: clampY(p.y, 1) };

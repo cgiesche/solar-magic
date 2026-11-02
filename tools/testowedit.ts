@@ -3,7 +3,8 @@
 // free space only otherwise; the game shows the painted map (emulated).
 import { Rom, snesToPc, pcToSnes } from '../src/core/rom.ts';
 import { RomEditSession } from '../src/core/romedit.ts';
-import { OverworldEmulator, OverworldLoads, readL1, writeL1, readL2, writeL2, l1Index, l2Index, l2Pointers, OW_L1 } from '../src/core/overworld.ts';
+import { OverworldEmulator, OverworldLoads, readL1, writeL1, readL2, writeL2, l1Index, l2Index, l2Pointers, OW_L1, readMaps, readTranslevels, writeTranslevels } from '../src/core/overworld.ts';
+import { RomWatch } from '../src/core/romwatch.ts';
 import { levelNameTiles, setLevelNameTiles, encodeName } from '../src/core/levelnames.ts';
 import { RAM, getS16 } from '../src/core/ram.ts';
 import { submapViews } from '../src/core/owevents.ts';
@@ -184,6 +185,37 @@ const diff = (a: Uint8Array, b: Uint8Array) => { const out: number[] = []; for (
   l2[l2Index(0, 5, 5)] ^= 0x0001;
   s.edit('Paint layer 2', () => writeL2(rom, l2));
   check(loads.get(0, 0) !== r0, 'layer 2, moved: painting it loads again');
+}
+
+// the overworld view syncs through a watch of the maps it reads (readMaps): a ROM edit that touches no overworld bytes
+// (a level's graphics, free space next to its moved layer 2) does not resync; painting a layer, the translevels or
+// undo does
+{
+  const { rom, s } = fresh();
+  const watch = new RomWatch(rom);
+  let syncs = 0;
+  const w = watch.watch(() => { syncs++; w.run(() => readMaps(rom)); });
+  w.run(() => readMaps(rom));
+  const edit = (label: string, f: () => void) => { s.edit(label, f); watch.notify(); };
+  const gfx = editorPatch(rom)!.levelGfx + 0x105 * 8;
+  edit('Level 105 graphics', () => rom.w8(gfx, rom.r8(gfx) ^ 1));
+  check(syncs === 0, 'overworld view: a ROM edit touching no overworld bytes does not resync');
+  const l1 = readL1(rom), i = l1Index(0, 7, 9);
+  l1[i] = l1[i] === 0x56 ? 0x57 : 0x56;
+  edit('Paint layer 1', () => writeL1(rom, l1));
+  check(syncs === 1, 'overworld view: painting layer 1 resyncs');
+  edit('Paint layer 2', () => writeL2(rom, noisyL2(rom)));
+  check(syncs === 2, 'overworld view: painting layer 2 (moved to free space) resyncs');
+  const attrs = snesToPc(l2Pointers(rom).attrs), block = rom.scanRats().find((b) => b.start + 8 <= attrs && attrs < b.start + 8 + b.size)!;
+  const next = block.start + 8 + block.size + 0x10;
+  edit('Free space next to layer 2', () => rom.w8(pcToSnes(next), rom.data[next] ^ 1));
+  check(syncs === 2, 'overworld view: an edit next to the moved layer 2 does not resync');
+  const tls = readTranslevels(rom);
+  tls[l1Index(0, 3, 3)] ^= 1;
+  edit('Translevels', () => writeTranslevels(rom, tls));
+  check(syncs === 3, 'overworld view: a translevel change resyncs');
+  s.undo(); watch.notify();
+  check(syncs === 4, 'overworld view: undo resyncs');
 }
 
 if (bad) { console.log(`${bad} failed`); process.exit(1); }

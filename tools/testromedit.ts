@@ -16,7 +16,7 @@ const A = 0x00b0a0, B = 0x0d8000;
 function setup() {
   const rom = new Rom(cleanImage());
   const runs = { a: 0, b: 0, written: 0, recorded: 0, prepared: 0 };
-  const follow = (at: number, k: 'a' | 'b'): FollowUp => ({ read: (r) => String(r.r16(at)), changed: () => { runs[k]++; } });
+  const follow = (at: number, k: 'a' | 'b'): FollowUp => ({ read: (r) => r.r16(at), changed: () => { runs[k]++; } });
   const s = new RomEditSession(rom, {
     prepare: () => { runs.prepared++; },
     followUps: [follow(A, 'a'), follow(B, 'b')],

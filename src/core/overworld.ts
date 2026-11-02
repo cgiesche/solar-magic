@@ -85,8 +85,8 @@ export function l2Pointers(rom: Rom): { tiles: number; attrs: number } {
 export function readL2(rom: Rom): Uint16Array {
   const out = new Uint16Array(0x2000);
   const p = l2Pointers(rom);
-  rleDecode(rom.data, snesToPc(p.tiles), out, 0, 0x2000);
-  rleDecode(rom.data, snesToPc(p.attrs), out, 8, 0x2000);
+  rom.noteRead(snesToPc(p.tiles), rleDecode(rom.data, snesToPc(p.tiles), out, 0, 0x2000));
+  rom.noteRead(snesToPc(p.attrs), rleDecode(rom.data, snesToPc(p.attrs), out, 8, 0x2000));
   return out;
 }
 
@@ -207,8 +207,15 @@ export function translevelTableBlock(rom: Rom): { snes: number; size: number } |
 export function readTranslevels(rom: Rom): Uint8Array {
   if (!hasTranslevelTable(rom)) missingPatch('Translevels per level tile');
   const out = new Uint8Array(0x800);
-  out.set(lz2Decompress(rom.data, snesToPc(tableAt(rom))).data.subarray(0, 0x800));
+  const at = snesToPc(tableAt(rom)), t = lz2Decompress(rom.data, at);
+  rom.noteRead(at, t.size);
+  out.set(t.data.subarray(0, 0x800));
   return out;
+}
+
+// the maps as in the ROM: layer 1, layer 2 and the translevel of each layer 1 tile (what the overworld view shows)
+export function readMaps(rom: Rom): { l1: Uint8Array; l2: Uint16Array; tls: Uint8Array } {
+  return { l1: readL1(rom), l2: readL2(rom), tls: readTranslevels(rom) };
 }
 
 // the level each level tile enters (l1Index → level number) in a ROM read through `r` – another than the
