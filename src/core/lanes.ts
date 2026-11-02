@@ -1,4 +1,4 @@
-// The lanes of the result learner's jobs (CONTEXT.md), on both sides of the probe worker (probeclient.ts, probehost.ts):
+// The lanes (CONTEXT.md) of the result learner's jobs, on both sides of the probe worker (probeclient.ts, probehost.ts):
 // per lane the jobs asked for in the order asked, one at a time (the first runs); a request for a job already in its
 // lane (the same key and input: id) joins it; a request replacing the lane's others drops them (they are not wanted
 // any more); the lane's busy label is the running job's progress, else the label it was asked with (given the count of
@@ -36,13 +36,22 @@ export class Lanes<N extends string, E> {
   // the lane's job with that id
   find(name: N, id: string): E | undefined { return this.lanes.get(name)?.jobs.find((j) => this.id(j) === id); }
 
-  // the lane's job with that id, else make's, queued last (added)
-  join(name: N, id: string, make: () => E): { job: E; added: boolean } {
-    const lane = this.lane(name), known = lane.jobs.find((j) => this.id(j) === id);
-    if (known) return { job: known, added: false };
+  // the job is in the lane (still asked for)
+  has(name: N, job: E): boolean { return this.lanes.get(name)?.jobs.includes(job) ?? false; }
+
+  // the lane's job with that id, else make's, queued last (added), with its lane
+  join(name: N, id: string, make: () => E): { job: E; added: boolean; lane: Lane<N, E> } {
+    const lane = this.lane(name), known = this.find(name, id);
+    if (known !== undefined) return { job: known, added: false, lane };
     const job = make();
     lane.jobs.push(job);
-    return { job, added: true };
+    return { job, added: true, lane };
+  }
+
+  // the job's progress label, while it runs (the lane's first)
+  setProgress(name: N, job: E, label: string | null): void {
+    const lane = this.lanes.get(name);
+    if (lane?.first === job) lane.progress = label;
   }
 
   // drops the lane's jobs other than the one with that id: those dropped (the progress goes with the first)

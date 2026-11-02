@@ -142,6 +142,9 @@ export type LearnLane =
 
 // what the probe client shows as busy: the probes, the tasks, the learn jobs' lanes
 export type ProbeBusyKey = 'probe' | TaskType | LearnLane;
+// (no lane is named as a task: compile error otherwise)
+const NO_TASK_LANE: [LearnLane & TaskType] extends [never] ? true : never = true;
+void NO_TASK_LANE;
 
 // a learn job asked for: its result under key and input (the hash of what it depends on outside the ROM, inputs.ts),
 // learned in a lane (one job at a time, in the order asked); replace drops the lane's other jobs; parts: the editor's

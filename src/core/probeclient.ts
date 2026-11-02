@@ -237,20 +237,19 @@ export class ProbeClient {
     const { job: want, added } = this.lanes.join(name, id, () => (
       { msg: { type: 'learn', lane: name, key, input, job, replace: !!opts.replace }, opts: opts as LearnOptions<unknown>, done: [], failed: [], dropped: [], resent: -1 }));
     if (added) {
-      const w = want;
       // (stored results first: the result may be known by then)
       this.d.cacheReady.then(() => {
-        if (!this.wanted(w)) return;
+        if (!this.lanes.has(name, want)) return;
         const known = this.stored(key, input, keep);
         // (with the stored parts of the result: the worker learns only the others)
-        if (known === undefined) this.send?.(this.withParts(w.msg));
-        else this.learned({ type: 'learned', gen: this.gen, lane: w.msg.lane, key, input, result: known, failed: false, put: [] });
+        if (known === undefined) this.send?.(this.withParts(want.msg));
+        else this.learned({ type: 'learned', gen: this.gen, lane: name, key, input, result: known, failed: false, put: [] });
       });
     } else if (learnRetargets(want.msg.job, job)) {
       // (the running job takes up the other work, e.g. the levels' uses another list; after the first request, sent
       // once the stored results are loaded)
       const w = want, msg = w.msg = { ...w.msg, job };
-      this.d.cacheReady.then(() => { if (w.msg === msg && this.wanted(w)) this.send?.(this.withParts(msg)); });
+      this.d.cacheReady.then(() => { if (w.msg === msg && this.lanes.has(name, w)) this.send?.(this.withParts(msg)); });
     }
     const done = opts.done as ((r: unknown) => void) | undefined;
     if (done && !want.done.includes(done)) want.done.push(done);
@@ -259,9 +258,6 @@ export class ProbeClient {
     this.learnBusy(name);
     return undefined;
   }
-
-  // (still asked for)
-  private wanted(w: LearnWant): boolean { return this.lanes.get(w.msg.lane)?.jobs.includes(w) ?? false; }
 
   // the jobs of a lane are not wanted any more
   unlearn(name: LearnLane): void {
@@ -368,11 +364,11 @@ export class ProbeClient {
   // a changed byte, the result is checked), its label
   private learning(d: Learning): void {
     this.take(d);
-    const w = this.want(d), lane = this.lanes.get(d.lane);
-    if (!w || !lane) return;
+    const w = this.want(d);
+    if (!w) return;
     if (d.fresh) w.opts.shown?.(null);
     if (d.shown.length && d.gen === this.gen) w.opts.shown?.(d.shown);
-    if (lane.first === w) lane.progress = d.label;
+    this.lanes.setProgress(d.lane, w, d.label);
     this.learnBusy(d.lane);
   }
 

@@ -203,7 +203,7 @@ export class ProbeHost {
     const id = laneId(msg.key, msg.input), runner = this.runner, state = this.state!;
     if (msg.replace) this.lanes.replace(msg.lane, id);
     if (msg.parts) this.prober!.results.load(msg.parts); // (not handed back: the editor has them)
-    const { job, added } = this.lanes.join(msg.lane, id, () => {
+    const { job, added, lane } = this.lanes.join(msg.lane, id, () => {
       const show = (items: unknown[] | null) => { if (items === null) { l.fresh = true; l.shown = []; } else l.shown.push(...items); };
       // (a job starting over runs for the latest request, the levels' uses take up its list as they run)
       const start: JobRun<unknown>['start'] = (emu, p, part) => learnJob(l.msg.job, state, show, () => l.msg.job)(emu, p, part);
@@ -211,7 +211,6 @@ export class ProbeHost {
       return l;
     });
     if (!added) job.msg = msg;
-    const lane = this.lanes.lane(msg.lane);
     this.turns.add(lane); // (one with jobs keeps its turn)
   }
 

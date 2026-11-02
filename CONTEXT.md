@@ -298,6 +298,10 @@ _Avoid_: Cached value, generation (for validity)
 What learns emulated results: runs the emulation for a result's key and input, records the ROM bytes it reads, and keeps the result while they and the input are unchanged. A read byte that changes while it learns starts it over. Wherever it runs (beside the editor or in the background worker) it learns the same way; probes are results it learns too.
 _Avoid_: prober (for the whole), worker (for what it does)
 
+**Lane**:
+A queue of the result learner's background jobs: one runs at a time, in the order asked; asking again for a job already there (the same key and input) joins it; a request may replace the lane's other jobs (they are not wanted any more). The busy indicator shows a lane's running job.
+_Avoid_: queue (for the probes' asked and prefetched jobs)
+
 **Picture**:
 An emulated result that shows what things look like (sprite images, object thumbnails, the placement preview, animated tiles and colors), and so counts the display data among the bytes it read. Any other result (a probe, a level's uses, a jump arc, …) is no picture and leaves the display data out, so drawing a tile or changing a color keeps it (ADR 0008). The palette tab's trace of where colors come from leaves out only the colors' values.
 _Avoid_: image, render (for the kind of result; a sprite image is one picture)

@@ -13,7 +13,7 @@ import type { RomReads, ResultCache } from './romdeps.ts';
 import { inputHash } from './inputs.ts';
 import { JobRunner } from './jobrunner.ts';
 
-const AT_ONCE = ''; // the lane of the emulator for work at once
+const AT_ONCE = ''; // the job runner's name of the emulator for work at once
 
 export interface LearnerDeps {
   rom: Rom;
