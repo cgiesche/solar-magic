@@ -26,7 +26,7 @@ import { RomFingerprint, RomReads } from '../src/core/romdeps.ts';
 import { gfxSkipMask } from '../src/core/gfxpages.ts';
 import { readGfx, writeGfx } from '../src/core/gfxfiles.ts';
 import type { Level } from '../src/core/level.ts';
-import { SHARED_PALETTES } from '../src/core/sharedpal.ts';
+import { FG_PALS } from '../src/core/sharedpal.ts';
 import { editorImage } from './fixture.ts';
 
 let fail = 0;
@@ -210,13 +210,14 @@ const tile104 = (lv: Level) => { lv.objects = lv.objects.filter((o) => !(o.ext =
   }
   same(undefined, 'another level saved');
   // a place with another object between its objects: its search loads the level, and the bytes the load read count
-  // (a color of the shared palettes: the test's emulator leaves out only graphics data)
+  // (a color of the shared palettes: the test's emulator leaves out only graphics data. One of the FG palettes, which
+  // every level loads: the palettes' first and last page are recorded by byte, there only the colors a load reads count)
   const h = loadLevel(rom, H1), b = block(0x70, 12);
   h.objects.push(...b.slice(0, 4), { uid: newUid(), num: 5, ext: 0, x: 0x78, y: 2, size: 0 }, ...b.slice(4));
   saveLevel(rom, h);
   same(undefined, 'a place with an object between');
   only([H1], 'a place with an object between');
-  const c = snesToPc(SHARED_PALETTES) + 2;
+  const c = snesToPc(FG_PALS) + 2;
   holds(undefined, true, 'before a color edited');
   rom.writeAt(c, Uint8Array.of(rom.data[c] ^ 0x1f));
   holds(undefined, false, 'a color edited');
