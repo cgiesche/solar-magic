@@ -36,7 +36,7 @@ import { RAM, map16Pointer } from '../core/ram.ts';
 import { loadMusicProject, submapSongs, submapMusic, setSubmapMusic, songHex, type SongInfo } from '../core/music.ts';
 import { songLabel } from './musicdialog.ts';
 import type { Rom } from '../core/rom.ts';
-import { OW_OPTIONS, owOption, owOptionValue, setOwOption, revealSpeed, setRevealSpeed, revealStepFrames, MAX_REVEAL_SPEED, DEFAULT_REVEAL_SPEED } from '../core/owoptions.ts';
+import { OW_OPTIONS, owOption, owOptionValue, setOwOption, revealSpeed, setRevealSpeed, revealStepFrames, MAX_REVEAL_SPEED, DEFAULT_REVEAL_SPEED, submapLightning, setSubmapLightning, LIGHTNING_TITLE } from '../core/owoptions.ts';
 
 // a w×h block of L1 tiles (16x16) or L2 tilemap entries (8x8), row-major; L1 tiles picked up from the map carry
 // their translevels (`tls`, 0 none), so a level tile placed with them enters the same level
@@ -1127,6 +1127,13 @@ export class OverworldView {
         rows.push(h('div', { class: 'prop ow-option-sub' }, h('label', null, 'Path reveal speed'), inp));
       }
     }
+    // the game's lightning (color 4·7), per submap: each one ROM edit of the same byte
+    rows.push(h('div', { class: 'row hint', title: 'The game\'s lightning flashes of color 4·7, per submap' }, 'Lightning on'));
+    MAP_NAMES.forEach((name, m) => {
+      const c = checkbox(name, LIGHTNING_TITLE, submapLightning(rom, m), (on) => this.app.romEdit(`Lightning on ${name}: ${on ? 'on' : 'off'}`, () => setSubmapLightning(rom, m, on)));
+      c.classList.add('ow-option-sub');
+      rows.push(c);
+    });
     const d = h('details', { class: 'ow-reveals', open: this.optionsOpen, ontoggle: () => (this.optionsOpen = d.open) },
       h('summary', null, 'Overworld options', h('span', { class: 'hint' }, ' · the game\'s, for all maps')), ...rows);
     return d;

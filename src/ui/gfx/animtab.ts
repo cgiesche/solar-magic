@@ -18,7 +18,7 @@ import { paletteOn } from '../../core/quarters.ts';
 import { fgTileUsers } from '../../core/levelusage.ts';
 import { EXT_TILES } from '../../core/map16ext.ts';
 import {
-  type ExList, type ExSlot, type ExListRef, emptyList, readList, writeList, levelSettings, setLevelSettings, submapAnimSettings, setSubmapAnimSettings, submapLightning, setSubmapLightning,
+  type ExList, type ExSlot, type ExListRef, emptyList, readList, writeList, levelSettings, setLevelSettings, submapAnimSettings, setSubmapAnimSettings,
   kindOf, tilesOf, secondSet as secondSetOf, secondSetName as secondSetNameOf, triggerName as triggerNameOf, isEventTrigger, eventManual, TYPE_NAMES, SLOTS,
   NO_GAME_COLORS, NO_GAME_TILES, NO_LEVEL_LIST, NO_GLOBAL_LIST, NO_DOT_COLORS, altFileUsers, localizeFrames, shapeOf, exanimTiles, exanimColors, ALT_FILE_MAX,
   rotationRange, setRotationRange, rotationStep, rotated, stepsPerSecond, heldColors, reversesOnTrigger, ROTATION_MAX,
@@ -400,11 +400,6 @@ export class AnimTab implements WsPanel {
       { heading: 'Game' },
       flag(NO_GAME_TILES, 'Original tile animation', 'The game\'s animated tiles of the overworld (water, waves …)'),
       flag(NO_DOT_COLORS, 'Level dot colors', 'The game\'s flashing of colors 6·D and 7·D (the level dots)'),
-      {
-        label: 'Lightning', title: 'The game\'s lightning flashes of color 4·7 (in the game on the Valley of Bowser only)',
-        checked: () => submapLightning(app.rom, m),
-        onToggle: async (on) => { app.romEdit(`Submap ${m}: Lightning ${on ? 'on' : 'off'}`, () => setSubmapLightning(app.rom, m, on)); },
-      },
       { heading: 'Own' },
       flag(NO_LEVEL_LIST, 'Submap animations', 'This submap\'s own animations'),
       flag(NO_GLOBAL_LIST, 'Overworld global animations', 'The overworld\'s global animations'),

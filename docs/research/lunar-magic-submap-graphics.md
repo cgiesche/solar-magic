@@ -225,6 +225,6 @@ game's table at `$04F875` (`80 40 20 10 08 04 02`, the main map to Star Road). S
 lightning is off on, kept in the game's code, and works without ExAnimation; the settings bytes (target `+$4A`) stayed
 the same. *Journey to Kaizo* has `7D` there (the lightning on the main map and Star Road).
 
-The editor writes that byte the same way (`submapLightning`/`setSubmapLightning` in `src/core/exanim.ts`, each submap's bit read
+The editor writes that byte the same way (`submapLightning`/`setSubmapLightning` in `src/core/owoptions.ts`, an overworld option (#267), each submap's bit read
 from the game's table as its check does; BOWSIE's code from `$04F76E` leaves the table alone, checked with BOWSIE installed) and keeps no bit of its own;
-`tools/testowexanim.ts` checks the bytes and the lightning by emulation.
+`tools/testowoptions.ts` checks the bytes and the lightning by emulation.

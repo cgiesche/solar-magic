@@ -4,8 +4,8 @@
 import { Rom } from '../src/core/rom.ts';
 import { LevelEmulator } from '../src/core/levelemu.ts';
 import { RomEditSession } from '../src/core/romedit.ts';
-import { readL1, readTranslevels, setInitialFlags, FLAG } from '../src/core/overworld.ts';
-import { OW_OPTIONS, owOptionValue, setOwOption, revealSpeed, setRevealSpeed, DEFAULT_REVEAL_SPEED, MAX_REVEAL_SPEED, revealStepFrames, type OwOptionId } from '../src/core/owoptions.ts';
+import { readL1, readTranslevels, setInitialFlags, FLAG, OverworldEmulator, MAP_NAMES } from '../src/core/overworld.ts';
+import { OW_OPTIONS, owOptionValue, setOwOption, submapLightning, setSubmapLightning, LIGHTNING_MASK, revealSpeed, setRevealSpeed, DEFAULT_REVEAL_SPEED, MAX_REVEAL_SPEED, revealStepFrames, type OwOptionId } from '../src/core/owoptions.ts';
 import { GM, RAM, PAD, get16, set16 } from '../src/core/ram.ts';
 import { PlaySession } from '../src/core/playsession.ts';
 import { cleanImage, editorImage } from './fixture.ts';
@@ -253,6 +253,48 @@ function gameOver(rom: Rom): { max: number; player: number } {
   check(game.max > 1 && game.player === 0, `a game over offers the life exchange (${game.max})`);
   check(noLR.max > 1 && noLR.player === 0, `L/R off: a game over still offers it (${noLR.max})`);
   check(no.max <= 1 && no.player === 1, `life exchange off: a game over doesn't offer it, Luigi's turn (${no.max})`);
+}
+
+// ---- the game's lightning per submap ----
+// color 47: the game's mask at $04F709, the bytes Lunar Magic 3.71 writes (ROMs it saved: F7 the game's, FF with the
+// Valley of Bowser's off, 7F with only the main map's on, 77 with both, 75 with Star Road's too); each switch one ROM
+// edit that undo takes back and redo brings again
+{
+  const rom = fresh(), s = new RomEditSession(rom), was = rom.data.slice();
+  const flashes = (m: number) => {
+    const emu = new OverworldEmulator(rom), c = new Set<number>();
+    emu.load(m, 0);
+    for (let f = 0; f < 900; f++) { emu.snes.runFrame(); c.add(emu.snes.cgram[0x8e] | (emu.snes.cgram[0x8f] << 8)); }
+    return c.size;
+  };
+  const mask = () => rom.r8(LIGHTNING_MASK);
+  const set = (m: number, on: boolean) => s.edit(`Lightning on ${MAP_NAMES[m]}: ${on ? 'on' : 'off'}`, () => setSubmapLightning(rom, m, on));
+  check(mask() === 0xf7 && clean.r8(LIGHTNING_MASK) === 0xf7 && MAP_NAMES.every((_, m) => submapLightning(rom, m) === (m === 4)),
+    'lightning: on the Valley of Bowser only, as in the game (F7)');
+  const before = flashes(4);
+  set(4, false);
+  const after = flashes(4);
+  check(mask() === 0xff && !submapLightning(rom, 4), `lightning: the Valley of Bowser's off: FF (${hx(mask())})`);
+  check(before > 1 && after === 1, `lightning: color 47 flashes on the Valley of Bowser (${before} colors in 900 frames), turned off not (${after})`);
+  const main0 = flashes(0);
+  set(0, true);
+  check(mask() === 0x7f, `lightning: only the main map's on: 7F (${hx(mask())})`);
+  set(4, true);
+  check(mask() === 0x77, `lightning: the main map's on too: 77 (${hx(mask())})`);
+  set(6, true);
+  check(mask() === 0x75, `lightning: and Star Road's: 75 (${hx(mask())})`);
+  set(6, false);
+  const main1 = flashes(0);
+  check(main0 === 1 && main1 > 1, `lightning: color 47 stands still on the main map (${main0}), turned on it flashes (${main1} colors)`);
+  s.undo();
+  check(mask() === 0x75, `lightning: undo brings Star Road's back (${hx(mask())})`);
+  s.redo();
+  check(mask() === 0x77, `lightning: redo takes it again (${hx(mask())})`);
+  for (let k = 0; k < 5; k++) s.undo();
+  check(same(rom.data, was), 'lightning: all undone, the game\'s F7 again');
+  let threw = false;
+  try { setSubmapLightning(rom, 7, true); } catch { threw = true; }
+  check(threw && mask() === 0xf7, 'lightning: no submap 7');
 }
 
 if (bad) { console.log(`${bad} failed`); process.exit(1); }

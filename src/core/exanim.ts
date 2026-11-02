@@ -40,7 +40,7 @@ export const SLOTS = 0x20;
 export const NO_GAME_COLORS = 0x80, NO_GAME_TILES = 0x40, NO_LEVEL_LIST = 0x20, NO_GLOBAL_LIST = 0x10;
 // a submap's settings bits (set = off): the game's tiles, its own list (NO_LEVEL_LIST) and the overworld's global
 // list as a level's, and the level dots' colors 6D and 7D (Lunar Magic's); the low four bits are unused, the
-// lightning is not among them (submapLightning)
+// lightning is not among them (an overworld option, owoptions.ts submapLightning)
 export const NO_DOT_COLORS = 0x80;
 
 export interface ExSlot {
@@ -440,22 +440,6 @@ export function submapAnimSettings(rom: Rom, submap: number): number {
 }
 export function setSubmapAnimSettings(rom: Rom, submap: number, v: number): void {
   rom.w8(owExanimLayout(rom)!.settings + submap, v & 0xf0);
-}
-// The game's lightning (color 47) per submap, Lunar Magic's "Enable original game's lightning palette animation": a
-// mask in the game's own code, the operand of its LDA #$F7 : JSR $F882 at $04F708, of the submaps it is off on –
-// each submap's bit as the game's check reads it, from its table at $04F875 (80 the main map … 02 Star Road), so in
-// the clean game (F7) on the Valley of Bowser only. Lunar Magic 3.71 writes this byte and no other for the switch
-// (ROMs it saved, docs/research/lunar-magic-submap-graphics.md, "The lightning switch"); it doesn't need the
-// ExAnimation patch.
-export const LIGHTNING_MASK = 0x04f709;
-const SUBMAP_BITS = 0x04f875;
-export function submapLightning(rom: RomRead, submap: number): boolean {
-  return !(rom.r8(LIGHTNING_MASK) & rom.r8(SUBMAP_BITS + submap));
-}
-export function setSubmapLightning(rom: Rom, submap: number, on: boolean): void {
-  if (submap < 0 || submap >= SUBMAP_LISTS) throw new RangeError(`no submap ${submap}`);
-  const bit = rom.r8(SUBMAP_BITS + submap), v = rom.r8(LIGHTNING_MASK);
-  rom.w8(LIGHTNING_MASK, on ? v & ~bit : v | bit);
 }
 
 // ---- every list by one name ----

@@ -17,6 +17,7 @@
 //   in the save prompt routine at $03BA26, overworld.ts) – a level tile's own "save prompt" flag still brings it up
 // - Luigi's map position saved as his own instead of Mario's ($048F9F)
 // - life exchange ($04828D, the window), L/R opening it ($04836E)
+// - the game's lightning per submap ($04F709, submapLightning)
 import type { Rom } from './rom.ts';
 
 // 1: the game's save tiles bring up the save prompt – in the initial level flags patch's save prompt routine (overworld.ts
@@ -137,4 +138,23 @@ export function setRevealSpeed(rom: Rom, v: number): void {
 export function revealStepFrames(rom: Rom): number {
   const v = revealSpeed(rom);
   return v === null ? 14 : Math.ceil(0x40 / v) + 2;
+}
+
+// The game's lightning (color 47) per submap, Lunar Magic's "Enable original game's lightning palette animation" (in
+// its animation settings; here with the overworld's other switches of the game, #267): a mask in the game's own code,
+// the operand of its LDA #$F7 : JSR $F882 at $04F708, of the submaps it is off on – each submap's bit as the game's
+// check reads it, from its table at $04F875 (80 the main map … 02 Star Road), so in the clean game (F7) on the Valley
+// of Bowser only. Lunar Magic 3.71 writes this byte and no other for the switch (ROMs it saved,
+// docs/research/lunar-magic-submap-graphics.md, "The lightning switch"); it doesn't need the ExAnimation patch.
+export const LIGHTNING_MASK = 0x04f709;
+const SUBMAP_BITS = 0x04f875;
+const SUBMAPS = 7; // the main map … Star Road (overworld.ts MAP_NAMES; not imported, see LF_SAVE_SWITCH)
+export const LIGHTNING_TITLE = 'The game\'s lightning flashes of color 4·7 on this submap (in the game on the Valley of Bowser only)';
+export function submapLightning(rom: Pick<Rom, 'r8'>, submap: number): boolean {
+  return !(rom.r8(LIGHTNING_MASK) & rom.r8(SUBMAP_BITS + submap));
+}
+export function setSubmapLightning(rom: Rom, submap: number, on: boolean): void {
+  if (submap < 0 || submap >= SUBMAPS) throw new RangeError(`no submap ${submap}`);
+  const bit = rom.r8(SUBMAP_BITS + submap), v = rom.r8(LIGHTNING_MASK);
+  rom.w8(LIGHTNING_MASK, on ? v & ~bit : v | bit);
 }
