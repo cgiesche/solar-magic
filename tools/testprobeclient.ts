@@ -385,6 +385,37 @@ function editor(worker: Worker | null) {
     'uses: shown a level at a time, in the levels\' entries, done');
   check(e.steps.every(([k]) => k === 'probe-prefetch'), 'uses: the main thread loaded no level');
 
+  // asked again with another list while it runs (#230): the request reaches the worker, the running job takes up the
+  // latest list; an edit during the scan asks once more for the reply of the generation before, not for every reply
+  const usesSent = () => w.sent.filter((m) => m.type === 'learn' && m.key === 'uses');
+  shown.length = 0;
+  const usesOpts = { lane: 'uses', label: 'Uses in levels', shown: (l: unknown[] | null) => { if (l) shown.push(...l); }, done: () => usesDone++ };
+  e.client.learn('uses', { kind: 'uses', levels: [0x107, 0x108, 0x109] }, usesOpts);
+  await settle();
+  for (let i = 0; i < 1000 && !shown.length && w.host.pending; i++) w.run(1);
+  const before = usesSent().length;
+  e.client.learn('uses', { kind: 'uses', levels: [0x10a] }, usesOpts);
+  await settle();
+  const last = usesSent().at(-1);
+  check(usesSent().length === before + 1 && last?.type === 'learn' && last.job.kind === 'uses' && last.job.levels.join() === [0x10a].join(), 'uses asked with another list: the request reaches the worker');
+  w.run();
+  check(shown.join() === [0x107, 0x10a].join() && usesDone === 2, `… the running job takes up the latest list (${shown.map((n) => (n as number).toString(16)).join()})`);
+
+  e.client.learn('uses', { kind: 'uses', levels: [0x10b] }, usesOpts);
+  await settle();
+  const genBefore = e.rom.gen;
+  touch(e.rom);
+  e.client.learn('uses', { kind: 'uses', levels: [0x10b] }, usesOpts); // (sends the edit)
+  const sent0 = usesSent().length;
+  // (the job's replies as from the generation before, until it is done: the worker then runs it again)
+  for (let i = 0; i < 1000 && w.host.pending; i++) if (w.run(1, (d) => ({ ...d, gen: genBefore }))[0]?.type === 'learned') break;
+  const old: ProbeReply = { type: 'learned', gen: genBefore, lane: 'uses', key: 'uses', input: undefined, result: undefined, failed: false, put: [] };
+  w.reply(old);
+  w.reply(old);
+  check(usesSent().length === sent0 + 1, `replies from the generation before: asked once more (${usesSent().length - sent0})`);
+  w.run();
+  check(usesDone === 3 && !e.busy.has('uses'), '… its reply done');
+
   const job: LearnJob = { kind: 'animated', level: 0x105, ov: {} }, opts = { input: { an: 1 }, lane: 'animated', replace: true };
   let anDone = 0;
   check(e.client.learn('anim:105', job, { ...opts, done: () => anDone++ }) === undefined, 'animated: unknown, asked for');

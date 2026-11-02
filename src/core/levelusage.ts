@@ -193,17 +193,20 @@ export class LevelUses {
 
 // The tiles of the levels among `levels` not known yet (LevelUses), a level per step on emu (the result learner's job, no picture:
 // its result is in the levels' entries, the job keeps none); show gets each level as its tiles are kept
-export function* levelUsesJob(idx: LevelUses, emu: LevelEmulator, levels: number[], show: (levels: number[]) => void): Generator<string, undefined> {
-  // (again until none is missing: a level's tiles kept before may not hold any more)
-  for (let left = idx.missing(levels); left.length; left = idx.missing(levels)) {
-    while (left.length) {
+export function* levelUsesJob(idx: LevelUses, emu: LevelEmulator, levels: () => number[], show: (levels: number[]) => void): Generator<string, undefined> {
+  // (again until none is missing: a level's tiles kept before may not hold any more; the list asked for may change
+  // while it runs: the latest one counts, the levels no longer asked for are left)
+  for (;;) {
+    const asked = levels();
+    const left = idx.missing(asked);
+    if (!left.length) return undefined;
+    while (left.length && levels() === asked) {
       const n = left.shift()!;
       idx.scan(n, emu);
       show([n]);
       yield `Uses in levels (${left.length})`;
     }
   }
-  return undefined;
 }
 
 export interface TileUser { level: number; uses: TileUse[] }

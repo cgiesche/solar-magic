@@ -499,13 +499,22 @@ for (const changeRead of [false, true]) {
   check(shownLevels.join() === levels.join() && uses.done?.type === 'learned' && !uses.done.failed && uses.done.result === undefined, `uses: a level at a time, shown as it comes (${shownLevels.join()})`);
   const idx = new LevelUses(lr, results);
   let usesDone = false;
-  learner.learn('uses', (emu) => levelUsesJob(idx, emu, levels, () => {}), { keep: false, picture: false, done: () => (usesDone = true) });
+  learner.learn('uses', (emu) => levelUsesJob(idx, emu, () => levels, () => {}), { keep: false, picture: false, done: () => (usesDone = true) });
   await drain(() => usesDone);
   const there = levels.map((n) => results.under(levelTilesKey(n))[0]);
   check(there.every((e) => !!e && same(uses.put.get(e[0]), e[1])) && !uses.put.has('uses'), 'uses: the levels\' entries as the result learner\'s on the main thread (keys, inputs, bytes read: no picture), none of the job\'s');
   const again = run({ type: 'learn', lane: 'uses', key: 'uses', job: { kind: 'uses', levels }, replace: false });
   check(!again.out.some((d) => d.type === 'learning') && levels.every((n, i) => same(again.put.get(there[i][0]), there[i][1])),
     'uses asked again: the levels known, none loaded, their entries handed back (the editor asked: it has none)');
+  // asked again with another list while it runs (#230): the running job takes up the latest list, the levels no
+  // longer asked for are left
+  h.handle({ type: 'learn', lane: 'uses', key: 'uses', job: { kind: 'uses', levels: [0x108, 0x109, 0x10a] }, replace: false });
+  const firstShown: unknown[] = [];
+  for (let i = 0; i < 1000 && !firstShown.length && h.pending; i++) { const d = h.next(); if (d?.type === 'learning') firstShown.push(...d.shown); }
+  const moved = run({ type: 'learn', lane: 'uses', key: 'uses', job: { kind: 'uses', levels: [0x10b] }, replace: false });
+  const movedShown = [...firstShown, ...moved.out.flatMap((d) => (d.type === 'learning' ? d.shown : []))];
+  check(movedShown.join() === [0x108, 0x10b].join() && moved.done?.type === 'learned' && [...moved.put.keys()].some((k) => k.startsWith(levelTilesKey(0x10b))) && ![0x109, 0x10a].some((n) => [...moved.put.keys()].some((k) => k.startsWith(levelTilesKey(n)))),
+    `uses asked with another list while running: the latest list scanned, the others not (${movedShown.map((n) => (n as number).toString(16)).join()})`);
 
   // the sprite memory check of $E0 in level 00C (incomplete with the level's value: a suggestion)
   const lvc = loadLevel(r, 0xc), sprites = [{ uid: 1, num: 0xe0, x: 8, y: 0x14, extra: 0 }];

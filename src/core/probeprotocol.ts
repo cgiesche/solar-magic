@@ -91,6 +91,12 @@ export type LearnJob =
   | { kind: 'owL1Without'; event: number }
   | { kind: 'msgRoutine' };
 
+// Whether a later request for the same result (key and input) asks the job for other work, which it then takes up as
+// it runs: the levels' uses with another list of levels (the running job scans the levels the latest list still needs)
+export function learnRetargets(was: LearnJob, now: LearnJob): boolean {
+  return was.kind === 'uses' && now.kind === 'uses' && was.levels.join() !== now.levels.join();
+}
+
 // Per kind of learn job where its result goes (keep, jobrunner.ts Keep) and whether it is a picture (CONTEXT.md, ADR
 // 0008): the levels' uses go to the entries of each level (the job keeps none); the prefab suggestions and the object
 // boxes to the editor only (it keeps them as a run's and per ROM state); the animated tiles and colors, the tiles of

@@ -9,7 +9,7 @@
 // bytes they read are unchanged.
 
 import { ProbeHost, pumpProbes } from './probehost.ts';
-import { jobId, jobKey, learnKeep, type ProbeJob, type ProbeMessage, type ProbeDone, type ProbeReply, type KindsDone, type ScanDone, type CameraDone, type LearnJob, type LearnMessage, type Learned, type Learning } from './probeprotocol.ts';
+import { jobId, jobKey, learnKeep, learnRetargets, type ProbeJob, type ProbeMessage, type ProbeDone, type ProbeReply, type KindsDone, type ScanDone, type CameraDone, type LearnJob, type LearnMessage, type Learned, type Learning } from './probeprotocol.ts';
 import { inputHash } from './inputs.ts';
 import { partKey, MemoryResults, MEMORY, type Keep } from './jobrunner.ts';
 import type { ResultCache } from './romdeps.ts';
@@ -55,7 +55,8 @@ export interface LearnOptions<T> {
   shown?: (items: unknown[] | null) => void; // what the job shows while it runs (null: it started, also over)
 }
 
-interface LearnWant { msg: LearnMessage; opts: LearnOptions<unknown>; done: ((r: unknown) => void)[]; failed: (() => void)[]; dropped: (() => void)[] }
+// (resent: the ROM generation it was last sent again for, a reply from an older one coming: once per generation)
+interface LearnWant { msg: LearnMessage; opts: LearnOptions<unknown>; done: ((r: unknown) => void)[]; failed: (() => void)[]; dropped: (() => void)[]; resent: number }
 interface LearnLane { wants: LearnWant[]; progress: string | null }
 
 export class ProbeClient {
@@ -240,7 +241,7 @@ export class ProbeClient {
     }
     let want = lane.wants.find(same);
     if (!want) {
-      const w: LearnWant = want = { msg: { type: 'learn', lane: opts.lane, key, input, job, replace: !!opts.replace }, opts: opts as LearnOptions<unknown>, done: [], failed: [], dropped: [] };
+      const w: LearnWant = want = { msg: { type: 'learn', lane: opts.lane, key, input, job, replace: !!opts.replace }, opts: opts as LearnOptions<unknown>, done: [], failed: [], dropped: [], resent: -1 };
       lane.wants.push(w);
       // (stored results first: the result may be known by then)
       this.d.cacheReady.then(() => {
@@ -250,6 +251,11 @@ export class ProbeClient {
         if (known === undefined) this.send?.(this.withParts(w.msg));
         else this.learned({ type: 'learned', gen: this.gen, lane: w.msg.lane, key, input, result: known, failed: false, put: [] });
       });
+    } else if (learnRetargets(want.msg.job, job)) {
+      // (the running job takes up the other work, e.g. the levels' uses another list; after the first request, sent
+      // once the stored results are loaded)
+      const w = want, msg = w.msg = { ...w.msg, job };
+      this.d.cacheReady.then(() => { if (w.msg === msg && this.lanes.get(msg.lane)?.wants.includes(w)) this.send?.(this.withParts(msg)); });
     }
     const done = opts.done as ((r: unknown) => void) | undefined;
     if (done && !want.done.includes(done)) want.done.push(done);
@@ -313,7 +319,7 @@ export class ProbeClient {
       if (this.asked.size) this.send({ type: 'ask', jobs: [...this.asked.values()] });
       if (this.kindsWant) this.send(this.kindsWant);
       for (const w of this.playWant.values()) this.send(w.msg);
-      for (const lane of this.lanes.values()) for (const w of lane.wants) this.send(this.withParts(w.msg));
+      for (const lane of this.lanes.values()) for (const w of lane.wants) { w.resent = this.gen; this.send(this.withParts(w.msg)); }
     }
     this.d.later('probe-prefetch', () => this.prefetch()); // results that read changed ROM data are redone
   }
@@ -386,7 +392,12 @@ export class ProbeClient {
     const w = this.want(d);
     if (!w) return;
     const { lane, want } = w, keep = learnKeep(want.msg.job);
-    if (d.gen !== this.gen && (keep === false || this.stored(d.key, d.input, keep) === undefined)) { this.send?.(want.msg); return; }
+    if (d.gen !== this.gen && (keep === false || this.stored(d.key, d.input, keep) === undefined)) {
+      // (asked again once per generation: the worker has the new ROM by then, its reply comes for it; more replies
+      // from older ones, the job finishing before each edit came, are not asked again)
+      if (want.resent !== this.gen) { want.resent = this.gen; this.send?.(want.msg); }
+      return;
+    }
     if (d.failed) this.learnFailed.add(`${d.key}#${d.input}`);
     lane.wants.splice(lane.wants.indexOf(want), 1);
     lane.progress = null;

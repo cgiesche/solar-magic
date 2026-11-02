@@ -63,13 +63,14 @@ interface LearnState {
 }
 const owLoads = (state: LearnState) => (state.ow ??= new OverworldLoads(new OverworldEmulator(state.rom), OW_LOADS_KEPT));
 
-// a learn job's job; show takes what it shows while it runs (null: it started, also over)
-function learnJob(j: LearnJob, state: LearnState, show: (items: unknown[] | null) => void): JobRun<unknown>['start'] {
+// a learn job's job; show takes what it shows while it runs (null: it started, also over); latest: the job of the latest
+// request it answers (learnRetargets: the levels' uses take up its list as they run)
+function learnJob(j: LearnJob, state: LearnState, show: (items: unknown[] | null) => void, latest: () => LearnJob = () => j): JobRun<unknown>['start'] {
   switch (j.kind) {
     case 'sprites': return (emu, _p, part) => spriteSetJob(emu, j.level, j.nums, show, part, j.input);
     case 'spriteAt': return (emu) => spriteAtJob(emu, j.level, j.id, j.x, j.y);
     case 'spriteBytes': return (emu) => spriteBytesJob(emu, j.level, j.id, j.bytes);
-    case 'uses': return (emu) => levelUsesJob(state.uses, emu, j.levels, show);
+    case 'uses': return (emu) => levelUsesJob(state.uses, emu, () => (latest() as typeof j).levels, show);
     case 'spriteMem': return (emu) => spriteMemCheckJob(emu, j.level, state.groups);
     case 'animated': return (emu) => animatedJob(emu, j.level, j.ov);
     case 'layer3': return (emu) => layer3KindsJob(emu, j.level, j.ov);
@@ -202,8 +203,8 @@ export class ProbeHost {
     const known = lane.learns.find(same);
     if (known) { known.msg = msg; return; }
     const show = (items: unknown[] | null) => { if (items === null) { l.fresh = true; l.shown = []; } else l.shown.push(...items); };
-    // (a job starting over runs for the latest request)
-    const state = this.state!, start: JobRun<unknown>['start'] = (emu, p, part) => learnJob(l.msg.job, state, show)(emu, p, part);
+    // (a job starting over runs for the latest request, the levels' uses take up its list as they run)
+    const state = this.state!, start: JobRun<unknown>['start'] = (emu, p, part) => learnJob(l.msg.job, state, show, () => l.msg.job)(emu, p, part);
     const run = this.runner.run({ key: msg.key, input: msg.input, ...LEARN_KINDS[msg.job.kind], start });
     const l: Learn = { msg, fresh: false, shown: [], run };
     lane.learns.push(l);
