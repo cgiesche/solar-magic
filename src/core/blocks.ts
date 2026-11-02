@@ -8,7 +8,7 @@
 import { Rom } from './rom.ts';
 import type { ApplyResult, PatchSource } from './patchapply.ts';
 import { toolStore, type ToolFormat, type ToolProject } from './toolproject.ts';
-import { uberFreeRam } from './uberproject.ts';
+import { uberFreeRam, isUberList } from './uberproject.ts';
 import { setBlock, setActsLike, EXT_TILES } from './map16ext.ts';
 import { definesFile, DEFAULT_FREERAM } from './uberasm.ts';
 import { GPS_ROUTINES, GPS_DEFINES } from './gpsroutines.ts';
@@ -43,6 +43,11 @@ export function parseBlockList(text: string): BlockAssign[] {
   });
   return out;
 }
+
+// a GPS list.txt, by its content (not an UberASM Tool list, whose level lines look alike)
+const GPS_LINE = /^[0-9a-f]{3,4}(-[0-9a-f]{3,4})?(:[0-9a-f]{3,4})?\s+\S+\.asm/im;
+export const isGpsListText = (text: string) => GPS_LINE.test(text) && !isUberList(text);
+export const isGpsList = (path: string, text: string) => /(^|\/)list\.txt$/i.test(path) && isGpsListText(text);
 
 export function writeBlockList(list: BlockAssign[]): string {
   const h = (n: number) => n.toString(16).toUpperCase().padStart(3, '0');

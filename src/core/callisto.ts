@@ -10,7 +10,7 @@
 //   title screen and credits (Lunar Magic data).
 
 import { isUberList } from './uberproject.ts';
-import { isGpsListText } from './pkgplan.ts';
+import { isGpsListText } from './blocks.ts';
 
 export interface CallistoProject {
   root: string; // the project root in the upload ('' or 'folder/')
