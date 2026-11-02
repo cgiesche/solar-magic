@@ -1,7 +1,7 @@
 // Overworld editor view.
 
 import type { App } from './app.ts';
-import { h, toast, select, checkbox, hexInput, attachPanZoom, zoomControl, ZOOM_MIN, ZOOM_MAX, attachRectPick, emptyState } from './dom.ts';
+import { h, toast, select, checkbox, hexInput, attachPanZoom, zoomControl, pixelZoomSteps, snapZoom, attachRectPick, emptyState } from './dom.ts';
 import {
   type OwRender, gameL1, gameL2, readL1, writeL1, readL2, writeL2, l1Index, l1XY, l2Index, readTranslevels, writeTranslevels,
   placeTile, sharedTranslevels, enterableLevels, translevelToLevel, MAP_NAMES,
@@ -144,8 +144,9 @@ export class OverworldView {
   private timeline = h('div', { class: 'ow-timeline' });
   showGrid = false;
   showPaths = false;
-  zoom = 2;
-  private zoomCtl = zoomControl(() => this.zoom, (z) => this.setZoom(z));
+  // whole screen pixels per SNES pixel (pixelZoomSteps): 200 % or the nearest level of the screen's scale
+  zoom = snapZoom(2, pixelZoomSteps());
+  private zoomCtl = zoomControl(() => this.zoom, (z) => this.setZoom(z), undefined, undefined, pixelZoomSteps);
   brush: Brush = { kind: 'l1', w: 1, h: 1, entries: [0x56] };
   l2Pal = 0;
   hover: { x: number; y: number } | null = null;
@@ -175,8 +176,12 @@ export class OverworldView {
       h('div', { class: 'panel-title' }, 'Level tiles', this.tlCount), this.tlList));
     this.root = h('div', { class: 'center' }, h('div', { class: 'level-view' }, this.scroller, this.eventsBadge), this.timeline, this.status);
     this.scroller.addEventListener('scroll', () => this.paint());
-    // next frame: layout() resizes the canvas inside the observed scroller (no ResizeObserver loop error)
-    new ResizeObserver(() => requestAnimationFrame(() => this.layout())).observe(this.scroller);
+    // next frame: layout() resizes the canvas inside the observed scroller (no ResizeObserver loop error); the zoom
+    // follows a screen of another scale (the browser's zoom changed: the scroller has other CSS pixels)
+    new ResizeObserver(() => requestAnimationFrame(() => {
+      const z = snapZoom(this.zoom, pixelZoomSteps());
+      if (Math.abs(z - this.zoom) > 1e-6) this.setZoom(z); else this.layout();
+    })).observe(this.scroller);
     // the paint sheet follows the panel's width, drawn anew when it needs other screen pixels per pixel
     new ResizeObserver(() => requestAnimationFrame(() => { if (this.palPixels && fillPixels(this.palWidth(), this.mode === 'l1' ? 256 : 128) !== this.palPixels) this.buildSide(); })).observe(this.palPanel);
     this.scroller.addEventListener('contextmenu', (e) => e.preventDefault());
@@ -185,7 +190,7 @@ export class OverworldView {
     this.scroller.addEventListener('mouseleave', () => { if (!this.drag) { this.hover = null; this.updateStatus(); this.paint(); } });
     window.addEventListener('mousemove', (e) => this.onMove(e));
     window.addEventListener('mouseup', (e) => this.onUp(e));
-    attachPanZoom(this.scroller, () => this.zoom, (z, ax, ay) => this.setZoom(z, ax, ay));
+    attachPanZoom(this.scroller, () => this.zoom, (z, ax, ay) => this.setZoom(z, ax, ay), undefined, undefined, pixelZoomSteps);
     this.eventsSlider.addEventListener('input', () => this.setProgress(+this.eventsSlider.value));
     // a ROM edit (a stroke ended, a name chosen) or undo/redo: shown as in the ROM (a stroke being painted is dropped)
     app.on('rom-change', () => {
@@ -198,7 +203,7 @@ export class OverworldView {
   }
 
   setZoom(z: number, ax = this.scroller.clientWidth / 2, ay = this.scroller.clientHeight / 2): void {
-    z = Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, z));
+    z = snapZoom(z, pixelZoomSteps());
     const lx = (this.scroller.scrollLeft + ax) / this.zoom, ly = (this.scroller.scrollTop + ay) / this.zoom;
     this.zoom = z;
     this.layout();
@@ -305,12 +310,13 @@ export class OverworldView {
   paint(): void {
     const ctx = this.canvas.getContext('2d')!;
     const dpr = window.devicePixelRatio || 1;
-    const z = this.zoom * dpr;
+    // whole screen pixels per SNES pixel (half one zoomed out the most), on whole screen pixels
+    const z = Math.round(this.zoom * dpr * 2) / 2;
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.fillStyle = '#1b1d22';
     ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
     ctx.imageSmoothingEnabled = false;
-    ctx.setTransform(z, 0, 0, z, -this.scroller.scrollLeft * dpr, -this.scroller.scrollTop * dpr);
+    ctx.setTransform(z, 0, 0, z, -Math.round(this.scroller.scrollLeft * dpr), -Math.round(this.scroller.scrollTop * dpr));
     const lw = 1 / z;
     if (this.playing) this.paintPlay(ctx);
     else ctx.drawImage(this.mapCanvas, 0, 0);

@@ -274,16 +274,33 @@ export function modal(title: string, body: HTMLElement, buttons: { label: string
 const ZOOM_STEPS = [0.5, 0.75, 1, 1.5, 2, 3, 4, 6, 8, 12, 16, 24, 32];
 export const ZOOM_MIN = 0.5, ZOOM_MAX = 4;
 
-// the next zoom level in or out (dir > 0: in) from z within [min, max], undefined at the end
-export function zoomStep(z: number, dir: number, min = ZOOM_MIN, max = ZOOM_MAX): number | undefined {
-  const steps = ZOOM_STEPS.filter((s) => s >= min && s <= max);
+// zoom levels of whole screen pixels per SNES pixel (half one for an overview), at the screen's scale: every SNES
+// pixel equally big. A zoom of 2.5 screen pixels per SNES pixel (200 % at a scale of 125 %) draws them 2 and 3 wide
+// alternately, which the browser may draw differently each time the picture changes – the whole picture flickers
+export function pixelZoomSteps(min = ZOOM_MIN, max = ZOOM_MAX): number[] {
+  const dpr = window.devicePixelRatio || 1, out: number[] = [];
+  for (const d of [0.5, ...Array.from({ length: Math.ceil(max * dpr) }, (_, i) => i + 1)]) {
+    const z = d / dpr;
+    if (z >= min * 0.75 && z <= max + 1e-6) out.push(z);
+  }
+  return out;
+}
+// the zoom level of steps nearest to z
+export function snapZoom(z: number, steps: number[]): number {
+  return steps.reduce((a, b) => (Math.abs(b - z) < Math.abs(a - z) ? b : a));
+}
+
+// the next zoom level in or out (dir > 0: in) from z within [min, max] (or of the view's own levels), undefined at
+// the end
+export function zoomStep(z: number, dir: number, min = ZOOM_MIN, max = ZOOM_MAX, own?: number[]): number | undefined {
+  const steps = own ?? ZOOM_STEPS.filter((s) => s >= min && s <= max);
   return dir > 0 ? steps.find((s) => s > z + 1e-6) : [...steps].reverse().find((s) => s < z - 1e-6);
 }
 
-// “− 100% +” of every view; update() shows the current zoom
-export function zoomControl(zoom: () => number, setZoom: (z: number) => void, min = ZOOM_MIN, max = ZOOM_MAX): { root: HTMLElement; update: () => void } {
+// “− 100% +” of every view; update() shows the current zoom. steps: the view's own zoom levels (pixelZoomSteps)
+export function zoomControl(zoom: () => number, setZoom: (z: number) => void, min = ZOOM_MIN, max = ZOOM_MAX, steps?: () => number[]): { root: HTMLElement; update: () => void } {
   const label = h('span', { class: 'zoom' });
-  const step = (dir: number) => { const z = zoomStep(zoom(), dir, min, max); if (z !== undefined) setZoom(z); };
+  const step = (dir: number) => { const z = zoomStep(zoom(), dir, min, max, steps?.()); if (z !== undefined) setZoom(z); };
   const update = () => { label.textContent = `${Math.round(zoom() * 100)}%`; };
   update();
   return {
@@ -295,7 +312,7 @@ export function zoomControl(zoom: () => number, setZoom: (z: number) => void, mi
 }
 
 // Middle-button drag pans a scroll container; Ctrl+wheel zooms in steps around the cursor.
-export function attachPanZoom(scroller: HTMLElement, zoom: () => number, setZoom: (z: number, anchorX: number, anchorY: number) => void, min = ZOOM_MIN, max = ZOOM_MAX): void {
+export function attachPanZoom(scroller: HTMLElement, zoom: () => number, setZoom: (z: number, anchorX: number, anchorY: number) => void, min = ZOOM_MIN, max = ZOOM_MAX, steps?: () => number[]): void {
   let pan: { x: number; y: number; sl: number; st: number } | null = null;
   scroller.addEventListener('mousedown', (e) => {
     if (e.button !== 1) return;
@@ -323,7 +340,7 @@ export function attachPanZoom(scroller: HTMLElement, zoom: () => number, setZoom
     if (Math.abs(acc) < 50) return;
     const dir = acc < 0 ? 1 : -1;
     acc = 0;
-    const next = zoomStep(zoom(), dir, min, max);
+    const next = zoomStep(zoom(), dir, min, max, steps?.());
     if (next === undefined) return;
     const rc = scroller.getBoundingClientRect();
     setZoom(next, e.clientX - rc.left, e.clientY - rc.top);
