@@ -15,7 +15,7 @@ import { zipSync, unzipSync } from 'fflate';
 import { Rom } from './rom.ts';
 import { reapplyPatch, type ApplyResult } from './patchapply.ts';
 import type { PartKind, ToolKind } from './parts.ts';
-import { uploadFiles, uploadFromFiles, withDefines, type Upload } from './patchpkg.ts';
+import { uploadFiles, uploadFromFiles, withDefines, type UploadCode } from './patchpkg.ts';
 import { suggestMapping, placed, suggestCalls, packageDocs, type PkgSuggestion } from './pkgmap.ts';
 import { detectGraphics, includedFiles, applyLevelSetup } from './pkgplan.ts';
 import { setCustomPalette } from './patches.ts';
@@ -95,18 +95,18 @@ export function inspectFiles(fileName: string, files: Map<string, Uint8Array>): 
   if (sug?.extra.length) return { ...head, status: 'manual', suggestion: sug };
 
   const docs = packageDocs(files);
-  let upload: Upload | null = null;
+  let code: UploadCode | null = null;
   if (asm.length) {
-    try { upload = uploadFromFiles(fileName, files); } catch (e) {
+    try { code = uploadFromFiles(fileName, files); } catch (e) {
       return { ...head, status: 'failed', reason: e instanceof Error ? e.message : String(e) };
     }
     // a patch with a manifest is one patch, whatever else it holds
-    if (upload.manifest) {
-      const main = upload.manifest.main;
-      return { ...head, name: upload.name, status: 'ready', parts: [{ kind: 'patch', name: upload.name, file: main, candidates: [main] }], upload, samples: [], unclaimed: [], docs, callisto: null, notes: [] };
+    if (code.manifest) {
+      const main = code.manifest.main;
+      return { ...head, name: code.name, status: 'ready', parts: [{ kind: 'patch', name: code.name, file: main, candidates: [main] }], code, samples: [], unclaimed: [], docs, callisto: null, notes: [] };
     }
   }
-  const d: Detection = { files, paths, upload, included, docs, graphics, callisto };
+  const d: Detection = { files, paths, code, included, docs, graphics, callisto };
   const won = resolveClaims(d);
   // each adapter's parts: those whose main file it won, the ones it keeps
   const found = new Map(DETECT_ORDER.map((k) => [k, won.parts.filter((p) => p.kind === k)]));
@@ -143,8 +143,8 @@ export function inspectFiles(fileName: string, files: Map<string, Uint8Array>): 
   const left = callisto?.left.filter((l) => files.has(l.file)) ?? [];
   const notes = [...left.map((l) => `Not part of the package: ${l.file} – ${l.what}.`), ...replaced.values()];
   const shared = new Set(callisto ? sharedCode(callisto, files) : []);
-  const unclaimed = paths.filter((p) => !won.files.has(p) && !replaced.has(p) && !included.has(p) && !shared.has(p) && !left.some((l) => l.file === p) && !isObjectTextFile(p) && !(upload && SHARED_CODE.test(p) && /\.(asm|asar)$/i.test(p))).sort();
-  return { ...head, status: 'ready', parts, upload, samples: graphics.mwls, unclaimed, docs, callisto, notes };
+  const unclaimed = paths.filter((p) => !won.files.has(p) && !replaced.has(p) && !included.has(p) && !shared.has(p) && !left.some((l) => l.file === p) && !isObjectTextFile(p) && !(code && SHARED_CODE.test(p) && /\.(asm|asar)$/i.test(p))).sort();
+  return { ...head, status: 'ready', parts, code, samples: graphics.mwls, unclaimed, docs, callisto, notes };
 }
 
 // every file to its best claim: lowest rank, then the adapter first in DETECT_ORDER, a part before a
@@ -347,7 +347,7 @@ export async function installPackage(rom: Rom, preview: ReadyPreview | ManualPre
 
 // applies the patch of an installed package (registry entry `entryId`) anew with other settings; the
 // patch's new id goes into the package's record (`rec`; null: none). Run it in an edit session.
-export function reapplyPackagePatch(rom: Rom, entryId: string, upload: Upload, fileName: string, main: string, values: Record<string, string>, rec: Package | null): ApplyResult {
+export function reapplyPackagePatch(rom: Rom, entryId: string, upload: UploadCode, fileName: string, main: string, values: Record<string, string>, rec: Package | null): ApplyResult {
   return recordedIn(rom, rec, () => reapplyPatch(rom, entryId, patchSource(upload, fileName, main, values)));
 }
 

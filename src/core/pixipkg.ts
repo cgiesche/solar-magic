@@ -5,7 +5,7 @@
 // number – the sprites' own files here, other parts' (blocks) by the caller.
 
 import type { Rom } from './rom.ts';
-import { scanDefines, withDefines, type FileDefines, type Upload } from './patchpkg.ts';
+import { scanDefines, withDefines, type FileDefines, type UploadCode } from './patchpkg.ts';
 import { FOLDER, MISC_KINDS, numberRange, sharesNumbers, assignSprite, loadPixiProject, savePixiProject, parseCfg, parseJsonCfg, type PixiEntry, type PixiProject } from './pixi.ts';
 import type { ApplyResult } from './patchapply.ts';
 import type { SpriteFolder } from './pixirt.ts';
@@ -33,7 +33,7 @@ function folderKind(f: string): SpriteFolder | null {
 }
 
 // the sprites and routines of an upload, without numbers yet (-1)
-export function pixiParts(upload: Upload): PixiParts {
+export function pixiParts(upload: UploadCode): PixiParts {
   const sprites: PixiPlanSprite[] = [];
   const used = new Set<string>(); // asm files belonging to a cfg/json
   for (const [f, data] of upload.files) {
@@ -62,7 +62,7 @@ export function pixiParts(upload: Upload): PixiParts {
 // numbers for the sprites of an upload (`parts`: those to install, as detected – the sprite parts – and
 // the routines going with them) and the defines naming them; `listed`: the numbers the package's PIXI
 // list gives them (by file), taken when free
-export function planPixiUpload(rom: Rom, upload: Upload, parts: PixiParts = pixiParts(upload), listed = new Map<string, number>()): PixiPlan {
+export function planPixiUpload(rom: Rom, upload: UploadCode, parts: PixiParts = pixiParts(upload), listed = new Map<string, number>()): PixiPlan {
   const proj = loadPixiProject(rom) ?? { files: new Map(), list: [] };
   const sprites = parts.sprites.map((s) => ({ ...s, num: -1 })), routines = parts.routines;
   // numbers: a sprite file already in the project keeps its number, the others get the list's when free,
@@ -111,7 +111,7 @@ export function planPixiUpload(rom: Rom, upload: Upload, parts: PixiParts = pixi
 
 // where a sprite's file goes in the project: below the folder of its type, with the path inside the
 // package's folder for that type (or next to the file) kept
-function destOf(upload: Upload, s: PixiPlanSprite): string {
+function destOf(upload: UploadCode, s: PixiPlanSprite): string {
   return FOLDER[s.kind] + relIn(s.file, s.kind);
 }
 function relIn(f: string, kind: SpriteFolder): string {
@@ -144,7 +144,7 @@ export function spriteFiles(paths: Iterable<string>, main: string, mains: string
 
 // adds the sprites to the ROM's PIXI project; `skip`: files not taken along from a sprite's folder (the
 // manuals, the files of the package's other parts); claim: every project file it writes (pkgreg.ts)
-export function applyPixiUpload(rom: Rom, upload: Upload, plan: PixiPlan, skip: Set<string>, claim: (file: string) => void): ApplyResult {
+export function applyPixiUpload(rom: Rom, upload: UploadCode, plan: PixiPlan, skip: Set<string>, claim: (file: string) => void): ApplyResult {
   const proj: PixiProject = loadPixiProject(rom) ?? { files: new Map(), list: [] };
   // define values from the chosen numbers
   const files = withDefines(upload.files, linkedDefines(plan));

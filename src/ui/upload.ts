@@ -29,7 +29,7 @@ export function openUploadPreview(app: App, p: ReadyPreview | ManualPreview, don
   const patch = patches.length === 1 && !p.callisto ? patches[0] : undefined;
   let main = patch?.file ?? '';
   const settingsBox = h('div');
-  let form = patch ? settingsForm(p.upload!, main, {}) : null;
+  let form = patch ? settingsForm(p.code!, main, {}) : null;
   if (form) settingsBox.appendChild(form.el);
   const log = h('div');
   const place = placementEditor(app, p, blankTile(app.rom, app.render));
@@ -51,7 +51,7 @@ export function openUploadPreview(app: App, p: ReadyPreview | ManualPreview, don
     p.unclaimed.length ? h('p', { class: 'hint' }, `Not installed: ${p.unclaimed.map((f) => f + (p.docs.includes(f) ? ' (manual)' : '')).join(', ')}.`) : '',
     defaults.length ? h('p', { class: 'hint' }, `Installing applies the whole package: ${defaults.join(', ')}. Assignments can be changed afterwards in the tabs.`) : '',
     patch && patch.candidates.length > 1 ? h('div', { class: 'prop' }, h('label', null, 'Main file'),
-      h('select', { onchange: (e: Event) => { main = (e.target as HTMLSelectElement).value; form = settingsForm(p.upload!, main, {}); clear(settingsBox).appendChild(form.el); } },
+      h('select', { onchange: (e: Event) => { main = (e.target as HTMLSelectElement).value; form = settingsForm(p.code!, main, {}); clear(settingsBox).appendChild(form.el); } },
         patch.candidates.map((f) => h('option', { value: f, selected: f === main }, f))),
       h('span', { class: 'hint' }, 'The upload has several .asm files – choose the patch file (see its readme).')) : '',
     place?.el ?? '',

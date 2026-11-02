@@ -17,7 +17,7 @@ import type { Rom } from './rom.ts';
 import type { ApplyResult, PatchSource } from './patchapply.ts';
 import { applyPatch } from './patchapply.ts';
 import type { PartKind } from './parts.ts';
-import { uploadSource, effectiveDefines, packUpload, type FileDefines, type Upload } from './patchpkg.ts';
+import { uploadSource, effectiveDefines, packUpload, type FileDefines, type UploadCode } from './patchpkg.ts';
 import { suggestCalls, placed, type PkgRules } from './pkgmap.ts';
 import { isSongText, songsFromFiles, loadMusicProject, emptyMusicProject, addSongs, addSfx, nextFreeSong, folders as musicFolders, saveMusicProject, hasAmk, musicEntry } from './music.ts';
 import { pixiParts, planPixiUpload, applyPixiUpload, spriteFiles, linkedDefines, hexNum, type PixiPlan } from './pixipkg.ts';
@@ -53,7 +53,7 @@ export interface PreviewBase { name: string; fileName: string; files: Map<string
 export interface ReadyPreview extends PreviewBase {
   status: 'ready';
   parts: PreviewPart[];
-  upload: Upload | null; // the upload's code (null: it has no .asm)
+  code: UploadCode | null; // the upload's code (null: it has no .asm)
   samples: string[]; // its sample levels (.mwl)
   unclaimed: string[]; // files no part takes: not installed
   docs: string[]; // the package's manuals (readme)
@@ -65,7 +65,7 @@ export interface ReadyPreview extends PreviewBase {
 export interface Detection {
   files: Map<string, Uint8Array>;
   paths: string[];
-  upload: Upload | null;
+  code: UploadCode | null;
   included: Set<string>; // files some .asm file includes
   docs: string[];
   graphics: DetectedGraphics;
@@ -123,7 +123,7 @@ const ok: ApplyResult = { ok: true, errors: [], warnings: [], prints: [] };
 // shared code: goes with the parts using it
 export const SHARED_CODE = /(^|\/)(library|routines|other)\//i;
 // (in a Callisto project, code is a patch by patches.toml or in a tool's folder)
-const loose = (d: Detection) => d.callisto ? [] : d.upload?.asmFiles.filter((p) => !d.included.has(p) && !SHARED_CODE.test(p)) ?? [];
+const loose = (d: Detection) => d.callisto ? [] : d.code?.asmFiles.filter((p) => !d.included.has(p) && !SHARED_CODE.test(p)) ?? [];
 // a file in one of a Callisto project's tool folders (UberASM Tool, GPS, PIXI): that tool's
 const inToolFolder = (d: Detection, f: string) => !!d.callisto && Object.values(d.callisto.tools).some((t) => t && f.startsWith(t.folder));
 export const partsOf = <K extends PartKind>(p: ReadyPreview, k: K) => p.parts.filter((x): x is PartOf<K> => x.kind === k);
@@ -131,12 +131,12 @@ export const partsOf = <K extends PartKind>(p: ReadyPreview, k: K) => p.parts.fi
 // ---------- patch ----------
 
 // built-in editor patches a patch.json asks for (every opened ROM has them)
-export function ensureRequirements(upload: Upload): void {
+export function ensureRequirements(upload: UploadCode): void {
   for (const req of upload.manifest?.requires ?? []) if (req !== 'smwe' && req !== 'smwx') throw new Error(`Unknown requirement “${req}” in patch.json`);
 }
 
 // the patch of an upload with its settings, its files kept with the editor data (to reapply it)
-export function patchSource(upload: Upload, fileName: string, main: string, values: Record<string, string>): PatchSource {
+export function patchSource(upload: UploadCode, fileName: string, main: string, values: Record<string, string>): PatchSource {
   ensureRequirements(upload);
   const src = uploadSource(upload, main, effectiveDefines(upload, values));
   src.settings = values;
@@ -145,7 +145,7 @@ export function patchSource(upload: Upload, fileName: string, main: string, valu
 }
 
 // a patch of a Callisto project: its files with the header Callisto generates, the defines it passes
-function callistoPatch(upload: Upload, p: CallistoProject, main: string): PatchSource {
+function callistoPatch(upload: UploadCode, p: CallistoProject, main: string): PatchSource {
   const files = new Map<string, Uint8Array | string>(upload.files);
   files.set('callisto.asm', callistoAsm(p));
   return { name: base(main).replace(/\.(asm|asar)$/i, ''), main, files, defines: { ...PATCH_DEFINES }, settings: {} };
@@ -157,23 +157,23 @@ const patch: PartAdapter<'patch'> = {
   // project's: those of its patches.toml
   claims: (d) => d.callisto
     ? d.callisto.patches.map((p) => ({ file: p, rank: RANK.folder, part: { kind: 'patch', name: base(p).replace(/\.(asm|asar)$/i, ''), file: p, candidates: [p] } }))
-    : loose(d).map((p) => ({ file: p, rank: RANK.fallback, part: { kind: 'patch', name: d.upload!.name, file: p, candidates: [p] } })),
+    : loose(d).map((p) => ({ file: p, rank: RANK.fallback, part: { kind: 'patch', name: d.code!.name, file: p, candidates: [p] } })),
   // one patch at most: the main file of the upload, or – when it has no other parts – one to choose; a
   // Callisto project's all, in its order
   finish(mine, others, d) {
     if (d.callisto) { const order = d.callisto.patches; return mine.sort((a, b) => order.indexOf(a.file) - order.indexOf(b.file)); }
     const files = mine.map((p) => p.file);
-    const main = d.upload?.main && files.includes(d.upload.main) ? d.upload.main : files.length === 1 ? files[0] : null;
+    const main = d.code?.main && files.includes(d.code.main) ? d.code.main : files.length === 1 ? files[0] : null;
     if (main) return [{ ...mine.find((p) => p.file === main)!, candidates: [main] }];
     return mine.length && !others.length ? [{ ...mine[0], candidates: files }] : [];
   },
   apply(rom, mine, { preview, opt }) {
     const c = preview.callisto;
-    if (!c) return applyPatch(rom, patchSource(preview.upload!, preview.fileName, opt.patch?.main ?? mine[0].file, opt.patch?.values ?? {}));
+    if (!c) return applyPatch(rom, patchSource(preview.code!, preview.fileName, opt.patch?.main ?? mine[0].file, opt.patch?.values ?? {}));
     // a Callisto project's one after the other (their sources are the package's)
     const warnings: string[] = [], prints: string[] = [];
     for (const p of mine) {
-      const r = applyPatch(rom, callistoPatch(preview.upload!, c, p.file));
+      const r = applyPatch(rom, callistoPatch(preview.code!, c, p.file));
       warnings.push(...r.warnings.map((w) => `${p.file}: ${w}`));
       prints.push(...r.prints);
       if (!r.ok) return { ok: false, errors: r.errors.map((e) => `${p.file}: ${e}`), warnings, prints };
@@ -203,7 +203,7 @@ function placeOf(f: string, folder: string): string {
 function placeFiles(preview: ReadyPreview, main: string, mainText: string, folder: string): Map<string, Uint8Array> {
   const others = new Set(preview.parts.map((p) => p.file).filter((f) => f !== main));
   const out = new Map<string, Uint8Array>();
-  for (const [f, c] of preview.upload!.files) {
+  for (const [f, c] of preview.code!.files) {
     if (!/\.(asm|bin)$/i.test(f) || others.has(f)) continue;
     out.set(placeOf(f, folder), f === main ? new TextEncoder().encode(mainText) : c);
   }
@@ -213,7 +213,7 @@ function placeFiles(preview: ReadyPreview, main: string, mainText: string, folde
 const uberasm: PartAdapter<'uberasm'> = {
   kind: 'uberasm',
   claims(d) {
-    if (!d.upload) return [];
+    if (!d.code) return [];
     const out: FileClaim[] = [];
     // an UberASM Tool folder (its list.txt has the sections of UberASM Tool): all its files; a Callisto
     // project's where it says, its list maybe elsewhere
@@ -256,7 +256,7 @@ const uberasm: PartAdapter<'uberasm'> = {
     for (const p of mine) {
       if (p.folder) continue;
       const folder = `${p.ctx}/`;
-      const text = uploadSource(preview.upload!, p.file, {}).files.get(p.file) as string;
+      const text = uploadSource(preview.code!, p.file, {}).files.get(p.file) as string;
       for (const [f, c] of placeFiles(preview, p.file, text, folder)) { proj.files.set(f, c); claim('uberasm', f); }
       const file = placeOf(p.file, folder);
       const num = p.ctx === 'level' ? opt.level ?? ALL : suggestCalls(preview.files, new Map([[p.file, file]]), { level: ALL, gamemode: 0x14, overworld: 0 })[0].num;
@@ -282,7 +282,7 @@ export function applyAssignment(rom: Rom, files: Map<string, Uint8Array>, a: Man
 // the routines (routines/ folders) going with the sprites or the blocks: those they call; ones nobody
 // calls go with both
 function partRoutines(preview: ReadyPreview, kind: 'sprite' | 'block'): string[] {
-  const upload = preview.upload!;
+  const upload = preview.code!;
   const all = [...upload.files.keys()].filter((f) => /(^|\/)routines\/[^/]+\.asm$/i.test(f));
   const files = (k: 'sprite' | 'block') => partsOf(preview, k).map((p) => p.file);
   const mine = routinesCalled(upload, all, files(kind));
@@ -294,7 +294,7 @@ const block: PartAdapter<'block'> = {
   kind: 'block',
   // named in a GPS list.txt or found by their content
   claims(d) {
-    if (!d.upload) return [];
+    if (!d.code) return [];
     const found = detectBlocks(d.files, d.callisto?.tools.gps);
     const out: FileClaim[] = found.list ? [{ file: found.list, rank: RANK.content }] : [];
     for (const f of new Set(found.blocks.map((b) => b.file))) out.push({ file: f, rank: RANK.content, part: { kind: 'block', name: base(f), file: f, found: found.blocks.filter((b) => b.file === f) } });
@@ -304,14 +304,14 @@ const block: PartAdapter<'block'> = {
     const defines: FileDefines = sprites ? linkedDefines(sprites) : new Map();
     const drawn = new Set(plannedFgTiles(plan));
     const extra = preview.callisto ? toolFiles(preview.callisto, preview.files) : undefined;
-    return applyBlocks(rom, preview.upload!, plan.blocks, defines, partRoutines(preview, 'block'), opt.blank, opt.tileWords, drawn, (f) => claim('block', f), extra);
+    return applyBlocks(rom, preview.code!, plan.blocks, defines, partRoutines(preview, 'block'), opt.blank, opt.tileWords, drawn, (f) => claim('block', f), extra);
   },
 };
 
 // ---------- sprites ----------
 
 // the .asm a sprite's cfg/json names
-function cfgAsm(upload: Upload, cfg: string): string | null {
+function cfgAsm(upload: UploadCode, cfg: string): string | null {
   try {
     const t = dec.decode(upload.files.get(cfg)!);
     const c = /\.json$/i.test(cfg) ? parseJsonCfg(t, cfg) : parseCfg(t, cfg);
@@ -326,22 +326,22 @@ const sprite: PartAdapter<'sprite'> = {
   // (A sprite at the upload's root has the whole upload as its folder: the other files there go by
   // their own claims.)
   claims(d) {
-    if (!d.upload) return [];
+    if (!d.code) return [];
     const out: FileClaim[] = [];
     const pixi = d.callisto?.tools.pixi;
-    const sprites = pixiParts(d.upload).sprites, mains = sprites.map((s) => s.file);
+    const sprites = pixiParts(d.code).sprites, mains = sprites.map((s) => s.file);
     for (const s of sprites) {
       if (d.callisto && !(pixi && s.file.startsWith(pixi.folder))) continue; // (a Callisto project's are in its PIXI folder)
       out.push({ file: s.file, rank: RANK.content, part: { kind: 'sprite', name: s.name, file: s.file, type: s.kind } });
       if (dirOf(s.file)) for (const p of spriteFiles(d.paths, s.file, mains, (f) => d.docs.includes(f))) if (p !== s.file) out.push({ file: p, rank: RANK.content, of: s.file });
-      const asm = /\.(json|cfg)$/i.test(s.file) ? cfgAsm(d.upload, s.file) : null;
+      const asm = /\.(json|cfg)$/i.test(s.file) ? cfgAsm(d.code, s.file) : null;
       if (asm) out.push({ file: asm, rank: RANK.content, of: s.file });
     }
     return out;
   },
   apply(rom, _mine, { preview, sprites }, claim) {
     const skip = new Set([...preview.docs, ...preview.parts.filter((p) => p.kind !== 'sprite').map((p) => p.file)]);
-    return applyPixiUpload(rom, preview.upload!, sprites!, skip, (f) => claim('sprite', f));
+    return applyPixiUpload(rom, preview.code!, sprites!, skip, (f) => claim('sprite', f));
   },
 };
 
@@ -351,7 +351,7 @@ const owsprite: PartAdapter<'owsprite'> = {
   kind: 'owsprite',
   // BOWSIE's sprites (an .asm with init and main and BOWSIE's names), each with the files of its folder but the manuals
   claims(d) {
-    if (!d.upload || d.callisto) return [];
+    if (!d.code || d.callisto) return [];
     const out: FileClaim[] = [];
     for (const f of bowsieUploadSprites(d.files)) {
       out.push({ file: f, rank: RANK.content, part: { kind: 'owsprite', name: base(f).replace(/\.asm$/i, ''), file: f } });
@@ -487,7 +487,7 @@ export function planInstall(rom: Rom, preview: ReadyPreview, opt: InstallOptions
   return {
     preview, opt,
     plan: opt.plan ?? planUpload(rom, preview, opt.blank),
-    sprites: sprites.length && preview.upload ? planPixiUpload(rom, preview.upload, { sprites, routines: partRoutines(preview, 'sprite') }, pixiListed(preview)) : null,
+    sprites: sprites.length && preview.code ? planPixiUpload(rom, preview.code, { sprites, routines: partRoutines(preview, 'sprite') }, pixiListed(preview)) : null,
     sfx,
   };
 }

@@ -32,7 +32,9 @@ export interface PatchManifest {
 }
 // a free RAM range: at a define's value (its setting, or its assignment in the main file) or a fixed address
 export interface PatchRam { define?: string; addr?: string | number; size: number; shared?: boolean }
-export interface Upload {
+// the code of an upload: its files, the .asm files that may be its main file and its manifest (an
+// upload without .asm has none)
+export interface UploadCode {
   name: string;
   files: Map<string, Uint8Array>;
   asmFiles: string[]; // candidates for the main file, shallowest first
@@ -75,12 +77,12 @@ export function uploadFiles(fileName: string, data: Uint8Array): Map<string, Uin
   return files;
 }
 
-export function readUpload(fileName: string, data: Uint8Array): Upload {
+export function readUpload(fileName: string, data: Uint8Array): UploadCode {
   return uploadFromFiles(fileName, uploadFiles(fileName, data));
 }
 
 // upload from already extracted files (paths relative to the package root)
-export function uploadFromFiles(fileName: string, files: Map<string, Uint8Array>): Upload {
+export function uploadFromFiles(fileName: string, files: Map<string, Uint8Array>): UploadCode {
   const base = fileName.replace(/\.[^.]*$/, '');
   if (!files.size) throw new Error('The archive is empty');
 
@@ -138,7 +140,7 @@ export function optionDefault(o: PatchOption): string {
 }
 
 // defines for the chosen settings: manifest defaults, overridden by `values`
-export function effectiveDefines(upload: Upload, values: Record<string, string>): Record<string, string> {
+export function effectiveDefines(upload: UploadCode, values: Record<string, string>): Record<string, string> {
   const out: Record<string, string> = {};
   for (const o of upload.manifest?.options ?? []) out[o.define] = optionDefault(o);
   return { ...out, ...values };
@@ -169,7 +171,7 @@ export function withDefines(files: Map<string, Uint8Array>, defines: FileDefines
 }
 
 // the Asar input for a package: defines of the main file are rewritten, the rest are passed on
-export function uploadSource(upload: Upload, main: string, defines: Record<string, string>): PatchSource {
+export function uploadSource(upload: UploadCode, main: string, defines: Record<string, string>): PatchSource {
   const files = new Map<string, Uint8Array | string>(upload.files);
   const { text, rest } = rewriteDefines(new TextDecoder().decode(upload.files.get(main)!), defines);
   files.set(main, text);
@@ -178,7 +180,7 @@ export function uploadSource(upload: Upload, main: string, defines: Record<strin
 }
 
 // the manifest's RAM ranges as claims; an address that isn't a plain number ($7FB000, 0x7FB000, decimal) is an error
-export function manifestRam(upload: Upload, mainText: string, defines: Record<string, string>): RamClaim[] {
+export function manifestRam(upload: UploadCode, mainText: string, defines: Record<string, string>): RamClaim[] {
   const out: RamClaim[] = [];
   const own = new Map(scanDefines(mainText).map((d) => [d.name, d.value]));
   for (const r of upload.manifest?.ram ?? []) {

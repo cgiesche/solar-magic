@@ -399,7 +399,7 @@ print "MAIN ",pc
   const f = 'test/fixtures/Aftertouch Shatter.zip';
   const preview = inspectUpload('Aftertouch Shatter.zip', new Uint8Array(readFileSync(f)));
   if (preview.status !== 'ready') throw new Error('Shatter: ' + preview.status);
-  const plan = planPixiUpload(r8, preview.upload!);
+  const plan = planPixiUpload(r8, preview.code!);
   const blocks = preview.parts.filter((p) => p.kind === 'block');
   check(plan.sprites.length === 1 && plan.sprites[0].kind === 'bounce' && blocks.length === 1 && plan.links.some((l) => l.define === 'bounce_sprite' && blocks[0].file === l.file),
     'Shatter: a bounce sprite, a block and the block\'s !bounce_sprite');

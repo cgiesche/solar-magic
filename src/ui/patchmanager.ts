@@ -7,7 +7,7 @@ import type { App } from './app.ts';
 import { h, modal, toast, logTool } from './dom.ts';
 import type { ApplyResult } from '../core/patchapply.ts';
 import { patchArchive, type PatchEntry } from '../core/patchreg.ts';
-import { uploadFromFiles, effectiveDefines, optionDefault, unpackUpload, type StoredUpload, type Upload, type PatchOption } from '../core/patchpkg.ts';
+import { uploadFromFiles, effectiveDefines, optionDefault, unpackUpload, type StoredUpload, type UploadCode, type PatchOption } from '../core/patchpkg.ts';
 import { definesForm } from './defineedit.ts';
 import type { ToolKind } from '../core/parts.ts';
 
@@ -17,12 +17,12 @@ export async function storedUpload(app: App, p: PatchEntry): Promise<StoredUploa
   return a ? unpackUpload(a) : undefined;
 }
 
-export function toUpload(s: StoredUpload): Upload {
+export function toUpload(s: StoredUpload): UploadCode {
   return { ...uploadFromFiles(s.fileName, new Map(s.files)), main: s.main };
 }
 
 // settings form: manifest options, or the define assignments at the top of the main file
-export function settingsForm(upload: Upload, main: string, values: Record<string, string>): { el: HTMLElement; read: () => Record<string, string> } {
+export function settingsForm(upload: UploadCode, main: string, values: Record<string, string>): { el: HTMLElement; read: () => Record<string, string> } {
   const opts = upload.manifest?.options;
   const wrap = (rows: HTMLElement[]) => h('div', { class: 'patch-settings' }, rows.length ? rows : h('p', { class: 'hint' }, 'No settings.'));
   if (!opts?.length) {
