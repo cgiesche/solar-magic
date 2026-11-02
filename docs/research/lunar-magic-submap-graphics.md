@@ -63,6 +63,42 @@ takes Lunar Magic's place at `$04DBB9`: its code turns the screen off (the windo
 runs the game's upload routine `$00A9DA` – which reads the submap's files and uploads only those that changed – and
 turns them on again.
 
+### The editor's bypass instead of Lunar Magic's lists
+
+Research for issue #283: does the editor's own bypass break ADR 0005 – does a tool or community content read Lunar
+Magic's list?
+
+What the ROMs Lunar Magic saved hold (*QW2*, *celery*, *Bluerio's Adventure*, *Journey to Kaizo*): the same routine at
+`$0FFAB0` in all four, called with the player's submap × 2 in X (`$1F11` doubled at `$00A12D`), in 16 bit `STA $20 :
+TXA : ASL #4 : CLC : ADC #table : STA $7FC006` (table + submap × `$20`), then the table's bank to `$7FC008`, `$42` to
+`$7FC009`, 0 to `$7FC00B`, `RTL`. Only the table's place differs: `$12ED08` in *QW2*, `$12F8A8` in *Bluerio's
+Adventure*, `$C1ED00` in *celery* and *Journey to Kaizo*. A submap's list is 16 file numbers as words; the game's
+layer 3 files `2B 2A 29 28` (LG4–LG1) come last in every list. Where a submap keeps the overworld's files, `1E 08 1D
+1C` (FG4–FG1) are in words 4–7 in *QW2*, in words 6–9 in *celery*'s submaps 2–6.
+
+Who reads it: a scan of all four ROMs for the long-addressed opcodes (`$xF`) on `$7FC006`–`$7FC008`, and for the
+absolute ones on `$C006`–`$C008` (with the data bank `$7F`); indirect accesses (`[dp]`) are not covered.
+
+- In *QW2*, *celery* and *Bluerio's Adventure* every long access is in Lunar Magic's own code in bank `$0F`
+  (`$0FF808`–`$0FFDA8`): its ExGFX routines, which levels and the overworld share, take their list from that pointer.
+  The absolute hits lie in data, not code.
+- *Journey to Kaizo* has one reader more: a patch hooked at `$00A9DF` (`JML $CFFCF2`, inside the game's graphics
+  upload `$00A9DA`; not in the hijack map, its RATS block at `$4FFCEA`), which, while the Retry System respawns
+  (`$7FB405`, Retry's `is_respawning`) into the same level (`$010B` against its own `$7FB600`), reads the list from
+  `$7FC006` and `$7FC009` and takes its own way through the upload (back at `$00AA54`). It reads a level's list: the overworld isn't its
+  case. Neither the Retry System 2.2.0 at hand nor any other package at hand contains it. In the editor's ROMs a level's
+  files are in its own bypass (SMWE, `src/core/patches.ts`) too, so such a patch finds no list in a level either,
+  whatever the submaps do: a question for the levels' bypass (#309), not for the overworld's.
+- The hijack map names nothing else at `$0FFAB0` or `$7FC006`. None of the community code at hand reads the list or
+  the pointer: BOWSIE (1.21), AddmusicK, the RHR baserom (its patches, UberASM code and documentation; it names Lunar
+  Magic's "GFX Bypass" windows only as a UI), No Overworld, the Retry System, VWF dialogues and the blocks and sprites
+  in `resources_local` and `test/fixtures`.
+
+So the bypass stays: nothing but Lunar Magic's own ExGFX routines reads a submap's list, and writing the list would
+mean writing those routines as well, for no other reader. ADR 0005 records it among its considered options. Should a
+tool or community content turn up that reads a submap's list (or its pointer at `$7FC006`–`$7FC008` on the
+overworld), the submap's files move there byte for byte, confirmed with a ROM Lunar Magic saved.
+
 ## Layer 3
 
 Lunar Magic's help: layer 3's files (LG1–LG4) and a tilemap file (LT3, destination "Start of layer 3", 0x800 bytes for
