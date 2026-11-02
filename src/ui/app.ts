@@ -38,7 +38,6 @@ import { toast, log as logMsg, modalsOpen, onModalsChange } from './dom.ts';
 import { musicPlayer } from './musicplayer.ts';
 import { exitTarget } from '../core/exitgraph.ts';
 import { SecondaryEntrances, NO_FREE_ENTRANCE, entranceTables, entranceMarkers, type Marker } from '../core/entrances.ts';
-import type { RomHistory } from '../core/romhistory.ts';
 import type { EditOptions } from '../core/romedit.ts';
 import { EditSession, type LevelEdit, type StepResult } from '../core/editsession.ts';
 import { LevelModel, isBrushMode, type EditMode, type PickedItem, type Placement } from '../core/levelmodel.ts';
@@ -145,7 +144,6 @@ export class App {
   readonly entrances: SecondaryEntrances;
   get level(): Level { return this.edits.level; }
   get dirty(): boolean { return this.edits.dirty; }
-  get romHistory(): RomHistory { return this.edits.romHistory; }
   render!: LevelRender;
   // what the render answers about its tiles (renderquery.ts): built with it
   query!: RenderQuery;

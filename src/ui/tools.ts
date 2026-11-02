@@ -143,7 +143,7 @@ export function openExpandDialog(app: App): void {
   const dlg = modal('Expand ROM', body, [{ label: 'Cancel' }]);
 }
 
-// one undoable structural edit of the current level
+// one undoable level edit remaking the open level (LevelModel.remake)
 function levelEdit(app: App, f: () => void): boolean {
   try { app.model.remake(f); } catch (e) { toast(String(e instanceof Error ? e.message : e), 'error'); return false; }
   app.emit('level-header');

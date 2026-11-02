@@ -5,7 +5,7 @@
 // level's probes (in its tileset). Selection, hover and drag previews stay the level view's own.
 
 import type { App } from './app.ts';
-import type { ViewSettings } from '../core/viewsettings.ts';
+import type { Shown } from '../core/viewsettings.ts';
 import type { Marker } from '../core/entrances.ts';
 import { hex2, hex3 } from '../core/names.ts';
 import { screenRect, invisibleTiles, type LayerGeom, type LevelImages } from '../core/render.ts';
@@ -82,7 +82,7 @@ export function levelOverlay(app: App, lv: Level, render: OverlayLevel['render']
   };
 }
 
-type Show = ViewSettings['show'];
+type Show = Shown;
 
 // What of the level's probes the overlays shown draw from and aren't known yet (asking for them): an image waits
 // for them (levelimages.ts)

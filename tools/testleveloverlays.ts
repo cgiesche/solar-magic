@@ -13,7 +13,7 @@ import { map16Tile } from '../src/core/ram.ts';
 import { hex3 } from '../src/core/names.ts';
 import { levelOverlay, overlayPending, paintOverlays, wholeLevel } from '../src/ui/leveloverlays.ts';
 import type { App } from '../src/ui/app.ts';
-import type { ViewSettings } from '../src/core/viewsettings.ts';
+import type { Shown } from '../src/core/viewsettings.ts';
 import { editorImage } from './fixture.ts';
 
 let bad = 0;
@@ -59,7 +59,7 @@ const app = {
     cameraBands: () => null,
   },
 } as unknown as App;
-const show: ViewSettings['show'] = { layer1: true, layer2: true, layer3: true, sprites: false, grid: false, screens: false, exits: false, ghost: true, anim: true, items: false, invisible: false, deaths: false, collision: true, preview: false, arcs: false, gameView: false, scrollBands: false };
+const show: Shown = { layer1: true, layer2: true, layer3: true, sprites: false, grid: false, screens: false, exits: false, ghost: true, anim: true, items: false, invisible: false, deaths: false, collision: true, preview: false, arcs: false, gameView: false, scrollBands: false };
 
 const src = levelOverlay(app, lv, r.render, r.images, () => undefined, undefined);
 

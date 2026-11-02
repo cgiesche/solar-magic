@@ -1,7 +1,7 @@
 // The "View" menu of the level view, shared by the level editor and the graphics workspace.
 
 import type { App } from './app.ts';
-import type { ViewSettings } from '../core/viewsettings.ts';
+import type { Shown, ViewSwitches } from '../core/viewsettings.ts';
 import { menuButton, type MenuItem } from './menu.ts';
 import { hex2 } from '../core/names.ts';
 import { COND_FLAGS, flagRam } from '../core/cdm16.ts';
@@ -11,7 +11,7 @@ import { loadDeaths, clearDeaths, clearAllDeaths, anyDeaths } from './deathmarks
 
 // paint: redraws the level view (overlay toggles that need no new composite)
 export function viewMenu(app: App, paint: () => void, full = true): HTMLElement {
-  const show = (k: keyof ViewSettings['show'], label: string, title?: string, shortcut?: string): MenuItem => ({
+  const show = (k: keyof Shown, label: string, title?: string, shortcut?: string): MenuItem => ({
     label, title, shortcut, checked: () => app.view.show[k],
     onToggle: (v) => {
       app.view.show[k] = v;
@@ -22,7 +22,7 @@ export function viewMenu(app: App, paint: () => void, full = true): HTMLElement 
     },
   });
   // view-only game state (re-runs the level load)
-  const gameState = (k: keyof ViewSettings['switches'], label: string, title: string): MenuItem => ({
+  const gameState = (k: keyof ViewSwitches, label: string, title: string): MenuItem => ({
     label, title, checked: () => app.view.switches[k], onToggle: (v) => { app.view.switches[k] = v; app.refresh(); },
   });
   // a P-switch's timer, a game condition of the view's triggers (extrigger.ts); as an animation trigger (turning
