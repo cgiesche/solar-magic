@@ -95,13 +95,16 @@ export function layer3Index(g: Layer3Geometry, cx: number, cy: number): number {
   return i >= 0 && i < L3_MAP_WORDS ? i : -1;
 }
 
+// where layer 3's graphics are in VRAM (bytes), by BG34NBA
+export const layer3CharBase = (ppuRegs: Uint8Array) => (ppuRegs[0x0c] & 0x0f) << 13;
+
 // the first layer 3 tile without a visible pixel (its 2bpp graphics all 0): what erasing puts in
-export function blankLayer3Tile(r: LevelRender): number {
-  const base = (r.ppuRegs[0x0c] & 0x0f) << 13;
+export function blankTile(vram: Uint8Array, charBase: number): number {
   for (let t = 0; t < 0x400; t++) {
     let blank = true;
-    for (let k = 0; k < 16 && blank; k++) blank = r.vram[(base + t * 16 + k) & 0xffff] === 0;
+    for (let k = 0; k < 16 && blank; k++) blank = vram[(charBase + t * 16 + k) & 0xffff] === 0;
     if (blank) return t;
   }
   return 0;
 }
+export const blankLayer3Tile = (r: LevelRender) => blankTile(r.vram, layer3CharBase(r.ppuRegs));

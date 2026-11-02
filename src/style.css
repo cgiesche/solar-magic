@@ -229,6 +229,10 @@ input.invalid, input.invalid:focus { outline: 1px solid var(--danger); border-co
 .level-view { flex: 1; position: relative; min-height: 0; }
 .level-scroller { position: absolute; inset: 0; overflow: auto; outline: none; }
 .level-canvas { position: sticky; top: 0; left: 0; display: block; float: left; margin-right: -100%; margin-bottom: -100vh; pointer-events: none; }
+/* the Game workspace (gameview.ts): the title screen at whole screen pixels per pixel */
+.game-scroller { padding: 16px; }
+.game-canvas { display: block; image-rendering: pixelated; cursor: crosshair; }
+.game-pick { flex: 1; min-height: 0; overflow-y: auto; }
 .level-sizer { pointer-events: none; }
 .statusbar { height: 24px; padding: 3px 8px; background: var(--panel); border-top: 1px solid var(--border); font-family: ui-monospace, monospace; font-size: 12px; white-space: nowrap; overflow: hidden; display: flex; gap: 16px; }
 .statusbar .status-pos { flex: none; min-width: 19ch; color: var(--muted); }

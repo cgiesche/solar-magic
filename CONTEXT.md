@@ -214,6 +214,16 @@ Where Mario and Luigi stand when a new game begins: a submap and a tile each.
 One of Lunar Magic's "Extra Options" of the overworld the community uses (Start+Select on passed levels, Start to scroll the main map, the 5 hardcoded paths, the event path fade with the path reveal speed, the save prompt after castles and the like, saving Luigi's position, life exchange and L/R for it): a switch for the whole game that changes a few bytes of the game's code to Lunar Magic's, turned back the clean game's; one ROM edit each.
 _Avoid_: extra option, setting (for these)
 
+### The game
+
+**Game workspace**:
+The workspace for what belongs to the whole game rather than a level or the overworld: the title screen (gameview.ts); the credits, the title screen demo and the game-wide settings are to follow there. Its changes are ROM edits.
+_Avoid_: game settings (only a part of it), title screen editor
+
+**Title screen**:
+The title screen's layer 3 tilemap: the logo, the frame and the copyright line over the title screen level's layers 1 and 2, with layer 3's graphics as that level has them (titlescreen.ts). 32 × 29 tiles – the 28 rows on screen and the one below them – written in Lunar Magic's layout: one stripe image in a RATS block, pointed to by the stripe image table's entry 03 ($0084D3). A paint stroke is one ROM edit.
+_Avoid_: title logo (only a part of it), title screen level (that is the level behind it, C7 in the clean game)
+
 ### Third-party content
 
 **Package**:

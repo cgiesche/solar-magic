@@ -26,6 +26,7 @@ import { viewMenu } from './ui/viewmenu.ts';
 import { LEVEL_FILE_EXT } from './core/levelfile.ts';
 import { openResources } from './ui/resources.ts';
 import { OverworldView } from './ui/overworld.ts';
+import { GameView } from './ui/gameview.ts';
 import { overworldReplacement } from './core/overworld.ts';
 import { openTestPlay, openOverworldTestPlay } from './ui/testplay.ts';
 import { musicPlayer, LEVEL_MUSIC, isSubmapMusic } from './ui/musicplayer.ts';
@@ -135,12 +136,15 @@ function buildUi(app: App): { start: (at: NavLoc | null) => Promise<void> } {
     props.root.querySelector<HTMLElement>('input, select, textarea, button')?.focus();
   });
 
-  let workspace: 'level' | 'ow' | 'gfx' = 'level';
+  let workspace: 'level' | 'ow' | 'gfx' | 'game' = 'level';
   let ow: OverworldView | null = null;
+  let game: GameView | null = null;
   // the package that replaced the overworld while the overworld workspace is shown locked (ADR 0005), else null
   let owLocked: string | null = null;
   let ws: GfxWorkspace | null = null;
-  const inLevel = () => workspace !== 'ow';
+  const inLevel = () => workspace === 'level' || workspace === 'gfx';
+  // the workspaces without the open level: their changes are ROM edits (nothing to save), no level to test or hear
+  const romOnly = () => workspace === 'ow' || workspace === 'game';
 
   // ---- level context bar: mode, view, zoom
   const modeBtn = (m: EditMode, label: string, key: string) => h('button', { class: 'mode', 'data-mode': m, title: `${label} (${key})`, onclick: () => app.setMode(m) }, label);
@@ -214,8 +218,8 @@ function buildUi(app: App): { start: (at: NavLoc | null) => Promise<void> } {
       { label: 'Expand/collapse log', shortcut: 'L', onClick: () => logBar.toggle() },
     ] },
   ]);
-  const wsBtn = (w: typeof workspace, label: string, key: string) => h('button', { 'data-ws': w, title: `${label} (${key})`, onclick: () => setWorkspace(w) }, label);
-  const wsSwitch = h('div', { class: 'btn-group ws-switch' }, wsBtn('level', 'Level', 'Esc'), wsBtn('ow', 'Overworld', 'O'), wsBtn('gfx', 'Graphics', 'P / M / G / A'));
+  const wsBtn = (w: typeof workspace, label: string, key: string) => h('button', { 'data-ws': w, title: key ? `${label} (${key})` : label, onclick: () => setWorkspace(w) }, label);
+  const wsSwitch = h('div', { class: 'btn-group ws-switch' }, wsBtn('level', 'Level', 'Esc'), wsBtn('ow', 'Overworld', 'O'), wsBtn('gfx', 'Graphics', 'P / M / G / A'), wsBtn('game', 'Game', ''));
   const backBtn = h('button', { onclick: () => history.back(), title: 'Back to the place before (Alt+←, mouse back button)', disabled: true }, '←');
   const fwdBtn = h('button', { onclick: () => history.forward(), title: 'Forward (Alt+→, mouse forward button)', disabled: true }, '→');
   const undoBtn = h('button', { onclick: () => app.undo(), title: 'Undo (Ctrl+Z)' }, '↶');
@@ -255,14 +259,15 @@ function buildUi(app: App): { start: (at: NavLoc | null) => Promise<void> } {
     for (const b of wsSwitch.querySelectorAll('button')) b.classList.toggle('active', b.dataset.ws === workspace);
     saveBtn.textContent = `Save level${app.dirty ? ' *' : ''}`;
     // (the overworld's changes are ROM edits: nothing to save; hidden, so nothing else moves)
-    saveBtn.style.visibility = workspace === 'ow' ? 'hidden' : '';
-    testBtn.disabled = workspace === 'ow' && !owShown();
-    testBtn.title = workspace !== 'ow' ? testLevelTitle
+    saveBtn.style.visibility = romOnly() ? 'hidden' : '';
+    testBtn.disabled = (workspace === 'ow' && !owShown()) || workspace === 'game';
+    testBtn.title = workspace === 'game' ? 'Test play is available in the level and overworld workspaces'
+      : workspace !== 'ow' ? testLevelTitle
       : owShown() ? 'Play the game from the overworld in the built-in emulator (T): a new game at the event progress shown, Mario on the selected tile (without one at the start position)'
         : 'The overworld is replaced by a package';
-    musicBtn.disabled = workspace === 'ow';
-    musicBtn.title = workspace === 'ow' ? 'The level\'s music plays in the level editor' : musicTitle;
-    if (workspace === 'ow' && musicPlayer.label === LEVEL_MUSIC) musicPlayer.stop();
+    musicBtn.disabled = romOnly();
+    musicBtn.title = romOnly() ? 'The level\'s music plays in the level editor' : musicTitle;
+    if (romOnly() && musicPlayer.label === LEVEL_MUSIC) musicPlayer.stop();
     if (workspace !== 'ow' && isSubmapMusic(musicPlayer.label)) musicPlayer.stop();
     menus.refresh();
   };
@@ -299,8 +304,8 @@ function buildUi(app: App): { start: (at: NavLoc | null) => Promise<void> } {
       return true;
     }
     // leave the current workspace
-    if (workspace === 'ow') {
-      layout.classList.remove('ow-mode');
+    if (romOnly()) {
+      layout.classList.remove('ow-mode'); // (the Game workspace's layout is the overworld's)
     } else if (workspace === 'gfx') {
       ws!.leave();
       layout.classList.remove('gfx-mode');
@@ -312,6 +317,12 @@ function buildUi(app: App): { start: (at: NavLoc | null) => Promise<void> } {
     if (w === 'ow') {
       if (app.dirty) app.saveLevel(true);
       showOverworld();
+    } else if (w === 'game') {
+      if (app.dirty) app.saveLevel(true);
+      game ??= new GameView(app);
+      showLayout(game.bar, game.left, game.root, game.side);
+      layout.classList.add('ow-mode');
+      game.show();
     } else if (w === 'gfx') {
       if (!ws) { ws = new GfxWorkspace(app); ws.onNav = (jump) => nav?.mark(jump); }
       if (gfx?.at) ws.setTarget(gfx.at);
@@ -379,6 +390,7 @@ function buildUi(app: App): { start: (at: NavLoc | null) => Promise<void> } {
   // ---- browser back/forward through the places (navhistory.ts)
   let nav: NavHistory | null = null;
   const capture = (): NavLoc => {
+    if (workspace === 'game') return { w: 'game', tab: game?.tab ?? 'title' };
     if (workspace === 'ow') { const o = owShown(); return { w: 'ow', map: o?.map ?? 0, ...(o && o.selected >= 0 ? { tile: o.selected } : {}) }; }
     if (workspace === 'gfx' && ws) {
       const t = ws.tab, sub = ws.target.submap ?? undefined, g = { w: 'gfx' as const, tab: t, ...(sub !== undefined ? { sub } : {}) };
@@ -393,7 +405,7 @@ function buildUi(app: App): { start: (at: NavLoc | null) => Promise<void> } {
   };
   const restore = async (l: NavLoc): Promise<boolean> => {
     if (!(await setWorkspace(l.w))) return false;
-    if (l.w === 'ow') { const o = owShown(); if (o) { o.setMap(l.map); if (l.tile !== undefined) o.selectTile(l.tile, true); } }
+    if (l.w === 'game') { /* the title screen, its only place so far */ } else if (l.w === 'ow') { const o = owShown(); if (o) { o.setMap(l.map); if (l.tile !== undefined) o.selectTile(l.tile, true); } }
     else if (l.w === 'gfx') {
       ws!.setTarget({ submap: l.sub ?? null, progress: ws!.target.progress });
       if (l.tab === 'pal' && l.pal !== undefined) ws!.showPalette(l.pal >> 4, l.pal & 15);
@@ -461,6 +473,10 @@ function buildUi(app: App): { start: (at: NavLoc | null) => Promise<void> } {
     if (workspace === 'gfx' && ws) {
       if (ws.key(e)) { e.preventDefault(); return; }
       if (k === 'Escape') setWorkspace('level');
+      return;
+    }
+    if (workspace === 'game') {
+      if (k === 'Escape') void setWorkspace('level');
       return;
     }
     if (workspace === 'ow') {

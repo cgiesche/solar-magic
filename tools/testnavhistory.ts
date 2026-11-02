@@ -24,6 +24,7 @@ const places: NavLoc[] = [
   { w: 'gfx', tab: 'anim' },
   { w: 'gfx', tab: 'anim', anim: { global: true, slot: 3 } },
   { w: 'gfx', tab: 'anim', anim: { global: false, slot: 0x1f } },
+  { w: 'game', tab: 'title' },
 ];
 for (const l of places) {
   const back = fromHash(toHash(l));

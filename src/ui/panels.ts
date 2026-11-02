@@ -24,7 +24,8 @@ import type { LevelPlaces } from '../core/prefabplaces.ts';
 import { EXT_TILES } from '../core/map16ext.ts';
 import { COND_FLAGS, COND_ADD, condByte, flagRam, isDm16, type Dm16Cond } from '../core/cdm16.ts';
 import { TileCache, map16Source, drawMap16, sheetCells } from '../core/render.ts';
-import { lt3Target, lt3Users, blankLayer3Tile, l3Palette, withL3Palette, L3_TILE, L3_PAL, L3_PRIO, L3_FLIP_X, L3_FLIP_Y } from '../core/layer3map.ts';
+import { lt3Target, lt3Users, layer3CharBase } from '../core/layer3map.ts';
+import { layer3Picker } from './l3picker.ts';
 import { LT3_DESTS } from '../core/layer3gfx.ts';
 import { probeable, probeText, spritesOf, spriteProbeAt, enterText, enterSuffix, switchText, switchedText, SWITCH_NAME, type SwitchState } from '../core/blockprobe.ts';
 import { tileMatches, drawTileMatches, tileBehaviors, behaviorTile, pendingHint } from './tilesearch.ts';
@@ -493,72 +494,18 @@ export class Picker {
     this.body.append(c);
   }
 
-  // layer 3: its 8x8 tiles (2bpp, as in VRAM) as brush, with palette, priority and flips (tilemap word bits
-  // 10-12, 13, 14-15); a brush picked from the level keeps each tile's own
+  // layer 3: its 8x8 tiles as brush (l3picker.ts), saved with the level into its LT3 file
   buildL3(): void {
-    const app = this.app, r = app.render, b = app.l3Brush, w0 = b.tiles[0];
-    const attr = w0 & ~L3_TILE, pal = l3Palette(w0);
-    const tc = new TileCache(r.vram, r.cgram, (r.ppuRegs[0x0c] & 0x0f) << 13);
-    const setBrush = (nb: typeof b) => { app.l3Brush = nb; this.build(); };
-    const each = (f: (w: number) => number) => setBrush({ ...b, tiles: b.tiles.map(f) });
-    const draw = (px: Uint32Array, width: number, word: number, x: number, y: number) => {
-      const t = tc.get(word, 2);
-      for (let k = 0; k < 64; k++) px[(y + (k >> 3)) * width + x + (k & 7)] = t[k] || 0xff282828;
-    };
-    // a brush that is a rectangle of the sheet (one palette, priority, no flips) is outlined there
-    const onSheet = !(attr & (L3_FLIP_X | L3_FLIP_Y)) && (w0 & L3_TILE) < 0x200 && (w0 & 15) + b.w <= 16
-      && b.tiles.every((t, i) => t === w0 + Math.floor(i / b.w) * 16 + (i % b.w));
-    const S = this.builtPixels = this.sheetPixels(), scale = this.sheetShown();
-    const c = h('canvas', { width: 128 * S, height: 256 * S, class: 'm16-pick sheet-fill', title: 'Click/drag: tile(s) as brush' });
-    const ctx = c.getContext('2d')!;
-    ctx.imageSmoothingEnabled = false;
-    const sheet = document.createElement('canvas');
-    sheet.width = 128; sheet.height = 256;
-    const sctx = sheet.getContext('2d')!, img = sctx.createImageData(128, 256), px = new Uint32Array(img.data.buffer);
-    for (let t = 0; t < 0x200; t++) draw(px, 128, t | (pal << 10), (t & 15) * 8, (t >> 4) * 8);
-    sctx.putImageData(img, 0, 0);
-    const show = (x: number, y: number, w: number, hh: number) => {
-      ctx.drawImage(sheet, 0, 0, c.width, c.height);
-      if (x < 0) return;
-      ctx.strokeStyle = '#4cc2ff'; ctx.lineWidth = 2;
-      ctx.strokeRect(x * 8 * S, y * 8 * S, w * 8 * S, hh * 8 * S);
-    };
-    if (onSheet) show(w0 & 15, (w0 & L3_TILE) >> 4, b.w, b.h); else show(-1, 0, 0, 0);
-    attachRectPick(c, 16, 32, (q) => show(q.x, q.y, q.w, q.h), (q) =>
-      setBrush({ w: q.w, h: q.h, tiles: Array.from({ length: q.w * q.h }, (_, i) => ((q.y + Math.floor(i / q.w)) * 16 + q.x + (i % q.w)) | (attr & (L3_PAL | L3_PRIO))) }));
-    previewSheet(c, () => sheet, 16, 32, 8, scale, (q) => [q.w * q.h > 1 ? `Block ${q.w}×${q.h} from tile ${hex3(q.y * 16 + q.x)}` : `Tile ${hex3(q.y * 16 + q.x)}`]);
-    const palSel = h('select', { title: 'Palette (colors 4 × n – 4 × n + 3)' }, Array.from({ length: 8 }, (_, i) => h('option', { value: String(i), selected: i === pal }, `Palette ${i}`)));
-    palSel.addEventListener('change', () => { const p = Number(palSel.value); each((w) => withL3Palette(w, p)); });
-    const prio = h('input', { type: 'checkbox', checked: !!(w0 & L3_PRIO) }) as HTMLInputElement;
-    prio.addEventListener('change', () => each((w) => (prio.checked ? w | L3_PRIO : w & ~L3_PRIO)));
-    const flip = (bit: number) => setBrush({
-      w: b.w, h: b.h,
-      tiles: b.tiles.map((_, i) => {
-        const x = i % b.w, y = Math.floor(i / b.w);
-        return b.tiles[bit === L3_FLIP_X ? y * b.w + (b.w - 1 - x) : (b.h - 1 - y) * b.w + x] ^ bit;
-      }),
-    });
+    const app = this.app, r = app.render;
     const t = lt3Target(app.rom, app.level.number);
     const others = t.file === null ? [] : lt3Users(app.rom, t.file).filter((n) => n !== app.level.number);
     const where = t.file === null
       ? 'Saved with the level into a new layer 3 tilemap file (ExGFX, LT3 in the Graphics tab), under the status bar.'
       : `Saved with the level into its layer 3 tilemap file, ExGFX ${hex2(t.file)} (LT3: ${LT3_DESTS[t.place.dest].toLowerCase()})${others.length ? ` – also used by level${others.length > 1 ? 's' : ''} ${others.map((n) => hex3(n)).join(', ')}` : ''}.`;
-    const what = b.tiles.length > 1 ? `Block ${b.w}×${b.h}${onSheet ? ` from tile ${hex3(w0 & L3_TILE)}` : ' from the level'}` : `Tile ${hex3(w0 & L3_TILE)}`;
-    this.body.append(
-      h('div', { class: 'row' }, palSel, h('label', { class: 'row small', title: 'In front of layers 1 and 2 (tilemap priority)' }, prio, 'Priority'),
-        h('button', { title: 'Mirror the brush horizontally', onclick: () => flip(L3_FLIP_X) }, 'Flip X'),
-        h('button', { title: 'Mirror the brush vertically', onclick: () => flip(L3_FLIP_Y) }, 'Flip Y'),
-        h('button', { title: 'Paint with a tile without visible pixels', onclick: () => setBrush({ w: 1, h: 1, tiles: [blankLayer3Tile(r)] }) }, 'Erase')),
-      h('div', { class: 'hint' }, `Brush: ${what} – click tiles here or in the level (drag: block). ${where} Layer 3 shows where it is when the level starts.`));
-    if (!onSheet) {
-      const p = h('canvas', { width: b.w * 8, height: b.h * 8, class: 'bg-brush' });
-      const pc = p.getContext('2d')!, pimg = pc.createImageData(b.w * 8, b.h * 8), ppx = new Uint32Array(pimg.data.buffer);
-      b.tiles.forEach((w, i) => draw(ppx, b.w * 8, w, (i % b.w) * 8, Math.floor(i / b.w) * 8));
-      pc.putImageData(pimg, 0, 0);
-      sized(p, fitScale(p.width, p.height, 128 * scale, 128 * scale, scale));
-      this.body.append(h('div', { class: 'row' }, p));
-    }
-    this.body.append(c);
+    layer3Picker(this.body, { vram: r.vram, cgram: r.cgram, charBase: layer3CharBase(r.ppuRegs) }, app.l3Brush, (nb) => { app.l3Brush = nb; this.build(); }, {
+      pixels: this.builtPixels = this.sheetPixels(), shown: this.sheetShown(), from: 'the level',
+      hint: `click tiles here or in the level (drag: block). ${where} Layer 3 shows where it is when the level starts.`,
+    });
   }
 
   // standard objects (with their types), extended objects 10–FF and, where the ROM reads object 2D with an

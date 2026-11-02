@@ -159,6 +159,13 @@ export class LevelEmulator {
     try { return fn(); } finally { this.skipMask = base; }
   }
 
+  // the machine at the title screen, as booted (booting first when the ROM changed what the boot read)
+  bootState(): SnesState {
+    this.sync();
+    if (!this.baseState) this.boot();
+    return this.baseState!;
+  }
+
   // runs fn recording the ROM it reads, on top of base (default: the boot's); the reads also
   // count for an enclosing tracked() call (with counted false only when given to count())
   tracked<T>(fn: () => T, base: RomReads | null = this.bootReads, counted = true): Recorded<T> {
