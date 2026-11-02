@@ -90,7 +90,7 @@ class MusicPlayer {
   private run(audio: AudioOut, token: number, next: () => Int16Array | null, handOff: () => boolean): void {
     this.timer = setInterval(() => {
       if (token !== this.token) return;
-      if (audio.failed) { this.error = 'No audio output available'; this.stop(); return; }
+      if (audio.failed) { this.error = audio.failReason; this.stop(); return; }
       if (!audio.ready) return;
       if (handOff()) return;
       for (let n = 0; n < 8 && audio.buffered() < audio.lead; n++) {

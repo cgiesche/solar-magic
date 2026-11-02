@@ -98,6 +98,7 @@ export class AudioOut {
   private volume = 1;
   muted = false;
   failed = false;
+  failReason = 'No audio output available';
   lead: number; // sample pairs a player keeps queued
   underruns = 0;
 
@@ -109,6 +110,14 @@ export class AudioOut {
       try { this.ctx = new AudioContext({ latencyHint: 'interactive' }); } catch { this.failed = true; return; }
     }
     const ctx = this.ctx;
+    if (!ctx.audioWorklet) {
+      // AudioWorklet exists only in a secure context: https or localhost, not http://<LAN address>
+      this.failed = true;
+      if (!window.isSecureContext) this.failReason = 'No audio: the browser allows it only over https or on localhost';
+      void ctx.close().catch(() => undefined);
+      this.ctx = null;
+      return;
+    }
     workletUrl ??= URL.createObjectURL(new Blob([WORKLET], { type: 'application/javascript' }));
     ctx.audioWorklet.addModule(workletUrl).then(() => {
       if (!this.ctx) return;

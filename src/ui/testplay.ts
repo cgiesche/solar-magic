@@ -249,7 +249,7 @@ function play(app: App, o: Origin, audio: AudioOut, p: PlaySession, ppu: PPU, ok
     info.textContent = `${where} · Frame ${frames}${paused ? ' · Pause' : ''} · Game mode ${hex(p.mode, 2)}`
       + (note && t < noteUntil ? ` · ${note}` : '')
       + (padNames.length ? ` · Gamepad: ${padNames.join(', ')}` : ' · Gamepad: none detected (press a button)')
-      + (!p.hasSound || audio.failed ? ' · No sound' : soundMuted ? ' · Sound off (M)' : '');
+      + (!p.hasSound || audio.failed ? (window.isSecureContext ? ' · No sound' : ' · No sound (needs https or localhost)') : soundMuted ? ' · Sound off (M)' : '');
     schedule();
   };
   // requestAnimationFrame pauses in hidden tabs; fall back to timers there
