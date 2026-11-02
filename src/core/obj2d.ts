@@ -26,6 +26,18 @@ const memo = new WeakMap<Rom, { gen: number; len: number; ranges: RomRange[] }>(
 // dispatcher, a hook's code) counts as read by the computation running (Rom.reads), also when the length is kept:
 // whatever reads a level depends on it, so a hook installed or removed drops what read a level as the ROM had it.
 export function objectLength2D(rom: Rom): number {
+  const had = found2D(rom), recorder = rom.reads;
+  if (recorder) for (const [start, end] of had.ranges) recorder.read(start, end - start);
+  return had.len;
+}
+
+// the ROM ranges finding object 2D's length read (PC: start, end), for a result that keeps them as single bytes
+export function objectLength2DReads(rom: Rom): RomRange[] {
+  return found2D(rom).ranges;
+}
+
+// object 2D's length and what finding it read, once per ROM state
+function found2D(rom: Rom): { len: number; ranges: RomRange[] } {
   let had = memo.get(rom);
   if (had?.gen !== rom.gen) {
     // (a hook may move the pointer only for the numbers it handles: the most any of these does)
@@ -35,9 +47,7 @@ export function objectLength2D(rom: Rom): number {
     // (kept before counting: the recorder's byte pages take level data ranges, which ask this again, unrecorded)
     memo.set(rom, had);
   }
-  const recorder = rom.reads;
-  if (recorder) for (const [start, end] of had.ranges) recorder.read(start, end - start);
-  return had.len;
+  return had;
 }
 
 // offsets as ranges of consecutive ones
