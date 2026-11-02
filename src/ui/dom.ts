@@ -81,6 +81,94 @@ export function select(options: [number, string][], value: number, onChange: (v:
   return s;
 }
 
+const MOVE_KEYS = new Set(['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Home', 'End', 'PageUp', 'PageDown']);
+// whether a key goes to the focused field instead of to the editor's shortcuts: a text field takes every key, a
+// dropdown and a slider only the keys they move with (a dropdown also letters: it picks by the first letter), so
+// Ctrl+Z, Ctrl+S, "o" etc. work while one keeps the focus
+export function fieldTakesKey(e: KeyboardEvent): boolean {
+  const t = e.target;
+  if (t instanceof HTMLTextAreaElement) return true;
+  if (t instanceof HTMLSelectElement) return MOVE_KEYS.has(e.key) || e.key === 'Enter' || (e.key.length === 1 && !e.ctrlKey && !e.metaKey && !e.altKey);
+  if (t instanceof HTMLInputElement) return t.type !== 'range' || MOVE_KEYS.has(e.key);
+  return false;
+}
+
+const isStepField = (t: EventTarget | null): t is HTMLSelectElement | HTMLInputElement =>
+  t instanceof HTMLSelectElement || (t instanceof HTMLInputElement && t.type === 'range');
+
+// dropdowns and sliders, everywhere: one changed with the keys keeps the focus when its panel is built anew on the
+// change (the field at the same place in the new panel, of the same kind and label, gets it), so the keys step on;
+// the mouse wheel over a slider steps it (input and change, as a key would)
+export function installStepFields(): void {
+  const label = (t: Element) => t.previousElementSibling?.textContent ?? '';
+  const remember = (e: Event) => {
+    const t = e.target;
+    if (!isStepField(t) || document.activeElement !== t) return;
+    // the way from the field up to the body: each parent with the index of the child on the way
+    const path: [Element, number][] = [];
+    for (let c: Element = t; c.parentElement && c !== document.body; c = c.parentElement) path.push([c.parentElement, [...c.parentElement.children].indexOf(c)]);
+    const kind = t instanceof HTMLInputElement ? `input:${t.type}` : 'select';
+    const name = label(t);
+    // the panel may be built anew right on the change or a little later (after an asynchronous ROM edit), even
+    // more than once: watched for a second, as long as the focus does not go elsewhere
+    let cur = t;
+    const done = (): boolean => {
+      if (cur.isConnected) return document.activeElement !== cur;
+      const a = document.activeElement;
+      if (a && a !== document.body) return true;
+      const from = path.findIndex(([p]) => p.isConnected);
+      if (from < 0) return false;
+      let el: Element | undefined = path[from][0];
+      for (let i = from; i >= 0 && el; i--) el = el.children[path[i][1]];
+      if (!isStepField(el ?? null)) return false;
+      const f = el as HTMLSelectElement | HTMLInputElement;
+      if ((f instanceof HTMLInputElement ? `input:${f.type}` : 'select') !== kind || label(f) !== name || f.disabled) return false;
+      f.focus({ preventScroll: true });
+      cur = f;
+      return false;
+    };
+    const until = performance.now() + 1000;
+    queueMicrotask(() => {
+      if (done()) return;
+      const tick = () => { if (!done() && performance.now() < until) requestAnimationFrame(tick); };
+      requestAnimationFrame(tick);
+    });
+  };
+  document.addEventListener('change', remember, true);
+  document.addEventListener('input', remember, true);
+  // touchpads send many small deltas: accumulated to one step per ~mouse-wheel notch. Each step is an input, the
+  // change (the edit, one undo step) comes once the wheel rests, as at the end of a drag
+  let acc = 0;
+  let over: HTMLInputElement | null = null;
+  let changed = false;
+  let rest = 0;
+  const settle = () => {
+    clearTimeout(rest);
+    if (over && changed) over.dispatchEvent(new Event('change', { bubbles: true }));
+    changed = false;
+  };
+  document.addEventListener('wheel', (e) => {
+    const t = e.target;
+    if (!(t instanceof HTMLInputElement) || t.type !== 'range' || t.disabled || e.ctrlKey) return;
+    e.preventDefault();
+    if (over !== t) { settle(); over = t; acc = 0; }
+    // a wheel event of several notches (~100 pixels each) steps as often
+    const d = e.deltaMode === 1 ? e.deltaY * 33 : e.deltaY;
+    const notches = Math.abs(d) >= 50 ? Math.round(Math.abs(d) / 100) || 1 : 0;
+    acc = notches ? 0 : acc + d;
+    if (!notches && Math.abs(acc) < 50) return;
+    const up = (notches ? d : acc) < 0;
+    acc = 0;
+    const was = t.value;
+    if (up) t.stepUp(notches || 1); else t.stepDown(notches || 1);
+    if (t.value === was) return;
+    changed = true;
+    t.dispatchEvent(new Event('input', { bubbles: true }));
+    clearTimeout(rest);
+    rest = window.setTimeout(settle, 400);
+  }, { passive: false, capture: true });
+}
+
 // message log: every toast plus events that are worth knowing afterwards (shown in the log bar)
 export type LogKind = 'info' | 'error' | 'warn' | 'output' | 'event';
 export interface LogEntry { time: Date; msg: string; kind: LogKind; count: number }

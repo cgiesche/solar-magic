@@ -187,7 +187,6 @@ export class OverworldView {
     window.addEventListener('mouseup', (e) => this.onUp(e));
     attachPanZoom(this.scroller, () => this.zoom, (z, ax, ay) => this.setZoom(z, ax, ay));
     this.eventsSlider.addEventListener('input', () => this.setProgress(+this.eventsSlider.value));
-    this.eventsSlider.addEventListener('change', () => this.eventsSlider.blur()); // the keys step on
     // a ROM edit (a stroke ended, a name chosen) or undo/redo: shown as in the ROM (a stroke being painted is dropped)
     app.on('rom-change', () => {
       if (!this.root.isConnected) return;

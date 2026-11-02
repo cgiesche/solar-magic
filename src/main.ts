@@ -4,7 +4,7 @@ import { createBps, crc32 } from './core/bps.ts';
 import { prepareRom } from './core/editorpatches.ts';
 import { SMW_CLEAN_CRC } from './core/cleangame.ts';
 import { App, type EditMode } from './ui/app.ts';
-import { h, clear, toast, log, modal, choose, zoomControl } from './ui/dom.ts';
+import { h, clear, toast, log, modal, choose, zoomControl, fieldTakesKey, installStepFields } from './ui/dom.ts';
 import { downloadBytes, pickFile, saveFile, filePath, fileName, desktop, guardClose } from './ui/platform.ts';
 import { LogBar } from './ui/logbar.ts';
 import { pasteHintBox } from './ui/pastehint.ts';
@@ -422,8 +422,7 @@ function buildUi(app: App): { start: (at: NavLoc | null) => Promise<void> } {
   if (desktop) {
     window.addEventListener('keydown', (e) => {
       if (!e.altKey || e.ctrlKey || e.metaKey || e.shiftKey || document.querySelector('.modal-back')) return;
-      const t = e.target as HTMLElement;
-      if (t && (t.tagName === 'INPUT' || t.tagName === 'SELECT' || t.tagName === 'TEXTAREA')) return;
+      if (fieldTakesKey(e)) return;
       if (workspace === 'level' && app.selection.size) return; // resizes the selection
       if (e.key === 'ArrowLeft') { e.preventDefault(); history.back(); } else if (e.key === 'ArrowRight') { e.preventDefault(); history.forward(); }
     });
@@ -445,10 +444,10 @@ function buildUi(app: App): { start: (at: NavLoc | null) => Promise<void> } {
     void setWorkspace('gfx', { tab: 'gfx' }).then((ok) => { if (ok) void ws!.gfx.importNew(job.file, job.into ?? undefined); });
   });
 
+  installStepFields();
   window.onkeydown = (e: KeyboardEvent) => {
     if ((e.ctrlKey || e.metaKey) && (e.key.toLowerCase() === 'f' || e.code === 'Space') && !e.altKey && !document.querySelector('.modal-back')) { e.preventDefault(); search(); return; }
-    const t = e.target as HTMLElement;
-    if (t && (t.tagName === 'INPUT' || t.tagName === 'SELECT' || t.tagName === 'TEXTAREA')) return;
+    if (fieldTakesKey(e)) return;
     if (document.querySelector('.modal-back')) return;
     const k = e.key;
     const ctrl = e.ctrlKey || e.metaKey;
