@@ -25,6 +25,7 @@ import {
 import { OverworldStroke, shownMaps } from '../core/owstroke.ts';
 import { isPathKind, PATH_KIND_NAMES, type PathKind } from '../core/owpaths.ts';
 import { emptyL1Tiles, freeL1Tiles, sheetPages, l1TileLines, l1Hex, SHEET_COLS, type SheetPage } from '../core/owl1sheet.ts';
+import { findL2Brush, l2BrushPalettes, l2SharedBits, l2SheetEntry, L2_SHEET_COLS, L2_SHEET_ROWS, L2_FLIP_X, L2_FLIP_Y, L2_PRIORITY, type SheetMark } from '../core/owl2sheet.ts';
 import { skipsRevealWalk } from '../core/revealwalk.ts';
 import type { OwSpriteView } from '../core/owsprites.ts';
 import { LinkLayer } from './owlinkview.ts';
@@ -650,6 +651,8 @@ export class OverworldView {
     const at = Array.from({ length: r.w * r.h }, (_, i) => idx(this.region, r.x + (i % r.w), r.y + Math.floor(i / r.w)));
     const entries = at.map((i) => src[i]);
     this.brush = { kind: this.mode === 'l2' ? 'l2' : 'l1', w: r.w, h: r.h, entries, tls: this.mode === 'l1' ? at.map((i, k) => (this.isLevelTile(entries[k]) ? this.tls[i] : 0)) : undefined };
+    if (this.mode === 'l2') { const p = l2BrushPalettes(entries); if (p.length === 1) this.l2Pal = p[0]; } // (the sheet in the brush's palette)
+    this.revealMark = true;
     this.buildSide();
     this.paint();
   }
@@ -1334,49 +1337,75 @@ export class OverworldView {
     ].filter((v): v is HTMLDivElement => !!v);
   }
 
-  // palette sheet with the brush outlined (when it is a rectangle of the sheet) and rectangle picking;
-  // any other brush (taken from the map, flipped) is shown as a preview instead
+  private revealMark = false; // a brush picked from the map: its mark in the sheet scrolled into view
   // the paint panel's width inside its padding, which the sheet fills
   private palWidth(): number {
     const st = getComputedStyle(this.palPanel);
     return this.palPanel.clientWidth - parseFloat(st.paddingLeft) - parseFloat(st.paddingRight);
   }
 
+  // where the brush is a rectangle of exactly its entries in a cols×rows sheet (null: nowhere)
+  private sheetRect(cols: number, rows: number, sheetValue: (x: number, y: number) => number): SheetMark | null {
+    const b = this.brush;
+    for (let i = 0; i < cols * rows; i++) {
+      const x = i % cols, y = Math.floor(i / cols);
+      if (x + b.w <= cols && y + b.h <= rows && b.entries.every((v, j) => v === sheetValue(x + (j % b.w), y + Math.floor(j / b.w)))) return { kind: 'rect', x, y, w: b.w, h: b.h, flip: 0 };
+    }
+    return null;
+  }
+
+  // palette sheet with the brush outlined and rectangle picking. `locate` finds the brush in the sheet (layer 1: a
+  // rectangle of exactly its entries, sheetRect; layer 2: also mirrored, else its 8x8 tiles each outlined thin –
+  // core/owl2sheet.ts). A brush not there as it is (taken from the map, flipped) is also shown as a preview
   sheetPalette(sheet: HTMLCanvasElement, cls: string, cols: number, rows: number, cell: number, sheetValue: (x: number, y: number) => number,
-    preview: (ctx: CanvasRenderingContext2D) => void, describe: (r: { x: number; y: number; w: number; h: number }) => string[]): HTMLElement {
+    preview: (ctx: CanvasRenderingContext2D) => void, describe: (r: { x: number; y: number; w: number; h: number }) => string[],
+    locate: () => SheetMark | null): HTMLElement {
     const b = this.brush;
     const k = this.palPixels = fillPixels(this.palWidth(), sheet.width), scale = this.palWidth() / sheet.width;
     const c = h('canvas', { width: sheet.width * k, height: sheet.height * k, class: `${cls} sheet-fill` });
     const ctx = c.getContext('2d')!;
     ctx.imageSmoothingEnabled = false;
     ctx.setTransform(k, 0, 0, k, 0, 0);
+    const mark = b.kind === this.mode ? locate() : null;
+    const at = mark?.kind === 'rect' ? mark : null;
+    // r: the rectangle being picked (null: the brush's mark)
     const draw = (r: { x: number; y: number; w: number; h: number } | null) => {
       ctx.drawImage(sheet, 0, 0);
+      if (!r && mark?.kind === 'tiles') {
+        ctx.strokeStyle = '#4cc2ff'; ctx.lineWidth = 1 / k; // (one canvas pixel)
+        for (const t of mark.cells) ctx.strokeRect(t.x * cell + ctx.lineWidth / 2, t.y * cell + ctx.lineWidth / 2, cell - ctx.lineWidth, cell - ctx.lineWidth);
+      }
+      r ??= at;
       if (!r) return;
       ctx.strokeStyle = '#4cc2ff'; ctx.lineWidth = cell / 8;
       ctx.strokeRect(r.x * cell + ctx.lineWidth / 2, r.y * cell + ctx.lineWidth / 2, r.w * cell - ctx.lineWidth, r.h * cell - ctx.lineWidth);
     };
-    let at: { x: number; y: number; w: number; h: number } | null = null;
-    if (b.kind === this.mode) {
-      for (let i = 0; i < cols * rows && !at; i++) {
-        const x = i % cols, y = Math.floor(i / cols);
-        if (x + b.w <= cols && y + b.h <= rows && b.entries.every((v, j) => v === sheetValue(x + (j % b.w), y + Math.floor(j / b.w)))) at = { x, y, w: b.w, h: b.h };
-      }
-    }
-    draw(at);
+    draw(null);
     attachRectPick(c, cols, rows, draw, (r) => {
       this.brush = { kind: this.mode === 'l2' ? 'l2' : 'l1', w: r.w, h: r.h, entries: Array.from({ length: r.w * r.h }, (_, j) => sheetValue(r.x + (j % r.w), r.y + Math.floor(j / r.w))) };
       this.buildSide();
     });
     previewSheet(c, () => sheet, cols, rows, cell, scale, describe);
     const out = h('div', null);
-    if (!at && b.kind === this.mode) {
+    if ((!at || at.flip) && b.kind === this.mode) {
       const p = h('canvas', { width: b.w * cell, height: b.h * cell, class: 'ow-brush' });
       preview(p.getContext('2d')!);
       sized(p, fitScale(p.width, p.height, sheet.width * scale, sheet.width * scale, scale));
       out.append(h('div', { class: 'hint' }, `Brush ${b.w}×${b.h}:`), h('div', { class: 'row' }, p));
     }
     out.append(c);
+    // a brush picked from the map: the panel scrolled to its mark when it is out of sight (laid out on the next frame)
+    if (mark && this.revealMark) {
+      this.revealMark = false;
+      const y0 = (mark.kind === 'rect' ? mark.y : Math.min(...mark.cells.map((t) => t.y))) * cell;
+      const y1 = mark.kind === 'rect' ? (mark.y + mark.h) * cell : (Math.max(...mark.cells.map((t) => t.y)) + 1) * cell;
+      requestAnimationFrame(() => {
+        if (!c.isConnected) return;
+        const rc = c.getBoundingClientRect(), pr = this.palPanel.getBoundingClientRect(), s = rc.height / sheet.height;
+        const top = rc.top + y0 * s, bottom = rc.top + y1 * s;
+        if (top < pr.top || bottom > pr.bottom) this.palPanel.scrollTop += top - pr.top - pr.height / 3;
+      });
+    }
     return out;
   }
 
@@ -1427,7 +1456,8 @@ export class OverworldView {
       return [this.sheetPalette(sheet, 'ow-pal', SHEET_COLS, p.rows, 16, at,
         (ctx) => ctx.drawImage(tiles(b.entries, b.w, b.w * 16, b.h * 16), 0, 0),
         (q) => (q.w * q.h > 1 ? [`Block ${q.w}×${q.h} from tile ${l1Hex(at(q.x, q.y))}`]
-          : [`Tile ${l1Hex(at(q.x, q.y))}`, ...l1TileLines(at(q.x, q.y), kinds, free[at(q.x, q.y)])])), fold];
+          : [`Tile ${l1Hex(at(q.x, q.y))}`, ...l1TileLines(at(q.x, q.y), kinds, free[at(q.x, q.y)])]),
+        () => this.sheetRect(SHEET_COLS, p.rows, at)), fold];
     };
     const [p0, p1] = sheetPages(empty, free, this.openPage1);
     return h('div', null,
@@ -1452,16 +1482,24 @@ export class OverworldView {
       ctx.putImageData(id, 0, 0);
       return c;
     };
-    const sheet = entries(Array.from({ length: 1024 }, (_, t) => t | (this.l2Pal << 10)), 16, 128, 512);
+    const sheet = entries(Array.from({ length: L2_SHEET_COLS * L2_SHEET_ROWS }, (_, t) => l2SheetEntry(t % L2_SHEET_COLS, Math.floor(t / L2_SHEET_COLS), this.l2Pal)), L2_SHEET_COLS, L2_SHEET_COLS * 8, L2_SHEET_ROWS * 8);
     const b = this.brush;
-    const brushInfo = b.kind === 'l2' ? `Brush ${b.w}×${b.h}: ${b.entries.slice(0, 16).map((v) => hex(v, 4)).join(' ')}${b.entries.length > 16 ? ' …' : ''}` : '';
-    const flip = (bit: number, label: string) => this.flipButton('l2', bit, label);
-    const pal = h('div', { class: 'ow-pal-scroll' }, this.sheetPalette(sheet, 'ow-pal8', 16, 64, 8, (x, y) => (y * 16 + x) | (this.l2Pal << 10),
+    const pals = b.kind === 'l2' ? l2BrushPalettes(b.entries) : [];
+    const brushInfo = b.kind === 'l2' ? `Brush ${b.w}×${b.h}${pals.length > 1 ? ` (palettes ${pals.join(', ')})` : ''}: ${b.entries.slice(0, 16).map((v) => hex(v, 4)).join(' ')}${b.entries.length > 16 ? ' …' : ''}` : '';
+    // the flip buttons pressed where every entry of the brush has the bit
+    const bits = b.kind === 'l2' ? l2SharedBits(b.entries) : 0;
+    const flip = (bit: number, label: string) => {
+      const btn = this.flipButton('l2', bit, label);
+      btn.classList.toggle('active', !!(bits & bit));
+      return btn;
+    };
+    const pal = h('div', { class: 'ow-pal-scroll' }, this.sheetPalette(sheet, 'ow-pal8', L2_SHEET_COLS, L2_SHEET_ROWS, 8, (x, y) => l2SheetEntry(x, y, this.l2Pal),
       (ctx) => ctx.drawImage(entries(b.entries, b.w, b.w * 8, b.h * 8), 0, 0),
-      (q) => [q.w * q.h > 1 ? `Block ${q.w}×${q.h} from tile ${hex(q.y * 16 + q.x, 3)}` : `Tile ${hex(q.y * 16 + q.x, 3)}`]));
+      (q) => [q.w * q.h > 1 ? `Block ${q.w}×${q.h} from tile ${hex(q.y * L2_SHEET_COLS + q.x, 3)}` : `Tile ${hex(q.y * L2_SHEET_COLS + q.x, 3)}`],
+      () => findL2Brush(b, this.l2Pal)));
     return h('div', null,
       h('div', { class: 'prop' }, h('label', null, 'Palette'), select(Array.from({ length: 8 }, (_, i) => [i, String(i)] as [number, string]), this.l2Pal, (v) => { this.l2Pal = v; this.buildSide(); })),
-      h('div', { class: 'row' }, flip(0x4000, 'X-Flip'), flip(0x8000, 'Y-Flip'), flip(0x2000, 'Priority')),
+      h('div', { class: 'row' }, flip(L2_FLIP_X, 'X-Flip'), flip(L2_FLIP_Y, 'Y-Flip'), flip(L2_PRIORITY, 'Priority')),
       h('div', { class: 'hint mono' }, brushInfo),
       pal);
   }
@@ -1474,8 +1512,8 @@ export class OverworldView {
         const br = this.brush;
         if (br.kind !== kind) return;
         const rows = Array.from({ length: br.h }, (_, y) => br.entries.slice(y * br.w, (y + 1) * br.w).map((v) => v ^ bit));
-        if (bit === 0x4000) rows.forEach((row) => row.reverse());
-        if (bit === 0x8000) rows.reverse();
+        if (bit === L2_FLIP_X) rows.forEach((row) => row.reverse());
+        if (bit === L2_FLIP_Y) rows.reverse();
         br.entries = rows.flat();
         this.buildSide();
       },
