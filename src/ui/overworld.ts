@@ -23,7 +23,8 @@ import {
   eventL1Tiles, exitChanges, type EventData, type EventRunner, type Rect, type ExitChanges,
 } from '../core/owevents.ts';
 import { OverworldStroke, shownMaps } from '../core/owstroke.ts';
-import { isPathKind, PATH_KIND_NAMES, type PathKind } from '../core/owpaths.ts';
+import { isPathKind, type PathKind, type PathShapes } from '../core/owpaths.ts';
+import { pathWays, pathTileText, type PathWay } from '../core/owpathshape.ts';
 import { emptyL1Tiles, freeL1Tiles, sheetPages, l1TileLines, l1Hex, SHEET_COLS, type SheetPage } from '../core/owl1sheet.ts';
 import { findL2Brush, l2BrushPalettes, l2SharedBits, l2SheetEntry, L2_SHEET_COLS, L2_SHEET_ROWS, L2_FLIP_X, L2_FLIP_Y, L2_PRIORITY, type SheetMark } from '../core/owl2sheet.ts';
 import { mapPieces, PIECE_COLS } from '../core/owl2pieces.ts';
@@ -423,20 +424,33 @@ export class OverworldView {
     }
     return this.kinds.kinds;
   }
+  // how the path tiles move Mario (owpaths.ts path shapes: the lines of their marks, the popup's words; null while they
+  // are learned)
+  private shapes: { gen: number; shapes: PathShapes } | null = null;
+  private shapesLearned = () => { if (!this.root.isConnected) return; this.paint(); this.updateStatus(); if (this.mode === 'l1') this.buildSide(); };
+  pathShapes(): PathShapes | null {
+    const gen = this.app.rom.gen;
+    if (this.shapes?.gen !== gen) {
+      const shapes = this.app.pathShapes(this.shapesLearned);
+      if (!shapes) return null;
+      this.shapes = { gen, shapes };
+    }
+    return this.shapes.shapes;
+  }
   // (the selected level tile's settings say which exits skip the reveal walk once that is learned)
   private revealWalksLearned = () => { if (this.root.isConnected) this.buildSide(); };
   // whether layer 1 tile t is a level tile (owpaths.ts levelTileTest; none while the path tiles are learned)
   isLevelTile = (t: number): boolean => this.pathKinds()?.[t] === 'level';
 
   // the path tiles of the map shown, a mark per kind (as Lunar Magic's "Layer 1 Mario Paths"): walk green, climb
-  // green with rungs, swim blue, exit red, stop a cross
+  // green with rungs, swim blue, exit red, stop a cross; the tile's shape as lines (once the shapes are learned)
   paintPaths(lw: number): void {
     const kinds = this.pathKinds();
     if (!kinds) return;
-    const ctx = this.canvas.getContext('2d')!, l1 = this.shown.l1;
+    const ctx = this.canvas.getContext('2d')!, l1 = this.shown.l1, shapes = this.pathShapes();
     for (let y = 0; y < 32; y++) for (let x = 0; x < 32; x++) {
-      const k = kinds[l1[l1Index(this.region, x, y)]];
-      if (isPathKind(k)) drawPathMark(ctx, k, x * 16, y * 16, lw);
+      const t = l1[l1Index(this.region, x, y)], k = kinds[t];
+      if (isPathKind(k)) drawPathMark(ctx, k, x * 16, y * 16, lw, pathWays(t, k, shapes));
     }
   }
 
@@ -724,7 +738,11 @@ export class OverworldView {
         const tl = this.tls[i];
         if (this.isLevelTile(this.l1[i])) t += tl ? `  ·  Level ${hex(translevelToLevel(tl), 3)} “${levelName(this.app.rom, tl)}”` : '  ·  Enters no level';
         const k = this.showPaths ? this.pathKinds()?.[shown] : undefined;
-        if (k && isPathKind(k)) { t += `  ·  ${PATH_KIND_NAMES[k]}`; this.scroller.title = PATH_KIND_NAMES[k]; }
+        if (k && isPathKind(k)) {
+          const what = pathTileText(shown, k, this.pathShapes());
+          t += `  ·  ${what}`;
+          this.scroller.title = what;
+        }
         const unreached = this.reach.status(i);
         if (unreached) t += `  ·  ${unreached}`;
       }
@@ -1413,7 +1431,7 @@ export class OverworldView {
   l1Palette(): HTMLElement {
     const r = this.render();
     if (!r) return h('div', { class: 'hint' }, 'Loading the overworld…');
-    const tc = new TileCache(r.vram, r.cgram, 0), kinds = this.pathKinds();
+    const tc = new TileCache(r.vram, r.cgram, 0), kinds = this.pathKinds(), shapes = this.pathShapes();
     const empty = emptyL1Tiles(this.app.rom), free = freeL1Tiles(empty, kinds);
     const tiles = (list: number[], w: number, W: number, H: number) => {
       const c = document.createElement('canvas');
@@ -1432,7 +1450,7 @@ export class OverworldView {
       ctx.putImageData(id, 0, 0);
       if (kinds) list.forEach((t, i) => {
         const k = kinds[t], x = (i % w) * 16, y = Math.floor(i / w) * 16;
-        if (!seen[i] && isPathKind(k)) drawPathMark(ctx, k, x, y, 0.5);
+        if (!seen[i] && isPathKind(k)) drawPathMark(ctx, k, x, y, 0.5, pathWays(t, k, shapes));
         else if (KIND_BORDER[k]) { ctx.strokeStyle = KIND_BORDER[k]; ctx.lineWidth = 1; ctx.strokeRect(x + 0.5, y + 0.5, 15, 15); }
       });
       return c;
@@ -1452,7 +1470,7 @@ export class OverworldView {
       return [this.sheetPalette(sheet, 'ow-pal', SHEET_COLS, p.rows, 16, at,
         (ctx) => ctx.drawImage(tiles(b.entries, b.w, b.w * 16, b.h * 16), 0, 0),
         (q) => (q.w * q.h > 1 ? [`Block ${q.w}×${q.h} from tile ${l1Hex(at(q.x, q.y))}`]
-          : [`Tile ${l1Hex(at(q.x, q.y))}`, ...l1TileLines(at(q.x, q.y), kinds, free[at(q.x, q.y)])]),
+          : [`Tile ${l1Hex(at(q.x, q.y))}`, ...l1TileLines(at(q.x, q.y), kinds, free[at(q.x, q.y)], shapes)]),
         () => this.sheetRect(SHEET_COLS, p.rows, at)), fold];
     };
     const [p0, p1] = sheetPages(empty, free, this.openPage1);
@@ -1613,11 +1631,12 @@ export class OverworldView {
 }
 
 // the mark of a path tile of kind k (isPathKind) on the 16x16 tile at (px, py), as the map's "Path tiles" overlay
-// draws it: walk green, climb green with rungs, swim blue, exit red, stop a cross (lw: the width of a pixel)
+// draws it: walk green, climb green with rungs, swim blue, exit red, stop a cross; its ways (owpathshape.ts pathWays,
+// none while the shapes are learned) as white lines through the tile (lw: the width of a pixel)
 // (each kind's colour, r,g,b: the mark's fill with its alpha, the sheet's border opaque; a level tile has no mark)
 const KIND_RGB: Partial<Record<PathKind, [string, number]>> = { walk: ['90,230,100', 0.7], climb: ['90,230,100', 0.7], swim: ['60,140,255', 0.75], exit: ['235,60,60', 0.8], stop: ['255,255,255', 1], level: ['255,210,60', 1] };
 const PATH_FILL = Object.fromEntries(Object.entries(KIND_RGB).map(([k, [c, a]]) => [k, `rgba(${c},${a})`])) as Partial<Record<PathKind, string>>;
-function drawPathMark(ctx: CanvasRenderingContext2D, k: PathKind, px: number, py: number, lw: number): void {
+function drawPathMark(ctx: CanvasRenderingContext2D, k: PathKind, px: number, py: number, lw: number, ways: readonly PathWay[]): void {
   if (k === 'stop') {
     for (const [c, w] of [['rgba(0,0,0,0.8)', 4], ['#fff', 2]] as [string, number][]) {
       ctx.strokeStyle = c;
@@ -1639,6 +1658,17 @@ function drawPathMark(ctx: CanvasRenderingContext2D, k: PathKind, px: number, py
     for (const ry of [5, 8, 11]) { ctx.moveTo(px + 2, py + ry); ctx.lineTo(px + 14, py + ry); }
     ctx.stroke();
   }
+  // (a way and the way back are one line: each drawn twice, the same)
+  if (!ways.length) return;
+  for (const [c, w] of [['rgba(0,0,0,0.85)', 3], ['#fff', 1.5]] as [string, number][]) {
+    ctx.strokeStyle = c;
+    ctx.lineWidth = w * lw;
+    ctx.lineCap = 'round';
+    ctx.beginPath();
+    for (const { from, to } of ways) { ctx.moveTo(px + from[0], py + from[1]); ctx.lineTo(px + to[0], py + to[1]); }
+    ctx.stroke();
+  }
+  ctx.lineCap = 'butt';
 }
 // the colour of the border a visible tile of kind k gets in the paint sheet (the overlay's; a level tile yellow)
 const KIND_BORDER = Object.fromEntries(Object.entries(KIND_RGB).map(([k, [c]]) => [k, `rgb(${c})`])) as Partial<Record<PathKind, string>>;

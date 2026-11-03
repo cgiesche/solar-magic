@@ -25,18 +25,15 @@ import { readEvents, eventRunners, exitChanges, eventTitle } from './owevents.ts
 import { hex2, hex3 } from './names.ts';
 import type { Severity } from './problems.ts';
 import { readTeleports, readExitPaths, type OwTile } from './owteleport.ts';
-import { DX, DY, NO_SHAPE, PATH_TILES_END, type PathKind, type PathShapes } from './owpaths.ts';
+import { DX, DY, NO_SHAPE, PATH_TILES_END, dirOf, reverse, turnedAt, type PathKind, type PathShapes } from './owpaths.ts';
 
 // the tile next to layer 1 tile i in direction dir on its map, -1 off the map
 function neighbor(i: number, dir: number): number {
   const { x, y } = l1XY(i), nx = x + DX[dir], ny = y + DY[dir];
   return nx < 0 || ny < 0 || nx > 31 || ny > 31 ? -1 : l1Index(i >> 10, nx, ny);
 }
-// the way a vector points: along x where `alongX`, else along y
-const wayOf = (vx: number, vy: number, alongX: boolean): number => (alongX ? (vx < 0 ? 2 : 3) : vy < 0 ? 0 : 1);
 
 // directions in the order of DIR_NAMES / DIR_FLAGS: up, down, left, right
-const reverse = (d: number): number => d ^ 1;
 const TURNS = [3, 2, 1, 0]; // the game's order of trying another way: right, left, down, up
 const ANY_WAY_TILE = 0x82; // the game lets Mario walk off it in every direction ($049268)
 const WARP_TILES = [0x5b, 0x5f, 0x82]; // the tiles A takes Mario to a star/pipe entry's destination from ($04915E)
@@ -131,7 +128,7 @@ export function walkFrom(inp: ReachInput, from: number, d: number): Walk | null 
       // moved by the tile's vector (the sum's low 2 bits cleared), turned by where it ends
       const [vx, vy] = vector(shapes.walk, l1[n], dir, 16);
       px = (px + vx) & ~3; py = (py + vy) & ~3;
-      if (!(px & 15) || !(py & 15)) dir = wayOf(vx, vy, !(px & 15));
+      dir = turnedAt(px, py, vx, vy, dir);
       cur = n;
     }
     // the way he has first, else the first other one but back
@@ -218,7 +215,7 @@ export function reachInput(rom: Rom, l1: ArrayLike<number>, tls: ArrayLike<numbe
   const exitPaths = readExitPaths(rom).flatMap((e) => {
     if (!e) return [];
     const tile = l1Index(e.to.submap ? 1 : 0, e.tile.x, e.tile.y), dx = e.tile.x * 16 + 8 - e.to.x, dy = e.tile.y * 16 + 8 - e.to.y;
-    const dir = dx || dy ? wayOf(dx, dy, Math.abs(dx) > Math.abs(dy)) : -1;
+    const dir = dx || dy ? dirOf(dx, dy, Math.abs(dx) > Math.abs(dy)) : -1;
     return [{ from: { region: e.from.submap ? 1 : 0, x: e.from.x, y: e.from.y }, to: { x: e.to.x, y: e.to.y }, tile, dir }];
   });
   const noEvent = (tl: number) => (baseEvent(rom, tl) === NO_EVENT ? exitDirections(rom, tl)[0] : -1);

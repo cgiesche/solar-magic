@@ -171,3 +171,13 @@ function* probeShapes(emu: LevelEmulator, end: () => void): Generator<string | v
     return out;
   } finally { end(); }
 }
+
+// the direction opposite to dir (DIR_NAMES order: up, down, left, right)
+export const reverse = (dir: number): number => dir ^ 1;
+// the direction a vector points: along x where `alongX`, else along y (DIR_NAMES order)
+export const dirOf = (vx: number, vy: number, alongX: boolean): number => (alongX ? (vx < 0 ? 2 : 3) : vy < 0 ? 0 : 1);
+// Mario moved by a tile's vector (vx, vy) to (x, y) (pixels, the low 2 bits cleared), going in direction dir: the
+// direction he goes on in – turned on a tile's left/right edge left or right, else on its top/bottom edge up or down,
+// else as before
+export const turnedAt = (x: number, y: number, vx: number, vy: number, dir: number): number =>
+  !(x & 15) || !(y & 15) ? dirOf(vx, vy, !(x & 15)) : dir;

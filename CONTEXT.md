@@ -182,7 +182,7 @@ A 16x16 block of layer 2 – 2x2 tilemap entries, each with its palette and flip
 _Avoid_: Map16 tile (layer 1's), event step (an event's 6x6 or 2x2 change)
 
 **Path shape**:
-How a path tile moves Mario: by a vector from where he is, by the tile and the way he steps onto it, turning him where it ends (a bend, a junction taken one way). Learned by emulation (owpaths.ts), as the path tiles' kinds.
+How a path tile moves Mario: by a vector from where he is, by the tile and the way he steps onto it, turning him where it ends (a bend, a junction taken one way). Learned by emulation (owpaths.ts), as the path tiles' kinds. Shown as the tile's **ways**: a line through its mark from the side he steps on to where it moves him (overlay and layer 1 sheet), and in words ("from below to the right, from the right down") in the popup and status bar; a way counts where the way back leads to where he stepped on.
 _Avoid_: tile direction, path direction
 
 **Reached tile**:

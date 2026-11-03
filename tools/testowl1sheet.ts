@@ -1,12 +1,14 @@
 // The overworld editor's layer 1 paint sheet (owl1sheet.ts) on the editor's test ROM: which tiles are free (drawn as
 // tile 000, on no map, doing what 000 does), the rows of each page shown and folded (page 1 folded whole while it has
-// none of the ROM's own tiles), and the hover popup's lines (each tile's function, "acts like" on page 1).
+// none of the ROM's own tiles), and the hover popup's lines (each tile's function – a path tile's with its shape –,
+// "acts like" on page 1).
 // node tools/testowl1sheet.ts
 import { Rom } from '../src/core/rom.ts';
 import { owTileWords, setOwTileWords, readL1, writeL1, OW_L1_TILES } from '../src/core/overworld.ts';
 import { emptyL1Tiles, freeL1Tiles, sheetPages, l1TileLines, KINDS_LEARNING } from '../src/core/owl1sheet.ts';
 import { PATH_KIND_NAMES } from '../src/core/owpaths.ts';
-import { editorImage, pathKinds } from './fixture.ts';
+import { SHAPES_LEARNING } from '../src/core/owpathshape.ts';
+import { editorImage, pathKinds, pathShapes } from './fixture.ts';
 
 let bad = 0;
 const check = (ok: boolean, what: string) => { console.log((ok ? 'ok   ' : 'FAIL ') + what); if (!ok) bad++; };
@@ -14,7 +16,7 @@ const hx = (v: number) => v.toString(16).toUpperCase();
 const range = (a: number, b: number) => Array.from({ length: b - a }, (_, k) => a + k);
 
 const rom = new Rom(await editorImage());
-const kinds = pathKinds(rom);
+const kinds = pathKinds(rom), shapes = pathShapes(rom);
 const empty = emptyL1Tiles(rom), free = freeL1Tiles(empty, kinds);
 check(empty.length === OW_L1_TILES && free.length === OW_L1_TILES, 'a flag per tile 000–1FF');
 check(!empty[0] && !free[0], 'tile 000 is not free (on the map, the others are copies of it)');
@@ -68,17 +70,20 @@ check(p1.folded === range(0x100, 0x200).filter((t) => free[t]).length && p1.hidd
 // ---- the popup's lines ----
 const kindOf = (k: string) => range(0, 0x100).find((t) => kinds[t] === k)!;
 const walk = kindOf('walk'), level = kindOf('level'), none = kindOf('none'), exit = kindOf('exit');
-check(l1TileLines(walk, kinds, false)[0] === 'Path: walk', `a walk tile (${hx(walk)}): "Path: walk"`);
-check(l1TileLines(exit, kinds, false)[0] === PATH_KIND_NAMES.exit, `an exit tile (${hx(exit)}): its function`);
-check(/^Level tile.*free translevel when painted/.test(l1TileLines(level, kinds, false)[0]), `a level tile (${hx(level)}): enters a level, gets a free translevel`);
-check(/^No path/.test(l1TileLines(none, kinds, false)[0]), `a tile Mario doesn't go on (${hx(none)}): no path`);
-check(range(0, OW_L1_TILES).every((t) => l1TileLines(t, kinds, free[t]).length >= 1 && l1TileLines(t, kinds, free[t])[0] !== KINDS_LEARNING), 'every tile has its function');
-const p1walk = l1TileLines(0x100 + walk, kinds, free[0x100 + walk]);
-check(p1walk[0] === 'Path: walk' && p1walk[1] === `Acts like tile ${hx(walk).padStart(2, '0')} where Mario walks`, `page 1: ${p1walk.join(' / ')}`);
-check(range(0x100, 0x200).every((t) => l1TileLines(t, kinds, free[t]).some((l) => l.startsWith('Acts like'))), 'every page 1 tile says what it acts like');
-check(range(0, 0x100).every((t) => !l1TileLines(t, kinds, free[t]).some((l) => l.startsWith('Acts like'))), 'no page 0 tile does');
-check(l1TileLines(0xc1, kinds, true).some((l) => l.startsWith('Free')), 'a free tile says so');
-check(l1TileLines(walk, null, false)[0] === KINDS_LEARNING, 'kinds not known: being learned');
+// (a path tile's shape in words: owpathshape.ts pathTileText, tools/testowpathshape.ts)
+const walkLine = l1TileLines(walk, kinds, false, shapes)[0];
+check(/^Path: walk · from .+, from /.test(walkLine), `a walk tile (${hx(walk)}): its function and shape, "${walkLine}"`);
+check(l1TileLines(walk, kinds, false, null)[0] === `Path: walk · ${SHAPES_LEARNING}`, 'shapes not known: "Path: walk · its shape is being learned…"');
+check(l1TileLines(exit, kinds, false, shapes)[0] === PATH_KIND_NAMES.exit, `an exit tile (${hx(exit)}): its function`);
+check(/^Level tile.*free translevel when painted/.test(l1TileLines(level, kinds, false, shapes)[0]), `a level tile (${hx(level)}): enters a level, gets a free translevel`);
+check(/^No path/.test(l1TileLines(none, kinds, false, shapes)[0]), `a tile Mario doesn't go on (${hx(none)}): no path`);
+check(range(0, OW_L1_TILES).every((t) => l1TileLines(t, kinds, free[t], shapes).length >= 1 && l1TileLines(t, kinds, free[t], shapes)[0] !== KINDS_LEARNING), 'every tile has its function');
+const p1walk = l1TileLines(0x100 + walk, kinds, free[0x100 + walk], shapes);
+check(p1walk[0] === walkLine && p1walk[1] === `Acts like tile ${hx(walk).padStart(2, '0')} where Mario walks`, `page 1: ${p1walk.join(' / ')}`);
+check(range(0x100, 0x200).every((t) => l1TileLines(t, kinds, free[t], shapes).some((l) => l.startsWith('Acts like'))), 'every page 1 tile says what it acts like');
+check(range(0, 0x100).every((t) => !l1TileLines(t, kinds, free[t], shapes).some((l) => l.startsWith('Acts like'))), 'no page 0 tile does');
+check(l1TileLines(0xc1, kinds, true, shapes).some((l) => l.startsWith('Free')), 'a free tile says so');
+check(l1TileLines(walk, null, false, shapes)[0] === KINDS_LEARNING, 'kinds not known: being learned');
 
 console.log(bad ? `\n${bad} FAILED` : '\nall ok');
 process.exit(bad ? 1 : 0);
