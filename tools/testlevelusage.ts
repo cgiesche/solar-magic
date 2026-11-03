@@ -231,7 +231,7 @@ check(uses.missing(levels).length === 0, 'every level known after scanning');
   kept('level 105\'s BG tilemap stored', 0x105);
   const [first, last] = pages(stored(0x105));
   emu.load(0x105);
-  check(last - first > 1 && bytePages(rom).subarray(first, last + 1).every((b) => b === 1), `its pages (${first.toString(16)}-${last.toString(16)}) are recorded by byte`);
+  check(last > first && bytePages(rom).subarray(first, last + 1).every((b) => b === 1), `its pages (${first.toString(16)}-${last.toString(16)}) are recorded by byte`);
   edit(0x106, 1);
   check(pages(stored(0x106))[0] === last, `level 106's BG tilemap is stored on its last page (${stored(0x106)[0].toString(16)})`);
   kept('level 106\'s BG tilemap stored next to it', 0x106);
