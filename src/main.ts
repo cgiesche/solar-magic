@@ -139,6 +139,7 @@ function buildUi(app: App): { start: (at: NavLoc | null) => Promise<void> } {
   let workspace: 'level' | 'ow' | 'gfx' | 'game' = 'level';
   let ow: OverworldView | null = null;
   let game: GameView | null = null;
+  let gameBorder: number | null = null; // the overworld map whose border the Game workspace shows when switched to
   // the package that replaced the overworld while the overworld workspace is shown locked (ADR 0005), else null
   let owLocked: string | null = null;
   let ws: GfxWorkspace | null = null;
@@ -320,10 +321,11 @@ function buildUi(app: App): { start: (at: NavLoc | null) => Promise<void> } {
       showOverworld();
     } else if (w === 'game') {
       if (app.dirty) app.saveLevel(true);
-      game ??= new GameView(app);
+      if (!game) { game = new GameView(app); game.onNav = () => nav?.mark(); }
       showLayout(game.bar, game.left, game.root, game.side);
       layout.classList.add('ow-mode');
-      game.show();
+      if (gameBorder !== null) game.select('border', gameBorder); else game.show();
+      gameBorder = null;
     } else if (w === 'gfx') {
       if (!ws) { ws = new GfxWorkspace(app); ws.onNav = (jump) => nav?.mark(jump); }
       if (gfx?.at) ws.setTarget(gfx.at);
@@ -360,6 +362,7 @@ function buildUi(app: App): { start: (at: NavLoc | null) => Promise<void> } {
         ow.onOpenLevel = async (n) => { if (await setWorkspace('level')) app.openLevel(n); };
         ow.onNav = () => nav?.mark();
         ow.onEditGraphics = (map, progress) => void setWorkspace('gfx', { tab: 'pal', at: { submap: map, progress } });
+        ow.onEditBorder = (map) => { gameBorder = map; void setWorkspace('game'); };
       }
       owRight.replaceChildren(ow.side);
       showLayout(ow.bar, ow.left, ow.root, owRight);
@@ -391,7 +394,7 @@ function buildUi(app: App): { start: (at: NavLoc | null) => Promise<void> } {
   // ---- browser back/forward through the places (navhistory.ts)
   let nav: NavHistory | null = null;
   const capture = (): NavLoc => {
-    if (workspace === 'game') return { w: 'game', tab: game?.tab ?? 'title' };
+    if (workspace === 'game') return game?.tab === 'border' ? { w: 'game', tab: 'border', map: game.borderMap } : { w: 'game', tab: 'title' };
     if (workspace === 'ow') { const o = owShown(); return { w: 'ow', map: o?.map ?? 0, ...(o && o.selected >= 0 ? { tile: o.selected } : {}) }; }
     if (workspace === 'gfx' && ws) {
       const t = ws.tab, sub = ws.target.submap ?? undefined, g = { w: 'gfx' as const, tab: t, ...(sub !== undefined ? { sub } : {}) };
@@ -406,7 +409,7 @@ function buildUi(app: App): { start: (at: NavLoc | null) => Promise<void> } {
   };
   const restore = async (l: NavLoc): Promise<boolean> => {
     if (!(await setWorkspace(l.w))) return false;
-    if (l.w === 'game') { /* the title screen, its only place so far */ } else if (l.w === 'ow') { const o = owShown(); if (o) { o.setMap(l.map); if (l.tile !== undefined) o.selectTile(l.tile, true); } }
+    if (l.w === 'game') { if (l.tab !== game!.tab || (l.tab === 'border' && l.map !== game!.borderMap)) game!.select(l.tab, l.map); } else if (l.w === 'ow') { const o = owShown(); if (o) { o.setMap(l.map); if (l.tile !== undefined) o.selectTile(l.tile, true); } }
     else if (l.w === 'gfx') {
       ws!.setTarget({ submap: l.sub ?? null, progress: ws!.target.progress });
       if (l.tab === 'pal' && l.pal !== undefined) ws!.showPalette(l.pal >> 4, l.pal & 15);

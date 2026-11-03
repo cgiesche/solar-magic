@@ -1155,6 +1155,12 @@ export class App {
     return this.probes.learn<OwRender>(`owt1:${map}${special ? ':special' : ''}`, { kind: 'owTriggers', map, progress, special, switches },
       { lane: 'owt', input: { progress, switches }, replace: true, label: 'Overworld animations', done });
   }
+  // the screen behind map `map`'s border (owlayer3.ts owScreen; special: after the special world), learned and kept as
+  // overworldTriggers
+  overworldScreen(map: number, special: boolean, done: (f: Uint32Array) => void): Uint32Array | undefined {
+    return this.probes.learn<Uint32Array>(`owbs1:${map}${special ? ':special' : ''}`, { kind: 'owScreen', map, special },
+      { lane: 'owbs', replace: true, label: 'Overworld screen', done });
+  }
   // the colors the game keeps setting on map `map` at event progress `progress` (owanimview.ts owGameColors), learned
   // and kept as overworldTriggers
   overworldGameColors(map: number, progress: number, special: boolean, done: (c: number[]) => void): number[] | undefined {

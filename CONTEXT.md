@@ -229,8 +229,12 @@ _Avoid_: overworld transfer, overworld export
 ### The game
 
 **Game workspace**:
-The workspace for what belongs to the whole game rather than a level or the overworld: the title screen (gameview.ts); the credits, the title screen demo and the game-wide settings are to follow there. Its changes are ROM edits.
+The workspace for the game's screens that belong to no level: the title screen (gameview.ts) and the overworld's borders (owborder.ts); the credits, the title screen demo and the game-wide settings are to follow there. Its changes are ROM edits.
 _Avoid_: game settings (only a part of it), title screen editor
+
+**Overworld border**:
+A map's layer 3 (the main map's or a submap's): 32 × 28 tiles fixed on the screen while the map is shown, edited as the screen in the Game workspace, in front of the screen as the game shows it after the load (owborder.ts, core/owlayer3.ts). Saved into the map's LT3 file, a new one where it has none (the game's border until then); a file shared with levels or other maps changes for all of them unless the map gets its own copy. The cells the game writes the lives and the level name over (row 4) are not painted. Lunar Magic's "Load Layer 3 of Submap". A paint stroke is one ROM edit.
+_Avoid_: layer 3 (of the overworld, for the border as a whole), overworld frame, HUD
 
 **Title screen**:
 The title screen's layer 3 tilemap: the logo, the frame and the copyright line over the title screen level's layers 1 and 2, with layer 3's graphics as that level has them (titlescreen.ts). 32 × 29 tiles – the 28 rows on screen and the one below them – written in Lunar Magic's layout: one stripe image in a RATS block, pointed to by the stripe image table's entry 03 ($0084D3). A paint stroke is one ROM edit.

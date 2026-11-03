@@ -40,17 +40,12 @@ import { loadMusicProject, submapSongs, submapMusic, setSubmapMusic, songHex, ty
 import { songLabel, playButton } from './musicdialog.ts';
 import { musicPlayer, submapMusicLabel } from './musicplayer.ts';
 import type { Rom } from '../core/rom.ts';
-import { submapLt3Target, submapLayer3, saveSubmapLayer3, owLayer3Grid, lt3UserText, OW_L3_COLS, OW_L3_ROWS, type OwLayer3Grid } from '../core/owlayer3.ts';
-import { lt3Users, lt3Covers, layer3Word, layer3WordText, blankTile, layer3CharBase } from '../core/layer3map.ts';
-import { layer3Picker } from './l3picker.ts';
-import { LT3_DESTS, levelLayer3 } from '../core/layer3gfx.ts';
-import { submapGfxEntry } from '../core/patches.ts';
 import { ReachLayer } from './owreachview.ts';
 import { OW_OPTIONS, owOption, owOptionValue, setOwOption, revealSpeed, setRevealSpeed, revealStepFrames, MAX_REVEAL_SPEED, DEFAULT_REVEAL_SPEED, submapLightning, setSubmapLightning, LIGHTNING_TITLE, lightningEditLabel } from '../core/owoptions.ts';
 
-// a w×h block of L1 tiles (16x16), L2 or layer 3 tilemap entries (8x8), row-major; L1 tiles picked up from the map
+// a w×h block of L1 tiles (16x16) or L2 tilemap entries (8x8), row-major; L1 tiles picked up from the map
 // carry their translevels (`tls`, 0 none), so a level tile placed with them enters the same level
-type Layer = 'l1' | 'l2' | 'l3';
+type Layer = 'l1' | 'l2';
 type Brush = { kind: Layer; w: number; h: number; entries: number[]; tls?: number[] };
 type Drag =
   | { kind: 'paint'; layer: Layer; x0: number; y0: number; lastX: number; lastY: number } // brush stamped on a grid from (x0, y0)
@@ -117,12 +112,6 @@ export class OverworldView {
   mode: Layer | 'links' | 'sprites' = 'l1';
   showL1 = true;
   showL2 = true;
-  showL3 = false; // layer 3 (the border) also outside the layer 3 mode
-  // layer 3 (owlayer3.ts): the screen's tiles drawn from the load shown (l3Canvas, at the grid's place), the stroke's
-  // tilemap entries over it (l3Stroke: entry → word; kept until the load after its ROM edit comes)
-  private l3Canvas = document.createElement('canvas');
-  private l3Grid: OwLayer3Grid | null = null;
-  private l3Stroke = new Map<number, number>();
   showLinks = false; // the links' arrows also while painting (always in the links mode)
   links = new LinkLayer(this);
   showSprites = false; // the sprites also while painting (always in the sprites mode)
@@ -159,6 +148,7 @@ export class OverworldView {
   onNav: () => void = () => {};
   // the graphics workspace on a submap's graphics (shown at an event progress)
   onEditGraphics: (map: number, progress: number) => void = () => {};
+  onEditBorder: (map: number) => void = () => {};
 
   constructor(app: App) {
     this.app = app;
@@ -197,7 +187,7 @@ export class OverworldView {
     // shown as in the ROM (a stroke being painted is dropped)
     this.watch = app.watchRom(() => {
       if (!this.root.isConnected) return;
-      if (this.drag?.kind === 'paint') { this.drag = null; this.stroke = null; this.l3Stroke.clear(); }
+      if (this.drag?.kind === 'paint') { this.drag = null; this.stroke = null; }
       this.sync();
     });
     // any ROM edit: the map's load asked for again if it no longer holds (drawn when it comes)
@@ -216,17 +206,13 @@ export class OverworldView {
     this.zoomCtl.update();
   }
 
-  // the map cells of the mode: layer 2's and 3's 8x8 tiles, else layer 1's 16x16
+  // the map cells of the mode: layer 2's 8x8 tiles, else layer 1's 16x16
   get cellSize(): number {
-    return this.mode === 'l2' || this.mode === 'l3' ? 8 : 16;
+    return this.mode === 'l2' ? 8 : 16;
   }
-  // the map pixel the mode's cells start at: layer 3's at the screen's top left (its grid), else the map's
-  private get cellOrigin(): { x: number; y: number } {
-    return this.mode === 'l3' && this.l3Grid ? this.l3Grid : { x: 0, y: 0 };
-  }
-  // the mode's cells: layer 1's 32x32, layer 2's 64x64, the screen's 32x28 of layer 3
+  // the mode's cells: layer 1's 32x32, layer 2's 64x64
   private get cells(): { w: number; h: number } {
-    return this.mode === 'l1' ? { w: 32, h: 32 } : this.mode === 'l3' ? { w: OW_L3_COLS, h: OW_L3_ROWS } : { w: 64, h: 64 };
+    return this.mode === 'l1' ? { w: 32, h: 32 } : { w: 64, h: 64 };
   }
 
   get region(): number {
@@ -295,9 +281,6 @@ export class OverworldView {
     this.shown = shownMaps(r, this.region, this, from, this.ev);
     const img = drawOwMap(this.app.rom, r, this.region, this.showL1 ? this.shown.l1 : undefined, this.showL2 ? this.shown.l2 : undefined);
     putImage(this.mapCanvas, img);
-    // (a stroke's tiles are shown until the load after its ROM edit comes)
-    if (exact && this.drag?.kind !== 'paint') this.l3Stroke.clear();
-    this.drawL3(r);
     this.paint();
     this.reach.button.update();
     if (!exact) return;
@@ -308,29 +291,6 @@ export class OverworldView {
 
   drawL1Tile(img: Uint32Array, tc: TileCache, t: number, px: number, py: number, W = 512, H = 512): void {
     drawL1Tile(this.app.rom, img, tc, t, px, py, W, H);
-  }
-
-  // layer 3 as the load shows it on the screen (its grid), with the stroke being painted
-  private drawL3(r: OwRender): void {
-    const g = this.l3Grid = owLayer3Grid(r), W = OW_L3_COLS * 8, H = OW_L3_ROWS * 8;
-    const tc = this.l3Tiles(r), img = new Uint32Array(W * H);
-    for (let y = 0; y < OW_L3_ROWS; y++) for (let x = 0; x < OW_L3_COLS; x++) {
-      const i = g.entry(x, y);
-      if (i >= 0) blit8(img, W, H, tc.get(this.l3Stroke.get(i) ?? layer3Word(r.vram, i), 2), x * 8, y * 8);
-    }
-    this.l3Canvas.width = W; this.l3Canvas.height = H;
-    const ctx = this.l3Canvas.getContext('2d')!, id = ctx.createImageData(W, H);
-    new Uint32Array(id.data.buffer).set(img);
-    ctx.putImageData(id, 0, 0);
-  }
-  private l3Tiles(r: OwRender): TileCache {
-    return new TileCache(r.vram, r.cgram, layer3CharBase(r.ppuRegs));
-  }
-  // the layer 3 tilemap word shown at cell (x, y) of the screen (-1: none)
-  private l3Word(x: number, y: number): number {
-    const r = this.render(), i = this.l3Grid?.entry(x, y) ?? -1;
-    if (!r || i < 0) return -1;
-    return this.l3Stroke.get(i) ?? layer3Word(r.vram, i);
   }
 
   layout(): void {
@@ -373,30 +333,18 @@ export class OverworldView {
     if (this.playing) this.paintPlay(ctx);
     else ctx.drawImage(this.mapCanvas, 0, 0);
     if (!this.playing) this.reach.paint(ctx);
-    const l3 = this.mode === 'l3' && this.l3Grid;
-    if ((this.mode === 'l3' || this.showL3) && this.l3Grid && !this.playing) ctx.drawImage(this.l3Canvas, this.l3Grid.x, this.l3Grid.y);
     if (this.showGrid) {
-      const step = this.cellSize, o = this.cellOrigin, n = this.cells;
-      const w = l3 ? n.w * step : 512, hh = l3 ? n.h * step : 512;
+      const step = this.cellSize;
       ctx.strokeStyle = 'rgba(255,255,255,0.12)';
       ctx.lineWidth = lw;
       ctx.beginPath();
-      for (let i = 0; i <= w; i += step) { ctx.moveTo(o.x + i, o.y); ctx.lineTo(o.x + i, o.y + hh); }
-      for (let i = 0; i <= hh; i += step) { ctx.moveTo(o.x, o.y + i); ctx.lineTo(o.x + w, o.y + i); }
+      for (let i = 0; i <= 512; i += step) { ctx.moveTo(i, 0); ctx.lineTo(i, 512); ctx.moveTo(0, i); ctx.lineTo(512, i); }
       ctx.stroke();
     }
-    if (l3) {
-      // the screen layer 3 is on
-      ctx.strokeStyle = 'rgba(255,255,255,0.5)';
-      ctx.lineWidth = lw;
-      ctx.setLineDash([4 * lw, 4 * lw]);
-      ctx.strokeRect(l3.x, l3.y, OW_L3_COLS * 8, OW_L3_ROWS * 8);
-      ctx.setLineDash([]);
-    }
-    // level tile labels: the level each enters (in orange where another tile enters it too; not in the layer 3 mode)
+    // level tile labels: the level each enters (in orange where another tile enters it too)
     const shared = sharedTranslevels(this.l1, this.tls, this.isLevelTile);
     ctx.font = `bold ${8}px monospace`;
-    if (this.mode !== 'l3') for (let y = 0; y < 32; y++) for (let x = 0; x < 32; x++) {
+    for (let y = 0; y < 32; y++) for (let x = 0; x < 32; x++) {
       const i = l1Index(this.region, x, y), tl = this.tls[i];
       if (!this.isLevelTile(this.l1[i])) continue;
       ctx.fillStyle = i === this.selected ? 'rgba(76,194,255,0.85)' : shared.has(tl) || !tl ? 'rgba(230,120,0,0.85)' : 'rgba(0,0,0,0.6)';
@@ -407,9 +355,9 @@ export class OverworldView {
     if (this.showPaths) this.paintPaths(lw);
     if (this.mode === 'sprites' || this.showSprites) this.sprites.paint(ctx, lw);
     if (this.mode === 'links' || this.showLinks) this.links.paint(ctx, lw);
-    if (this.mode !== 'links' && this.mode !== 'sprites' && this.mode !== 'l3') this.paintSelected(lw);
+    if (this.mode !== 'links' && this.mode !== 'sprites') this.paintSelected(lw);
     this.paintStep(lw);
-    const s = this.cellSize, o = this.cellOrigin;
+    const s = this.cellSize;
     if (this.mode === 'sprites') {
       // the sprites show what is under the mouse
     } else if (this.mode === 'links') {
@@ -423,13 +371,13 @@ export class OverworldView {
       ctx.strokeStyle = '#4cc2ff';
       ctx.fillStyle = 'rgba(76,194,255,0.15)';
       ctx.lineWidth = lw;
-      ctx.fillRect(o.x + r.x * s, o.y + r.y * s, r.w * s, r.h * s);
-      ctx.strokeRect(o.x + r.x * s, o.y + r.y * s, r.w * s, r.h * s);
+      ctx.fillRect(r.x * s, r.y * s, r.w * s, r.h * s);
+      ctx.strokeRect(r.x * s, r.y * s, r.w * s, r.h * s);
     } else if (this.hover) {
       // the area the brush would paint
       ctx.strokeStyle = 'rgba(255,255,0,0.9)';
       ctx.lineWidth = lw;
-      ctx.strokeRect(o.x + this.hover.x * s, o.y + this.hover.y * s, this.brush.w * s, this.brush.h * s);
+      ctx.strokeRect(this.hover.x * s, this.hover.y * s, this.brush.w * s, this.brush.h * s);
     }
   }
 
@@ -582,8 +530,8 @@ export class OverworldView {
 
   // the mode's cell under the mouse (with `s`: the map's cells of that size)
   cell(e: MouseEvent, s?: number): { x: number; y: number } {
-    const p = this.point(e), o = s ? { x: 0, y: 0 } : this.cellOrigin, z = s ?? this.cellSize;
-    return { x: Math.floor((p.x - o.x) / z), y: Math.floor((p.y - o.y) / z) };
+    const p = this.point(e), z = s ?? this.cellSize;
+    return { x: Math.floor(p.x / z), y: Math.floor(p.y / z) };
   }
 
   // same buttons as in the level editor: click/drag takes tiles into the brush, right-click/Shift+click paints
@@ -601,9 +549,8 @@ export class OverworldView {
       if (this.mode === 'l1' && !this.pathKinds()) { toast('The path tiles are still being learned – layer 1 can be painted in a moment.'); return; }
       if (this.mode === 'l1' && this.ev?.without === null) { toast('Layer 1 can\'t be painted on this event: the map without its layer 1 changes could not be emulated.', 'error'); return; }
       if (this.mode === 'l1' && this.ev && !this.evL1Ready()) { toast('The map after the event is still being emulated – layer 1 can be painted in a moment.'); return; }
-      if (this.mode === 'l3' && !this.load()) { toast('The overworld is still being loaded – layer 3 can be painted in a moment.'); return; }
       this.drag = { kind: 'paint', layer: this.mode, x0: c.x, y0: c.y, lastX: c.x, lastY: c.y };
-      this.stroke = this.mode === 'l3' ? null : new OverworldStroke(this.app.rom, this.mode, this, this.isLevelTile,
+      this.stroke = new OverworldStroke(this.app.rom, this.mode, this, this.isLevelTile,
         this.ev && { event: this.event, after: this.ev.after, l1: this.ev.l1, game: this.ev.game, without: this.ev.without, place: () => this.place(this.event) });
       this.paintAt(c.x, c.y);
       return;
@@ -665,7 +612,6 @@ export class OverworldView {
 
   // a stroke is one ROM edit, written when it ends (owstroke.ts)
   endStroke(layer: Layer): void {
-    if (layer === 'l3') { this.endL3Stroke(); return; }
     const stroke = this.stroke;
     this.stroke = null;
     if (!stroke) return;
@@ -691,43 +637,17 @@ export class OverworldView {
     for (const w of end.warnings) toast(w);
   }
 
-  // a stroke on layer 3: the submap's LT3 file with the stroke's tiles (a new file where it has none), one ROM edit;
-  // its tiles shown until the load after it comes
-  endL3Stroke(): void {
-    const rom = this.app.rom, r = this.load(), map = this.map;
-    if (!this.l3Stroke.size) return;
-    if (!r) { toast('Not painted: the overworld was loaded again meanwhile – paint once more.', 'error'); this.l3Stroke.clear(); this.redrawMap(); return; }
-    const tilemap = submapLayer3(rom, map, r.vram);
-    for (const [i, v] of this.l3Stroke) tilemap[i] = v;
-    try {
-      this.app.romEdit(`Paint layer 3 of ${MAP_NAMES[map]}`, () => { saveSubmapLayer3(rom, map, tilemap); });
-    } catch (e) {
-      toast(`Not painted: ${e instanceof Error ? e.message : e}`, 'error');
-      this.l3Stroke.clear();
-      this.sync();
-    }
-  }
-
   paintAt(x: number, y: number): void {
     const b = this.brush;
     if (b.kind !== this.mode) return;
     if (this.mode === 'l1' && this.ev && !this.evL1Ready()) return; // (the maps the event is painted with are still emulated)
-    const n = this.cells, g = this.l3Grid, r = this.mode === 'l3' ? this.load() : undefined;
-    if (this.mode === 'l3' && (!r || !g)) return;
-    // (layer 3: the file's words a tile is compared with – the game's drawn over row 4 aren't the file's)
-    const place = this.mode === 'l3' ? submapLt3Target(this.app.rom, this.map).place : null, file = r ? submapLayer3(this.app.rom, this.map, r.vram) : null;
+    const n = this.cells;
     let changed = false;
     for (let dy = 0; dy < b.h; dy++) for (let dx = 0; dx < b.w; dx++) {
       const xx = x + dx, yy = y + dy;
       if (xx < 0 || yy < 0 || xx >= n.w || yy >= n.h) continue;
       const v = b.entries[dy * b.w + dx];
-      if (this.mode === 'l3') {
-        // (only where the LT3 file is copied to)
-        const i = g!.entry(xx, yy);
-        if (i < 0 || !lt3Covers(place!, i) || (this.l3Stroke.get(i) ?? file![i]) === v) continue;
-        this.l3Stroke.set(i, v);
-        changed = true;
-      } else if (this.stroke?.paint(this.region, xx, yy, v, b.tls?.[dy * b.w + dx] ?? 0)) changed = true;
+      if (this.stroke?.paint(this.region, xx, yy, v, b.tls?.[dy * b.w + dx] ?? 0)) changed = true;
     }
     if (!changed) return;
     this.redrawMap();
@@ -735,13 +655,6 @@ export class OverworldView {
   }
 
   pick(r: { x: number; y: number; w: number; h: number }): void {
-    if (this.mode === 'l3') {
-      const rr = this.render(), blank = rr ? blankTile(rr.vram, layer3CharBase(rr.ppuRegs)) : 0;
-      this.brush = { kind: 'l3', w: r.w, h: r.h, entries: Array.from({ length: r.w * r.h }, (_, i) => { const v = this.l3Word(r.x + (i % r.w), r.y + Math.floor(i / r.w)); return v < 0 ? blank : v; }) };
-      this.buildSide();
-      this.paint();
-      return;
-    }
     const src = this.mode === 'l2' ? this.shown.l2 : this.shown.l1;
     const idx = this.mode === 'l2' ? l2Index : l1Index;
     const at = Array.from({ length: r.w * r.h }, (_, i) => idx(this.region, r.x + (i % r.w), r.y + Math.floor(i / r.w)));
@@ -795,10 +708,6 @@ export class OverworldView {
       this.statusText.textContent = this.links.status() ?? 'Drag from a star, pipe or exit path tile to where it leads · Click: select · Drag an end of the selected arrow to move it · Delete removes it';
       return;
     }
-    if (!c && this.mode === 'l3') {
-      this.statusText.textContent = 'Layer 3 on the screen as the overworld loads: click/drag picks up tiles · Right click/Shift+click paints (each stroke saved into the submap\'s LT3 file)';
-      return;
-    }
     if (!c) {
       this.statusText.textContent = this.ev
         ? `Painting layer ${this.mode === 'l1' ? 1 : 2} as after ${eventTitle(this.ev.runners, this.event)} · Click/drag picks up tiles · Right click/Shift+click paints · Esc: the map before events`
@@ -806,10 +715,6 @@ export class OverworldView {
       return;
     }
     let t = `X ${hex(c.x, 2)}  Y ${hex(c.y, 2)}`;
-    if (this.mode === 'l3') {
-      this.statusText.textContent = this.l3Status(c.x, c.y, t);
-      return;
-    }
     if (this.mode !== 'l2') {
       if (c.x >= 0 && c.y >= 0 && c.x < 32 && c.y < 32) {
         const i = l1Index(this.region, c.x, c.y), shown = this.shown.l1[i];
@@ -830,19 +735,6 @@ export class OverworldView {
       else if (shown !== this.l2[i]) t += ` (by events, ${hex(this.l2[i], 4)} before)`;
     }
     this.statusText.textContent = t;
-  }
-
-  // layer 3's cell (x, y) of the screen: its tilemap word; where the game draws over the file (the lives, the level
-  // name), where the file is not copied to
-  private l3Status(x: number, y: number, t: string): string {
-    const r = this.render(), i = this.l3Grid?.entry(x, y) ?? -1;
-    if (!r || i < 0 || x < 0 || y < 0 || x >= OW_L3_COLS || y >= OW_L3_ROWS) return t;
-    const rom = this.app.rom, w = this.l3Word(x, y), target = submapLt3Target(rom, this.map);
-    t += `  ·  Layer 3: ${layer3WordText(w)}`;
-    if (this.l3Stroke.has(i)) return t + ' (painted)';
-    if (!lt3Covers(target.place, i)) return t + ' · not in the LT3 file\'s part: can\'t be painted';
-    if (target.file !== null && submapLayer3(rom, this.map, r.vram)[i] !== w) t += ' · drawn over the file by the game (the lives, the level name)';
-    return t;
   }
 
   // ---------------- event progress ----------------
@@ -1044,8 +936,6 @@ export class OverworldView {
     this.afterShown = null; // (a note for the map shown before)
     this.map = n;
     this.selected = -1;
-    this.l3Stroke.clear();
-    this.l3Grid = null; // (the other map's screen, until its load comes)
     this.redrawMap();
     this.buildBar();
     this.buildSide();
@@ -1058,7 +948,6 @@ export class OverworldView {
     const setMode = (m: Layer | 'links' | 'sprites') => {
       if (this.mode === m) return;
       this.mode = m;
-      if (m === 'l3' && this.brush.kind !== m) { const r = this.render(); this.brush = { kind: m, w: 1, h: 1, entries: [r ? blankTile(r.vram, layer3CharBase(r.ppuRegs)) : 0] }; }
       if ((m === 'l1' || m === 'l2') && this.brush.kind !== m) this.brush = { kind: m, w: 1, h: 1, entries: [m === 'l1' ? 0x56 : 0] };
       this.buildBar();
       this.buildSide();
@@ -1076,14 +965,13 @@ export class OverworldView {
         h('button', { class: this.mode === 'l1' ? 'active' : '', title: 'Layer 1 (1)', onclick: () => setMode('l1') }, 'Layer 1 (paths/levels)'),
         h('button', { class: this.mode === 'l2' ? 'active' : '', title: 'Layer 2 (2)', onclick: () => setMode('l2') }, 'Layer 2 (terrain)'),
         h('button', { class: this.mode === 'links' ? 'active' : '', title: 'Overworld links (3): stars, pipes and exit paths leading elsewhere, drawn as arrows; drag from a tile to where it leads', onclick: () => setMode('links') }, 'Overworld links'),
-        h('button', { class: this.mode === 'sprites' ? 'active' : '', title: 'Sprites (4): the overworld\'s sprites as the game shows them at the event progress, the start positions and the Koopa Kids\' places; drag to move', onclick: () => setMode('sprites') }, 'Sprites'),
-        h('button', { class: this.mode === 'l3' ? 'active' : '', title: 'Layer 3 (5): the border, fixed on the screen – drawn where the screen is when the overworld loads, painted in 8x8 tiles into the submap\'s LT3 file', onclick: () => setMode('l3') }, 'Layer 3 (border)')),
+        h('button', { class: this.mode === 'sprites' ? 'active' : '', title: 'Sprites (4): the overworld\'s sprites as the game shows them at the event progress, the start positions and the Koopa Kids\' places; drag to move', onclick: () => setMode('sprites') }, 'Sprites')),
+      h('button', { title: `${MAP_NAMES[this.map]}'s border (layer 3, fixed on the screen) in the Game workspace`, onclick: () => this.onEditBorder(this.map) }, 'Edit border…'),
       h('span', { class: 'sep' }),
       menuButton({ label: 'View', items: [
         { heading: 'Layers' },
         view('Layer 1', () => this.showL1, (v) => (this.showL1 = v)),
         view('Layer 2', () => this.showL2, (v) => (this.showL2 = v)),
-        view('Layer 3', () => this.showL3, (v) => (this.showL3 = v), 'The border where the screen is when the overworld loads (always shown in the Layer 3 mode)'),
         { heading: 'Guides' },
         view('Grid', () => this.showGrid, (v) => (this.showGrid = v), undefined, 'G'),
         view('Path tiles', () => this.showPaths, (v) => (this.showPaths = v),
@@ -1122,7 +1010,7 @@ export class OverworldView {
     if (k === 'g') { this.showGrid = !this.showGrid; this.paint(); return true; }
     if (k === 'm' && this.selected >= 0 && (this.mode === 'l1' || this.mode === 'l2')) { this.editTile(this.selected); return true; }
     if (k === ',' || k === '.') { this.setProgress(this.progress + (k === ',' ? -1 : 1)); return true; }
-    if (k >= '1' && k <= '5') { (this.bar.querySelectorAll('.btn-group button')[+k - 1] as HTMLButtonElement).click(); return true; }
+    if (k >= '1' && k <= '4') { (this.bar.querySelectorAll('.btn-group button')[+k - 1] as HTMLButtonElement).click(); return true; }
     if ((k === 'delete' || k === 'backspace') && this.mode === 'sprites') return this.sprites.remove();
     if ((k === 'delete' || k === 'backspace') && this.mode === 'links') return this.links.remove();
     return false;
@@ -1169,7 +1057,7 @@ export class OverworldView {
     this.palPanel.replaceChildren(...(this.mode === 'sprites' ? this.sprites.palette()
       : this.mode === 'links' ? [h('div', { class: 'panel-title' }, 'Overworld links'), this.linkLegend()] : [
       h('div', { class: 'panel-title' }, 'Paint', h('span', { class: 'hint' }, 'Right click/Shift+click paints')),
-      this.mode === 'l1' ? this.l1Palette() : this.mode === 'l3' ? this.l3Palette() : this.l2Palette()]));
+      this.mode === 'l1' ? this.l1Palette() : this.l2Palette()]));
     this.palPanel.scrollTop = scroll;
     this.buildProps();
   }
@@ -1248,7 +1136,8 @@ export class OverworldView {
     sel.title = `The song ${MAP_NAMES[map]} plays – when the overworld loads there and when Mario comes from another map (songs come with packages; with AddmusicK all of its songs)`;
     const play = playButton(label, listen, `Listen: the overworld on ${MAP_NAMES[map]}, as the game plays its song`);
     return h('div', { class: 'ow-info' }, h('div', { class: 'prop' }, h('label', null, 'Map music'), sel, play),
-      h('button', { onclick: () => this.onEditGraphics(map, this.progress), title: `${MAP_NAMES[map]}'s own palettes, graphics files, layer 3 and animations in the graphics workspace` }, 'Edit graphics of this submap'));
+      h('button', { onclick: () => this.onEditGraphics(map, this.progress), title: `${MAP_NAMES[map]}'s own palettes, graphics files, layer 3 graphics and animations in the graphics workspace` }, 'Edit graphics of this submap'),
+      h('button', { onclick: () => this.onEditBorder(map), title: `${MAP_NAMES[map]}'s border (layer 3, fixed on the screen) in the Game workspace` }, 'Edit border of this submap'));
   }
 
   // what the overworld links mode's arrows mean
@@ -1478,7 +1367,7 @@ export class OverworldView {
     }
     draw(at);
     attachRectPick(c, cols, rows, draw, (r) => {
-      this.brush = { kind: this.mode === 'l2' || this.mode === 'l3' ? this.mode : 'l1', w: r.w, h: r.h, entries: Array.from({ length: r.w * r.h }, (_, j) => sheetValue(r.x + (j % r.w), r.y + Math.floor(j / r.w))) };
+      this.brush = { kind: this.mode === 'l2' ? 'l2' : 'l1', w: r.w, h: r.h, entries: Array.from({ length: r.w * r.h }, (_, j) => sheetValue(r.x + (j % r.w), r.y + Math.floor(j / r.w))) };
       this.buildSide();
     });
     previewSheet(c, () => sheet, cols, rows, cell, scale, describe);
@@ -1562,28 +1451,6 @@ export class OverworldView {
         this.buildSide();
       },
     }, label);
-  }
-
-  // layer 3's tiles (2bpp, as the load has them in VRAM) in the shared layer 3 picker (l3picker.ts); where the stroke
-  // goes: the submap's LT3 file, other users of it warned about
-  l3Palette(): HTMLElement {
-    const r = this.render();
-    if (!r) return h('div', { class: 'hint' }, 'Loading the overworld…');
-    const rom = this.app.rom, map = this.map, g = { vram: r.vram, cgram: r.cgram, charBase: layer3CharBase(r.ppuRegs) };
-    const b = this.brush.kind === 'l3' ? this.brush : { kind: 'l3' as const, w: 1, h: 1, entries: [blankTile(g.vram, g.charBase)] };
-    const t = submapLt3Target(rom, map), own = submapGfxEntry(map), assigned = levelLayer3(rom, own).lt3;
-    const others = t.file === null ? [] : lt3Users(rom, t.file).filter((n) => n !== own);
-    const where = t.file === null
-      ? `${assigned !== 0xff ? `Its LT3 file ${hex(assigned, 3)} can't be painted (not an uncompressed file of its size): ` : ''}The first stroke makes a new layer 3 tilemap file (ExGFX, LT3 in the graphics workspace) at the start of layer 3, 256x256, which the overworld loads on ${MAP_NAMES[map]} in place of the game's border.`
-      : `Each stroke is saved into ${MAP_NAMES[map]}'s layer 3 tilemap file, ExGFX ${hex(t.file, 3)} (LT3: ${LT3_DESTS[t.place.dest].toLowerCase()}).`;
-    const out = h('div', null);
-    const pixels = this.palPixels = fillPixels(this.palWidth(), 128);
-    layer3Picker(out, g, { w: b.w, h: b.h, tiles: b.entries }, (nb) => { this.brush = { kind: 'l3', w: nb.w, h: nb.h, entries: nb.tiles }; this.buildSide(); }, {
-      pixels, shown: this.palWidth() / 128, from: 'the map',
-      hint: `click tiles here or on the map (drag: block). ${where} The game writes the lives and the level name over row 4 of the file (shown as it draws them).`,
-    });
-    if (others.length) out.insertBefore(h('div', { class: 'hint warn-text' }, `⚠ The file is also used by ${lt3UserText(others)}: they change too.`), out.firstChild);
-    return out;
   }
 
   // the maps again from the ROM (the kept loads stay where the ROM edits changed nothing they read)

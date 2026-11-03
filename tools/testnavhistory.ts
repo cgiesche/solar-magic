@@ -25,6 +25,8 @@ const places: NavLoc[] = [
   { w: 'gfx', tab: 'anim', anim: { global: true, slot: 3 } },
   { w: 'gfx', tab: 'anim', anim: { global: false, slot: 0x1f } },
   { w: 'game', tab: 'title' },
+  { w: 'game', tab: 'border', map: 0 },
+  { w: 'game', tab: 'border', map: 6 },
 ];
 for (const l of places) {
   const back = fromHash(toHash(l));
@@ -34,7 +36,7 @@ check(toHash({ w: 'level', level: 0x105, mode: 'spr', cx: 10, cy: 20 }) === '#le
 check(fromHash('#gfx/map16/bg/130')?.w === 'gfx', 'hash without leading # works too');
 
 for (const h of ['', '#', '#level', '#level/200', '#level/xyz', '#level/105/1', '#ow/7', '#ow/a', '#gfx', '#gfx/foo',
-  '#gfx/pal/100', '#gfx/map16/bg/bg/1', '#gfx/map16/ow/bg/1', '#gfx/anim/x3', '#gfx/anim/g', '#something'])
+  '#gfx/pal/100', '#gfx/map16/bg/bg/1', '#gfx/map16/ow/bg/1', '#gfx/anim/x3', '#gfx/anim/g', '#game/border', '#game/border/7', '#game/title/1', '#something'])
   check(fromHash(h) === null, `“${h}” leads nowhere`);
 
 const k = (l: NavLoc) => stepKey(l);
@@ -44,6 +46,7 @@ check(k({ w: 'gfx', tab: 'map16' }) !== k({ w: 'gfx', tab: 'pal' }), 'other grap
 check(k({ w: 'level', level: 0x105 }) !== k({ w: 'level', level: 0x106 }), 'other level: new step');
 check(k({ w: 'ow', map: 1 }) !== k({ w: 'ow', map: 2 }), 'other overworld map: new step');
 check(k({ w: 'level', level: 0 }) !== k({ w: 'ow', map: 0 }), 'other workspace: new step');
+check(k({ w: 'game', tab: 'border', map: 1 }) !== k({ w: 'game', tab: 'border', map: 2 }) && k({ w: 'game', tab: 'title' }) !== k({ w: 'game', tab: 'border', map: 0 }), 'another border or the title screen: new step');
 
 if (bad) { console.log(`${bad} failed`); process.exit(1); }
 console.log('all passed');

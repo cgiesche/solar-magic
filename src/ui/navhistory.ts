@@ -10,7 +10,7 @@ import type { Map16Target } from './gfx/target.ts';
 export type NavLoc =
   | { w: 'level'; level: number; mode?: EditMode; cx?: number; cy?: number } // cx/cy: tile in the middle of the view
   | { w: 'ow'; map: number; tile?: number } // tile: the selected layer 1 tile (l1Index)
-  | { w: 'game'; tab: GameTab }
+  | { w: 'game'; tab: GameTab; map?: number } // map: the overworld map whose border is shown (tab 'border')
   | { w: 'gfx'; tab: WsTab; sub?: number; pal?: number; m16?: number; target?: Map16Target; gfx?: number; anim?: { global: boolean; slot: number } }; // sub: a submap as the target
 
 const hx = (n: number) => n.toString(16).toUpperCase();
@@ -23,7 +23,7 @@ const num = (s: string | undefined, max: number): number | null => {
 export function toHash(l: NavLoc): string {
   if (l.w === 'level') return `#level/${hx(l.level)}`;
   if (l.w === 'ow') return `#ow/${l.map}`;
-  if (l.w === 'game') return `#game/${l.tab}`;
+  if (l.w === 'game') return `#game/${l.tab}${l.tab === 'border' ? `/${l.map ?? 0}` : ''}`;
   const g = `#gfx${l.sub !== undefined ? `/s${l.sub}` : ''}`;
   if (l.tab === 'pal') return `${g}/pal${l.pal !== undefined ? `/${hx(l.pal)}` : ''}`;
   if (l.tab === 'map16') return `${g}/map16${l.target && l.target !== 'fg' ? `/${l.target}` : ''}${l.m16 !== undefined ? `/${hx(l.m16)}` : ''}`;
@@ -45,6 +45,7 @@ export function fromHash(hash: string): NavLoc | null {
     return n === null ? null : { w: 'level', level: n };
   }
   if (p[0] === 'game' && p.length === 2 && p[1] === 'title') return { w: 'game', tab: 'title' };
+  if (p[0] === 'game' && p.length === 3 && p[1] === 'border' && /^[0-6]$/.test(p[2])) return { w: 'game', tab: 'border', map: Number(p[2]) };
   if (p[0] === 'ow' && p.length === 2 && /^[0-6]$/.test(p[1])) return { w: 'ow', map: Number(p[1]) };
   if (p[0] !== 'gfx') return null;
   const tab = p[1], rest = p.slice(2);
@@ -77,7 +78,7 @@ export function fromHash(hash: string): NavLoc | null {
 
 // the place without what is chosen there: a different key is a new history step
 export function stepKey(l: NavLoc): string {
-  return l.w === 'level' ? `level/${l.level}` : l.w === 'ow' ? `ow/${l.map}` : l.w === 'game' ? `game/${l.tab}` : `gfx/${l.sub ?? ''}/${l.tab}`;
+  return l.w === 'level' ? `level/${l.level}` : l.w === 'ow' ? `ow/${l.map}` : l.w === 'game' ? `game/${l.tab}/${l.map ?? ''}` : `gfx/${l.sub ?? ''}/${l.tab}`;
 }
 
 export function sameLoc(a: NavLoc, b: NavLoc): boolean {

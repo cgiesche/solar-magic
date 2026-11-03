@@ -1,6 +1,6 @@
-// The Game workspace: what belongs to the whole game rather than a level or the overworld. So far the title
-// screen's layer 3 tilemap (titlescreen.ts): its picture as the game draws it, painted with layer 3's 8x8 tiles;
-// a stroke is one ROM edit when the mouse is released.
+// The Game workspace: the game's screens that belong to no level – the title screen's layer 3 tilemap
+// (titlescreen.ts: its picture as the game draws it) and the overworld's borders (owborder.ts: each map's layer 3
+// fixed on the screen) – painted with layer 3's 8x8 tiles; a stroke is one ROM edit when the mouse is released.
 
 import type { App } from './app.ts';
 import { h, toast } from './dom.ts';
@@ -11,8 +11,11 @@ import { layer3WordText } from '../core/layer3map.ts';
 import { layer3Picker } from './l3picker.ts';
 import { fillPixels, hidePickerPreview } from './pickerview.ts';
 import type { Brush } from './app.ts';
+import { BorderView } from './owborder.ts';
+import { MAP_NAMES } from '../core/overworld.ts';
 
-export type GameTab = 'title';
+// the title screen, or the border of an overworld map (0 the main map, 1–6 the submaps)
+export type GameTab = 'title' | 'border';
 const GAP = 4; // pixels between the screen and the row below it
 const W = 256, H = TITLE_SHOWN_ROWS * 8 + GAP + 8;
 
@@ -23,6 +26,10 @@ export class GameView {
   left: HTMLDivElement;
   tab: GameTab = 'title';
   private app: App;
+  private border: BorderView;
+  private title = h('span', { class: 'level-title' }, 'Title screen');
+  private list = h('div', { class: 'level-list' });
+  private scroller: HTMLDivElement;
   private emu: LevelEmulator | null = null;
   private saved: Uint16Array | null = null; // the tilemap as in the ROM
   private map: Uint16Array | null = null; // with the stroke being painted
@@ -40,31 +47,63 @@ export class GameView {
 
   constructor(app: App) {
     this.app = app;
-    this.bar = h('div', { class: 'ctxbar' }, h('span', { class: 'level-title' }, 'Title screen'),
+    this.border = new BorderView(app);
+    this.border.setStatus = (t) => { this.status.textContent = t; };
+    this.bar = h('div', { class: 'ctxbar' }, this.title,
       h('span', { class: 'sep' }),
       h('button', { title: 'Zoom out', onclick: () => this.setZoom(this.zoom - 1) }, '−'),
-      h('button', { title: 'Zoom in', onclick: () => this.setZoom(this.zoom + 1) }, '+'));
-    this.left = h('div', { class: 'left' }, h('div', { class: 'panel levels' }, h('div', { class: 'panel-title' }, 'Game'),
-      h('div', { class: 'level-list' }, h('div', { class: 'level-item active', title: 'The title screen\'s layer 3: the logo, the frame and the copyright line' }, 'Title screen'))));
-    const scroller = h('div', { class: 'level-scroller game-scroller' }, this.canvas);
-    this.root = h('div', { class: 'center' }, h('div', { class: 'level-view' }, scroller), h('div', { class: 'statusbar' }, this.status));
+      h('button', { title: 'Zoom in', onclick: () => this.setZoom(this.zoom + 1) }, '+'),
+      h('span', { class: 'sep' }));
+    this.left = h('div', { class: 'left' }, h('div', { class: 'panel levels' }, h('div', { class: 'panel-title' }, 'Game'), this.list));
+    this.scroller = h('div', { class: 'level-scroller game-scroller' }, this.canvas);
+    this.root = h('div', { class: 'center' }, h('div', { class: 'level-view' }, this.scroller), h('div', { class: 'statusbar' }, this.status));
     this.side = h('div', { class: 'ow-side' }, this.pickPanel);
+    this.buildList();
     this.canvas.addEventListener('contextmenu', (e) => e.preventDefault());
     this.canvas.addEventListener('mousedown', (e) => this.onDown(e));
     this.canvas.addEventListener('mousemove', (e) => this.onMove(e));
     this.canvas.addEventListener('mouseleave', () => { this.hover = null; this.paint(); });
     window.addEventListener('mouseup', () => this.onUp());
     // a ROM edit, undo or redo: shown as in the ROM (a stroke being painted is dropped)
-    app.on('rom-change', () => { if (this.root.isConnected) { this.drag = null; this.sync(); } });
+    app.on('rom-change', () => {
+      if (!this.root.isConnected) return;
+      if (this.tab === 'border') { this.border.reload(); return; }
+      this.drag = null;
+      this.sync();
+    });
     // the sheet follows the panel's width, drawn anew when it needs other screen pixels per pixel
     new ResizeObserver(() => requestAnimationFrame(() => { if (this.pickPixels && fillPixels(this.pickPanel.clientWidth, 128) !== this.pickPixels) this.buildPicker(); })).observe(this.pickPanel);
     this.setZoom(this.zoom);
   }
 
-  // shown: the title screen as in the ROM
+  // the border's map shown (while the border is the tab; else the last one shown)
+  get borderMap(): number { return this.border.map; }
+
+  // shown: the title screen as in the ROM, or the border of the map shown last
   show(): void {
-    this.sync();
+    if (this.tab === 'border') this.border.show(this.border.map);
+    else this.sync();
   }
+  // the title screen, or the border of map `map`
+  select(tab: GameTab, map = this.border.map): void {
+    this.tab = tab;
+    const border = tab === 'border';
+    this.title.textContent = border ? `${MAP_NAMES[map]} – overworld border` : 'Title screen';
+    this.scroller.replaceChildren(border ? this.border.canvas : this.canvas);
+    this.side.replaceChildren(border ? this.border.side : this.pickPanel);
+    if (border) this.bar.append(this.border.bar); else this.border.bar.remove();
+    this.status.textContent = '';
+    if (border) this.border.show(map); else this.sync();
+    this.buildList();
+  }
+  private buildList(): void {
+    const item = (label: string, title: string, on: boolean, go: () => void) => h('div', { class: `level-item${on ? ' current' : ''}`, title, onclick: go }, label);
+    this.list.replaceChildren(
+      item('Title screen', 'The title screen\'s layer 3: the logo, the frame and the copyright line', this.tab === 'title', () => { this.select('title'); this.onNav(); }),
+      h('div', { class: 'panel-title' }, 'Overworld border'),
+      ...MAP_NAMES.map((n, m) => item(n, `${n}'s border: layer 3, fixed on the screen while the map is shown`, this.tab === 'border' && this.border.map === m, () => { this.select('border', m); this.onNav(); })));
+  }
+  onNav: () => void = () => {};
 
   private sync(): void {
     if (!this.emu || this.emu.rom !== this.app.rom) { this.emu = new LevelEmulator(this.app.rom); this.emu.adoptBoot(this.app.emu); }
@@ -86,6 +125,7 @@ export class GameView {
     this.zoom = Math.max(1, Math.min(6, z));
     this.canvas.style.width = `${W * this.zoom}px`;
     this.canvas.style.height = `${H * this.zoom}px`;
+    this.border.setZoom(this.zoom);
   }
 
   // the picture as the game draws it with the tilemap as painted (once per animation frame while painting)
