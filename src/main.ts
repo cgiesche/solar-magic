@@ -651,6 +651,7 @@ function showHelp(): void {
       ['G', 'Grid on/off'],
       ['M', 'Edit the selected tile\'s 8x8 tiles in the Map16 tab (target Overworld)'],
       [', / .', 'Event progress: one event back / further'],
+      ['Q (held)', 'While layer 1 or 2 is painted: the other layer hidden (else dimmed, View → Layers)'],
       ['T', 'Test play from the overworld: a new game at the event progress, Mario on the selected tile (or at the start position)'],
     ]],
     ['Graphics', [

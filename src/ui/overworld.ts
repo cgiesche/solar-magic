@@ -42,6 +42,7 @@ import { songLabel, playButton } from './musicdialog.ts';
 import { musicPlayer, submapMusicLabel } from './musicplayer.ts';
 import type { Rom } from '../core/rom.ts';
 import { ReachLayer } from './owreachview.ts';
+import { layerStrengths } from './owlayers.ts';
 import { OW_OPTIONS, owOption, owOptionValue, setOwOption, revealSpeed, setRevealSpeed, revealStepFrames, MAX_REVEAL_SPEED, DEFAULT_REVEAL_SPEED, submapLightning, setSubmapLightning, LIGHTNING_TITLE, lightningEditLabel } from '../core/owoptions.ts';
 
 // a w×h block of L1 tiles (16x16) or L2 tilemap entries (8x8), row-major; L1 tiles picked up from the map
@@ -106,6 +107,8 @@ export class OverworldView {
   mode: Layer | 'links' | 'sprites' = 'l1';
   showL1 = true;
   showL2 = true;
+  dimOther = loadDim(); // the layer not painted dimmed (View → Layers, kept in the browser)
+  private solo = false; // Q held: the layer not painted hidden
   showLinks = false; // the links' arrows also while painting (always in the links mode)
   links = new LinkLayer(this);
   showSprites = false; // the sprites also while painting (always in the sprites mode)
@@ -152,7 +155,9 @@ export class OverworldView {
     pick: (r) => this.pick(this.clampRect(r)),
   });
   selected = -1; // the layer 1 tile shown in the properties (l1Index)
-  mapCanvas = document.createElement('canvas');
+  mapCanvas = document.createElement('canvas'); // the map as shown: its layers at their strengths (composeMap)
+  private l1Canvas = document.createElement('canvas'); // layer 1 alone (transparent where it has no pixel)
+  private l2Canvas = document.createElement('canvas'); // layer 2 alone (black where it has no pixel)
   // set by the host: open a level in the level editor
   onOpenLevel: (n: number) => void = () => {};
   onNav: () => void = () => {};
@@ -191,6 +196,9 @@ export class OverworldView {
     this.scroller.addEventListener('mouseleave', () => { this.mouse = null; if (!this.brushDrag.active) { this.hover = null; this.updateStatus(); this.paint(); } });
     window.addEventListener('mousemove', (e) => this.onMove(e));
     window.addEventListener('mouseup', (e) => this.onUp(e));
+    // Q released (or the window left, its keyup never comes): the layer not painted shown again
+    window.addEventListener('keyup', (e) => { if (e.key.toLowerCase() === 'q') this.setSolo(false); });
+    window.addEventListener('blur', () => this.setSolo(false));
     attachPanZoom(this.scroller, () => this.zoom, (z, ax, ay) => this.setZoom(z, ax, ay), undefined, undefined, pixelZoomSteps);
     // a ROM edit (a stroke ended, a name chosen) or undo/redo that changed what the view was built from (its watch):
     // shown as in the ROM (a stroke being painted is dropped)
@@ -288,10 +296,25 @@ export class OverworldView {
     const r = exact ?? last!.r, from = exact ? this.rom : last!.rom;
     if (exact && this.ev && !this.ev.l1) { this.ev.l1 = gameL1(r); this.ev.game = this.ev.l1.slice(); }
     this.shown = shownMaps(r, this.region, this, from, this.ev);
-    const img = drawOwMap(this.app.rom, r, this.region, this.showL1 ? this.shown.l1 : undefined, this.showL2 ? this.shown.l2 : undefined);
-    putImage(this.mapCanvas, img);
+    putLayers(this.l1Canvas, this.l2Canvas, this.app.rom, r, this.region, this.shown.l1, this.shown.l2);
+    this.composeMap();
     this.paint();
     this.reach.button.update();
+  }
+
+  // the map image from its layers, each at the strength the mode, Q and the view switches give it (layerStrengths)
+  private composeMap(): void {
+    composeLayers(this.mapCanvas, this.l1Canvas, this.l2Canvas, this.strengths());
+  }
+  private strengths(): { l1: number; l2: number } {
+    return layerStrengths({ mode: this.mode, showL1: this.showL1, showL2: this.showL2, dim: this.dimOther, solo: this.solo });
+  }
+  // Q held (or released): the layer not painted hidden (or shown again)
+  private setSolo(on: boolean): void {
+    if (this.solo === on) return;
+    this.solo = on;
+    this.composeMap();
+    this.paint();
   }
 
   drawL1Tile(img: Uint32Array, tc: TileCache, t: number, px: number, py: number, W = 512, H = 512): void {
@@ -685,9 +708,10 @@ export class OverworldView {
       return;
     }
     if (!c) {
+      const solo = ` · Q held: layer ${this.mode === 'l1' ? 2 : 1} hidden`;
       this.statusText.textContent = this.ev
-        ? `Painting layer ${this.mode === 'l1' ? 1 : 2} as after ${eventTitle(this.ev.runners, this.event)} · Click/drag picks up tiles · Right click/Shift+click paints · Esc: the map before events`
-        : 'Click/drag picks up tiles · Right click/Shift+click paints · Alt/Ctrl+click: tile settings';
+        ? `Painting layer ${this.mode === 'l1' ? 1 : 2} as after ${eventTitle(this.ev.runners, this.event)} · Click/drag picks up tiles · Right click/Shift+click paints · Esc: the map before events${solo}`
+        : `Click/drag picks up tiles · Right click/Shift+click paints · Alt/Ctrl+click: tile settings${solo}`;
       return;
     }
     let t = `X ${hex(c.x, 2)}  Y ${hex(c.y, 2)}`;
@@ -714,14 +738,17 @@ export class OverworldView {
   }
 
   // ---------------- the event shown and painted ----------------
-  // the badge on the map: where painting goes (or, in the links and sprites modes, the event the map is shown after)
+  // the badge on the map: the layer painted (in its colour) and where painting goes (or, in the links and sprites modes,
+  // the event the map is shown after)
   private showEventBadge(): void {
-    const e = this.event;
-    this.eventsBadge.classList.toggle('show', e >= 0);
-    if (e < 0) return;
+    const e = this.event, painting = this.mode === 'l1' || this.mode === 'l2';
+    this.eventsBadge.classList.toggle('show', e >= 0 || painting);
+    this.eventsBadge.classList.toggle('ow-l1', this.mode === 'l1');
+    this.eventsBadge.classList.toggle('ow-l2', this.mode === 'l2');
+    if (e < 0) { if (painting) this.eventsBadge.textContent = `Layer ${this.mode === 'l1' ? 1 : 2} · painting the map before events`; return; }
     const rom = this.app.rom, runners = eventRunners(rom), r = runners.get(e)?.[0];
     const title = `event ${hex(e, 2)}${r ? ` · ${levelName(rom, r.tl)} (${eventTitle(runners, e)})` : ''}`;
-    this.eventsBadge.textContent = this.mode === 'l1' || this.mode === 'l2' ? `Painting into ${title}` : `Map after ${title}`;
+    this.eventsBadge.textContent = painting ? `Layer ${this.mode === 'l1' ? 1 : 2} · painting into ${title}` : `Map after ${title}`;
   }
 
   // ---------------- painting an event ----------------
@@ -853,7 +880,9 @@ export class OverworldView {
     if (!ev) return;
     const before = document.createElement('canvas'), r = this.render();
     if (!r) return;
-    putImage(before, drawOwMap(this.app.rom, r, this.region, this.showL1 ? this.shown.l1 : undefined, this.showL2 ? ev.before : undefined));
+    const l1 = document.createElement('canvas'), l2 = document.createElement('canvas');
+    putLayers(l1, l2, this.app.rom, r, this.region, this.shown.l1, ev.before);
+    composeLayers(before, l1, l2, this.strengths());
     const rom = this.app.rom;
     this.playing = { start: performance.now(), before, stepMs: revealStepFrames(rom) * 1000 / 60, fade: owOptionValue(rom, 'pathFade') !== false };
     const tick = () => {
@@ -904,6 +933,7 @@ export class OverworldView {
       this.buildBar();
       this.buildSide();
       this.updateStatus();
+      this.composeMap();
       this.paint();
     };
     const view = (label: string, get: () => boolean, set: (v: boolean) => void, title?: string, shortcut?: string) =>
@@ -914,8 +944,8 @@ export class OverworldView {
       h('label', { class: 'row' }, 'Map ', select(MAP_NAMES.map((n, i) => [i, n] as [number, string]), this.map, (v) => this.setMap(v))),
       h('span', { class: 'sep' }),
       h('div', { class: 'btn-group' },
-        h('button', { class: this.mode === 'l1' ? 'active' : '', title: 'Layer 1 (1)', onclick: () => setMode('l1') }, 'Layer 1 (paths/levels)'),
-        h('button', { class: this.mode === 'l2' ? 'active' : '', title: 'Layer 2 (2)', onclick: () => setMode('l2') }, 'Layer 2 (terrain)'),
+        h('button', { class: `ow-l1${this.mode === 'l1' ? ' active' : ''}`, title: 'Layer 1 (1) · layer 2 dimmed while it is painted, hold Q to hide it', onclick: () => setMode('l1') }, 'Layer 1 (paths/levels)'),
+        h('button', { class: `ow-l2${this.mode === 'l2' ? ' active' : ''}`, title: 'Layer 2 (2) · layer 1 dimmed while it is painted, hold Q to hide it', onclick: () => setMode('l2') }, 'Layer 2 (terrain)'),
         h('button', { class: this.mode === 'links' ? 'active' : '', title: 'Overworld links (3): stars, pipes and exit paths leading elsewhere, drawn as arrows; drag from a tile to where it leads', onclick: () => setMode('links') }, 'Overworld links'),
         h('button', { class: this.mode === 'sprites' ? 'active' : '', title: 'Sprites (4): the overworld\'s sprites as the game shows them at the event progress, the start positions and the Koopa Kids\' places; drag to move', onclick: () => setMode('sprites') }, 'Sprites')),
       h('button', { title: `${MAP_NAMES[this.map]}'s border (layer 3, fixed on the screen) in the Game workspace`, onclick: () => this.onEditBorder(this.map) }, 'Edit border…'),
@@ -924,6 +954,8 @@ export class OverworldView {
         { heading: 'Layers' },
         view('Layer 1', () => this.showL1, (v) => (this.showL1 = v)),
         view('Layer 2', () => this.showL2, (v) => (this.showL2 = v)),
+        view('Dim the layer not painted', () => this.dimOther, (v) => { this.dimOther = v; storeDim(v); },
+          'While layer 1 or 2 is painted the other one is drawn dimmed (Q held hides it)'),
         { heading: 'Guides' },
         view('Grid', () => this.showGrid, (v) => (this.showGrid = v), undefined, 'G'),
         view('Path tiles', () => this.showPaths, (v) => (this.showPaths = v),
@@ -959,6 +991,7 @@ export class OverworldView {
     if (k === 'escape' && this.mode === 'links' && this.links.cancelPending()) return true;
     if (k === 'escape' && this.event >= 0) { this.setEvent(-1); return true; }
     if (k === 'g') { this.showGrid = !this.showGrid; this.paint(); return true; }
+    if (k === 'q' && (this.mode === 'l1' || this.mode === 'l2')) { this.setSolo(true); return true; }
     if (k === 'm' && this.selected >= 0 && (this.mode === 'l1' || this.mode === 'l2')) { this.editTile(this.selected); return true; }
     if (k === ',' || k === '.') { this.setEvent(stepEvent(this.event, k === ',' ? -1 : 1)); return true; }
     if (k >= '1' && k <= '4') { (this.bar.querySelectorAll('.btn-group button')[+k - 1] as HTMLButtonElement).click(); return true; }
@@ -1431,7 +1464,11 @@ export class OverworldView {
     this.event = loadEvent(this.app.romName);
     // (the map drawn last may be another ROM's: not shown while this one's load is emulated)
     this.last = null;
-    if (!this.load()) putImage(this.mapCanvas, new Uint32Array(512 * 512));
+    if (!this.load()) {
+      putImage(this.l1Canvas, new Uint32Array(512 * 512), 512, 0);
+      putImage(this.l2Canvas, new Uint32Array(512 * 512));
+      this.composeMap();
+    }
     this.sync();
     this.layout();
   }
@@ -1447,3 +1484,30 @@ function storeEvent(rom: string, e: number): void {
   try { if (e >= 0) localStorage.setItem(EVENT_PREF + rom, String(e)); else localStorage.removeItem(EVENT_PREF + rom); } catch { /* no storage */ }
 }
 
+// "Dim the layer not painted" kept in the browser (on unless switched off)
+const DIM_PREF = 'ow-dim-other';
+function loadDim(): boolean {
+  try { return localStorage.getItem(DIM_PREF) !== '0'; } catch { return true; }
+}
+function storeDim(on: boolean): void {
+  try { localStorage.setItem(DIM_PREF, on ? '1' : '0'); } catch { /* no storage */ }
+}
+
+// a map region's layers drawn apart: layer 1 transparent where it has no pixel, layer 2 black there (the back area)
+function putLayers(l1c: HTMLCanvasElement, l2c: HTMLCanvasElement, rom: Rom, r: OwRender, region: number, l1: Uint16Array, l2: Uint16Array): void {
+  putImage(l1c, drawOwMap(rom, r, region, l1, undefined), 512, 0);
+  putImage(l2c, drawOwMap(rom, r, region, undefined, l2));
+}
+// the map from its layers: black, layer 2, layer 1 over it, each at its strength (0: left out)
+function composeLayers(out: HTMLCanvasElement, l1c: HTMLCanvasElement, l2c: HTMLCanvasElement, s: { l1: number; l2: number }): void {
+  out.width = 512; out.height = 512;
+  const ctx = out.getContext('2d')!;
+  ctx.fillStyle = '#000';
+  ctx.fillRect(0, 0, 512, 512);
+  for (const [c, a] of [[l2c, s.l2], [l1c, s.l1]] as const) {
+    if (!a || !c.width) continue;
+    ctx.globalAlpha = a;
+    ctx.drawImage(c, 0, 0);
+  }
+  ctx.globalAlpha = 1;
+}
