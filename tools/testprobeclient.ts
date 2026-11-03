@@ -531,6 +531,24 @@ function editor(worker: Worker | null) {
   open.shown(0x105, 2, a);
   check(open.shown(0x106, 2, undefined).tiles === null && open.shown(0x105, 2, undefined).tiles === null, '… another level\'s: none, also back at the first');
   check(open.shown(0x106, 2, b).tiles === b, '… known for the other level');
+  check(open.shown(0x106, 2, undefined).as === 'last' && open.shown(0x106, 2, b).as === 'edited', '… as edited, as last known');
+
+  // failed with none known before (#284): the level as saved, learned meanwhile; none when that failed too
+  const saved = tiles(0x107), broken = { ...tiles(0x107), ok: false };
+  const fresh = () => new OpenLevelTiles();
+  const w8 = fresh().shown(0x107, 1, undefined, true, () => undefined);
+  check(w8.tiles === null && w8.state === 'pending' && w8.as === null, 'failed, none known: pending while the level as saved is learned');
+  const s = fresh().shown(0x107, 1, undefined, true, () => saved);
+  check(s.tiles === saved && s.state === 'failed' && s.as === 'saved', '… then the level as saved, failed');
+  const n = fresh().shown(0x107, 1, undefined, true, () => broken);
+  check(n.tiles === null && n.state === 'failed' && n.as === null, '… the level as saved failed too: none');
+  const kept = fresh();
+  const k = tiles(0x107);
+  kept.shown(0x107, 1, k);
+  let asked = false;
+  const l = kept.shown(0x107, 1, undefined, true, () => { asked = true; return saved; });
+  check(l.tiles === k && l.as === 'last' && !asked, '… the last known first, the level as saved not asked for');
+  check(fresh().shown(0x107, 1, undefined, false, () => saved).tiles === null, '… only when failed: none while pending');
 }
 
 // a progress reply from an older ROM generation (#229): its images are not shown (the result is checked as before)

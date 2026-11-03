@@ -65,7 +65,7 @@ import { levelInput, inputHash, editState } from '../core/inputs.ts';
 import { map16Tile, bgTile } from '../core/ram.ts';
 import { exanimTiles, exanimColors, exanimPeriod, readLevelList, readGlobalList } from '../core/exanim.ts';
 import { usedTriggers, initTriggers, type TriggerView, type SlotRef } from '../core/extrigger.ts';
-import { LevelUses, OpenLevelTiles, levelOverride, usedLevels, spriteUsage, isTilesetTile, type LevelTiles, type OpenTilesState, type SpriteUser } from '../core/levelusage.ts';
+import { LevelUses, OpenLevelTiles, levelOverride, usedLevels, spriteUsage, isTilesetTile, type LevelTiles, type OpenTilesState, type OpenTilesAs, type SpriteUser } from '../core/levelusage.ts';
 import { TILESETS, sharingTilesets } from '../core/tilesets.ts';
 import { slipperyKey } from '../core/slippery.ts';
 import { gameBgKey } from '../core/tilemove.ts';
@@ -1053,24 +1053,28 @@ export class App {
 
   // The Map16 tiles of every level (levelusage.ts), the open one as edited: those known now, the others are
   // learned in the probe worker ('level-uses' as they come); pending: how many are still missing (the open level's
-  // previous ones of this ROM state count as missing while its tiles as edited are learned); open: whether the open
-  // level's are known, learned, or could not be learned (not counted as missing then, its previous ones are kept)
-  levelTiles(): { levels: LevelTiles[]; pending: number; open: OpenTilesState } {
+  // previous ones of this ROM state count as missing while its tiles as edited are learned, and its tiles as saved
+  // while they are learned in place of those that could not be); open: whether the open level's are known, learned,
+  // or could not be learned; as: which tiles stand for them – as edited, the last known, as saved, none (OpenLevelTiles)
+  levelTiles(): { levels: LevelTiles[]; pending: number; open: OpenTilesState; as: OpenTilesAs } {
     const idx = this.usesIndex ??= new LevelUses(this.rom, this.results);
     // the open level's (kept in memory with the level as edited as their input); a level with conditional
     // Direct Map16 objects in both of their states, whatever the view's flags
     const lv = this.level, edited = editState(lv, this.buildOverrides());
     const here = this.probes.learnOrFailed<LevelTiles>(`lt:${lv.number}`, { kind: 'levelTiles', state: edited },
       { input: edited.id, lane: 'lt', replace: true, label: 'Uses in this level', done: this.usesLearned, failed: this.usesLearned });
-    const failed = here === FAILED, { tiles, state } = this.openTiles.shown(lv.number, this.rom.gen, failed ? undefined : here, failed);
+    const failed = here === FAILED;
+    const { tiles, state, as } = this.openTiles.shown(lv.number, this.rom.gen, failed ? undefined : here, failed, () => idx.tiles(lv.number));
     const levels = tiles ? [tiles] : [], missing: number[] = [];
+    // (failed, and the level as saved not known yet: learned with the others)
+    if (failed && state === 'pending') missing.push(lv.number);
     for (const n of usedLevels(this.rom)) {
       if (n === lv.number) continue;
       const t = idx.tiles(n);
       if (t) levels.push(t); else missing.push(n);
     }
     if (missing.length) this.learnLevelTiles(missing);
-    return { levels, pending: missing.length + (state === 'pending' ? 1 : 0), open: state };
+    return { levels, pending: missing.length + (state === 'pending' && !failed ? 1 : 0), open: state, as };
   }
   private openTiles = new OpenLevelTiles(); // the open level's tiles, the last known while they are learned
   // A level's BG tilemap from its load (the open one as shown), where it is the game's own (tilemove.ts): another

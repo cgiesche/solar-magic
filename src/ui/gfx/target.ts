@@ -186,20 +186,22 @@ function levelTarget(app: App, at: WsTarget, layer: 'fg' | 'bg'): GfxTarget {
       return { match: tileMatches(q, EXT_TILES, [blockFilesByTile(rom), namesOf(rom, 'fg'), behaviors.texts]), pending: behaviors.pending };
     },
     usedIn: (t, link, unused) => {
-      const { levels, pending, open } = app.levelTiles();
-      const unknown = open === 'failed' ? `The tiles this level places as edited could not be learned${levels.some((l) => l.level === n) ? ' (listed as last known)' : ''}.` : undefined;
+      const { levels, pending, open, as } = app.levelTiles();
+      const unknown = open === 'failed' ? `The tiles this level places as edited could not be learned${as === 'last' ? ' (listed as last known)' : as === 'saved' ? ' (listed as saved)' : ': it is not included'}.` : undefined;
       if (!fg) {
         const users = bgTileUsers(levels, t);
         return [usedInList(app, 'Used in levels', users.map((u) => ({ level: u.level, text: `${u.count}× in the BG` })), pending, 'In no level\'s background.', unknown)];
       }
-      const tilesets = app.tilesetsOf(t), tilesetTile = isTilesetTile(t);
+      const tilesets = app.tilesetsOf(t), tilesetTile = isTilesetTile(t), unusedText = 'Defined, but placed in no level and no prefab: unused.';
       const items = fgTileUsers(levels, t, tilesets).map((u) => ({
         level: u.level, at: { x: u.uses[0].x, y: u.uses[0].y },
         text: u.uses.map((q) => `${q.count}× ${TILE_SOURCES[q.source]}${q.layer === 2 ? ' (layer 2)' : ''}`).join(', '),
       }));
       const l = tileLinks(rom, t);
       return [
-        usedInList(app, tilesetTile ? `Used in levels of ${tilesetNames(tilesets)}` : 'Used in levels', items, pending, unused?.has(t) ? 'Defined, but placed in no level and no prefab: unused.' : 'Placed in no level.', unknown),
+        // (unused with the open level's tiles as listed: said with why they are not as edited, which hides the rest)
+        usedInList(app, tilesetTile ? `Used in levels of ${tilesetNames(tilesets)}` : 'Used in levels', items, pending, unused?.has(t) ? unusedText : 'Placed in no level.',
+          unknown && unused?.has(t) ? `${unknown} ${unusedText}` : unknown),
         ...(l.actsLike.length ? [h('div', { class: 'hint' }, 'Acting like it: ', ...l.actsLike.slice(0, 24).flatMap((x, i) => [i ? ' ' : '', link(x)]), l.actsLike.length > 24 ? ` … (${l.actsLike.length})` : '')] : []),
         ...(l.prefabs.length ? [h('div', { class: 'hint' }, `In prefab${l.prefabs.length > 1 ? 's' : ''} ${l.prefabs.map((x) => hex(x, 2)).join(', ')}`)] : []),
         ...(l.blocks.length ? [h('div', { class: 'hint' }, `Custom block on it: ${l.blocks.join(', ')}`)] : []),

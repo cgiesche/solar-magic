@@ -61,8 +61,9 @@ interface Remapping { ed: RemapEditor; scope: RemapScope; box: HTMLElement; scop
 // what an offer fills in when it opens the remap
 export interface RemapFill { line?: string; scope?: RemapScope; target?: Map16Target }
 // the move panel: where the selection's top left tile goes (-1: not a valid number), the plan for it
-// (pending: levels the usage index has not looked through yet for tiles placed by objects' code)
-interface Moving { to: number; box: HTMLElement; input: HTMLInputElement; status: HTMLElement; plan: { plan: MovePlan; src: MoveSource; pending: number } | null }
+// (pending: levels the usage index has not looked through yet for tiles placed by objects' code; failed: the open
+// level's tiles as edited could not be learned)
+interface Moving { to: number; box: HTMLElement; input: HTMLInputElement; status: HTMLElement; plan: { plan: MovePlan; src: MoveSource; pending: number; failed: boolean } | null }
 // a tile the remap changes: its words and acts-like before and after
 interface RemapRow { tile: number; words: number[]; acts: number | null; newWords: number[]; newActs: number | null; out: number[]; changed: boolean }
 type Cell = { x: number; y: number };
@@ -106,6 +107,7 @@ export class Map16Tab implements WsPanel {
   private sameActs = false; // mark tiles that act like the selected one
   private markUnused = false; // mark tiles 200-FFF defined but used nowhere
   private unused: Set<number> | null = null; // (known once every level's tiles are)
+  private unusedHint = h('span', { class: 'hint' }); // why the unused tiles are not marked (unusedTiles)
   private usesBox = h('div', { class: 'mt-uses' });
   private visible = false;
   private bar = h('div', { class: 'ws-bar' });
@@ -412,6 +414,7 @@ export class Map16Tab implements WsPanel {
       !t.acts ? '' : h('label', { class: 'toggle', title: 'Mark the tiles 200–FFF that have graphics, an acts-like setting or a block but are in no level and no prefab' },
         (() => { const cb = h('input', { type: 'checkbox', checked: this.markUnused }); cb.addEventListener('change', () => { this.markUnused = cb.checked; this.drawSheet(); }); return cb; })(),
         'Mark unused'),
+      !t.acts ? '' : this.unusedHint,
       h('span', { class: 'spacer' }),
       !t.files ? '' : menuButton({ label: 'Import/Export', items: [
         { label: 'Import (.map16) …', title: 'Insert a Lunar Magic .map16 starting at the selected tile', onClick: () => void this.importMap16() },
@@ -477,6 +480,8 @@ export class Map16Tab implements WsPanel {
     for (let p = 0; p < Math.ceil(this.t.tiles / 256); p++) {
       if (this.near.has(p)) this.drawPage(p); else this.dirty.add(p);
     }
+    if (!this.markUnused || !this.t.acts) this.unusedHint.textContent = '';
+    else this.unusedTiles(); // (its hint, also with no page near)
   }
 
   private drawPage(p: number): void {
@@ -949,11 +954,13 @@ export class Map16Tab implements WsPanel {
     return el;
   }
 
-  // the defined tiles 200-FFF used nowhere (null while not every level's tiles are known)
+  // the defined tiles 200-FFF used nowhere (null while not every level's tiles are known, and when the open level's
+  // can't be: neither as edited nor as saved)
   private unusedTiles(): Set<number> | null {
     if (this.unused) return this.unused;
-    const app = this.app, { levels, pending } = app.levelTiles();
-    if (!pending) this.unused = new Set(unusedFgTiles(app.rom, levels, blankTile(app.rom, app.render)));
+    const app = this.app, { levels, pending, as } = app.levelTiles();
+    this.unusedHint.textContent = this.markUnused && !pending && !as ? 'Not marked: this level\'s tiles could not be learned, neither as edited nor as saved' : '';
+    if (!pending && as) this.unused = new Set(unusedFgTiles(app.rom, levels, blankTile(app.rom, app.render)));
     return this.unused;
   }
 
@@ -1117,7 +1124,7 @@ export class Map16Tab implements WsPanel {
     const { levels: index, pending, open } = app.levelTiles();
     const src: MoveSource = { ...levelSource(app, map), blank: blankTile(app.rom, app.render), index };
     const plan = planMove(app.rom, layer, map, src);
-    m.plan = { plan, src, pending: layer === 'bg' ? 0 : pending };
+    m.plan = { plan, src, pending: layer === 'bg' ? 0 : pending, failed: layer === 'bg' ? false : open === 'failed' };
     const ok = !plan.problems.length;
     m.status.replaceChildren(
       ...plan.problems.map((q) => h('div', { class: 'warn-box' }, q)),
@@ -1136,8 +1143,12 @@ export class Map16Tab implements WsPanel {
     const m = this.moving, p = m?.plan;
     if (!m || !p || p.plan.problems.length) return;
     const { plan, src } = p, to = m.to, from = this.sel, layer = this.t.id === 'bg' ? 'bg' : 'fg';
-    if (p.pending && await choose('Move now?', `${p.pending} level${p.pending > 1 ? 's have' : ' has'} not been looked through yet for these tiles placed by objects' code (custom objects), which a move can't rewrite. Wait for the look-through, or move now?`,
-      [{ label: 'Wait' }, { label: 'Move now' }]) !== 1) return;
+    const unknown = [
+      p.pending ? `${p.pending} level${p.pending > 1 ? 's have' : ' has'} not been looked through yet for these tiles placed by objects' code (custom objects), which a move can't rewrite.` : '',
+      p.failed ? 'The tiles this level\'s objects\' code places as edited could not be learned: tiles placed there by custom objects may not be known, and a move can\'t rewrite them.' : '',
+    ].filter(Boolean);
+    if (unknown.length && await choose('Move now?', `${unknown.join(' ')} ${p.pending ? 'Wait for the look-through, or move now?' : 'Move now?'}`,
+      [{ label: p.pending ? 'Wait' : 'Cancel' }, { label: 'Move now' }]) !== 1) return;
     if (plan.overwrite.length && await choose('Overwrite tiles?', `Tile${plan.overwrite.length > 1 ? 's' : ''} ${plan.overwrite.map((t) => hex(t, 3)).join(', ')} ${plan.overwrite.length > 1 ? 'have' : 'has'} contents of ${plan.overwrite.length > 1 ? 'their' : 'its'} own (used nowhere). Overwrite with the moved tiles?`,
       [{ label: 'Cancel' }, { label: 'Overwrite', danger: true }]) !== 1) return;
     try {

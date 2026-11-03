@@ -113,17 +113,27 @@ export function levelOverride(rom: Rom, lv: Level): LevelOverride {
 
 // what is known of the open level's tiles as edited: known, still learned (pending), or they could not be learned
 export type OpenTilesState = 'known' | 'pending' | 'failed';
+// which tiles stand for the open level's: as edited, the last known as edited, the level as saved (none: not known)
+export type OpenTilesAs = 'edited' | 'last' | 'saved' | null;
 
 // The open level's tiles as edited (learned elsewhere, e.g. the probe worker) and, while they are learned, the last
 // known ones: only for the level and ROM state (gen: the ROM's count of changes) they were learned at – another
-// level's, and those from before a ROM change, are dropped (#229)
+// level's, and those from before a ROM change, are dropped (#229). When they could not be learned and none are known
+// from before, the level as saved stands for them: pending while its tiles are learned, none when it did not load
+// either (#284).
 export class OpenLevelTiles {
   private last: { tiles: LevelTiles; gen: number } | null = null;
-  // here: the tiles learned for the level as it is now (undefined: not known); failed: they could not be learned
-  shown(level: number, gen: number, here: LevelTiles | undefined, failed = false): { tiles: LevelTiles | null; state: OpenTilesState } {
-    if (here) this.last = { tiles: here, gen };
-    else if (this.last && (this.last.tiles.level !== level || this.last.gen !== gen)) this.last = null;
-    return { tiles: here ?? this.last?.tiles ?? null, state: here ? 'known' : failed ? 'failed' : 'pending' };
+  // here: the tiles learned for the level as it is now (undefined: not known); failed: they could not be learned;
+  // saved: the level as saved's tiles (undefined: not known yet), asked for only then
+  shown(level: number, gen: number, here: LevelTiles | undefined, failed = false, saved: () => LevelTiles | undefined = () => undefined):
+    { tiles: LevelTiles | null; state: OpenTilesState; as: OpenTilesAs } {
+    if (here) { this.last = { tiles: here, gen }; return { tiles: here, state: 'known', as: 'edited' }; }
+    if (this.last && (this.last.tiles.level !== level || this.last.gen !== gen)) this.last = null;
+    if (this.last) return { tiles: this.last.tiles, state: failed ? 'failed' : 'pending', as: 'last' };
+    if (!failed) return { tiles: null, state: 'pending', as: null };
+    const s = saved();
+    if (!s) return { tiles: null, state: 'pending', as: null };
+    return s.ok ? { tiles: s, state: 'failed', as: 'saved' } : { tiles: null, state: 'failed', as: null };
   }
 }
 
