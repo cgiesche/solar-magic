@@ -71,6 +71,8 @@ function freeNote(rom: Rom, tl: number): string {
 
 // what an exit the game skips the reveal walk for does (revealwalk.ts)
 const NO_REVEAL_WALK = 'the level tile the path leads to gets no way back to this one (as after Yoshi\'s House and the switch palaces in the clean game)';
+// (the level tiles are known with the path tile kinds: until then the list and a selected tile say so – exitpanel.ts says the same)
+const LEVEL_TILES_LEARNED = 'The overworld\'s level tiles are being learned …';
 
 export class OverworldView {
   app: App;
@@ -1119,6 +1121,12 @@ export class OverworldView {
     this.watch.add(() => this.buildLeftNow());
   }
   private buildLeftNow(): void {
+    // (while the path tiles are learned which tiles are level tiles is not known: said so, not "none")
+    if (!this.pathKinds()) {
+      this.tlCount.textContent = '…';
+      this.tlList.replaceChildren(emptyState(LEVEL_TILES_LEARNED));
+      return;
+    }
     const shared = sharedTranslevels(this.l1, this.tls, this.isLevelTile);
     const items: HTMLElement[] = [];
     for (let y = 0; y < 32; y++) for (let x = 0; x < 32; x++) {
@@ -1325,7 +1333,9 @@ export class OverworldView {
   // the selected tile: a level tile's settings, and for every tile the events that reveal it
   tileInfo(i: number): HTMLElement {
     const { x, y } = l1XY(i), t = this.l1[i];
-    const info = this.isLevelTile(t) ? this.levelInfo(i) : h('div', { class: 'ow-info' }, h('div', { class: 'hint' }, `Tile ${hex(x, 2)},${hex(y, 2)} · ${l1Hex(t)} (not a level tile)`));
+    const known = !!this.pathKinds(); // (whether it is a level tile: not known while the path tiles are learned)
+    const info = this.isLevelTile(t) ? this.levelInfo(i) : h('div', { class: 'ow-info' }, h('div', { class: 'hint' }, `Tile ${hex(x, 2)},${hex(y, 2)} · ${l1Hex(t)}${known ? ' (not a level tile)' : ''}`),
+      known ? null : h('div', { class: 'hint' }, LEVEL_TILES_LEARNED));
     info.append(h('div', { class: 'row' }, h('button', { title: 'Edit which 8x8 tiles make this layer 1 tile, in the Map16 tab (M) – for every place of the tile on all maps', onclick: () => this.editTile(i) }, `Edit tile ${l1Hex(t)} in Map16 …`)),
       ...this.revealSettings(i), ...this.destroySettings(i));
     return info;
