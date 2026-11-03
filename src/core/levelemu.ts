@@ -409,7 +409,8 @@ export class LevelEmulator {
   // puts Mario on the overworld tile of translevel tl, so a following load({ continueState }) plays the
   // level within a game in progress: dying costs a life and returns to the overworld there, entering
   // the tile again loads the level. Tiles of submaps get the submap whose camera view (from loading
-  // each submap) is centered nearest to them. Not found on the overworld: Mario stays at the start.
+  // each submap) is centered nearest to them; the overworld is then loaded again there, so that the game's state
+  // for his tile ($13C1: what A does) is as when he arrives. Not found on the overworld: Mario stays at the start.
   startGame(tl: number): void {
     this.startOn((w) => (tl > 0 ? w.subarray(RAM.owTranslevels, RAM.owTranslevelsEnd).indexOf(tl) : -1));
   }
@@ -451,10 +452,15 @@ export class LevelEmulator {
       set16(w, RAM.owPlayerTileX + o, tx); set16(w, RAM.owPlayerTileY + o, ty);
     }
     w[RAM.submap] = w[RAM.submap + 1] = sub;
+    // the overworld loaded again where he stands, as after a level: the game sets what it derives from his tile –
+    // the tile he stands on ($13C1, read by A: a star tile 5F enters no level), his submap's view – as when he
+    // arrives there (walking, $0495DE: the same read of layer 1 at his tile as the load's, $048E9B)
+    this.reloadOverworld(events);
   }
 
   // on the overworld: loads it again as the game does after a level, so that it shows where Mario stands now (his
-  // submap, the camera at him) – after startGameAt moved him; events: set again as it loads (startGameAt)
+  // submap, the camera at him, the tile he stands on) – after his tile or submap was changed in RAM (startGame and
+  // startGameAt do it for the tile they put him on); events: set again as it loads (startGameAt)
   reloadOverworld(events?: Uint8Array): void {
     this.sync();
     this.snes.wram[RAM.gameMode] = GM.overworldLoad;

@@ -14,7 +14,7 @@ import {
 import { hasMessages } from '../src/core/messages.ts';
 import { levelName, levelNameTiles, setLevelNameTiles, hasLevelName, encodeName } from '../src/core/levelnames.ts';
 import { L1_PTRS } from '../src/core/level.ts';
-import { GM, RAM } from '../src/core/ram.ts';
+import { GM, RAM, get16 } from '../src/core/ram.ts';
 import { cleanImage, editorImage, levelTiles } from './fixture.ts';
 
 let bad = 0;
@@ -45,13 +45,17 @@ check(same(readTranslevels(patched), cleanTl), `every level tile has the transle
   }
 }
 
-// the translevel ($13BF) the game enters from tile i (A pressed on it); null: none entered
+// the translevel ($13BF) the game enters from tile i (A pressed on it); null: none entered (also: A took Mario
+// elsewhere, as a star tile's warp does, before a level loaded)
 function enter(emu: LevelEmulator, i: number): number | null {
   emu.startGameAt(i);
   const s = emu.snes, w = s.wram;
+  const marioAt = () => [RAM.owPlayerTileX, RAM.owPlayerTileY].map((a) => get16(w, a)).concat(w[RAM.submap]).join();
+  const start = marioAt();
   for (let f = 0; f < 400; f++) {
     s.joy1 = f % 8 < 2 ? 0x0080 : 0;
     s.runFrame();
+    if (marioAt() !== start) break;
     if (w[RAM.gameMode] === GM.levelLoad) {
       s.joy1 = 0;
       return w[RAM.translevel];
@@ -62,14 +66,21 @@ function enter(emu: LevelEmulator, i: number): number | null {
 }
 {
   const ea = new LevelEmulator(clean), eb = new LevelEmulator(patched);
-  const differ: string[] = [];
+  const differ: string[] = [], wrong: string[] = [];
+  const l1 = readL1(clean); // (isLevelTile: the patched game's path kinds, the clean game's – testowpaths)
   let entered = 0;
   for (const i of tiles) {
     const a = enter(ea, i), b = enter(eb, i);
     if (a) entered++;
     if (a !== b) differ.push(`${hx(i)}: ${a === null ? '-' : hx(a)} / ${b === null ? '-' : hx(b)}`);
+    // Mario put on tile i stands there as if he had walked there: A enters a level only from a tile the game enters
+    // one from when he walks onto it (the path kinds; the six star tiles 5F with a translevel warp, enter none)
+    if ((a !== null) !== isLevelTile(l1[i])) wrong.push(`${hx(i)} (tile ${hx(l1[i])}): ${a === null ? '-' : hx(a)}`);
   }
-  check(!differ.length && entered === tiles.length, `every level tile enters the same translevel as in the clean game (${entered} of ${tiles.length} entered from a new game) ${differ.join(', ')}`);
+  check(!differ.length, `every level tile enters the same translevel as in the clean game ${differ.join(', ')}`);
+  const none = tiles.filter((i) => !isLevelTile(l1[i]));
+  check(none.length > 0 && none.every((i) => l1[i] === 0x5f), `the tiles with a translevel entering none are the star tiles 5F (${none.map(hx).join(', ')})`);
+  check(!wrong.length, `entered from a new game: the tiles whose layer 1 tile is a level tile (${entered} of ${tiles.length} with a translevel) ${wrong.join(', ')}`);
 }
 
 // ---- placing level tiles ----

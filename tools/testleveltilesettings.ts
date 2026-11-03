@@ -13,7 +13,7 @@ import {
 } from '../src/core/overworld.ts';
 import { GM, RAM, PAD } from '../src/core/ram.ts';
 import { PlaySession } from '../src/core/playsession.ts';
-import { cleanImage, editorImage } from './fixture.ts';
+import { cleanImage, editorImage, levelTiles } from './fixture.ts';
 
 let bad = 0;
 const check = (ok: boolean, what: string) => { console.log((ok ? 'ok   ' : 'FAIL ') + what); if (!ok) bad++; };
@@ -120,8 +120,10 @@ function pass(rom: Rom, i: number, exit: number): { before: number; after: numbe
   const subIn = enter(e, sub);
   setInitialFlags(rom, stl, FLAG.passed | FLAG.noEntry);
   check(subIn === stl && enter(e, sub) === null, `a submap's level tile (${hx(sub)}, translevel ${hx(stl)}): entered, with "no entry" once passed not`);
-  // every other level tile still entered as without the patch's check
-  const missed = [...tls.keys()].filter((i) => tls[i] && i % 7 === 0).filter((i) => enter(e, i) !== tls[i]);
+  // every other level tile still entered as without the patch's check (a star tile 5F with a translevel enters none:
+  // A warps, as in the game)
+  const isLevelTile = levelTiles(rom);
+  const missed = [...tls.keys()].filter((i) => tls[i] && isLevelTile(l1[i]) && i % 7 === 0).filter((i) => enter(e, i) !== tls[i]);
   check(!missed.length, `other level tiles entered as before (${missed.map(hx).join(' ')})`);
 }
 
