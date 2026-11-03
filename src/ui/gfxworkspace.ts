@@ -12,7 +12,7 @@ import { Map16Tab, type RemapFill } from './gfx/map16tab.ts';
 import { gfxTarget, type GfxTarget, type Map16Target } from './gfx/target.ts';
 import { GfxTab } from './gfx/gfxtab.ts';
 import { AnimTab } from './gfx/animtab.ts';
-import { MAP_NAMES, gameL2, owTileAt, drawOwMap, type OwRender } from '../core/overworld.ts';
+import { MAP_NAMES, gameL2, owTileAt, drawOwMap, owShownAt, owMapAt, type OwRender } from '../core/overworld.ts';
 import { cgramToRGBA } from '../core/gfx.ts';
 
 export type WsTab = 'pal' | 'map16' | 'gfx' | 'anim';
@@ -160,7 +160,10 @@ export class LevelPreview {
     // (layer 2 of the loaded region as the game shows it, in readL2's order)
     const region = o.submap > 0 ? 1 : 0, l2 = new Uint16Array(0x2000);
     l2.set(gameL2(r), region * 0x1000);
-    o.img = drawOwMap(this.app.rom, r, region, null, l2);
+    // (shown as the overworld editor shows it: the submaps' region moved, wrapping; owShownAt)
+    const img = drawOwMap(this.app.rom, r, region, null, l2), shown = new Uint32Array(img.length);
+    for (let y = 0; y < 512; y++) for (let x = 0; x < 512; x++) { const p = owShownAt(region, x, y); shown[p.y * 512 + p.x] = img[y * 512 + x]; }
+    o.img = shown;
   }
   // the submap's view in the middle (its region's 512x512 image)
   scrollToSubmap(): void {
@@ -169,7 +172,9 @@ export class LevelPreview {
     if (v) this.scrollToRect(v[o.submap]);
   }
   private scrollToRect(r: { x: number; y: number; w: number; h: number } | undefined): void {
-    if (r) this.scrollTo((r.x + r.w / 2) / 2, (r.y + r.h / 2) / 2);
+    if (!r || !this.ow) return;
+    const p = owShownAt(this.ow.submap > 0 ? 1 : 0, (r.x + r.w / 2) * 8, (r.y + r.h / 2) * 8);
+    this.scrollTo(p.x / 16, p.y / 16);
   }
   // the image shown (the level's, or the submap's map; null while none is known)
   private image(): { w: number; h: number; px: Uint32Array; backdrop: number } | null {
@@ -197,10 +202,11 @@ export class LevelPreview {
   get cgram(): Uint8Array {
     return this.ow ? (this.ow.switched ?? this.ow.r)?.cgram ?? new Uint8Array(0x200) : this.app.render.cgram;
   }
-  // the pixel at (px, py) of what is shown (RGBA) and the backdrop color there
+  // the pixel at (px, py) of what is shown (RGBA) and the backdrop color there (a submap's: of its map, pos)
   pixel(px: number, py: number): { rgba: number; backdrop: boolean } {
     const im = this.image();
     if (!im) return { rgba: 0, backdrop: true };
+    if (this.ow) ({ x: px, y: py } = owShownAt(this.ow.submap > 0 ? 1 : 0, px, py));
     const v = im.px[py * im.w + px];
     return { rgba: v, backdrop: !v || (v >>> 0) === (im.backdrop >>> 0) };
   }
@@ -224,12 +230,16 @@ export class LevelPreview {
     this.zoomCtl.update();
   }
 
+  // the pixel under the mouse: the level's, or the pixel of the submap's map shown there (owMapAt)
   private pos(e: MouseEvent): { px: number; py: number } | null {
     const im = this.image();
     if (!im) return null;
     const rc = this.img.getBoundingClientRect();
     const px = Math.floor((e.clientX - rc.left) / this.zoom), py = Math.floor((e.clientY - rc.top) / this.zoom);
-    return px >= 0 && py >= 0 && px < im.w && py < im.h ? { px, py } : null;
+    if (px < 0 || py < 0 || px >= im.w || py >= im.h) return null;
+    if (!this.ow) return { px, py };
+    const p = owMapAt(this.ow.submap > 0 ? 1 : 0, px, py);
+    return { px: p.x, py: p.y };
   }
 
   tileAt(px: number, py: number): number {
