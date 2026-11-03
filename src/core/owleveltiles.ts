@@ -6,7 +6,10 @@
 // Which tiles are level tiles and stop tiles the game's code decides (owpaths.ts path kinds), passed in.
 
 import type { Rom } from './rom.ts';
-import { readL1, writeL1, readTranslevels, writeTranslevels, owTileWords, MAX_TRANSLEVEL, OW_L1_TILES } from './overworld.ts';
+import {
+  readL1, writeL1, readTranslevels, writeTranslevels, owTileWords, l1Index, l1XY, hasDestroyPatch, readDestroyList, writeDestroyList, destroySettingAt,
+  MAX_TRANSLEVEL, OW_L1_TILES, NO_EVENT,
+} from './overworld.ts';
 import type { PathKind } from './owpaths.ts';
 
 // the stop tile of the clean game ("Mario stops, enters no level") and its first level tile
@@ -55,12 +58,45 @@ function editMaps(rom: Rom, f: (l1: Uint16Array, tls: Uint8Array) => void): void
   writeTranslevels(rom, tls);
 }
 
-// the level tile at `from` (l1Index) moved to `to`: the two cells swap their tiles and translevels
+// the level tile at `from` (l1Index) moved to `to`: the two cells swap their tiles and translevels. A castle moves
+// whole: the tile whose destroy changes the level tile (its top above it, destroySettingAt) swaps with the cell as far
+// from the target – unless that is off the map or holds a level tile or a destroyed tile (another castle's top only
+// when the two castles swap) – and the destroys set on the level tile and its top move with them (a castle collapsing
+// is its level). Reveals stay with the cells (they belong to the path).
 export function moveLevelTile(rom: Rom, from: number, to: number): void {
-  editMaps(rom, (l1, tls) => {
-    [l1[from], l1[to]] = [l1[to], l1[from]];
-    [tls[from], tls[to]] = [tls[to], tls[from]];
-  });
+  const l1 = readL1(rom), tls = readTranslevels(rom), list = hasDestroyPatch(rom) ? readDestroyList(rom) : [];
+  const destroyed = new Set(list.filter((d) => d.event !== NO_EVENT).map((d) => d.tile));
+  // the tile whose destroy changes level tile i when another cell (its castle's top), -1 none
+  const topOf = (i: number) => { const at = list.length ? destroySettingAt(rom, l1, l1, i).at : -1; return at === i ? -1 : at; };
+  // the cells swapped so far: which cell's original tile each holds, and where a cell's original tile is now
+  const origin = new Map<number, number>(), originOf = (c: number) => origin.get(c) ?? c;
+  const cellOf = (o: number) => { for (const [c, v] of origin) if (v === o) return c; return o; };
+  const swap = (a: number, b: number) => {
+    [l1[a], l1[b]] = [l1[b], l1[a]];
+    [tls[a], tls[b]] = [tls[b], tls[a]];
+    const oa = originOf(a);
+    origin.set(a, originOf(b)).set(b, oa);
+  };
+  const tops = [topOf(from), topOf(to)];
+  swap(from, to);
+  for (const [level, target, top] of [[from, to, tops[0]], [to, from, tops[1]]]) {
+    if (top < 0) continue;
+    const dest = shifted(top, level, target), now = cellOf(top);
+    if (dest < 0 || dest === now) continue;
+    const there = originOf(dest);
+    if (tls[dest] || (destroyed.has(there) && !tops.includes(there))) continue;
+    swap(now, dest);
+  }
+  writeL1(rom, l1);
+  writeTranslevels(rom, tls);
+  const owned = new Set([from, to, ...tops.filter((t) => t >= 0)]);
+  const moved = list.map((d) => (d.event !== NO_EVENT && owned.has(d.tile) ? { ...d, tile: cellOf(d.tile) } : d));
+  if (moved.some((d, k) => d.tile !== list[k].tile)) writeDestroyList(rom, moved);
+}
+// cell i moved by as much as cell `a` to `b` (on b's map), -1 where that leaves the map
+function shifted(i: number, a: number, b: number): number {
+  const p = l1XY(i), pa = l1XY(a), pb = l1XY(b), x = p.x + pb.x - pa.x, y = p.y + pb.y - pa.y;
+  return x < 0 || y < 0 || x >= 32 || y >= 32 ? -1 : l1Index(b >= 0x400 ? 1 : 0, x, y);
 }
 
 // the level tile at i removed: the stop tile (stopTile) in its place, no translevel

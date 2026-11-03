@@ -10,8 +10,8 @@ import {
   type OwRender, gameL1, readL1, readL2, l1Index, l1XY, l2Index, readTranslevels, writeTranslevels, readMaps,
   sharedTranslevels, translevelToLevel, MAP_NAMES,
   resetTranslevel, baseEvent, setBaseEvent, eventNames, exitDirections, setExitDirection, DIR_ARROWS, DIR_NAMES, EXIT_NAMES, NO_EVENT,
-  initialFlags, setInitialFlags, FLAG, DIR_FLAGS, OW_EVENTS, revealEvents, setRevealEvents, revealAt, revealedTile, revealEventCount,
-  readRevealList, writeRevealList, destroyEffects, destroySettingAt, destroyEvent, setDestroyEvent, readDestroyList, levelTilesOf, OW_L1_TILES,
+  initialFlags, setInitialFlags, FLAG, DIR_FLAGS, OW_EVENTS, revealEvents, revealedTile,
+  readRevealList, writeRevealList, destroyEffects, destroySettingAt, readDestroyList, hasDestroyPatch, levelTilesOf, OW_L1_TILES,
   eventBits, drawOwMap, drawL1Tile, owShownAt, owMapAt, owShownCopies,
 } from '../core/overworld.ts';
 import { isBlank, readMessage } from '../core/messages.ts';
@@ -33,6 +33,7 @@ import type { OwSpriteView } from '../core/owsprites.ts';
 import { LinkLayer } from './owlinkview.ts';
 import { LevelTileLayer, tilePlace } from './owlevelview.ts';
 import { levelsWithoutTile } from '../core/owleveltiles.ts';
+import { eventReveal, eventDestroys, revealRefusal, destroyRefusal, addReveal, removeReveal, addDestroy, removeDestroy, cellText, NO_REVEAL_AT_0 } from '../core/oweventtiles.ts';
 import { SpriteLayer } from './owspriteview.ts';
 import { levelTeleports, locationUses, type LevelTeleport } from '../core/owlinks.ts';
 import { tileText } from '../core/owteleport.ts';
@@ -56,8 +57,8 @@ type Brush = { kind: Layer; w: number; h: number; entries: number[]; tls?: numbe
 
 // a layer 1 tile's number: 2 digits on page 0, 3 on page 1 (82, 1A5)
 
-// what the timeline shows: an animated step, a silent one, the layer 1 changes
-type StepKind = 'step' | 'silent' | 'l1';
+// what the timeline shows: an animated step, a silent one, the layer 1 changes, the tile revealed, a tile destroyed
+type StepKind = 'step' | 'silent' | 'l1' | 'reveal' | 'destroy';
 
 // what an exit the game skips the reveal walk for does (revealwalk.ts)
 const NO_REVEAL_WALK = 'the level tile the path leads to gets no way back to this one (as after Yoshi\'s House and the switch palaces in the clean game)';
@@ -127,6 +128,9 @@ export class OverworldView {
     runners: Map<number, EventRunner[]>;
   } | null = null;
   private hoverStep: { kind: StepKind; k: number } | null = null;
+  // a reveal or destroy being added to the event in the timeline: the cell clicked on the map (at -1 until then), for
+  // a reveal then the tile it becomes picked in the layer 1 sheet
+  private eventPick: { kind: 'reveal' | 'destroy'; at: number } | null = null;
   private playing: { start: number; before: HTMLCanvasElement; stepMs: number; fade: boolean } | null = null;
   private timeline = h('div', { class: 'ow-timeline' });
   showGrid = false;
@@ -559,6 +563,8 @@ export class OverworldView {
     if (e.target !== this.scroller && e.target !== this.canvas) return;
     const rc = this.scroller.getBoundingClientRect();
     if (e.clientX - rc.left > this.scroller.clientWidth || e.clientY - rc.top > this.scroller.clientHeight) return;
+    // a reveal or destroy being added: the tile clicked
+    if (this.eventPick && this.eventPick.at < 0 && e.button === 0) { const p = this.cell(e, 16); this.pickEventCell(p.x, p.y); return; }
     const c = this.cell(e);
     // (links and moved starts are written with the submap of their tiles: not before the submaps' views are known)
     if ((this.mode === 'links' || this.mode === 'sprites') && !this.views) return;
@@ -709,6 +715,11 @@ export class OverworldView {
     const b = this.brush;
     this.scroller.title = ''; // the kind of the path tile under the mouse
     this.statusStats.textContent = b.kind === this.mode ? `Brush ${b.w}×${b.h}` : '';
+    if (this.eventPick) {
+      this.statusText.textContent = this.eventPick.at < 0 ? `Click the tile the event ${this.eventPick.kind === 'reveal' ? 'reveals' : 'destroys'} · Esc cancels`
+        : 'Click the tile it becomes in the layer 1 sheet · Esc cancels';
+      return;
+    }
     if (this.mode === 'sprites' && !c) {
       this.statusText.textContent = 'Click: select a sprite, a start position (M, L) or a Koopa Kid\'s place (K1–K3) · Drag moves it (8 pixels, 1 with Shift) · Delete empties a sprite slot';
       return;
@@ -776,6 +787,7 @@ export class OverworldView {
     this.stopPlay();
     this.event = e;
     this.hoverStep = null;
+    this.eventPick = null;
     storeEvent(this.app.romName, e);
     this.syncEvent();
     this.buildBar();
@@ -815,8 +827,12 @@ export class OverworldView {
   }
 
   // the steps under the map: the animated ones in their order (drag to reorder), the silent ones, the layer 1
-  // changes; hovering one outlines its tiles
+  // changes, the tile the event reveals and those it destroys; hovering one outlines its tiles
+  // (what it reads watched too: built again on its own after the last sync)
   buildTimeline(): void {
+    this.watch.add(() => this.buildTimelineNow());
+  }
+  private buildTimelineNow(): void {
     const ev = this.ev, e = this.event;
     this.timeline.classList.toggle('show', !!ev);
     if (!ev) { this.timeline.replaceChildren(); return; }
@@ -860,17 +876,123 @@ export class OverworldView {
         l1.length ? h('div', { class: 'ow-step silent', ...hover('l1', 0),
           title: 'Layer 1 tiles the event changes (paint layer 1 while the event is chosen): written at once when it ends, shown when the map is loaded again – for other submaps and tiles not seen (paths)' },
         `Layer 1: ${l1.length} tile${l1.length > 1 ? 's' : ''}${l1Here < l1.length ? ` (${l1Here} here)` : ''}`) : null),
+      h('div', { class: 'ow-steps' }, ...this.tileChanges(hover)),
     );
+  }
+
+  // the tile the event reveals and those it destroys, each with a remove button (a click shows the tile), "+ Reveal"
+  // and "+ Destroy" – or, while one is added, what to pick
+  private tileChanges(hover: (kind: StepKind, k: number) => object): (HTMLElement | null)[] {
+    const rom = this.app.rom, e = this.event, pick = this.eventPick;
+    if (pick) {
+      const at = pick.at, into = at >= 0 ? revealedTile(rom, this.l1[at]) : -1;
+      return [
+        h('span', { class: 'hint' }, at < 0 ? `Click the tile on the map the event ${pick.kind === 'reveal' ? 'reveals' : 'destroys'}`
+          : `Pick in the layer 1 sheet the tile ${l1Hex(this.l1[at])} at ${cellText(at)} becomes when revealed`),
+        at >= 0 && into >= 0 ? h('button', { title: 'Reveal it into what the reveal list turns its tile into', onclick: () => this.pickReveal(into) }, `Becomes ${l1Hex(into)} (as the reveal list has it)`) : null,
+        h('button', { title: 'Add nothing (Esc)', onclick: () => this.cancelEventPick() }, 'Cancel'),
+      ];
+    }
+    const reveal = eventReveal(rom, e), destroys = hasDestroyPatch(rom) ? eventDestroys(rom, e) : [];
+    const entry = (kind: StepKind, k: number, i: number, text: string, title: string, what: string, remove: () => void) =>
+      h('div', { class: 'ow-step silent ow-tile-change', title: `${title} – click to show it`, ...hover(kind, k), onclick: () => this.showTile(i) }, text,
+        h('button', { class: 'link-btn', title: `The event no longer ${what} it`, onclick: (ev: MouseEvent) => { ev.stopPropagation(); this.tileEdit(`no longer ${what} ${cellText(i)}`, remove); } }, '×'));
+    const into = reveal >= 0 ? revealedTile(rom, this.l1[reveal]) : -1;
+    return [
+      reveal >= 0 ? entry('reveal', 0, reveal, `Reveals tile at ${cellText(reveal)}: ${l1Hex(this.l1[reveal])} → ${into < 0 ? '(not in the reveal list)' : l1Hex(into)}`,
+        'The tile the event reveals: turned into its counterpart of the reveal list when the event passes', 'reveals', () => removeReveal(rom, e)) : null,
+      ...destroys.map((i, k) => entry('destroy', k, i, `Destroys tile ${l1Hex(this.l1[i])} at ${cellText(i)}`,
+        'A tile the event destroys (a castle, fortress or switch palace collapsing) when it passes', 'destroys', () => removeDestroy(rom, e, i))),
+      h('button', { title: 'The event reveals a tile: click it on the map, then pick what it becomes in the layer 1 sheet (an event reveals one tile)', onclick: () => this.startEventPick('reveal') }, '+ Reveal'),
+      hasDestroyPatch(rom) ? h('button', { title: 'The event destroys a tile (a castle, fortress or switch palace): click it on the map (an event destroys one tile, 0x18 in all)', onclick: () => this.startEventPick('destroy') }, '+ Destroy') : null,
+    ];
+  }
+  // a reveal or destroy edit of the chosen event, one ROM edit; refused with the reason
+  private tileEdit(what: string, f: () => void): boolean {
+    try {
+      this.app.romEdit(`${eventTitle(this.ev!.runners, this.event)}: ${what}`, f);
+      return true;
+    } catch (err) {
+      toast(`Not changed: ${err instanceof Error ? err.message : err}`, 'error');
+      return false;
+    }
+  }
+  // "+ Reveal", "+ Destroy": a click on the map picks the tile (the game's limits refused first, with the reason); a
+  // reveal's tile is then picked in the layer 1 sheet (the layer 1 mode shown)
+  private startEventPick(kind: 'reveal' | 'destroy'): void {
+    const rom = this.app.rom, why = kind === 'reveal' ? revealRefusal(rom, this.event) : destroyRefusal(rom, this.event);
+    if (why) { toast(`Not added: ${why}`, 'error'); return; }
+    this.eventPick = { kind, at: -1 };
+    this.buildTimeline();
+    this.updateStatus();
+  }
+  // Esc: no reveal or destroy added; false: none being added
+  cancelEventPick(): boolean {
+    if (!this.eventPick) return false;
+    this.eventPick = null;
+    this.buildTimeline();
+    this.updateStatus();
+    this.buildSide();
+    return true;
+  }
+  // the tile clicked on the map while a reveal or destroy is added (x, y: layer 1 cell); a destroy is set where the
+  // game destroys it (a castle's level tile: its top, destroySettingAt)
+  private pickEventCell(x: number, y: number): void {
+    const pick = this.eventPick!, rom = this.app.rom;
+    if (x < 0 || y < 0 || x >= 32 || y >= 32) return;
+    const i = l1Index(this.region, x, y);
+    if (pick.kind === 'reveal') {
+      if (!i) { toast(NO_REVEAL_AT_0, 'error'); return; }
+      this.eventPick = { kind: 'reveal', at: i };
+      if (this.mode !== 'l1') this.bar.querySelector<HTMLButtonElement>('.btn-group button.ow-l1')?.click(); else this.buildSide();
+      this.buildTimeline();
+      this.updateStatus();
+      return;
+    }
+    this.eventPick = null;
+    this.tileEdit(`destroys ${cellText(i)}`, () => addDestroy(rom, this.event, i, this.shown.l1));
+    this.buildTimeline();
+    this.updateStatus();
+  }
+  // the tile the revealed one becomes, picked in the layer 1 sheet (or as the reveal list has it)
+  private pickReveal(into: number): void {
+    const at = this.eventPick?.at ?? -1;
+    if (at < 0) return;
+    this.eventPick = null;
+    const t = this.l1[at];
+    if (this.tileEdit(`reveals ${cellText(at)}`, () => addReveal(this.app.rom, this.event, at, into)) && readL1(this.app.rom)[at] !== t)
+      toast(`Tile ${l1Hex(t)} at ${cellText(at)} does not become ${l1Hex(into)}: it is now tile ${l1Hex(readL1(this.app.rom)[at])} on the map before events, which the reveal list turns into it.`);
+    this.buildTimeline();
+    this.updateStatus();
+    this.buildSide();
   }
 
   // the tiles of the step hovered in the timeline, outlined
   paintStep(lw: number): void {
-    const ev = this.ev, s = this.hoverStep;
-    if (!ev || !s) return;
+    const ev = this.ev, s = this.hoverStep, at = this.eventPick?.at ?? -1;
+    if (!ev || (!s && at < 0)) return;
     const ctx = this.canvas.getContext('2d')!;
     ctx.strokeStyle = '#ffd34c';
     ctx.fillStyle = 'rgba(255,211,76,0.25)';
     ctx.lineWidth = 1.5 * lw;
+    // (the tile a reveal is being added to)
+    if (at >= 0 && (at >= 0x400) === (this.region === 1)) { const p = l1XY(at); ctx.strokeRect(p.x * 16, p.y * 16, 16, 16); }
+    if (!s) return;
+    if (s.kind === 'reveal' || s.kind === 'destroy') {
+      const rom = this.app.rom, i = s.kind === 'reveal' ? eventReveal(rom, this.event) : eventDestroys(rom, this.event)[s.k];
+      if (i === undefined || i < 0) return;
+      // (a destroy: the tiles it changes too, a castle's level tile below its top)
+      // (the tile as the game may see it: before events, else as shown at the event progress)
+      const o = l1XY(i), effects = s.kind === 'destroy' ? destroyEffects(rom) : [];
+      const t = [this.l1[i], this.shown.l1[i]].find((v) => effects[v]?.length);
+      const cells = t === undefined ? [] : effects[t].map((c) => ({ x: o.x + c.dx, y: o.y + c.dy }));
+      if ((i >= 0x400) !== (this.region === 1)) return;
+      for (const c of [o, ...cells]) {
+        ctx.fillRect(c.x * 16, c.y * 16, 16, 16);
+        ctx.strokeRect(c.x * 16, c.y * 16, 16, 16);
+      }
+      return;
+    }
     if (s.kind === 'l1') {
       for (const i of eventL1Tiles(ev.data, this.event)) {
         if ((i >= 0x400) !== (this.region === 1)) continue;
@@ -948,6 +1070,7 @@ export class OverworldView {
       if (this.mode === m) return;
       this.mode = m;
       this.levelTiles.cancel();
+      if (m !== 'l1' && (this.eventPick?.at ?? -1) >= 0) this.cancelEventPick(); // (the tile a reveal becomes is picked in the layer 1 sheet)
       this.buildLeft(); // (levels without a level tile are dragged onto the map in the levels mode)
       if (isLayerMode(m) && this.brush.kind !== m) this.brush = { kind: m, w: 1, h: 1, entries: [m === 'l1' ? 0x56 : 0] };
       this.buildBar();
@@ -1008,6 +1131,7 @@ export class OverworldView {
     // (Esc with any modifier: a stroke is never left running)
     if (k === 'escape' && this.brushDrag.cancel()) { this.paint(); return true; }
     if (k === 'escape' && this.levelTiles.cancel()) return true;
+    if (k === 'escape' && this.cancelEventPick()) return true;
     if (e.ctrlKey || e.metaKey || e.altKey) return false;
     if (k === 'escape' && this.mode === 'sprites' && this.sprites.unpick()) return true;
     if (k === 'escape' && this.mode === 'links' && this.links.cancelPending()) return true;
@@ -1312,48 +1436,41 @@ export class OverworldView {
     ];
   }
 
-  // the events that reveal layer 1 tile i (Lunar Magic's "reveal this tile on events"): one tile per event
+  // an event as a link choosing it in "Map after" (where its reveals and destroys are edited)
+  private eventLink(names: Map<number, string>, e: number): HTMLElement {
+    return h('button', { class: 'link-btn', title: 'Show the map after this event – its reveals and destroys are edited in its timeline', onclick: () => this.setEvent(e) }, this.eventLabel(names, e));
+  }
+
+  // the events that reveal layer 1 tile i (Lunar Magic's "reveal this tile on events"), each a link to the event:
+  // reveals are added and removed in the event's timeline
   revealSettings(i: number): HTMLElement[] {
-    const rom = this.app.rom, { x, y } = l1XY(i), t = this.l1[i], into = revealedTile(rom, t), names = eventNames(rom);
-    if (!i) return [h('div', { class: 'hint' }, 'The top left tile of the main map can\'t be revealed (0 stands for none).')];
-    const evs = revealEvents(rom, i);
-    const set = (list: number[]) => this.app.romEdit(`Tile ${hex(x, 2)},${hex(y, 2)}: revealed on events`, () => setRevealEvents(rom, i, list));
-    const where = (k: number) => { const p = l1XY(k); return `${k >= 0x400 ? 'submaps' : 'main map'} ${hex(p.x, 2)},${hex(p.y, 2)}`; };
-    const add = select([[-1, 'Add an event…'], ...Array.from({ length: revealEventCount(rom) }, (_, e) => e).filter((e) => !evs.includes(e))
-      .map((e) => { const k = revealAt(rom, e); return [e, `${this.eventLabel(names, e)}${k ? ` (reveals ${where(k)})` : ''}`] as [number, string]; })], -1,
-    (e) => { if (e >= 0) set([...evs, e].sort((a, b) => a - b)); });
-    add.title = 'An event reveals one tile: one that reveals another tile moves here';
+    const rom = this.app.rom, t = this.l1[i], into = revealedTile(rom, t), names = eventNames(rom);
+    const evs = i ? revealEvents(rom, i) : [];
+    if (!evs.length) return [h('div', { class: 'hint' }, 'Revealed on no event (an event reveals a tile: "+ Reveal" in its timeline, Map after).')];
     return [
-      h('div', { class: 'prop' }, h('label', null, 'Revealed on'), add),
-      ...evs.map((e) => h('div', { class: 'row' }, h('span', { class: 'hint' }, this.eventLabel(names, e)),
-        h('button', { title: 'This event no longer reveals the tile', onclick: () => set(evs.filter((v) => v !== e)) }, '×'))),
-      ...(!evs.length ? [] : [into < 0 ? h('div', { class: 'hint warn-text' }, `⚠ Tile ${l1Hex(t)} is not in the reveal list: revealing it changes nothing.`)
-        : h('div', { class: 'hint' }, `Revealed, tile ${l1Hex(t)} becomes ${l1Hex(into)}.`)]),
+      h('div', { class: 'prop' }, h('label', null, 'Revealed on'), h('div', null, ...evs.map((e) => h('div', null, this.eventLink(names, e))))),
+      into < 0 ? h('div', { class: 'hint warn-text' }, `⚠ Tile ${l1Hex(t)} is not in the reveal list: revealing it changes nothing.`)
+        : h('div', { class: 'hint' }, `Revealed, tile ${l1Hex(t)} becomes ${l1Hex(into)}.`),
     ];
   }
 
-  // the event destroying tile i (Lunar Magic's "Destroy Level Tile Settings") – on a tile the game destroys (what it
-  // does learned by emulation), also on the level tile below a castle's top; one tile per event
+  // the events destroying tile i (Lunar Magic's "Destroy Level Tile Settings") – on a tile the game destroys (what it
+  // does learned by emulation), also on the level tile below a castle's top – each a link to the event: destroys are
+  // added and removed in the event's timeline
   destroySettings(i: number): HTMLElement[] {
-    const rom = this.app.rom, effects = destroyEffects(rom), names = eventNames(rom);
+    const rom = this.app.rom;
+    if (!hasDestroyPatch(rom)) return [];
+    const effects = destroyEffects(rom), names = eventNames(rom);
     const { at: j, tile: t } = destroySettingAt(rom, this.l1, this.shown.l1, i);
-    if (j < 0) return [];
-    const { x, y } = l1XY(j), ev = destroyEvent(rom, j);
-    const where = (k: number) => { const p = l1XY(k); return `${k >= 0x400 ? 'submaps' : 'main map'} ${hex(p.x, 2)},${hex(p.y, 2)}`; };
-    const other = new Map(readDestroyList(rom).filter((d) => d.event !== NO_EVENT && d.tile !== j).map((d) => [d.event, d.tile]));
-    const pick = select([[NO_EVENT, 'No event'], ...Array.from({ length: OW_EVENTS }, (_, e) => [e, `${this.eventLabel(names, e)}${other.has(e) ? ` (destroys ${where(other.get(e)!)})` : ''}`] as [number, string])], ev, (v) => {
-      try {
-        this.app.romEdit(`Tile ${hex(x, 2)},${hex(y, 2)}: destroyed on event`, () => setDestroyEvent(rom, j, v));
-      } catch (err) { toast(`Not set: ${err instanceof Error ? err.message : err}`, 'error'); this.buildProps(); }
-    });
-    pick.title = 'The event that destroys this tile when it passes (as castles and fortresses): an event destroys one tile, one destroying another moves here';
+    const evs = j < 0 ? [] : readDestroyList(rom).filter((d) => d.event !== NO_EVENT && d.tile === j).map((d) => d.event);
+    if (!evs.length) return j < 0 ? [] : [h('div', { class: 'hint' }, 'Destroyed on no event (an event destroys a tile: "+ Destroy" in its timeline, Map after).')];
     const side = (c: { dx: number; dy: number }) => (c.dy > 0 ? 'below' : c.dy < 0 ? 'above' : c.dx > 0 ? 'right of it' : 'left of it');
     const changes = t === undefined ? [] : effects[t].map((c) => `${c.dx || c.dy ? `the tile ${side(c)} ` : ''}becomes ${l1Hex(c.tile)}`);
     return [
-      h('div', { class: 'prop' }, h('label', null, 'Destroyed on'), pick),
-      j !== i ? h('div', { class: 'hint' }, `The setting of the tile at ${where(j)}, whose destroy changes this one too (a castle's top).`) : null,
-      ev !== NO_EVENT && t !== undefined ? h('div', { class: 'hint' }, `Destroyed, tile ${l1Hex(t)} ${changes.join(', ')}.`) : null,
-      ev !== NO_EVENT && t === undefined ? h('div', { class: 'hint warn-text' }, '⚠ The game destroys no such tile: destroying it changes nothing.') : null,
+      h('div', { class: 'prop' }, h('label', null, 'Destroyed on'), h('div', null, ...evs.map((e) => h('div', null, this.eventLink(names, e))))),
+      j !== i ? h('div', { class: 'hint' }, `Set on the tile at ${cellText(j)}, whose destroy changes this one too (a castle's top).`) : null,
+      t !== undefined ? h('div', { class: 'hint' }, `Destroyed, tile ${l1Hex(t)} ${changes.join(', ')}.`)
+        : h('div', { class: 'hint warn-text' }, '⚠ The game destroys no such tile: destroying it changes nothing.'),
     ].filter((v): v is HTMLDivElement => !!v);
   }
 
@@ -1396,6 +1513,8 @@ export class OverworldView {
     };
     draw(null);
     attachRectPick(c, cols, rows, draw, (r) => {
+      // (a reveal being added: the tile it becomes)
+      if (this.mode === 'l1' && (this.eventPick?.at ?? -1) >= 0) { this.pickReveal(sheetValue(r.x, r.y)); return; }
       this.brush = { kind: this.mode === 'l2' ? 'l2' : 'l1', w: r.w, h: r.h, entries: Array.from({ length: r.w * r.h }, (_, j) => sheetValue(r.x + (j % r.w), r.y + Math.floor(j / r.w))) };
       this.buildSide();
     });

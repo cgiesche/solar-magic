@@ -17,6 +17,7 @@ import { hasMessages } from '../core/messages.ts';
 import { levelName, hasLevelName } from '../core/levelnames.ts';
 import { mainTranslevel } from '../core/level.ts';
 import { l1Hex } from '../core/owl1sheet.ts';
+import { cellText } from '../core/oweventtiles.ts';
 import { hex } from '../core/names.ts';
 
 // the level picker's note for a level no tile enters: what a tile choosing it gets (translevelUse)
@@ -26,10 +27,7 @@ function freeNote(rom: Rom, tl: number): string {
   return has.length ? `free · has ${has.join(', ')}` : 'free';
 }
 // where layer 1 tile k (l1Index) is: its map region and cell
-export function tilePlace(k: number): string {
-  const p = l1XY(k);
-  return `${k >= 0x400 ? 'submaps' : 'main map'} ${hex(p.x, 2)},${hex(p.y, 2)}`;
-}
+export const tilePlace = cellText;
 const levelHex = (tl: number) => hex(translevelToLevel(tl), 3);
 
 export class LevelTileLayer {

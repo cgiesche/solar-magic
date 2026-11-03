@@ -202,13 +202,13 @@ Up to which event the overworld is shown as passed (events applied in their numb
 _Avoid_: events passed, after all events
 
 **Reveal**:
-A layer 1 tile that changes into another when an event passes over it (Lunar Magic's reveal list: which tile becomes which). An event reveals at most one tile, a tile can be revealed by several events; set on the tile, any layer 1 tile.
+A layer 1 tile that changes into another when an event passes over it (Lunar Magic's reveal list: which tile becomes which). An event reveals at most one tile, a tile can be revealed by several events; any layer 1 tile. Edited with the event (its timeline in "Map after": the tile clicked on the map, then what it becomes picked in the layer 1 sheet – the cell gets the tile the reveal list turns into it); the tile's properties name the events. Stays with its cell when a level tile moves.
 
 **Reveal walk**:
 What the overworld does when a level's exit is first passed, after the exit's event: it walks the path from the level tile in the direction the exit enables to the next level tile and enables there the direction leading back. The game skips it for some translevels (in the clean game Yoshi's House and the switch palaces): their exits still run their event and enable their direction, but the level tile the path leads to gets no way back. Which ones is learned by emulation, not from the game's list.
 
 **Destroyed level tile**:
-A layer 1 tile an event destroys when it passes (a castle, fortress or switch palace collapsing; a castle's top and the tile below it). One tile per event, 0x18 in all; set on the tile it destroys. What destroying a tile does is the game's code's.
+A layer 1 tile an event destroys when it passes (a castle, fortress or switch palace collapsing; a castle's top and the tile below it). One tile per event, 0x18 in all; set on the tile it destroys (a castle's: its top), edited with the event (its timeline), the tile's properties naming the events. Moves with its level tile (a castle moved moves whole). What destroying a tile does is the game's code's.
 _Avoid_: collapse (that is the animation), destruction event
 
 **Layer 1 change**:

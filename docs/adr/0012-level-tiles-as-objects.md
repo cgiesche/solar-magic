@@ -20,4 +20,4 @@ Which tiles are level tiles and which tile Mario stops on are the path kinds' (l
 
 ## Consequences
 
-The reveal and destroy settings are per cell: they stay where they are when a level tile moves (an event destroying or revealing the old cell then acts on the tile swapped there). Level tiles changed by events (layer 1 changes) are still edited by painting layer 1 as after the event.
+Reveals are per cell: they stay where they are when a level tile moves (they belong to the path; an event revealing the old cell then acts on the tile swapped there). Destroys move with the level tile (#339): the collapsing castle is the level. A destroy set on the level tile moves with it; a castle moves whole – the tile whose destroy changes the level tile (its top above it) swaps with the cell as far from the target, its destroy with it (both stay when that cell is off the map or holds a level tile or a destroyed tile – another castle's top only when the two castles swap). Two level tiles swapped take their destroys along each. Level tiles changed by events (layer 1 changes) are still edited by painting layer 1 as after the event.
