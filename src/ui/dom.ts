@@ -213,10 +213,15 @@ export function clearLog(): void {
   for (const fn of logListeners) fn(null, false);
 }
 
+let toastStack: HTMLElement | null = null;
 export function toast(msg: string, kind: 'info' | 'error' = 'info'): void {
   log(msg, kind);
+  // one column for all toasts: a toast shown while others are visible goes below them instead of on top
+  if (!toastStack?.isConnected) toastStack = document.body.appendChild(h('div', { class: 'toast-stack' }));
   const t = h('div', { class: `toast ${kind}` }, msg);
-  document.body.appendChild(t);
+  toastStack.appendChild(t);
+  // a burst (Ctrl+Z held, many errors) keeps only the newest few on screen; the log has them all
+  while (toastStack.childElementCount > 5) toastStack.firstElementChild!.remove();
   setTimeout(() => t.classList.add('show'), 10);
   setTimeout(() => { t.classList.remove('show'); setTimeout(() => t.remove(), 300); }, kind === 'error' ? 6000 : 2500);
 }
