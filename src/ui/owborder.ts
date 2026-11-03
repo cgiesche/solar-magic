@@ -1,9 +1,10 @@
 // The overworld's border in the Game workspace (#330): the screen's layer 3 of a map (the main map or a submap), 32x28
 // 8x8 tiles fixed on the screen, in front of the screen as the game shows it after the load (the map, the sprites,
-// Mario; dimmed by default). Painted with layer 3's 8x8 tiles (l3picker.ts) as the title screen is: each stroke one ROM
-// edit into the map's LT3 file (core/owlayer3.ts), a new one where it has none. The cells the game writes the lives
-// and the level name over are hatched and not painted. The bar says where the border is saved and who shares the file;
-// a map can get a file of its own, take another map's border or go back to the game's.
+// Mario; dimmed by default). Painted with layer 3's 8x8 tiles (l3picker.ts) as every brush editor paints
+// (brushsurface.ts, ADR 0011): each stroke one ROM edit into the map's LT3 file (core/owlayer3.ts), a new one where
+// it has none. The cells the game writes the lives and the level name over are hatched and not painted. The bar says
+// where the border is saved and who shares the file; a map can get a file of its own, take another map's border or
+// go back to the game's.
 
 import type { App, Brush } from './app.ts';
 import { h, toast } from './dom.ts';
@@ -19,6 +20,7 @@ import {
 } from '../core/owlayer3.ts';
 import { layer3Picker } from './l3picker.ts';
 import { fillPixels, hidePickerPreview } from './pickerview.ts';
+import { BrushSurface, PAINT_HINT, PAINT_TITLE } from './brushsurface.ts';
 
 const W = OW_L3_COLS * 8, H = OW_L3_ROWS * 8;
 const GAME_CELL = 'The game writes the lives and the level name here when the overworld loads: not painted';
@@ -26,6 +28,7 @@ const OUTSIDE_FILE = 'Not in the part of the screen the map\'s layer 3 tilemap f
 
 export class BorderView {
   canvas = h('canvas', { class: 'game-canvas', width: W, height: H });
+  surface: BrushSurface;
   side = h('div', { class: 'panel game-pick' });
   bar: HTMLElement;
   map = 0;
@@ -38,8 +41,6 @@ export class BorderView {
   private stroke = new Map<number, number>(); // tilemap entry → word: painted, not yet shown by a load
   private brush: Brush = { w: 1, h: 1, tiles: [0] };
   private brushSet = false; // chosen by the user (else the blank tile, once a load comes)
-  private hover: { x: number; y: number } | null = null;
-  private drag: { kind: 'paint' | 'pick'; x0: number; y0: number; x1: number; y1: number } | null = null;
   private pickPixels = 0;
   private fileLine = h('span', { class: 'hint' });
   private actions = h('span');
@@ -55,24 +56,42 @@ export class BorderView {
       h('label', { class: 'toggle', title: 'The map as the game shows it once the special world is passed: its second set of colors, the border\'s too' }, this.specialBox, 'After the special world'),
       h('label', { class: 'toggle', title: 'The screen behind the border dimmed, so that the border stands out' }, this.dimBox, 'Dim the map'),
       h('span', { class: 'sep' }), this.fileLine, this.actions);
-    this.canvas.addEventListener('contextmenu', (e) => e.preventDefault());
-    this.canvas.addEventListener('mousedown', (e) => this.onDown(e));
-    this.canvas.addEventListener('mousemove', (e) => this.onMove(e));
-    this.canvas.addEventListener('mouseleave', () => { this.hover = null; this.canvas.title = ''; this.paint(); this.setStatus(''); });
-    window.addEventListener('mouseup', () => this.onUp());
+    this.surface = new BrushSurface(this.canvas, {
+      cells: { w: OW_L3_COLS, h: OW_L3_ROWS },
+      cellAt: (px, py) => (this.r && px >= 0 && py >= 0 && px < W && py < H ? { x: Math.floor(px / 8), y: Math.floor(py / 8) } : null),
+      box: (q) => ({ x: q.x * 8, y: q.y * 8, w: q.w * 8, h: q.h * 8 }),
+      brush: () => this.brush,
+      whyNot: (x, y) => this.refusal(x, y),
+      tell: (why) => toast(why),
+      stamp: (x, y) => this.stamp(x, y),
+      end: () => this.save(),
+      cancel: () => { this.stroke.clear(); this.paint(); },
+      pick: (q) => {
+        this.brush = { w: q.w, h: q.h, tiles: Array.from({ length: q.w * q.h }, (_, k) => Math.max(0, this.word(q.x + (k % q.w), q.y + Math.floor(k / q.w)))) };
+        this.brushSet = true;
+        this.buildPicker();
+      },
+      changed: () => this.paint(),
+      moved: (c) => { this.canvas.title = c ? this.refusal(c.x, c.y) : ''; this.updateStatus(c); },
+    });
     new ResizeObserver(() => requestAnimationFrame(() => { if (this.pickPixels && fillPixels(this.side.clientWidth, 128) !== this.pickPixels) this.buildPicker(); })).observe(this.side);
   }
 
   private get connected(): boolean { return this.canvas.isConnected; }
+  // what is shown in the workspace's scroller
+  get root(): HTMLElement { return this.surface.root; }
+  // Esc: a stroke or pick in progress cancelled; whether it was taken
+  key(e: KeyboardEvent): boolean { return this.surface.key(e); }
 
   setZoom(z: number): void {
     this.canvas.style.width = `${W * z}px`;
     this.canvas.style.height = `${H * z}px`;
+    this.surface.frames();
   }
 
   // shows map `map`'s border (special: after the special world)
   show(map: number, special = this.special): void {
-    if (map !== this.map) { this.stroke.clear(); this.drag = null; }
+    if (map !== this.map) { this.stroke.clear(); this.surface.drop(); }
     this.map = map;
     this.special = special;
     this.specialBox.checked = special;
@@ -86,7 +105,7 @@ export class BorderView {
     const loaded = (r: OwRender) => {
       if (this.rKey !== key || !this.connected) return;
       // (the strokes are shown by the load after their ROM edit; one being painted stays)
-      if (!this.drag) this.stroke.clear();
+      if (!this.surface.painting) this.stroke.clear();
       this.r = r;
       if (!this.brushSet) this.brush = { w: 1, h: 1, tiles: [blankTile(r.vram, layer3CharBase(r.ppuRegs))] };
       this.buildPicker();
@@ -134,21 +153,9 @@ export class BorderView {
       ctx.font = '10px sans-serif';
       ctx.fillText(`Loading ${MAP_NAMES[this.map]}…`, 12, 20);
     }
-    const c = this.drag?.kind === 'pick' ? this.rect(this.drag) : this.hover ? { x: this.hover.x, y: this.hover.y, w: this.brush.w, h: this.brush.h } : null;
-    if (c) {
-      ctx.strokeStyle = this.drag?.kind === 'pick' ? '#4cc2ff' : 'rgba(255,255,0,0.9)';
-      ctx.strokeRect(c.x * 8 + 0.5, c.y * 8 + 0.5, c.w * 8 - 1, c.h * 8 - 1);
-    }
+    this.surface.frames();
   }
 
-  private cellAt(e: MouseEvent): { x: number; y: number } | null {
-    const rc = this.canvas.getBoundingClientRect();
-    const x = Math.floor((e.clientX - rc.left) / rc.width * OW_L3_COLS), y = Math.floor((e.clientY - rc.top) / rc.height * OW_L3_ROWS);
-    return x >= 0 && y >= 0 && x < OW_L3_COLS && y < OW_L3_ROWS ? { x, y } : null;
-  }
-  private rect(d: { x0: number; y0: number; x1: number; y1: number }) {
-    return { x: Math.min(d.x0, d.x1), y: Math.min(d.y0, d.y1), w: Math.abs(d.x1 - d.x0) + 1, h: Math.abs(d.y1 - d.y0) + 1 };
-  }
   // the word shown at cell (x, y): painted, else the load's (-1: none)
   private word(x: number, y: number): number {
     const r = this.r, i = r ? owLayer3Grid(r).entry(x, y) : -1;
@@ -170,42 +177,10 @@ export class BorderView {
     return r && (i < 0 || !lt3Covers(submapLt3Target(this.app.rom, this.map).place, i)) ? OUTSIDE_FILE : '';
   }
 
-  // left: paint the brush (a stroke), right drag: take the border's tiles as the brush (as on the title screen)
-  private onDown(e: MouseEvent): void {
-    const c = this.cellAt(e);
-    if (!c || !this.r) return;
-    e.preventDefault();
-    if (e.button === 2) { this.drag = { kind: 'pick', x0: c.x, y0: c.y, x1: c.x, y1: c.y }; this.paint(); return; }
-    if (e.button !== 0) return;
-    const no = this.refusal(c.x, c.y);
-    if (no) { toast(no); return; }
-    this.drag = { kind: 'paint', x0: c.x, y0: c.y, x1: c.x, y1: c.y };
-    if (this.stamp(c.x, c.y)) this.paint();
-  }
-  private onMove(e: MouseEvent): void {
-    const c = this.cellAt(e);
-    this.hover = c;
-    if (c && this.drag && (c.x !== this.drag.x1 || c.y !== this.drag.y1)) {
-      this.drag.x1 = c.x; this.drag.y1 = c.y;
-      if (this.drag.kind === 'paint') this.stamp(c.x, c.y);
-    }
-    this.canvas.title = c ? this.refusal(c.x, c.y) : '';
-    this.paint();
-    this.updateStatus();
-  }
-  private onUp(): void {
-    const d = this.drag, r = this.r;
-    if (!d || !r) return;
-    this.drag = null;
-    if (d.kind === 'pick') {
-      const q = this.rect(d);
-      this.brush = { w: q.w, h: q.h, tiles: Array.from({ length: q.w * q.h }, (_, k) => Math.max(0, this.word(q.x + (k % q.w), q.y + Math.floor(k / q.w)))) };
-      this.brushSet = true;
-      this.buildPicker();
-      this.paint();
-      return;
-    }
-    if (!this.stroke.size) return;
+  // the stroke saved: one ROM edit into the map's file
+  private save(): void {
+    const r = this.r;
+    if (!r || !this.stroke.size) return;
     const rom = this.app.rom, map = this.map, tilemap = submapLayer3(rom, map, r.vram);
     for (const [i, v] of this.stroke) tilemap[i] = v;
     this.edit(`Paint the border of ${MAP_NAMES[map]}`, () => saveSubmapLayer3(rom, map, tilemap));
@@ -222,11 +197,10 @@ export class BorderView {
     }
   }
 
-  private updateStatus(): void {
-    const c = this.hover;
-    if (!c) { this.setStatus(''); return; }
+  private updateStatus(c: { x: number; y: number } | null): void {
+    if (!c) { this.setStatus(PAINT_HINT); return; }
     const w = this.word(c.x, c.y), no = this.refusal(c.x, c.y);
-    this.setStatus(`Column ${c.x}, row ${c.y}${w >= 0 ? `: tile ${layer3WordText(w)}` : ''} – ${no || 'click: paint, right drag: take tiles as the brush'}`);
+    this.setStatus(`Column ${c.x}, row ${c.y}${w >= 0 ? `: tile ${layer3WordText(w)}` : ''} – ${no || PAINT_HINT}`);
   }
 
   // where the border is saved, and what can be done with its file
@@ -261,14 +235,14 @@ export class BorderView {
   // layer 3's 8x8 tiles as the brush (l3picker.ts)
   private buildPicker(): void {
     hidePickerPreview(this.side);
-    this.side.replaceChildren(h('div', { class: 'panel-title' }, 'Layer 3 tiles'));
+    this.side.replaceChildren(h('div', { class: 'panel-title' }, 'Paint', h('span', { class: 'hint' }, PAINT_TITLE)));
     this.pickPixels = 0;
     const r = this.r;
     if (!r) { this.side.append(h('div', { class: 'hint' }, 'Loading the overworld…')); return; }
     const w = this.side.clientWidth;
     layer3Picker(this.side, { vram: r.vram, cgram: r.cgram, charBase: layer3CharBase(r.ppuRegs) }, this.brush, (nb) => { this.brush = nb; this.buildPicker(); }, {
       pixels: this.pickPixels = fillPixels(w, 128), shown: w / 128, from: 'the border',
-      hint: 'click or drag on the border to paint, right drag there takes its tiles. Each stroke is saved into the map\'s layer 3 tilemap file (see the bar). Hatched: the lives and the level name, which the game writes there.',
+      hint: 'click tiles here or on the border (drag: block). Each stroke is saved into the map\'s layer 3 tilemap file (see the bar). Hatched: the lives and the level name, which the game writes there.',
     });
   }
 }

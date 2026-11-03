@@ -480,6 +480,7 @@ function buildUi(app: App): { start: (at: NavLoc | null) => Promise<void> } {
       return;
     }
     if (workspace === 'game') {
+      if (game?.key(e)) { e.preventDefault(); return; }
       if (k === 'Escape') void setWorkspace('level');
       return;
     }

@@ -232,6 +232,8 @@ input.invalid, input.invalid:focus { outline: 1px solid var(--danger); border-co
 /* the Game workspace (gameview.ts): the title screen at whole screen pixels per pixel */
 .game-scroller { padding: 16px; }
 .game-canvas { display: block; image-rendering: pixelated; cursor: crosshair; }
+.brush-surface { position: relative; width: max-content; }
+.brush-over { position: absolute; left: 0; top: 0; pointer-events: none; }
 .game-pick { flex: 1; min-height: 0; overflow-y: auto; }
 .level-sizer { pointer-events: none; }
 .statusbar { height: 24px; padding: 3px 8px; background: var(--panel); border-top: 1px solid var(--border); font-family: ui-monospace, monospace; font-size: 12px; white-space: nowrap; overflow: hidden; display: flex; gap: 16px; }
