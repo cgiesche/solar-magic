@@ -506,9 +506,16 @@ export class LevelEmulator {
   // init runs in the next frame like for a sprite from level data (which it is not: $161A = $FF)
   spawnSprite(slot: number, id: number, x: number, y: number): void {
     const w = this.snes.wram;
-    const num = id & 0xff;
+    let num = id & 0xff, status = 1;
+    // the shells DA–DD and DF: the game's loader ($02A8D4, $02A976) makes them sprites 04–07 / 09 in the
+    // stationary state (9) – their own numbers have no INIT or MAIN (a JSL into garbage)
+    if (id < 0x100 && num >= 0xda && num <= 0xdf && num !== 0xde) {
+      status = 9;
+      num = num - 0xda + 4;
+      if (w[RAM.specialWorld] & 0x80) num = num === 4 ? 7 : num === 5 ? 6 : num; // the special world's colours
+    }
     w[SPR.num + slot] = num;
-    w[SPR.status + slot] = 1;
+    w[SPR.status + slot] = status;
     setSpritePos(w, slot, x, y);
     w[SPR.loadIndex + slot] = 0xff;
     this.call(INIT_TABLES, slot);

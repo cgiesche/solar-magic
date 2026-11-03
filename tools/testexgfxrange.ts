@@ -117,9 +117,13 @@ check(MAX_GFX === 0xfff, 'ExGFX numbers go up to FFF');
   const rom = fresh();
   importGfxFile(rom, 0x80, pattern(0x1000, 17));
   importGfxFile(rom, 0x1c0, pattern(0x1000, 17));
-  const at = (num: number) => { withSlot(rom, LV, 'SP1', num); const emu = new LevelEmulator(rom); emu.boot(); return emu.load(LV); };
+  // compared at the same game frame ($13): the game animates tiles in SP1's VRAM by it, and how many frames a
+  // load takes depends on the file's decompression
+  const at = (num: number) => { withSlot(rom, LV, 'SP1', num); const emu = new LevelEmulator(rom); emu.boot(); return { r: emu.load(LV), s: emu.snes }; };
   const a = at(0x80), b = at(0x1c0), c = at(0xff);
-  check(a.ok && b.ok && same(a.vram, b.vram) && !same(a.vram, c.vram), 'SP1: ExGFX 1C0 as the same file under 80');
+  const t = (a.s.wram[0x13] + 4) & 0xff; // a few frames on: the loads end at most a frame or two apart
+  for (const e of [a, b, c]) while (e.s.wram[0x13] !== t) e.s.runFrame();
+  check(a.r.ok && b.r.ok && same(a.s.vram, b.s.vram) && !same(a.s.vram, c.s.vram), 'SP1: ExGFX 1C0 as the same file under 80');
 }
 
 // BG2 (VRAM $2000) from ExGFX 2A0
