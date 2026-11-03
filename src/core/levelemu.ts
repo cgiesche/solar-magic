@@ -13,7 +13,7 @@ import { RomReads, record, countReads, PAGE_SHIFT, type Recorded } from './romde
 import { findSpriteTables, spriteTablesHold } from './spritetables.ts';
 import { applyTriggers, type TriggerView } from './extrigger.ts';
 import { inputHash, levelInput } from './inputs.ts';
-import { GM, RAM, SPR, MAP_BASE, MAP_SIZE, MAP_HI, CDM16_FLAGS, getS16, set16, setSpritePos } from './ram.ts';
+import { GM, RAM, SPR, MAP_BASE, MAP_SIZE, MAP_HI, CDM16_FLAGS, MUSIC_FADE, getS16, set16, setSpritePos } from './ram.ts';
 
 export const OV_L1 = 0x0000; // overlay offsets
 export const OV_L2 = 0x4000;
@@ -257,6 +257,15 @@ export class LevelEmulator {
     if (ov.switchPalaces) for (let i = 0; i < 4; i++) w[RAM.switchPalaces + i] = 1;
     if (ov.onOffSwitch) w[RAM.onOff] = 1;
     if (ov.cdm16Flags) w.set(ov.cdm16Flags.subarray(0, CDM16_FLAGS[1]), CDM16_FLAGS[0] - 0x7e0000);
+    // with the sound unit emulated: as the overworld does on entering a level ($0491E0), the song playing is faded
+    // out for as long as the game's fade lasts before the level's music bank is uploaded. Still playing, the song
+    // would go on reading its data where the upload put the new bank's, which can crash the sound driver (silent,
+    // and every later upload waits for it: the overworld after dying stays black)
+    if (musicCall >= 0) {
+      w[RAM.musicRequest] = MUSIC_FADE;
+      w[RAM.gameMode] = GM.levelFade;
+      for (let f = 0; f < 120 && w[RAM.gameMode] === GM.levelFade; f++) s.runFrame();
+    }
     w[RAM.gameMode] = GM.levelLoad;
 
     // temporary pointer patches in the ROM image, taken back after the load: written past rom.w8, as they are

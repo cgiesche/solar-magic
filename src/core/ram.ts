@@ -12,6 +12,7 @@ export const GM = {
   overworldLoad: 0x0b, // fading into the overworld
   overworldReturn: 0x0c, // loading the overworld after a level
   overworld: 0x0e,
+  levelFade: 0x0f, // fading out the overworld to enter a level
   levelLoad: 0x11, // loading a level ("Mario Start!")
   level: 0x14,
 } as const;
@@ -93,7 +94,7 @@ export const RAM = {
   midwayScreen: 0x13cd, // the level's midway screen: its tape sets the checkpoint unless it is 0
   entranceAction: 0x192a, // what Mario does when he enters (pipe, door, …)
   levelMusic: 0x0dda, // song of the level; the game doesn't restart it when the next level has the same
-  musicRequest: 0x1dfb, // a song the game asks the sound driver to play (0: none)
+  musicRequest: 0x1dfb, // a song the game asks the sound driver to play (0: none; MUSIC_FADE fades the song out)
   amkSong: 0x1b000, // AddmusicK's current song ($7FB000, its !FreeRAM)
   stripeEnd: 0x1837b, stripes: 0x1837d, // the stripe buffer the game uploads to VRAM ($7F837D), its used length (16 bit)
   screenExitLo: 0x19b8, screenExitHi: 0x19d8, // per screen
@@ -163,6 +164,7 @@ export const RAM = {
 
 export const SWITCH_PALACES = 4; // $1F27–$1F2A
 export const MARIO_DYING = 9; // Mario's animation while he dies
+export const MUSIC_FADE = 0x80; // $1DFB: fade the playing song out (the overworld asks it on entering a level, $0491E0)
 // joypad bits ($4218)
 export const PAD = { b: 0x8000, y: 0x4000, select: 0x2000, start: 0x1000, up: 0x0800, down: 0x0400, left: 0x0200, right: 0x0100, a: 0x0080, x: 0x0040, l: 0x0020, r: 0x0010 } as const;
 

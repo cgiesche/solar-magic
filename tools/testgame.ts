@@ -87,5 +87,24 @@ for (const [name, image] of [['clean game', new Uint8Array(readFileSync('test/fi
       `level ${hx(level)} with sound: intro walk (animation ${hx(walk)}), then the level (after ${f} frames, game mode ${hx(w[RAM.gameMode])})`);
   }
 }
+// test play with the sound unit, as the editor starts it: the level's song plays, and after dying the overworld loads
+// (its music bank upload is answered). Entered from the overworld, the game fades the overworld's song out before it
+// uploads the level's music bank; uploaded while that song still played, the song read the new bank's bytes as its
+// own and could crash the sound driver – whether it did depended on where the song was
+{
+  const rom = new Rom(new Uint8Array(readFileSync('test/fixtures/smw.smc')));
+  const emu = new LevelEmulator(rom);
+  emu.snes.apu = new Apu();
+  emu.boot();
+  for (const level of [0x105, 0x001, 0x10f]) {
+    const p = PlaySession.test(emu, level);
+    let peak = 0;
+    for (let f = 0; f < 120; f++) { p.frame(); for (const v of p.audio!) peak = Math.max(peak, Math.abs(v)); }
+    p.wram[RAM.marioAnim] = MARIO_DYING;
+    const back = p.follow();
+    check(p.ready && peak > 1000 && back === 'overworld',
+      `level ${hx(level)} test played with sound: its song plays (peak ${peak}), after dying: ${back} (game mode ${hx(p.mode)})`);
+  }
+}
 console.log(bad ? `${bad} failed` : 'all ok');
 process.exit(bad ? 1 : 0);
