@@ -26,6 +26,7 @@ import { OverworldStroke, shownMaps } from '../core/owstroke.ts';
 import { isPathKind, PATH_KIND_NAMES, type PathKind } from '../core/owpaths.ts';
 import { emptyL1Tiles, freeL1Tiles, sheetPages, l1TileLines, l1Hex, SHEET_COLS, type SheetPage } from '../core/owl1sheet.ts';
 import { findL2Brush, l2BrushPalettes, l2SharedBits, l2SheetEntry, L2_SHEET_COLS, L2_SHEET_ROWS, L2_FLIP_X, L2_FLIP_Y, L2_PRIORITY, type SheetMark } from '../core/owl2sheet.ts';
+import { mapPieces, PIECE_COLS } from '../core/owl2pieces.ts';
 import { skipsRevealWalk } from '../core/revealwalk.ts';
 import type { OwSpriteView } from '../core/owsprites.ts';
 import { LinkLayer } from './owlinkview.ts';
@@ -38,7 +39,7 @@ import { owActionShort } from '../core/level.ts';
 import { TileCache, blit8 } from '../core/render.ts';
 import { hex } from '../core/names.ts';
 import { menuButton } from './menu.ts';
-import { fillPixels, fitScale, sized, previewSheet, hidePickerPreview } from './pickerview.ts';
+import { fillPixels, fitScale, sized, previewSheet, hidePickerPreview, showPickerPreview, crop } from './pickerview.ts';
 import { loadMusicProject, submapSongs, submapMusic, setSubmapMusic, songHex, type SongInfo } from '../core/music.ts';
 import { songLabel, playButton } from './musicdialog.ts';
 import { musicPlayer, submapMusicLabel } from './musicplayer.ts';
@@ -269,6 +270,7 @@ export class OverworldView {
     if (!this.root.isConnected || this.shownViews) return;
     this.shownViews = v;
     this.buildTimeline();
+    if (this.mode === 'l2') this.buildSide(); // (the pieces on this map)
     this.paint();
     if (this.pendingTile >= 0) { const i = this.pendingTile; this.pendingTile = -1; this.showTile(i); }
   };
@@ -1361,11 +1363,7 @@ export class OverworldView {
     preview: (ctx: CanvasRenderingContext2D) => void, describe: (r: { x: number; y: number; w: number; h: number }) => string[],
     locate: () => SheetMark | null): HTMLElement {
     const b = this.brush;
-    const k = this.palPixels = fillPixels(this.palWidth(), sheet.width), scale = this.palWidth() / sheet.width;
-    const c = h('canvas', { width: sheet.width * k, height: sheet.height * k, class: `${cls} sheet-fill` });
-    const ctx = c.getContext('2d')!;
-    ctx.imageSmoothingEnabled = false;
-    ctx.setTransform(k, 0, 0, k, 0, 0);
+    const { c, ctx, k, scale } = this.sheetCanvas(sheet, cls);
     const mark = b.kind === this.mode ? locate() : null;
     const at = mark?.kind === 'rect' ? mark : null;
     // r: the rectangle being picked (null: the brush's mark)
@@ -1376,9 +1374,7 @@ export class OverworldView {
         for (const t of mark.cells) ctx.strokeRect(t.x * cell + ctx.lineWidth / 2, t.y * cell + ctx.lineWidth / 2, cell - ctx.lineWidth, cell - ctx.lineWidth);
       }
       r ??= at;
-      if (!r) return;
-      ctx.strokeStyle = '#4cc2ff'; ctx.lineWidth = cell / 8;
-      ctx.strokeRect(r.x * cell + ctx.lineWidth / 2, r.y * cell + ctx.lineWidth / 2, r.w * cell - ctx.lineWidth, r.h * cell - ctx.lineWidth);
+      if (r) outlineCells(ctx, r, cell);
     };
     draw(null);
     attachRectPick(c, cols, rows, draw, (r) => {
@@ -1478,11 +1474,11 @@ export class OverworldView {
       const id = ctx.createImageData(W, H);
       const px = new Uint32Array(id.data.buffer);
       px.fill(0xff181818);
-      list.forEach((v, i) => blit8(px, W, H, tc.get(v), (i % w) * 8, Math.floor(i / w) * 8));
+      list.forEach((v, i) => { if (v >= 0) blit8(px, W, H, tc.get(v), (i % w) * 8, Math.floor(i / w) * 8); }); // (-1: none)
       ctx.putImageData(id, 0, 0);
       return c;
     };
-    const sheet = entries(Array.from({ length: L2_SHEET_COLS * L2_SHEET_ROWS }, (_, t) => l2SheetEntry(t % L2_SHEET_COLS, Math.floor(t / L2_SHEET_COLS), this.l2Pal)), L2_SHEET_COLS, L2_SHEET_COLS * 8, L2_SHEET_ROWS * 8);
+    const sheet = () => entries(Array.from({ length: L2_SHEET_COLS * L2_SHEET_ROWS }, (_, t) => l2SheetEntry(t % L2_SHEET_COLS, Math.floor(t / L2_SHEET_COLS), this.l2Pal)), L2_SHEET_COLS, L2_SHEET_COLS * 8, L2_SHEET_ROWS * 8);
     const b = this.brush;
     const pals = b.kind === 'l2' ? l2BrushPalettes(b.entries) : [];
     const brushInfo = b.kind === 'l2' ? `Brush ${b.w}×${b.h}${pals.length > 1 ? ` (palettes ${pals.join(', ')})` : ''}: ${b.entries.slice(0, 16).map((v) => hex(v, 4)).join(' ')}${b.entries.length > 16 ? ' …' : ''}` : '';
@@ -1493,15 +1489,74 @@ export class OverworldView {
       btn.classList.toggle('active', !!(bits & bit));
       return btn;
     };
-    const pal = h('div', { class: 'ow-pal-scroll' }, this.sheetPalette(sheet, 'ow-pal8', L2_SHEET_COLS, L2_SHEET_ROWS, 8, (x, y) => l2SheetEntry(x, y, this.l2Pal),
+    // the 8x8 sheet (built only while shown)
+    const pal = () => h('div', { class: 'ow-pal-scroll' }, this.sheetPalette(sheet(), 'ow-pal8', L2_SHEET_COLS, L2_SHEET_ROWS, 8, (x, y) => l2SheetEntry(x, y, this.l2Pal),
       (ctx) => ctx.drawImage(entries(b.entries, b.w, b.w * 8, b.h * 8), 0, 0),
       (q) => [q.w * q.h > 1 ? `Block ${q.w}×${q.h} from tile ${hex(q.y * L2_SHEET_COLS + q.x, 3)}` : `Tile ${hex(q.y * L2_SHEET_COLS + q.x, 3)}`],
       () => findL2Brush(b, this.l2Pal)));
+    if (!this.l2TilesOpen) this.revealMark = false; // (no 8x8 sheet to scroll to)
     return h('div', null,
-      h('div', { class: 'prop' }, h('label', null, 'Palette'), select(Array.from({ length: 8 }, (_, i) => [i, String(i)] as [number, string]), this.l2Pal, (v) => { this.l2Pal = v; this.buildSide(); })),
       h('div', { class: 'row' }, flip(L2_FLIP_X, 'X-Flip'), flip(L2_FLIP_Y, 'Y-Flip'), flip(L2_PRIORITY, 'Priority')),
       h('div', { class: 'hint mono' }, brushInfo),
-      pal);
+      h('div', { class: 'hint ow-page' }, 'Pieces on this map (16×16, the most used first)'),
+      this.piecesSheet(entries),
+      h('div', { class: 'row ow-fold' }, h('span', { class: 'hint' }, '8×8 tiles'),
+        h('button', { onclick: () => { this.l2TilesOpen = !this.l2TilesOpen; this.buildSide(); } }, this.l2TilesOpen ? 'Fold' : 'Show')),
+      ...(this.l2TilesOpen ? [
+        h('div', { class: 'prop' }, h('label', null, 'Palette'), select(Array.from({ length: 8 }, (_, i) => [i, String(i)] as [number, string]), this.l2Pal, (v) => { this.l2Pal = v; this.buildSide(); })),
+        pal()] : []));
+  }
+
+  private l2TilesOpen = true; // the 8x8 sheet below the pieces shown (folded: the pieces alone)
+  // "Pieces on this map" (#337, core/owl2pieces.ts): the 2x2 entry blocks on the 16-pixel grid of the submap's view (the
+  // main map whole) in the map before events, each once, the most used first, PIECE_COLS a row; a click takes one as the
+  // brush (2x2: painted on its grid), no rectangle over several (they are not neighbours); the brush outlined where it is
+  // one; the hover popup (at any size: the count is shown nowhere else) the piece's use and entries.
+  // `drawEntries` draws a list of entries w a row (-1 none)
+  private piecesSheet(drawEntries: (list: number[], w: number, W: number, H: number) => HTMLCanvasElement): HTMLElement {
+    const views = this.views;
+    if (!views) return h('div', { class: 'hint' }, 'Finding the submaps\' views…');
+    const pieces = mapPieces(this.rom.l2, this.region, views[this.map]);
+    const rows = Math.max(1, Math.ceil(pieces.length / PIECE_COLS)), w = PIECE_COLS * 2;
+    const list = new Array<number>(w * rows * 2).fill(-1);
+    pieces.forEach((p, i) => p.entries.forEach((v, k) => { list[(Math.floor(i / PIECE_COLS) * 2 + (k >> 1)) * w + (i % PIECE_COLS) * 2 + (k & 1)] = v; }));
+    const sheet = drawEntries(list, w, w * 8, rows * 16);
+    const { c, ctx } = this.sheetCanvas(sheet, 'ow-pal8');
+    ctx.drawImage(sheet, 0, 0);
+    const b = this.brush;
+    const at = b.kind === 'l2' && b.w === 2 && b.h === 2 ? pieces.findIndex((p) => p.entries.every((v, j) => v === b.entries[j])) : -1;
+    if (at >= 0) outlineCells(ctx, { x: at % PIECE_COLS, y: Math.floor(at / PIECE_COLS), w: 1, h: 1 }, 16);
+    const cellAt = (e: MouseEvent) => {
+      const rc = c.getBoundingClientRect();
+      const x = Math.floor((e.clientX - rc.left) / (rc.width / PIECE_COLS)), y = Math.floor((e.clientY - rc.top) / (rc.height / rows));
+      return { x, y, p: x >= 0 && x < PIECE_COLS ? pieces[y * PIECE_COLS + x] : undefined };
+    };
+    c.addEventListener('mousedown', (e) => {
+      if (e.button !== 0) return;
+      e.preventDefault();
+      const { p } = cellAt(e);
+      if (!p) return;
+      hidePickerPreview(c);
+      this.brush = { kind: 'l2', w: 2, h: 2, entries: p.entries.slice() };
+      this.buildSide();
+    });
+    c.addEventListener('mousemove', (e) => {
+      const { x, y, p } = cellAt(e);
+      if (!p) { hidePickerPreview(c); return; }
+      showPickerPreview(c, e, crop(sheet, x * 16, y * 16, 16, 16), [`Piece used ${p.count} time${p.count === 1 ? '' : 's'} on this map`, p.entries.map((v) => hex(v, 4)).join(' ')]);
+    });
+    c.addEventListener('mouseleave', () => hidePickerPreview(c));
+    return c;
+  }
+
+  // a sheet's canvas filling the paint panel (in whole pixels of the sheet's), drawn in the sheet's pixels
+  private sheetCanvas(sheet: HTMLCanvasElement, cls: string): { c: HTMLCanvasElement; ctx: CanvasRenderingContext2D; k: number; scale: number } {
+    const k = this.palPixels = fillPixels(this.palWidth(), sheet.width), scale = this.palWidth() / sheet.width;
+    const c = h('canvas', { width: sheet.width * k, height: sheet.height * k, class: `${cls} sheet-fill` });
+    const ctx = c.getContext('2d')!;
+    ctx.imageSmoothingEnabled = false;
+    ctx.setTransform(k, 0, 0, k, 0, 0);
+    return { c, ctx, k, scale };
   }
 
   // a button flipping the brush of layer `kind` (tilemap entries): X-flip mirrors every row of the block, Y-flip the
@@ -1589,6 +1644,11 @@ function drawPathMark(ctx: CanvasRenderingContext2D, k: PathKind, px: number, py
 const KIND_BORDER = Object.fromEntries(Object.entries(KIND_RGB).map(([k, [c]]) => [k, `rgb(${c})`])) as Partial<Record<PathKind, string>>;
 // the background of transparent pixels in the paint sheet: a checkerboard of 4x4 pixel squares (layer 2 shows there)
 const checker = (x: number, y: number): number => (((x >> 2) ^ (y >> 2)) & 1 ? 0xff2a2a2a : 0xff1c1c1c);
+// the brush's rectangle r (cells of `cell` pixels) outlined in a sheet, an eighth of a cell wide
+function outlineCells(ctx: CanvasRenderingContext2D, r: { x: number; y: number; w: number; h: number }, cell: number): void {
+  ctx.strokeStyle = '#4cc2ff'; ctx.lineWidth = cell / 8;
+  ctx.strokeRect(r.x * cell + ctx.lineWidth / 2, r.y * cell + ctx.lineWidth / 2, r.w * cell - ctx.lineWidth, r.h * cell - ctx.lineWidth);
+}
 
 // the event of "Map after" kept per ROM (by its name) in the browser, -1: before events (a new key: the event progress
 // kept before was a view only, the map painted before events)

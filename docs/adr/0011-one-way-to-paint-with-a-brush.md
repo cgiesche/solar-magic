@@ -18,7 +18,7 @@ ui/brushsurface.ts holds the convention: BrushDrag is the drag without the DOM (
 - **The Map16 builder** marks quarters with the left button (Ctrl adds, Shift takes the whole tile) and puts 8x8 tiles with the right: what it selects are the quarters an edit changes, not a brush.
 - **The graphics tab's pixel pane** draws with the foreground color on the left and the background color on the right, as pixel editors do; Alt picks a color.
 - **Objects and sprites in the level** are selected, moved and box-selected with the left button; the right inserts the chosen item. They are items, not cells of a brush.
-- **Tile sheets** (pickers) only pick (dom.ts attachRectPick); Ctrl+click goes to a tile's definition.
+- **Tile sheets** (pickers) only pick (dom.ts attachRectPick); Ctrl+click goes to a tile's definition. The overworld's "Pieces on this map" (layer 2's map pieces) picks one piece per click, no rectangle: its pieces are not neighbours.
 
 ## Considered options
 

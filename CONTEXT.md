@@ -177,6 +177,10 @@ _Avoid_: road, Mario path (Lunar Magic's view name)
 A layer 1 tile drawn as tile 000, on no map (nor put there by an event) and doing what 000 does where Mario walks – room for a new tile. The editor's Map16 extension makes C1–1FF such copies of 000. The paint sheet folds them into one row ("N free tiles · New tile…").
 _Avoid_: empty tile (an empty tile may still be an invisible path or level tile)
 
+**Map piece** (overworld layer 2):
+A 16x16 block of layer 2 – 2x2 tilemap entries, each with its palette and flips – on the 16-pixel grid of a submap's view: what the map is made of (water, grass, shores, hills). The layer 2 paint panel's "Pieces on this map" lists those of the map before events, each once, the most used first; one is a 2x2 brush.
+_Avoid_: Map16 tile (layer 1's), event step (an event's 6x6 or 2x2 change)
+
 **Path shape**:
 How a path tile moves Mario: by a vector from where he is, by the tile and the way he steps onto it, turning him where it ends (a bend, a junction taken one way). Learned by emulation (owpaths.ts), as the path tiles' kinds.
 _Avoid_: tile direction, path direction
@@ -191,7 +195,7 @@ _Avoid_: path reveal (that is part of one), trigger
 
 **Event step**:
 A 6x6 or 2x2 block of 8x8 tiles an event changes on layer 2: **animated** (shown with the path fade, in order, on the submap of the level running the event) or **silent** (written at once, on other submaps). The user paints the map as it looks after the event; the editor finds its steps – which tiles changed to the map before it, the blocks, animated or silent, the order along the path from the level tile – and the user changes only their order on the timeline (ADR 0005).
-_Avoid_: event tile (Lunar Magic's), piece
+_Avoid_: event tile (Lunar Magic's), piece (a map piece is a 16x16 block of the map, not a change)
 
 **Event progress**:
 Up to which event the overworld is shown as passed (events applied in their number order, as the game does when it loads a save); not part of the ROM. The overworld editor's "Map after" chooses it by the last event passed, and what is painted goes into that event ("Before events": into the map before events) – the map is never shown at one progress and painted at another. Test play from the overworld takes it over, and the save at that progress too – the levels passed with their paths open and the events triggered – learned by emulation: each event's level (the first that runs it) left with its exit in the event order, the game's code setting what passing it sets (core/owprogress.ts); a level only runs an event the game hasn't run, so of two levels running the same one only the first is passed. The switch palaces pressed then are those whose switch tiles are in a level played from a translevel passed (its level and those its exits lead to); which tiles press which switch is learned by the block probe (Mario landing on each tile), which levels hold them by loading the levels – no table of palace levels.
