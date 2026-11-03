@@ -232,6 +232,7 @@ input.invalid, input.invalid:focus { outline: 1px solid var(--danger); border-co
 /* the Game workspace (gameview.ts): the title screen at whole screen pixels per pixel */
 .game-scroller { padding: 16px; }
 .game-canvas { display: block; image-rendering: pixelated; cursor: crosshair; }
+.panning, .panning * { cursor: grabbing !important; }
 .brush-surface { position: relative; width: max-content; }
 .brush-over { position: absolute; left: 0; top: 0; pointer-events: none; }
 .game-pick { flex: 1; min-height: 0; overflow-y: auto; }

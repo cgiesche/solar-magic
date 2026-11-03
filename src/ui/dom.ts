@@ -323,7 +323,7 @@ export function attachPanZoom(scroller: HTMLElement, zoom: () => number, setZoom
     if (e.button !== 1) return;
     e.preventDefault(); // no autoscroll / primary-selection paste
     pan = { x: e.clientX, y: e.clientY, sl: scroller.scrollLeft, st: scroller.scrollTop };
-    scroller.style.cursor = 'grabbing';
+    scroller.classList.add('panning'); // (the grabbing hand over whatever cursor its contents have)
   });
   window.addEventListener('mousemove', (e) => {
     if (!pan) return;
@@ -333,7 +333,7 @@ export function attachPanZoom(scroller: HTMLElement, zoom: () => number, setZoom
   window.addEventListener('mouseup', (e) => {
     if (e.button !== 1 || !pan) return;
     pan = null;
-    scroller.style.cursor = '';
+    scroller.classList.remove('panning');
   });
   scroller.addEventListener('auxclick', (e) => { if (e.button === 1) e.preventDefault(); });
   // touchpads send many small deltas: accumulate to one step per ~mouse-wheel notch
