@@ -69,13 +69,23 @@ EMSCRIPTEN_KEEPALIVE int spcw_play( Inst* s, int count, short* out ) {
 	return 1;
 }
 // after snes_spc's own state: the clocks short of a sample, the samples already in buf for the next frame
-// (count, then the samples; at most extra_size, as set_output hands them on) and the filter's memory
+// (count, then the samples; at most extra_size, as set_output hands them on), the filter's memory and the
+// values the CPU last wrote to the four ports. snes_spc's state has no place for those: its copy_state
+// sets them to what the SPC wrote to the ports – when saving too (load_regs) – so a state saved while
+// the sound engine still answered a command the CPU had taken back (a sound effect: written for one
+// frame, then 0) gave the engine that command again, and a sound effect kept restarting while test play
+// kept states to rewind to
+static unsigned char* cpu_ports( Inst* s ) { return &s->spc.m.smp_regs [1] [SNES_SPC::r_cpuio0]; }
 EMSCRIPTEN_KEEPALIVE int spcw_state_size() {
-	return SNES_SPC::state_size + 2 * sizeof (int) + SNES_SPC::extra_size * sizeof (short) + sizeof (SPC_Filter::ch);
+	return SNES_SPC::state_size + 2 * sizeof (int) + SNES_SPC::extra_size * sizeof (short) + sizeof (SPC_Filter::ch)
+		+ SNES_SPC::port_count;
 }
 EMSCRIPTEN_KEEPALIVE int spcw_save( Inst* s, unsigned char* out ) {
 	unsigned char* p = out;
+	unsigned char ports [SNES_SPC::port_count];
+	memcpy( ports, cpu_ports( s ), sizeof ports );
 	s->spc.copy_state( &p, save_func );
+	memcpy( cpu_ports( s ), ports, sizeof ports );
 	int clocks = s->spc.m.extra_clocks;
 	int n = (int) ( s->spc.dsp.out_pos() - s->buf );
 	if ( n < 0 || n > SNES_SPC::extra_size ) n = 0;
@@ -83,6 +93,7 @@ EMSCRIPTEN_KEEPALIVE int spcw_save( Inst* s, unsigned char* out ) {
 	save_func( &p, &n, sizeof n );
 	save_func( &p, s->buf, n * sizeof (short) );
 	save_func( &p, s->filter.ch, sizeof s->filter.ch );
+	save_func( &p, ports, sizeof ports );
 	return (int) ( p - out );
 }
 EMSCRIPTEN_KEEPALIVE void spcw_load( Inst* s, unsigned char* in ) {
@@ -93,6 +104,7 @@ EMSCRIPTEN_KEEPALIVE void spcw_load( Inst* s, unsigned char* in ) {
 	load_func( &p, &n, sizeof n );
 	load_func( &p, s->spc.m.extra_buf, n * sizeof (short) );
 	load_func( &p, s->filter.ch, sizeof s->filter.ch );
+	load_func( &p, cpu_ports( s ), SNES_SPC::port_count );
 	s->spc.m.extra_clocks = clocks;
 	s->spc.m.extra_pos = s->spc.m.extra_buf + n; // arm puts them at the start of the next frame's samples
 	arm( s );

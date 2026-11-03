@@ -72,6 +72,24 @@ const input = (f: number) => PAD.right | (f % 40 < 10 ? PAD.b : 0);
   p.close();
 }
 {
+  // keeping states changes nothing that plays: one jump, then 300 frames without buttons, sample for sample as without
+  // them. (A state saved while the sound engine still answered the jump's sound effect, which the CPU had taken back
+  // the frame after, gave the engine the command again: the sound effect restarted with every state kept.)
+  const sound = (rewind: boolean) => {
+    const p = PlaySession.start(emu, 0x105);
+    if (rewind) p.keepRewind();
+    const out: number[] = [];
+    for (let f = 0; f < 310; f++) { p.frame(f < 10 ? PAD.b : 0); out.push(...p.audio!); }
+    p.close();
+    return out;
+  };
+  const plain = sound(false), kept = sound(true);
+  const diff = plain.findIndex((v, i) => v !== kept[i]);
+  const tail = (a: number[]) => Math.max(...a.slice(-32000).map(Math.abs)); // the last half second
+  check(diff < 0 && plain.length === kept.length,
+    `states kept to rewind to: the jump's sound as without (${diff < 0 ? 'the same' : `differs from sample ${diff}`}, the last half second's peak ${tail(plain)} / ${tail(kept)})`);
+}
+{
   // bounded: a level played longer than the ring holds keeps REWIND_STATES states
   const p = PlaySession.start(emu, 0x105);
   p.keepRewind();
