@@ -360,6 +360,11 @@ canvas.sheet-fill { width: 100%; height: auto; image-rendering: auto; }
 .ow-reveal { gap: 4px; padding: 1px 2px; border-radius: 4px; }
 .ow-reveal.current { background: rgba(76,194,255,0.18); }
 .ow-tile { width: 16px; height: 16px; image-rendering: pixelated; }
+.ow-looks { display: flex; flex-wrap: wrap; gap: 2px; }
+.ow-look { padding: 1px; line-height: 0; border: 1px solid var(--border); }
+.ow-look .ow-tile { width: 24px; height: 24px; }
+.ow-look.current { outline: 2px solid var(--accent); }
+.ow-place { display: flex; flex-direction: column; gap: 6px; max-width: 420px; }
 .ow-reveal input.hex { width: 3.2em; flex: none; }
 .ow-info { border: 1px solid var(--border); border-radius: 6px; padding: 6px; display: flex; flex-direction: column; gap: 5px; }
 .ow-info select { flex: 1; min-width: 0; max-width: none; }

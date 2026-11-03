@@ -1,5 +1,5 @@
 // What the overworld editor draws of its two layers (core/owlayers.ts): the layer not painted dimmed (or hidden while
-// Q is held) in the painting modes, both at full strength in the object modes, View → Layers' switches winning.
+// Q is held) in the painting modes, both at full strength in the object modes (levels, links, sprites), View → Layers' switches winning.
 import { layerStrengths, DIM_STRENGTH, type LayerView } from '../src/core/owlayers.ts';
 
 let bad = 0;
@@ -11,6 +11,8 @@ check(DIM_STRENGTH > 0.3 && DIM_STRENGTH < 0.5, 'dimmed: about 40 % strength');
 check(is(layerStrengths(v({ mode: 'l1' })), 1, DIM_STRENGTH), 'painting layer 1: layer 2 dimmed');
 check(is(layerStrengths(v({ mode: 'l2' })), DIM_STRENGTH, 1), 'painting layer 2: layer 1 dimmed');
 check(is(layerStrengths(v({ mode: 'links' })), 1, 1) && is(layerStrengths(v({ mode: 'sprites' })), 1, 1), 'links/sprites modes: nothing dimmed');
+check(is(layerStrengths(v({ mode: 'levels' })), 1, 1) && is(layerStrengths(v({ mode: 'levels', solo: true })), 1, 1), 'levels mode (level tiles as objects): nothing dimmed, Q does nothing');
+check(is(layerStrengths(v({ mode: 'levels', showL2: false })), 1, 0) && is(layerStrengths(v({ mode: 'levels', showL1: false })), 0, 1), 'levels mode: View → Layers\' switches win');
 check(is(layerStrengths(v({ mode: 'l1', solo: true })), 1, 0) && is(layerStrengths(v({ mode: 'l2', solo: true })), 0, 1), 'Q held: the layer not painted gone');
 check(is(layerStrengths(v({ mode: 'links', solo: true })), 1, 1) && is(layerStrengths(v({ mode: 'sprites', solo: true })), 1, 1), 'Q does nothing in the object modes');
 check(is(layerStrengths(v({ mode: 'l1', dim: false })), 1, 1) && is(layerStrengths(v({ mode: 'l2', dim: false })), 1, 1), 'the switch off: nothing dimmed');

@@ -118,7 +118,7 @@ export class OverworldStroke {
     const warnings: string[] = [];
     const before = sharedTranslevels(old.l1, old.tls, this.isLevelTile);
     const added = [...sharedTranslevels(maps.l1, maps.tls, this.isLevelTile)].filter(([tl, at]) => (before.get(tl)?.length ?? 0) < at.length);
-    if (added.length) warnings.push(`${added.map(([tl, at]) => `Level ${hex(translevelToLevel(tl), 3)} is entered from ${at.length} tiles`).join(', ')} – to move a level tile, paint over the old one.`);
+    if (added.length) warnings.push(`${added.map(([tl, at]) => `Level ${hex(translevelToLevel(tl), 3)} is entered from ${at.length} tiles`).join(', ')} – to move a level tile, drag it in the Levels mode (3).`);
     if (maps.l1.some((v, i) => this.isLevelTile(v) && !maps.tls[i])) warnings.push('Every level (001–024, 101–13B) is already entered from a level tile – the new level tile enters none; choose its level in the properties.');
     return {
       label: 'Paint layer 1', warnings,

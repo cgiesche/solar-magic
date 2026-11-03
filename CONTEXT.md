@@ -157,6 +157,10 @@ _Avoid_: world (that is the player's notion), map (alone, where the 512x512 map 
 A layer 1 tile of the overworld that enters a level: one on which A starts a level, as emulation shows (the path tiles' kind "level"), not a range of tile numbers – in the clean game and in a ROM Lunar Magic saved 56–80 without 5B and 5F; 81–86 are tiles Mario stops on without entering one. Its translevel belongs to the tile and moves with it; the level's settings (name, base event, the direction each exit enables – in the ROM the "initial flags" byte –, the initial level flags of a new game – Lunar Magic's, with "no entry if passed" and "save prompt" – and message boxes) belong to the translevel: tiles entering the same level share them, a tile painted over leaves them with the level, a new tile entering it shows them. Free translevels that bring nothing along are given out first; the settings are reset only when asked.
 _Avoid_: level dot, node
 
+**Levels mode**:
+The overworld editor's mode in which level tiles are objects on top of layer 1 (ADR 0012): selected by a click, moved by a drag – swapping with the tile where it is dropped, its translevel with it (another level tile swaps too) –, removed by Delete (the stop tile 81 in its place, the level then "without level tile": its translevel held by no tile on any map, its settings kept), placed by "Place level here…" or by dragging a level without level tile onto the map, its look (a visible tile the path kinds call "level", or one drawn on layer 2) changed in its properties. Each one ROM edit of the map before events.
+_Avoid_: level entrance (that is the tile entrance in a level)
+
 **Translevel**:
 The number the overworld knows a level by (0–24 for levels 0–24, 25–5F for 101–13B), the index of everything per level on the overworld (names, base events, flags, saved progress). Stored per tile in Lunar Magic's table, not found by scanning the map, so placing a level tile shifts no other level's number.
 _Avoid_: level number (for the overworld's), OW level

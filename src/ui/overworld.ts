@@ -8,13 +8,13 @@ import { h, toast, select, checkbox, hexInput, attachPanZoom, zoomControl, pixel
 import { BrushDrag, drawBrushFrame, paintButton } from './brushsurface.ts';
 import {
   type OwRender, gameL1, readL1, readL2, l1Index, l1XY, l2Index, readTranslevels, writeTranslevels, readMaps,
-  sharedTranslevels, enterableLevels, translevelToLevel, MAP_NAMES,
-  translevelUse, resetTranslevel, baseEvent, setBaseEvent, eventNames, exitDirections, setExitDirection, DIR_ARROWS, DIR_NAMES, EXIT_NAMES, NO_EVENT,
+  sharedTranslevels, translevelToLevel, MAP_NAMES,
+  resetTranslevel, baseEvent, setBaseEvent, eventNames, exitDirections, setExitDirection, DIR_ARROWS, DIR_NAMES, EXIT_NAMES, NO_EVENT,
   initialFlags, setInitialFlags, FLAG, DIR_FLAGS, OW_EVENTS, revealEvents, setRevealEvents, revealAt, revealedTile, revealEventCount,
   readRevealList, writeRevealList, destroyEffects, destroySettingAt, destroyEvent, setDestroyEvent, readDestroyList, levelTilesOf, OW_L1_TILES,
   eventBits, drawOwMap, drawL1Tile, owShownAt, owMapAt, owShownCopies,
 } from '../core/overworld.ts';
-import { hasMessages, isBlank, readMessage } from '../core/messages.ts';
+import { isBlank, readMessage } from '../core/messages.ts';
 import { messageRoutineNote, messageRoutineUnknown, MESSAGE_ROUTINE_CHECKING } from '../core/messagedraw.ts';
 import { levelName, hasLevelName } from '../core/levelnames.ts';
 import { levelNameField } from './levelnamefield.ts';
@@ -28,6 +28,8 @@ import { emptyL1Tiles, freeL1Tiles, sheetPages, l1TileLines, l1Hex, SHEET_COLS, 
 import { skipsRevealWalk } from '../core/revealwalk.ts';
 import type { OwSpriteView } from '../core/owsprites.ts';
 import { LinkLayer } from './owlinkview.ts';
+import { LevelTileLayer, tilePlace } from './owlevelview.ts';
+import { levelsWithoutTile } from '../core/owleveltiles.ts';
 import { SpriteLayer } from './owspriteview.ts';
 import { levelTeleports, locationUses, type LevelTeleport } from '../core/owlinks.ts';
 import { tileText } from '../core/owteleport.ts';
@@ -35,9 +37,7 @@ import { owActionShort } from '../core/level.ts';
 import { TileCache, blit8 } from '../core/render.ts';
 import { hex } from '../core/names.ts';
 import { menuButton } from './menu.ts';
-import { levelPicker } from './levelpicker.ts';
 import { fillPixels, fitScale, sized, previewSheet, hidePickerPreview } from './pickerview.ts';
-import { mainTranslevel } from '../core/level.ts';
 import { loadMusicProject, submapSongs, submapMusic, setSubmapMusic, songHex, type SongInfo } from '../core/music.ts';
 import { songLabel, playButton } from './musicdialog.ts';
 import { musicPlayer, submapMusicLabel } from './musicplayer.ts';
@@ -55,13 +55,6 @@ type Brush = { kind: Layer; w: number; h: number; entries: number[]; tls?: numbe
 
 // what the timeline shows: an animated step, a silent one, the layer 1 changes
 type StepKind = 'step' | 'silent' | 'l1';
-
-// the level picker's note for a level no tile enters: what a tile choosing it gets (translevelUse)
-function freeNote(rom: Rom, tl: number): string {
-  if (translevelUse(rom, tl) === 2) return 'free · has a level';
-  const has = [hasLevelName(rom, tl) && 'name', baseEvent(rom, tl) !== NO_EVENT && 'event', hasMessages(rom, tl) && 'message'].filter(Boolean);
-  return has.length ? `free · has ${has.join(', ')}` : 'free';
-}
 
 // what an exit the game skips the reveal walk for does (revealwalk.ts)
 const NO_REVEAL_WALK = 'the level tile the path leads to gets no way back to this one (as after Yoshi\'s House and the switch palaces in the clean game)';
@@ -114,6 +107,7 @@ export class OverworldView {
   links = new LinkLayer(this);
   showSprites = false; // the sprites also while painting (always in the sprites mode)
   sprites = new SpriteLayer(this);
+  levelTiles = new LevelTileLayer(this); // the level tiles as objects (the levels mode)
   reach = new ReachLayer(this); // path validation: the tiles Mario doesn't reach dimmed, the problems of the paths
   // the event the map is shown and painted as after (both layers; "Map after" in the bar), -1: the map before events
   // (kept per ROM in the browser, not in the ROM)
@@ -158,6 +152,7 @@ export class OverworldView {
   selected = -1; // the layer 1 tile shown in the properties (l1Index)
   mapCanvas = document.createElement('canvas'); // the map as shown: its layers at their strengths (composeMap)
   private l1Canvas = document.createElement('canvas'); // layer 1 alone (transparent where it has no pixel)
+  get l1Image(): HTMLCanvasElement { return this.l1Canvas; }
   private l2Canvas = document.createElement('canvas'); // layer 2 alone (black where it has no pixel)
   // set by the host: open a level in the level editor
   onOpenLevel: (n: number) => void = () => {};
@@ -194,6 +189,14 @@ export class OverworldView {
     this.scroller.addEventListener('contextmenu', (e) => e.preventDefault());
     this.scroller.addEventListener('mousedown', (e) => this.onDown(e));
     this.scroller.addEventListener('dblclick', (e) => this.onDouble(e));
+    // a level dragged from the list ("Without level tile") onto the map: placed on the cell it is dropped on
+    this.scroller.addEventListener('dragover', (e) => {
+      if (!this.levelTiles.dragged || this.mode !== 'levels') return;
+      e.preventDefault();
+      const c = this.cell(e, 16);
+      if (this.hover?.x !== c.x || this.hover?.y !== c.y) { this.hover = c; this.paint(); }
+    });
+    this.scroller.addEventListener('drop', (e) => { if (!this.levelTiles.dragged) return; e.preventDefault(); const c = this.cell(e, 16); this.levelTiles.drop(c.x, c.y); });
     this.scroller.addEventListener('mouseleave', () => { this.mouse = null; if (!this.brushDrag.active) { this.hover = null; this.updateStatus(); this.paint(); } });
     window.addEventListener('mousemove', (e) => this.onMove(e));
     window.addEventListener('mouseup', (e) => this.onUp(e));
@@ -230,7 +233,7 @@ export class OverworldView {
   }
   // the mode's cells: layer 1's 32x32, layer 2's 64x64
   private get cells(): { w: number; h: number } {
-    return this.mode === 'l1' ? { w: 32, h: 32 } : { w: 64, h: 64 };
+    return this.mode === 'l2' ? { w: 64, h: 64 } : { w: 32, h: 32 };
   }
 
   get region(): number {
@@ -389,6 +392,8 @@ export class OverworldView {
     const s = this.cellSize;
     if (this.mode === 'sprites') {
       // the sprites show what is under the mouse
+    } else if (this.mode === 'levels' || this.levelTiles.dragged) {
+      this.levelTiles.paint(ctx, lw);
     } else if (this.mode === 'links') {
       if (this.hover) {
         ctx.strokeStyle = 'rgba(255,255,0,0.9)';
@@ -542,6 +547,11 @@ export class OverworldView {
     if ((this.mode === 'links' || this.mode === 'sprites') && !this.views) return;
     if (this.mode === 'links') { if (e.button === 0) this.links.down(c.x, c.y); return; }
     if (this.mode === 'sprites') { if (e.button === 0) { const p = this.point(e); this.sprites.down(p.x, p.y); } return; }
+    if (this.mode === 'levels') {
+      if (e.button === 0) this.levelTiles.down(c.x, c.y);
+      else if (e.button === 2) this.levelTiles.menu(e.clientX, e.clientY, c.x, c.y);
+      return;
+    }
     if (paintButton(e)) {
       // (a level tile painted gets a translevel: not before the level tiles are known)
       if (this.mode === 'l1' && !this.pathKinds()) { toast('The path tiles are still being learned – layer 1 can be painted in a moment.'); return; }
@@ -575,12 +585,14 @@ export class OverworldView {
     const inside = e.target === this.scroller || e.target === this.canvas;
     if (inside) this.mouse = this.point(e);
     if (this.sprites.drag) { const p = this.point(e); this.sprites.move(p.x, p.y, e.shiftKey); return; }
-    if (!inside && !this.brushDrag.active && !this.links.drag) return;
+    if (!inside && !this.brushDrag.active && !this.links.drag && !this.levelTiles.drag) return;
     const c = this.cell(e);
     if (this.hover && this.hover.x === c.x && this.hover.y === c.y) return;
     this.hover = c;
+    if (this.mode === 'levels') this.levelTiles.move(c.x, c.y);
     this.updateStatus();
     if (this.links.drag) { this.links.move(c.x, c.y); return; }
+    if (this.mode === 'levels') { this.paint(); return; }
     this.brushDrag.move(c);
     this.paint();
   }
@@ -588,6 +600,7 @@ export class OverworldView {
   onUp(e: MouseEvent): void {
     if (this.links.drag) { this.links.up(); return; }
     if (this.sprites.drag) { const p = this.point(e); this.sprites.up(p.x, p.y); return; }
+    if (this.levelTiles.drag) { this.levelTiles.up(); return; }
     this.brushDrag.up();
   }
 
@@ -642,7 +655,7 @@ export class OverworldView {
   }
 
   info(x: number, y: number): void {
-    if (this.mode !== 'l1') { toast('Tile settings are available on layer 1 (paths/levels)'); return; }
+    if (this.mode !== 'l1') { toast('Tile settings are available on layer 1 and in the Levels mode'); return; }
     if (x < 0 || y < 0 || x >= 32 || y >= 32) return;
     this.selectTile(l1Index(this.region, x, y), false);
   }
@@ -679,6 +692,10 @@ export class OverworldView {
     this.statusStats.textContent = b.kind === this.mode ? `Brush ${b.w}×${b.h}` : '';
     if (this.mode === 'sprites' && !c) {
       this.statusText.textContent = 'Click: select a sprite, a start position (M, L) or a Koopa Kid\'s place (K1–K3) · Drag moves it (8 pixels, 1 with Shift) · Delete empties a sprite slot';
+      return;
+    }
+    if (this.mode === 'levels' && (this.levelTiles.status() || !c)) {
+      this.statusText.textContent = this.levelTiles.status() ?? 'Click: select a level tile · Drag moves it (swaps with the tile there) · Delete: a stop tile in its place · Right click: Place level here… · Double click: open the level';
       return;
     }
     if (this.mode === 'links' && (this.links.status() || !c)) {
@@ -907,6 +924,8 @@ export class OverworldView {
     const setMode = (m: OwMode) => {
       if (this.mode === m) return;
       this.mode = m;
+      this.levelTiles.cancel();
+      this.buildLeft(); // (levels without a level tile are dragged onto the map in the levels mode)
       if (isLayerMode(m) && this.brush.kind !== m) this.brush = { kind: m, w: 1, h: 1, entries: [m === 'l1' ? 0x56 : 0] };
       this.buildBar();
       this.buildSide();
@@ -922,10 +941,11 @@ export class OverworldView {
       h('label', { class: 'row' }, 'Map ', select(MAP_NAMES.map((n, i) => [i, n] as [number, string]), this.map, (v) => this.setMap(v))),
       h('span', { class: 'sep' }),
       h('div', { class: 'btn-group' },
-        h('button', { class: `ow-l1${this.mode === 'l1' ? ' active' : ''}`, title: 'Layer 1 (1) · layer 2 dimmed while it is painted, hold Q to hide it', onclick: () => setMode('l1') }, 'Layer 1 (paths/levels)'),
+        h('button', { class: `ow-l1${this.mode === 'l1' ? ' active' : ''}`, title: 'Layer 1 (1): paths and level tiles painted as tiles · layer 2 dimmed while it is painted, hold Q to hide it', onclick: () => setMode('l1') }, 'Layer 1 (paths)'),
         h('button', { class: `ow-l2${this.mode === 'l2' ? ' active' : ''}`, title: 'Layer 2 (2) · layer 1 dimmed while it is painted, hold Q to hide it', onclick: () => setMode('l2') }, 'Layer 2 (terrain)'),
-        h('button', { class: this.mode === 'links' ? 'active' : '', title: 'Overworld links (3): stars, pipes and exit paths leading elsewhere, drawn as arrows; drag from a tile to where it leads', onclick: () => setMode('links') }, 'Overworld links'),
-        h('button', { class: this.mode === 'sprites' ? 'active' : '', title: 'Sprites (4): the overworld\'s sprites as the game shows them at the event progress, the start positions and the Koopa Kids\' places; drag to move', onclick: () => setMode('sprites') }, 'Sprites')),
+        h('button', { class: this.mode === 'levels' ? 'active' : '', title: 'Levels (3): the level tiles as objects – click selects, drag moves (swaps with the tile there), Delete leaves a stop tile, right click places a level', onclick: () => setMode('levels') }, 'Levels'),
+        h('button', { class: this.mode === 'links' ? 'active' : '', title: 'Overworld links (4): stars, pipes and exit paths leading elsewhere, drawn as arrows; drag from a tile to where it leads', onclick: () => setMode('links') }, 'Overworld links'),
+        h('button', { class: this.mode === 'sprites' ? 'active' : '', title: 'Sprites (5): the overworld\'s sprites as the game shows them at the event progress, the start positions and the Koopa Kids\' places; drag to move', onclick: () => setMode('sprites') }, 'Sprites')),
       h('button', { title: `${MAP_NAMES[this.map]}'s border (layer 3, fixed on the screen) in the Game workspace`, onclick: () => this.onEditBorder(this.map) }, 'Edit border…'),
       h('span', { class: 'sep' }),
       menuButton({ label: 'View', items: [
@@ -964,17 +984,19 @@ export class OverworldView {
     }
     // (Esc with any modifier: a stroke is never left running)
     if (k === 'escape' && this.brushDrag.cancel()) { this.paint(); return true; }
+    if (k === 'escape' && this.levelTiles.cancel()) return true;
     if (e.ctrlKey || e.metaKey || e.altKey) return false;
     if (k === 'escape' && this.mode === 'sprites' && this.sprites.unpick()) return true;
     if (k === 'escape' && this.mode === 'links' && this.links.cancelPending()) return true;
     if (k === 'escape' && this.event >= 0) { this.setEvent(-1); return true; }
     if (k === 'g') { this.showGrid = !this.showGrid; this.paint(); return true; }
     if (k === 'q' && isLayerMode(this.mode)) { this.setSolo(true); return true; }
-    if (k === 'm' && this.selected >= 0 && isLayerMode(this.mode)) { this.editTile(this.selected); return true; }
+    if (k === 'm' && this.selected >= 0 && (isLayerMode(this.mode) || this.mode === 'levels')) { this.editTile(this.selected); return true; }
     if (k === ',' || k === '.') { this.setEvent(stepEvent(this.event, k === ',' ? -1 : 1)); return true; }
-    if (k >= '1' && k <= '4') { (this.bar.querySelectorAll('.btn-group button')[+k - 1] as HTMLButtonElement).click(); return true; }
+    if (k >= '1' && k <= '5') { (this.bar.querySelectorAll('.btn-group button')[+k - 1] as HTMLButtonElement).click(); return true; }
     if ((k === 'delete' || k === 'backspace') && this.mode === 'sprites') return this.sprites.remove();
     if ((k === 'delete' || k === 'backspace') && this.mode === 'links') return this.links.remove();
+    if ((k === 'delete' || k === 'backspace') && this.mode === 'levels') return this.levelTiles.remove();
     return false;
   }
 
@@ -1004,7 +1026,11 @@ export class OverworldView {
       if (cur) setTimeout(() => el.scrollIntoView({ block: 'nearest' }), 0);
     }
     this.tlCount.textContent = String(items.length);
-    this.tlList.replaceChildren(...(items.length ? items : [emptyState('This map has no level tiles (56–80).')]));
+    // the levels no level tile on any map enters (their settings kept with their translevels): dragged onto the map
+    const without = levelsWithoutTile(this.tls);
+    this.tlList.replaceChildren(...(items.length ? items : [emptyState('This map has no level tiles.')]),
+      ...(without.length ? [h('div', { class: 'gt-list-head', title: 'Levels no level tile on any map enters – drag one onto the map to place it' }, `Without level tile (${without.length})`),
+        ...this.levelTiles.withoutTile(without)] : []));
   }
 
   // ---------------- right: palette, properties ----------------
@@ -1017,7 +1043,8 @@ export class OverworldView {
     hidePickerPreview(this.palPanel);
     this.palPixels = 0;
     this.palPanel.replaceChildren(...(this.mode === 'sprites' ? this.sprites.palette()
-      : this.mode === 'links' ? [h('div', { class: 'panel-title' }, 'Overworld links'), this.linkLegend()] : [
+      : this.mode === 'links' ? [h('div', { class: 'panel-title' }, 'Overworld links'), this.linkLegend()]
+      : this.mode === 'levels' ? [h('div', { class: 'panel-title' }, 'Levels'), this.levelsHelp()] : [
       h('div', { class: 'panel-title' }, 'Paint', h('span', { class: 'hint' }, 'Right click/Shift+click paints')),
       this.mode === 'l1' ? this.l1Palette() : this.l2Palette()]));
     this.palPanel.scrollTop = scroll;
@@ -1030,7 +1057,8 @@ export class OverworldView {
     if (this.mode === 'sprites') { this.props.replaceChildren(h('div', { class: 'panel-title' }, 'Sprite'), this.sprites.props()); return; }
     this.props.replaceChildren(h('div', { class: 'panel-title' }, 'Properties'),
       this.mapSettings(),
-      this.selected >= 0 ? this.tileInfo(this.selected) : emptyState('Select a level tile in the list on the left, or any tile with Alt/Ctrl+click on the map.'),
+      this.selected >= 0 ? this.tileInfo(this.selected) : emptyState(this.mode === 'levels' ? 'Click a level tile on the map or in the list on the left.'
+        : 'Select a level tile in the list on the left, or any tile with Alt/Ctrl+click on the map.'),
       this.revealList(),
       this.optionsPanel());
   }
@@ -1102,6 +1130,16 @@ export class OverworldView {
       h('button', { onclick: () => this.onEditBorder(map), title: `${MAP_NAMES[map]}'s border (layer 3, fixed on the screen) in the Game workspace` }, 'Edit border of this submap'));
   }
 
+  // what the levels mode does
+  private levelsHelp(): HTMLElement {
+    return h('div', { class: 'ow-info' },
+      h('div', { class: 'hint' }, 'Level tiles as objects on layer 1, each change one ROM edit of the map before events:'),
+      h('div', { class: 'hint' }, 'Drag a level tile to move it: it swaps with the tile there (a path stays whole), its level and settings go with it.'),
+      h('div', { class: 'hint' }, 'Delete: the stop tile 81 in its place – the level keeps its settings and is listed under "Without level tile".'),
+      h('div', { class: 'hint' }, 'Right click a cell: Place level here… – or drag a level from "Without level tile" onto the map.'),
+      h('div', { class: 'hint' }, 'The look of the selected level tile is chosen in its properties.'));
+  }
+
   // what the overworld links mode's arrows mean
   private linkLegend(): HTMLElement {
     const row = (color: string, text: string, dashed = false) => h('div', { class: 'row' },
@@ -1113,7 +1151,7 @@ export class OverworldView {
   }
 
   // a layer 1 tile drawn (16x16) for the lists
-  private tileImage(t: number): HTMLCanvasElement {
+  tileImage(t: number): HTMLCanvasElement {
     const r = this.render(), c = h('canvas', { width: 16, height: 16, class: 'ow-tile' }), ctx = c.getContext('2d')!;
     const id = ctx.createImageData(16, 16), px = new Uint32Array(id.data.buffer);
     px.fill(0xff181818);
@@ -1142,21 +1180,19 @@ export class OverworldView {
   // the level tile at i: the level it enters (chosen from the levels; the translevel only shown), its name
   levelInfo(i: number): HTMLElement {
     const rom = this.app.rom, tl = this.tls[i], { x, y } = l1XY(i);
-    const where = (k: number) => { const p = l1XY(k); return `${k >= 0x400 ? 'submaps' : 'main map'} ${hex(p.x, 2)},${hex(p.y, 2)}`; };
     const others = levelTilesOf(this.l1, this.tls, tl, this.isLevelTile).filter((k) => k !== i);
-    const onMap = (t: number) => this.tls.findIndex((v, k) => v === t && k !== i && this.isLevelTile(this.l1[k]));
-    const levels = enterableLevels();
-    const choose = levelPicker(this.app, tl ? translevelToLevel(tl) : levels[0], (lvl) => {
-      const t = mainTranslevel(lvl)!;
+    const choose = this.levelTiles.levelChoice(tl || 1, i, (t) => {
       if (t === tl) return;
       const next = this.tls.slice();
       next[i] = t;
-      this.app.romEdit(`Level tile ${hex(x, 2)},${hex(y, 2)}: level ${hex(lvl, 3)}`, () => writeTranslevels(rom, next));
-    }, { levels, note: (lvl) => { const t = mainTranslevel(lvl)!, k = onMap(t); return k >= 0 ? `on ${where(k)}` : t === tl ? '' : freeNote(rom, t); } });
+      this.app.romEdit(`Level tile ${hex(x, 2)},${hex(y, 2)}: level ${hex(translevelToLevel(t), 3)}`, () => writeTranslevels(rom, next));
+    });
     const head = [
       h('div', { class: 'prop' }, h('label', null, 'Enters level'), choose),
       h('div', { class: 'hint' }, `Tile ${hex(x, 2)},${hex(y, 2)}${tl ? ` · translevel ${hex(tl, 2)}` : ''}`),
-      ...others.map((k) => h('div', { class: 'hint warn-text' }, `⚠ The level tile at ${where(k)} enters this level too.`)),
+      ...others.map((k) => h('div', { class: 'hint warn-text' }, `⚠ The level tile at ${tilePlace(k)} enters this level too.`)),
+      h('div', { class: 'prop' }, h('label', { title: 'The level tiles\' looks: the visible tiles the game enters a level on, and one drawn on layer 2 – the tile changes, its level stays' }, 'Look')),
+      this.levelTiles.lookPicker(this.l1[i], (t) => this.levelTiles.setLook(i, t)),
     ];
     if (!tl) return h('div', { class: 'ow-info' }, ...head, h('div', { class: 'hint warn-text' }, '⚠ This level tile enters no level.'));
     const lvl = translevelToLevel(tl);

@@ -645,7 +645,8 @@ function showHelp(): void {
       ['J · Shift+J', 'Jump arcs at the mouse on/off · pin them to the tile / unpin'],
     ]],
     ['Overworld', [
-      ['1 / 2', 'Layer 1 (paths/levels) / layer 2 (terrain)'],
+      ['1 / 2 / 3 / 4 / 5', 'Layer 1 (paths) / layer 2 (terrain) / Levels / Overworld links / Sprites'],
+      ['Levels: drag · Del · right click', 'Move a level tile (swaps with the tile there) · a stop tile in its place · Place level here…'],
       ['Click/drag · right click/Shift+click', 'Pick up tile(s) as brush · paint'],
       ['Alt+click / Ctrl+click', 'Level info of the level tile'],
       ['G', 'Grid on/off'],
