@@ -643,18 +643,22 @@ export class Map16Tab implements WsPanel {
     const sc = this.scroll, y = this.tileY(t);
     if (y < sc.scrollTop || y > sc.scrollTop + sc.clientHeight - 40) sc.scrollTop = y - sc.clientHeight / 2;
   }
+  // the selected tile in view, the page bar marking the page shown (a target change may leave the list where it is: no
+  // scroll event marks it then)
   private scrollToSel(): void {
     this.scrollPending = false;
     this.scrollToTile(this.sel);
+    this.pageScrolled();
   }
   private scrollToPage(p: number): void {
     this.scroll.scrollTop = this.heads[p].offsetTop - this.scroll.offsetTop;
     this.pageScrolled();
   }
-  // marks the page at the top of the list in the bar
+  // marks the page at the top of the list in the bar (of the target's pages: the hidden ones' headings are at 0)
   private pageScrolled(): void {
     let page = 0;
-    this.heads.forEach((head, p) => { if (head.offsetTop - this.scroll.offsetTop <= this.scroll.scrollTop + 4) page = p; });
+    const pages = Math.ceil(this.t.tiles / 256);
+    for (let p = 1; p < pages; p++) if (this.heads[p].offsetTop - this.scroll.offsetTop <= this.scroll.scrollTop + 4) page = p;
     this.topPage = page;
     this.pageBar.querySelectorAll('button').forEach((b, i) => b.classList.toggle('active', i === page));
   }
