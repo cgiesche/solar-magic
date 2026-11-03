@@ -7,9 +7,9 @@ import { Rom, snesToPc, pcToSnes } from '../src/core/rom.ts';
 import { RomEditSession } from '../src/core/romedit.ts';
 import {
   OverworldEmulator, OverworldLoads, readL1, readL2, l1Index, l1XY, l2Index, l2Pointers, OW_L1, readMaps, readTranslevels, writeTranslevels, translevelToLevel,
-  freeTranslevel, translevelUse, sharedTranslevels, gameL1, OW_EVENTS, MAX_TRANSLEVEL,
+  freeTranslevel, translevelUse, sharedTranslevels, MAX_TRANSLEVEL,
 } from '../src/core/overworld.ts';
-import { OverworldStroke, shownMaps, type StrokeLayer, type StrokeEnd } from '../src/core/owstroke.ts';
+import { OverworldStroke, type StrokeLayer, type StrokeEnd } from '../src/core/owstroke.ts';
 import type { LevelTileTest } from '../src/core/owpaths.ts';
 import { RomWatch } from '../src/core/romwatch.ts';
 import { levelNameTiles, setLevelNameTiles, encodeName } from '../src/core/levelnames.ts';
@@ -279,22 +279,6 @@ const diff = (a: Uint8Array, b: Uint8Array) => { const out: number[] = []; for (
     `${MAX_TRANSLEVEL} level tiles painted: ${given.size} get a translevel each, ${none} none (warned)`);
   s.undo();
   check(same(rom.data, image), 'undone: the ROM as before');
-}
-
-// a painted tile an event changes: counted (the toast's “changed by events”) on the map shown at the event progress
-// (shownMaps: the painted tiles as painted, the others as the game shows them); one no event changes is shown
-{
-  const { rom } = fresh();
-  const emu = new OverworldEmulator(rom), was = readL1(rom), game = gameL1(emu.load(0, OW_EVENTS));
-  const main = Array.from({ length: 0x400 }, (_, i) => i);
-  const i = main.find((k) => game[k] !== was[k])!, j = main.find((k) => k !== i && game[k] === was[k])!;
-  const v = [0x10, 0x11, 0x12].find((t) => t !== was[i] && t !== game[i])!, w = was[main.find((k) => game[k] === was[k] && was[k] !== was[j])!];
-  const { maps, end } = stroke(rom, 'l1', [l1Cell(i, v), l1Cell(j, w)]);
-  const shown = shownMaps(emu.load(0, OW_EVENTS), 0, maps, readMaps(rom));
-  check(shown.l1[i] === game[i] && shown.l1[j] === w && end.covered(shown) === 1,
-    `painted at all events (${hx2(v)} where an event makes ${hx2(game[i])}, ${hx2(w)} where none changes): 1 painted tile changed by events`);
-  const before = shownMaps(emu.load(0, 0), 0, maps, readMaps(rom));
-  check(end.covered(before) === 0, 'at event progress 0: none');
 }
 
 // a stroke cancelled (Esc): the maps it painted are as when it began – layer 1 with its translevels, layer 2, and an

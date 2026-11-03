@@ -19,7 +19,7 @@ import { messageRoutineNote, messageRoutineUnknown, MESSAGE_ROUTINE_CHECKING } f
 import { levelName, hasLevelName } from '../core/levelnames.ts';
 import { levelNameField } from './levelnamefield.ts';
 import {
-  readEvents, writeEvents, applyEvents, reorderSteps, eventRunners, eventTitle, eventPlace, submapOf, pieceTiles, isBig, l2XY,
+  readEvents, writeEvents, applyEvents, reorderSteps, eventRunners, eventTitle, eventList, stepEvent, eventPlace, submapOf, pieceTiles, isBig, l2XY,
   eventL1Tiles, exitChanges, type EventData, type EventRunner, type Rect, type ExitChanges,
 } from '../core/owevents.ts';
 import { OverworldStroke, shownMaps } from '../core/owstroke.ts';
@@ -85,17 +85,13 @@ export class OverworldView {
   private tlList = h('div', { class: 'level-list' });
   private tlCount = h('span', { class: 'hint' });
   private eventsBadge = h('div', { class: 'ow-badge' });
-  private eventsSlider = h('input', { type: 'range', class: 'ow-events', min: 0, max: OW_EVENTS, step: 1 });
-  private eventsLabel = h('span', { class: 'ow-events-name' });
   map = 0;
   private watch: Watch; // the ROM bytes the view was built from (romwatch.ts)
   // The map as the game shows it is emulated in the probe worker (App.overworldMap): until the load of the map at the
   // event progress comes, the map drawn last stays (last: its load, of map `map`, with the maps as in the ROM then;
-  // stale: something was built from another load or none, built again when it comes; afterShown: what waits for the
-  // map shown, as the game shows it)
+  // stale: something was built from another load or none, built again when it comes)
   private last: { r: OwRender; map: number; rom: { l1: Uint16Array; l2: Uint16Array } } | null = null;
   private stale = false;
-  private afterShown: (() => void) | null = null;
   private stroke: OverworldStroke | null = null; // the stroke on layer 1 or 2 being painted
   private shownViews: Rect[] | null = null;
   private pendingTile = -1; // a tile to show (showTile) once the submaps' views are known
@@ -115,10 +111,13 @@ export class OverworldView {
   showSprites = false; // the sprites also while painting (always in the sprites mode)
   sprites = new SpriteLayer(this);
   reach = new ReachLayer(this); // path validation: the tiles Mario doesn't reach dimmed, the problems of the paths
-  // event progress: the map shown with events 0 … progress-1 passed (a view setting kept per ROM, not in the ROM)
-  progress = 0;
-  // the event being painted (both layers shown and painted as after it), -1 none: the map before events
+  // the event the map is shown and painted as after (both layers; "Map after" in the bar), -1: the map before events
+  // (kept per ROM in the browser, not in the ROM)
   event = -1;
+  // event progress: the map shown with events 0 … progress-1 passed, those up to the event shown
+  get progress(): number {
+    return this.event + 1;
+  }
   // l1: layer 1 as after it (the game's at the event progress just after it, game; null until its load comes), with the
   // stroke being painted; without: layer 1 as after it without its layer 1 changes (what a stroke is compared with,
   // App.layer1Without; undefined while it is emulated, null when it could not be). Layer 1 is painted once both come
@@ -193,7 +192,6 @@ export class OverworldView {
     window.addEventListener('mousemove', (e) => this.onMove(e));
     window.addEventListener('mouseup', (e) => this.onUp(e));
     attachPanZoom(this.scroller, () => this.zoom, (z, ax, ay) => this.setZoom(z, ax, ay), undefined, undefined, pixelZoomSteps);
-    this.eventsSlider.addEventListener('input', () => this.setProgress(+this.eventsSlider.value));
     // a ROM edit (a stroke ended, a name chosen) or undo/redo that changed what the view was built from (its watch):
     // shown as in the ROM (a stroke being painted is dropped)
     this.watch = app.watchRom(() => {
@@ -294,10 +292,6 @@ export class OverworldView {
     putImage(this.mapCanvas, img);
     this.paint();
     this.reach.button.update();
-    if (!exact) return;
-    const after = this.afterShown;
-    this.afterShown = null;
-    after?.();
   }
 
   drawL1Tile(img: Uint32Array, tc: TileCache, t: number, px: number, py: number, W = 512, H = 512): void {
@@ -617,16 +611,6 @@ export class OverworldView {
       this.sync();
       return;
     }
-    // shown again at the event progress (once its load comes): painted tiles an event changes are on the map before
-    // events only
-    const covered = () => {
-      const n = end.covered(this.shown);
-      if (n) toast(`${n} painted tile${n > 1 ? 's are' : ' is'} changed by events at this event progress – painting changes the map before events (fewer events: ,)`);
-    };
-    if (stroke.event < 0) {
-      if (this.load()) covered(); // (known at once: the ROM edit's sync drew it)
-      else this.afterShown = covered;
-    }
     for (const w of end.warnings) toast(w);
   }
 
@@ -729,42 +713,25 @@ export class OverworldView {
     this.statusText.textContent = t;
   }
 
-  // ---------------- event progress ----------------
-  // events 0 … n-1 passed (clamped to none … all), kept for the ROM
-  setProgress(n: number): void {
-    n = clampProgress(n);
-    if (n === this.progress) return;
-    this.afterShown = null; // (a note for the map shown before)
-    if (this.event >= 0) { this.event = -1; this.syncEvent(); this.buildBar(); }
-    this.progress = n;
-    storeProgress(this.app.romName, n);
-    this.showProgress();
-    this.redrawMap();
-    this.updateStatus();
-  }
-  private names = new StateMemo<Map<number, string>>(); // the events' names (per ROM state, reads counted)
-  // the slider, the last event passed with the exit that runs it, the badge on the map
-  showProgress(): void {
-    const rom = this.app.rom, n = this.progress;
-    const names = this.names.get(rom, null, () => eventNames(rom));
-    const e = n - 1, last = n ? `${hex(e, 2)} ${names.get(e) ?? '(run by no level exit)'}` : '';
-    this.eventsSlider.value = String(n);
-    this.eventsLabel.textContent = n === 0 ? 'none' : n === OW_EVENTS ? 'all' : `up to ${last}`;
-    this.eventsLabel.title = last;
-    this.eventsBadge.textContent = `Event progress: ${n === OW_EVENTS ? 'all' : `up to ${hex(e, 2)}`}`;
-    this.eventsBadge.classList.toggle('show', n > 0);
+  // ---------------- the event shown and painted ----------------
+  // the badge on the map: where painting goes (or, in the links and sprites modes, the event the map is shown after)
+  private showEventBadge(): void {
+    const e = this.event;
+    this.eventsBadge.classList.toggle('show', e >= 0);
+    if (e < 0) return;
+    const rom = this.app.rom, runners = eventRunners(rom), r = runners.get(e)?.[0];
+    const title = `event ${hex(e, 2)}${r ? ` · ${levelName(rom, r.tl)} (${eventTitle(runners, e)})` : ''}`;
+    this.eventsBadge.textContent = this.mode === 'l1' || this.mode === 'l2' ? `Painting into ${title}` : `Map after ${title}`;
   }
 
   // ---------------- painting an event ----------------
-  // event e painted (-1: none): layer 2 shown and painted as after it, the event progress just after it
+  // the map shown and painted as after event e (-1: the map before events), the event progress just after it
   setEvent(e: number): void {
+    if (e === this.event) return;
     this.stopPlay();
     this.event = e;
     this.hoverStep = null;
-    if (e >= 0) {
-      this.progress = e + 1;
-      storeProgress(this.app.romName, this.progress);
-    }
+    storeEvent(this.app.romName, e);
     this.syncEvent();
     this.buildBar();
     this.buildSide();
@@ -789,19 +756,13 @@ export class OverworldView {
     const views = this.views;
     return views && eventPlace(this.ev!.runners, views, e, this.map);
   }
-  // the events by the level exit that runs them (by level, then exit), those no level on the map runs by number
-  eventPicker(): HTMLSelectElement {
-    const runners = eventRunners(this.app.rom);
-    const first = (e: number) => runners.get(e)?.[0];
-    const events = Array.from({ length: OW_EVENTS }, (_, e) => e).sort((a, b) => {
-      const ra = first(a), rb = first(b);
-      if (!ra || !rb) return ra ? -1 : rb ? 1 : a - b;
-      return translevelToLevel(ra.tl) - translevelToLevel(rb.tl) || ra.exit - rb.exit;
-    });
-    const s = select([[-1, 'Map before events'], ...events.map((e) => [e, first(e) ? `${eventTitle(runners, e)} (${hex(e, 2)})` : eventTitle(runners, e)] as [number, string])],
-      this.event, (v) => this.setEvent(v));
+  // "Map after": ‹ › one event back/further in number order, the list by the level exit running the events (eventList)
+  private eventPicker(): HTMLElement {
+    const s = select(eventList(eventRunners(this.app.rom)).map((x) => [x.event, x.label] as [number, string]), this.event, (v) => this.setEvent(v));
     s.classList.add('ow-event-pick');
-    return s;
+    const step = (d: number, label: string, title: string) => h('button', { title, disabled: stepEvent(this.event, d) === this.event, onclick: () => this.setEvent(stepEvent(this.event, d)) }, label);
+    return h('span', { class: 'row', title: 'The map as after loading a save in which the events up to this one passed, applied in their number order as the game does – and what is painted goes into this event (the editor finds its steps: layer 2 animated on the submap of the level running it, silent elsewhere; layer 1 silent). "Before events": painting changes the map before events' },
+      'Map after ', step(-1, '‹', 'One event back (,)'), s, step(1, '›', 'One event further (.)'));
   }
   private editSteps(what: string, order: number[]): void {
     const rom = this.app.rom, e = this.event;
@@ -925,7 +886,6 @@ export class OverworldView {
 
   setMap(n: number): void {
     if (n === this.map) return;
-    this.afterShown = null; // (a note for the map shown before)
     this.map = n;
     this.selected = -1;
     this.redrawMap();
@@ -949,7 +909,7 @@ export class OverworldView {
     const view = (label: string, get: () => boolean, set: (v: boolean) => void, title?: string, shortcut?: string) =>
       ({ label, title, shortcut, checked: get, onToggle: (v: boolean) => { set(v); this.redrawMap(); this.updateStatus(); } });
     this.zoomCtl.update();
-    this.showProgress();
+    this.showEventBadge();
     this.bar.replaceChildren(
       h('label', { class: 'row' }, 'Map ', select(MAP_NAMES.map((n, i) => [i, n] as [number, string]), this.map, (v) => this.setMap(v))),
       h('span', { class: 'sep' }),
@@ -978,10 +938,7 @@ export class OverworldView {
           'Stars, pipes and exit paths leading elsewhere as arrows (always shown in the Overworld links mode), the locations exits to the overworld teleport to and the Koopa Kids\' places dashed'),
       ] }),
       h('span', { class: 'sep' }),
-      h('label', { class: 'row', title: 'Event progress: the overworld as after loading a save in which the events up to this one passed, applied in their number order as the game does (a view setting, not in the ROM) – painting changes the map before events · , and . : one event back/further' },
-        'Events ', this.eventsSlider, this.eventsLabel),
-      h('label', { class: 'row', title: 'Paint an event: the map as it looks after the event – the editor finds its steps (layer 2 animated on the submap of the level running it, silent elsewhere; layer 1 silent); the map before it is the event progress just below it' },
-        'Paint ', this.eventPicker()),
+      this.eventPicker(),
       h('span', { class: 'sep' }),
       this.zoomCtl.root,
     );
@@ -1003,7 +960,7 @@ export class OverworldView {
     if (k === 'escape' && this.event >= 0) { this.setEvent(-1); return true; }
     if (k === 'g') { this.showGrid = !this.showGrid; this.paint(); return true; }
     if (k === 'm' && this.selected >= 0 && (this.mode === 'l1' || this.mode === 'l2')) { this.editTile(this.selected); return true; }
-    if (k === ',' || k === '.') { this.setProgress(this.progress + (k === ',' ? -1 : 1)); return true; }
+    if (k === ',' || k === '.') { this.setEvent(stepEvent(this.event, k === ',' ? -1 : 1)); return true; }
     if (k >= '1' && k <= '4') { (this.bar.querySelectorAll('.btn-group button')[+k - 1] as HTMLButtonElement).click(); return true; }
     if ((k === 'delete' || k === 'backspace') && this.mode === 'sprites') return this.sprites.remove();
     if ((k === 'delete' || k === 'backspace') && this.mode === 'links') return this.links.remove();
@@ -1460,6 +1417,7 @@ export class OverworldView {
     this.tls = m.tls;
     this.stopPlay();
     this.syncEvent();
+    this.buildBar(); // (the events' names and order in "Map after", the badge)
     this.buildSide();
     this.buildLeft();
     this.redrawMap();
@@ -1469,26 +1427,23 @@ export class OverworldView {
   show(): void {
     this.shownViews = null;
     this.pendingTile = -1;
-    this.afterShown = null;
     void this.views; // (asked for now: the links, sprites and events need them)
-    this.event = -1;
-    this.progress = loadProgress(this.app.romName);
+    this.event = loadEvent(this.app.romName);
     // (the map drawn last may be another ROM's: not shown while this one's load is emulated)
     this.last = null;
     if (!this.load()) putImage(this.mapCanvas, new Uint32Array(512 * 512));
-    this.buildBar();
     this.sync();
     this.layout();
   }
 }
 
-// the event progress kept per ROM (by its name) in the browser
-const PROGRESS_PREF = 'ow-event-progress:';
-const clampProgress = (n: number) => Math.max(0, Math.min(OW_EVENTS, n));
-function loadProgress(rom: string): number {
-  try { return clampProgress(Number(localStorage.getItem(PROGRESS_PREF + rom)) || 0); } catch { return 0; }
+// the event of "Map after" kept per ROM (by its name) in the browser, -1: before events (a new key: the event progress
+// kept before was a view only, the map painted before events)
+const EVENT_PREF = 'ow-map-after:';
+function loadEvent(rom: string): number {
+  try { const v = localStorage.getItem(EVENT_PREF + rom); return v === null ? -1 : stepEvent(Number(v) || 0, 0); } catch { return -1; }
 }
-function storeProgress(rom: string, n: number): void {
-  try { if (n) localStorage.setItem(PROGRESS_PREF + rom, String(n)); else localStorage.removeItem(PROGRESS_PREF + rom); } catch { /* no storage */ }
+function storeEvent(rom: string, e: number): void {
+  try { if (e >= 0) localStorage.setItem(EVENT_PREF + rom, String(e)); else localStorage.removeItem(EVENT_PREF + rom); } catch { /* no storage */ }
 }
 

@@ -32,13 +32,11 @@ export interface OwEventMaps {
   place: () => EventPlace | null;
 }
 
-// the end of a stroke: the ROM edit (`label`, `write`; null when nothing is written), the warnings about it, and how
-// many painted tiles events change on the map shown at the event progress (painting changes the map before events)
+// the end of a stroke: the ROM edit (`label`, `write`; null when nothing is written) and the warnings about it
 export interface StrokeEnd {
   label: string;
   write: (() => void) | null;
   warnings: string[];
-  covered: (shown: { l1: ArrayLike<number>; l2: ArrayLike<number> }) => number;
 }
 
 export class OverworldStroke {
@@ -96,15 +94,12 @@ export class OverworldStroke {
   // the ROM edit of the stroke and its warnings; `write` throws when it can't be written (the submaps' views not known)
   end(): StrokeEnd {
     const { rom, maps, ev, old } = this;
-    const covered = (shown: { l1: ArrayLike<number>; l2: ArrayLike<number> }) => (this.layer === 'l1'
-      ? maps.l1.filter((v, i) => v !== old.l1[i] && shown.l1[i] !== v).length
-      : maps.l2.filter((v, i) => v !== old.l2[i] && shown.l2[i] !== v).length);
     if (ev) {
       const title = eventTitle(eventRunners(rom), ev.event), e = ev.event;
       if (this.layer === 'l2') {
         const after = ev.after, place = ev.place();
         return {
-          label: `${title}: paint`, warnings: [], covered: () => 0,
+          label: `${title}: paint`, warnings: [],
           write: () => {
             if (!place) throw new Error('the submaps are still being loaded, try again');
             writeEvents(rom, paintEvent(readEvents(rom), readL2(rom), e, after, place));
@@ -117,16 +112,16 @@ export class OverworldStroke {
         writeEvents(rom, paintEventL1(readEvents(rom), e, after, without, painted));
         writeTranslevels(rom, maps.tls);
       } : null;
-      return { label: `${title}: paint layer 1`, write, warnings: [], covered: () => 0 };
+      return { label: `${title}: paint layer 1`, write, warnings: [] };
     }
-    if (this.layer === 'l2') return { label: 'Paint layer 2', write: () => writeL2(rom, maps.l2), warnings: [], covered };
+    if (this.layer === 'l2') return { label: 'Paint layer 2', write: () => writeL2(rom, maps.l2), warnings: [] };
     const warnings: string[] = [];
     const before = sharedTranslevels(old.l1, old.tls, this.isLevelTile);
     const added = [...sharedTranslevels(maps.l1, maps.tls, this.isLevelTile)].filter(([tl, at]) => (before.get(tl)?.length ?? 0) < at.length);
     if (added.length) warnings.push(`${added.map(([tl, at]) => `Level ${hex(translevelToLevel(tl), 3)} is entered from ${at.length} tiles`).join(', ')} – to move a level tile, paint over the old one.`);
     if (maps.l1.some((v, i) => this.isLevelTile(v) && !maps.tls[i])) warnings.push('Every level (001–024, 101–13B) is already entered from a level tile – the new level tile enters none; choose its level in the properties.');
     return {
-      label: 'Paint layer 1', warnings, covered,
+      label: 'Paint layer 1', warnings,
       write: () => { writeL1(rom, maps.l1); writeTranslevels(rom, maps.tls); },
     };
   }

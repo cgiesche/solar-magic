@@ -403,10 +403,30 @@ export function exitChanges(rom: Rom, tl: number, d: EventData = readEvents(rom)
 }
 const EXIT_SHORT = ['normal exit', 'secret exit 1', 'secret exit 2', 'secret exit 3'];
 const hex3 = (n: number) => n.toString(16).toUpperCase().padStart(3, '0');
+const hex2 = (n: number) => n.toString(16).toUpperCase().padStart(2, '0');
 // "Level 105 · secret exit 1", "Event 4A" for one no level exit on the map runs
 export function eventTitle(runners: Map<number, EventRunner[]>, e: number): string {
   const r = runners.get(e)?.[0];
-  return r ? `Level ${hex3(translevelToLevel(r.tl))} · ${EXIT_SHORT[r.exit]}` : `Event ${e.toString(16).toUpperCase().padStart(2, '0')}`;
+  return r ? `Level ${hex3(translevelToLevel(r.tl))} · ${EXIT_SHORT[r.exit]}` : `Event ${hex2(e)}`;
+}
+
+// the editor's "Map after" list (CONTEXT.md "Event progress"): the map before events (-1), then the events run by a
+// level exit (by level, then exit; labelled by it, the event's number after it), then those no level exit runs by
+// number
+export function eventList(runners: Map<number, EventRunner[]>): { event: number; label: string }[] {
+  const first = (e: number) => runners.get(e)?.[0];
+  const events = Array.from({ length: OW_EVENTS }, (_, e) => e).sort((a, b) => {
+    const ra = first(a), rb = first(b);
+    if (!ra || !rb) return ra ? -1 : rb ? 1 : a - b;
+    return translevelToLevel(ra.tl) - translevelToLevel(rb.tl) || ra.exit - rb.exit;
+  });
+  return [{ event: -1, label: 'Before events' },
+    ...events.map((e) => ({ event: e, label: first(e) ? `${eventTitle(runners, e)} (${hex2(e)})` : eventTitle(runners, e) }))];
+}
+
+// one event back (d -1) or further (+1) in number order from e (-1: the map before events), clamped
+export function stepEvent(e: number, d: number): number {
+  return Math.max(-1, Math.min(OW_EVENTS - 1, e + d));
 }
 
 // the part of the submaps' region each submap shows (8x8 tiles; the camera the game sets there, emulated), index
