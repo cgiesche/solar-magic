@@ -350,6 +350,8 @@ canvas.sheet-fill { width: 100%; height: auto; image-rendering: auto; }
 .ow-step.silent { cursor: default; color: var(--muted); }
 .empty { color: var(--muted); font-size: 12px; font-style: italic; padding: 10px 6px; text-align: center; }
 .ow-pal, .ow-pal8 { image-rendering: pixelated; cursor: crosshair; display: block; }
+.ow-fold { align-items: center; gap: 8px; margin: 4px 0; }
+.ow-page { margin-top: 8px; }
 .ow-pick-body { display: flex; flex-direction: column; gap: 6px; }
 .ow-pick { width: 512px; max-width: 100%; aspect-ratio: 1; image-rendering: pixelated; cursor: crosshair; border: 1px solid var(--border); }
 .ow-reveals { margin-top: 8px; }

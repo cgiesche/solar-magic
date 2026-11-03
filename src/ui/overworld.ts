@@ -24,6 +24,7 @@ import {
 } from '../core/owevents.ts';
 import { OverworldStroke, shownMaps } from '../core/owstroke.ts';
 import { isPathKind, PATH_KIND_NAMES, type PathKind } from '../core/owpaths.ts';
+import { emptyL1Tiles, freeL1Tiles, sheetPages, l1TileLines, SHEET_COLS, type SheetPage } from '../core/owl1sheet.ts';
 import { skipsRevealWalk } from '../core/revealwalk.ts';
 import type { OwSpriteView } from '../core/owsprites.ts';
 import { LinkLayer } from './owlinkview.ts';
@@ -425,32 +426,9 @@ export class OverworldView {
     const kinds = this.pathKinds();
     if (!kinds) return;
     const ctx = this.canvas.getContext('2d')!, l1 = this.shown.l1;
-    const fill = { walk: 'rgba(90,230,100,0.7)', climb: 'rgba(90,230,100,0.7)', swim: 'rgba(60,140,255,0.75)', exit: 'rgba(235,60,60,0.8)' } as Record<PathKind, string>;
     for (let y = 0; y < 32; y++) for (let x = 0; x < 32; x++) {
       const k = kinds[l1[l1Index(this.region, x, y)]];
-      if (!isPathKind(k)) continue;
-      const px = x * 16, py = y * 16;
-      if (k === 'stop') {
-        for (const [c, w] of [['rgba(0,0,0,0.8)', 4], ['#fff', 2]] as [string, number][]) {
-          ctx.strokeStyle = c;
-          ctx.lineWidth = w * lw;
-          ctx.beginPath();
-          ctx.moveTo(px + 4, py + 4); ctx.lineTo(px + 12, py + 12); ctx.moveTo(px + 12, py + 4); ctx.lineTo(px + 4, py + 12);
-          ctx.stroke();
-        }
-        continue;
-      }
-      ctx.fillStyle = fill[k];
-      ctx.fillRect(px + 2, py + 2, 12, 12);
-      ctx.strokeStyle = 'rgba(0,0,0,0.85)';
-      ctx.lineWidth = 1.5 * lw;
-      ctx.strokeRect(px + 2, py + 2, 12, 12);
-      if (k === 'climb') {
-        ctx.lineWidth = 2 * lw;
-        ctx.beginPath();
-        for (const ry of [5, 8, 11]) { ctx.moveTo(px + 2, py + ry); ctx.lineTo(px + 14, py + ry); }
-        ctx.stroke();
-      }
+      if (isPathKind(k)) drawPathMark(ctx, k, x * 16, y * 16, lw);
     }
   }
 
@@ -1366,30 +1344,58 @@ export class OverworldView {
     return out;
   }
 
+  // the layer 1 sheet (owl1sheet.ts): pages 0 and 1 (tiles 100–1FF do where Mario walks what 00–FF do) in number
+  // order, 16 a row; transparent pixels on a checkerboard, a path tile invisible in the game with its mark of the map's
+  // "Path tiles" overlay, a visible tile doing something with a border of its colour (none while the kinds are learned);
+  // the rows of free tiles at a page's end folded into one row (page 1 whole while none of its tiles is the ROM's own)
   l1Palette(): HTMLElement {
     const r = this.render();
     if (!r) return h('div', { class: 'hint' }, 'Loading the overworld…');
-    const tc = new TileCache(r.vram, r.cgram, 0);
+    const tc = new TileCache(r.vram, r.cgram, 0), kinds = this.pathKinds();
+    const empty = emptyL1Tiles(this.app.rom), free = freeL1Tiles(empty, kinds);
     const tiles = (list: number[], w: number, W: number, H: number) => {
       const c = document.createElement('canvas');
       c.width = W; c.height = H;
       const ctx = c.getContext('2d')!;
       const id = ctx.createImageData(W, H);
       const px = new Uint32Array(id.data.buffer);
-      px.fill(0xff181818);
       list.forEach((t, i) => this.drawL1Tile(px, tc, t, (i % w) * 16, Math.floor(i / w) * 16, W, H));
+      // (whether each cell has a pixel, before the checkerboard fills the others)
+      const seen = list.map((_, i) => {
+        const x0 = (i % w) * 16, y0 = Math.floor(i / w) * 16;
+        for (let y = y0; y < y0 + 16; y++) for (let x = x0; x < x0 + 16; x++) if (px[y * W + x]) return true;
+        return false;
+      });
+      for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) if (!px[y * W + x]) px[y * W + x] = checker(x, y);
       ctx.putImageData(id, 0, 0);
+      if (kinds) list.forEach((t, i) => {
+        const k = kinds[t], x = (i % w) * 16, y = Math.floor(i / w) * 16;
+        if (!seen[i] && isPathKind(k)) drawPathMark(ctx, k, x, y, 0.5);
+        else if (KIND_BORDER[k]) { ctx.strokeStyle = KIND_BORDER[k]; ctx.lineWidth = 1; ctx.strokeRect(x + 0.5, y + 0.5, 15, 15); }
+      });
       return c;
     };
-    // pages 0 and 1 of the Map16 (overworld.ts): tiles 100–1FF do where Mario walks what 00–FF do
-    const rows = OW_L1_TILES / 16, sheet = tiles(Array.from({ length: OW_L1_TILES }, (_, t) => t), 16, 256, rows * 16);
     const b = this.brush;
     const one = b.kind === 'l1' && b.entries.length === 1;
+    const page = (p: SheetPage) => {
+      const fold = p.free ? h('div', { class: 'row ow-fold' },
+        h('span', { class: 'hint' }, `${p.free} free tile${p.free === 1 ? '' : 's'}`),
+        h('button', { title: `Edit tile ${l1Hex(p.firstFree)}, the first free one, in the Map16 tab`,
+          onclick: () => this.app.editTile(p.firstFree, 'ow', { submap: this.map, progress: this.progress }) }, 'New tile…')) : null;
+      if (!p.rows) return [fold];
+      const sheet = tiles(Array.from({ length: p.rows * SHEET_COLS }, (_, k) => p.first + k), SHEET_COLS, SHEET_COLS * 16, p.rows * 16);
+      const at = (x: number, y: number) => p.first + y * SHEET_COLS + x;
+      return [this.sheetPalette(sheet, 'ow-pal', SHEET_COLS, p.rows, 16, at,
+        (ctx) => ctx.drawImage(tiles(b.entries, b.w, b.w * 16, b.h * 16), 0, 0),
+        (q) => (q.w * q.h > 1 ? [`Block ${q.w}×${q.h} from tile ${l1Hex(at(q.x, q.y))}`]
+          : [`Tile ${l1Hex(at(q.x, q.y))}`, ...l1TileLines(at(q.x, q.y), kinds, free[at(q.x, q.y)])])), fold];
+    };
+    const [p0, p1] = sheetPages(empty, free);
     return h('div', null,
       h('div', { class: 'hint' }, `${one ? `Tile ${l1Hex(b.entries[0])}` : b.kind === 'l1' ? `Block ${b.w}×${b.h}` : ''} · Level tiles: 56–80 (156–180)`),
-      this.sheetPalette(sheet, 'ow-pal', 16, rows, 16, (x, y) => y * 16 + x,
-        (ctx) => ctx.drawImage(tiles(b.entries, b.w, b.w * 16, b.h * 16), 0, 0),
-        (q) => [q.w * q.h > 1 ? `Block ${q.w}×${q.h} from tile ${l1Hex(q.y * 16 + q.x)}` : `Tile ${l1Hex(q.y * 16 + q.x)}`]));
+      ...page(p0),
+      h('div', { class: 'hint ow-page' }, 'Page 1 (100–1FF): acts like 00–FF where Mario walks'),
+      ...page(p1));
   }
 
   l2Palette(): HTMLElement {
@@ -1473,6 +1479,37 @@ export class OverworldView {
     this.layout();
   }
 }
+
+// the mark of a path tile of kind k (isPathKind) on the 16x16 tile at (px, py), as the map's "Path tiles" overlay
+// draws it: walk green, climb green with rungs, swim blue, exit red, stop a cross (lw: the width of a pixel)
+const PATH_FILL: Partial<Record<PathKind, string>> = { walk: 'rgba(90,230,100,0.7)', climb: 'rgba(90,230,100,0.7)', swim: 'rgba(60,140,255,0.75)', exit: 'rgba(235,60,60,0.8)' };
+function drawPathMark(ctx: CanvasRenderingContext2D, k: PathKind, px: number, py: number, lw: number): void {
+  if (k === 'stop') {
+    for (const [c, w] of [['rgba(0,0,0,0.8)', 4], ['#fff', 2]] as [string, number][]) {
+      ctx.strokeStyle = c;
+      ctx.lineWidth = w * lw;
+      ctx.beginPath();
+      ctx.moveTo(px + 4, py + 4); ctx.lineTo(px + 12, py + 12); ctx.moveTo(px + 12, py + 4); ctx.lineTo(px + 4, py + 12);
+      ctx.stroke();
+    }
+    return;
+  }
+  ctx.fillStyle = PATH_FILL[k]!;
+  ctx.fillRect(px + 2, py + 2, 12, 12);
+  ctx.strokeStyle = 'rgba(0,0,0,0.85)';
+  ctx.lineWidth = 1.5 * lw;
+  ctx.strokeRect(px + 2, py + 2, 12, 12);
+  if (k === 'climb') {
+    ctx.lineWidth = 2 * lw;
+    ctx.beginPath();
+    for (const ry of [5, 8, 11]) { ctx.moveTo(px + 2, py + ry); ctx.lineTo(px + 14, py + ry); }
+    ctx.stroke();
+  }
+}
+// the colour of the border a visible tile of kind k gets in the paint sheet (the overlay's; a level tile yellow)
+const KIND_BORDER: Partial<Record<PathKind, string>> = { walk: '#5ae664', climb: '#5ae664', swim: '#3c8cff', exit: '#eb3c3c', stop: '#ffffff', level: '#ffd23c' };
+// the background of transparent pixels in the paint sheet: a checkerboard of 4x4 pixel squares (layer 2 shows there)
+const checker = (x: number, y: number): number => (((x >> 2) ^ (y >> 2)) & 1 ? 0xff2a2a2a : 0xff1c1c1c);
 
 // the event of "Map after" kept per ROM (by its name) in the browser, -1: before events (a new key: the event progress
 // kept before was a view only, the map painted before events)

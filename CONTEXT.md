@@ -169,6 +169,10 @@ _Avoid_: message slot
 A layer 1 tile Mario walks, climbs or swims along, or stops or exits on; invisible in the game, drawn by the editor as an overlay. The game's 5 hardcoded paths are not tiles.
 _Avoid_: road, Mario path (Lunar Magic's view name)
 
+**Free tile** (overworld layer 1):
+A layer 1 tile drawn as tile 000, on no map (nor put there by an event) and doing what 000 does where Mario walks – room for a new tile. The editor's Map16 extension makes C1–1FF such copies of 000. The paint sheet folds them into one row ("N free tiles · New tile…").
+_Avoid_: empty tile (an empty tile may still be an invisible path or level tile)
+
 **Path shape**:
 How a path tile moves Mario: by a vector from where he is, by the tile and the way he steps onto it, turning him where it ends (a bend, a junction taken one way). Learned by emulation (owpaths.ts), as the path tiles' kinds.
 _Avoid_: tile direction, path direction
