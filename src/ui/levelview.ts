@@ -2,6 +2,7 @@
 
 import { App, isBrushMode, type Marker, type LevelEdit, type Brush, type PreviewPart } from './app.ts';
 import { h, attachPanZoom, toast } from './dom.ts';
+import { BrushDrag, drawBrushFrame } from './brushsurface.ts';
 import { paintOverlays, openOverlay, boxLayers, deathsAt, gameViewLabelBox, gameViewIn, BAND_STYLE, type SpriteDraw, MARKER_STYLE, type GameViewFrame, ARC_STYLE, type ArcsDraw } from './leveloverlays.ts';
 import { hex2, hex3 } from '../core/names.ts';
 import { type Grab } from '../core/objresize.ts';
@@ -26,8 +27,7 @@ type Drag =
   | { kind: 'resize'; resize: ResizeDrag } // the selected objects by a handle (levelmodel.ts)
   | { kind: 'band'; x0: number; y0: number; x1: number; y1: number; add: boolean; far: boolean } // far: dragged, not a click
   | { kind: 'marker'; edit: LevelEdit | null; marker: Marker; offX: number; offY: number; moved: boolean } // (secondary entrances: not a level edit)
-  | { kind: 'paint'; edit: LevelEdit; changed: boolean; x0: number; y0: number; lastX: number; lastY: number } // BG/layer 3 brush, stamped on a grid of cells from (x0, y0)
-  | { kind: 'pick'; x0: number; y0: number; x1: number; y1: number } // BG/layer 3 cells taken into the brush
+  | { kind: 'brush' } // BG/layer 3: a stroke or a pick (brushDrag)
   | { kind: 'gameView'; offX: number; offY: number }; // the game view frame, held at (offX, offY) inside it
 
 export class LevelView {
@@ -40,6 +40,20 @@ export class LevelView {
   levelCanvas: HTMLCanvasElement;
   hover: { tx: number; ty: number; px: number; py: number; top: number; cx: number; cy: number } | null = null; // cx/cy: the brush cell
   drag: Drag | null = null;
+  // BG and layer 3 painted with a brush (brushsurface.ts, ADR 0011); a stroke is one level edit
+  private stroke: { edit: LevelEdit; changed: boolean } | null = null;
+  private brushDrag = new BrushDrag({
+    brush: () => this.brush(),
+    stamp: (x, y) => this.paintCell(x, y),
+    changed: () => { if (this.stroke) this.stroke.changed = true; this.scheduleRefresh(); },
+    end: () => { const s = this.stroke; this.stroke = null; if (s?.changed) s.edit.commit(); else s?.edit.cancel(); },
+    cancel: () => { this.stroke?.edit.cancel(true); this.stroke = null; },
+    pick: (r) => {
+      const app = this.app;
+      if (app.model.mode === 'l3') app.pickL3(r.x, r.y, r.x + r.w - 1, r.y + r.h - 1); else app.pickBg(r.x, r.y, r.x + r.w - 1, r.y + r.h - 1);
+      if (this.hover) this.updateStatus(this.hover.tx, this.hover.ty);
+    },
+  });
   status: HTMLSpanElement;
   stats: HTMLSpanElement;
   problems: ReturnType<typeof problemsButton>;
@@ -249,23 +263,21 @@ export class LevelView {
         } else this.outlineObject(ctx, hit.item as LevelObject, 'rgba(255,255,255,0.7)', lw);
       }
       // BG and layer 3: the area the brush would paint
-      ctx.strokeStyle = 'rgba(255,255,0,0.9)';
-      ctx.lineWidth = lw;
       if (this.brushMode()) {
-        const c = this.cellAt(this.hover.px, this.hover.py), b = this.brush();
-        ctx.strokeRect(...this.cellBox(c.x, c.y, b.w, b.h));
-      } else ctx.strokeRect(tx * 16, ty * 16, 16, 16);
+        const r = this.brushDrag.hoverFrame(this.cellAt(this.hover.px, this.hover.py));
+        drawBrushFrame(ctx, 'hover', this.cellBox(r.x, r.y, r.w, r.h), lw);
+      } else {
+        ctx.strokeStyle = 'rgba(255,255,0,0.9)';
+        ctx.lineWidth = lw;
+        ctx.strokeRect(tx * 16, ty * 16, 16, 16);
+      }
     }
     this.paintBoxNames(ctx);
-    if (this.drag?.kind === 'pick') {
-      const d = this.drag;
-      const m = this.brushMax();
-      const box = this.cellBox(Math.min(d.x0, d.x1), Math.min(d.y0, d.y1), Math.min(Math.abs(d.x1 - d.x0) + 1, m.w), Math.min(Math.abs(d.y1 - d.y0) + 1, m.h));
-      ctx.strokeStyle = '#4cc2ff';
-      ctx.fillStyle = 'rgba(76,194,255,0.15)';
-      ctx.lineWidth = lw;
-      ctx.fillRect(...box);
-      ctx.strokeRect(...box);
+    const picked = this.brushDrag.pickFrame();
+    if (picked) {
+      // (as large as a brush gets)
+      const r = picked, m = this.brushMax();
+      drawBrushFrame(ctx, 'pick', this.cellBox(r.x, r.y, Math.min(r.w, m.w), Math.min(r.h, m.h)), lw);
     }
     if (this.drag?.kind === 'band') {
       const d = this.drag;
@@ -485,9 +497,9 @@ export class LevelView {
       // insert picked item (BG: paint with the brush, dragging keeps painting)
       if (app.model.mode === 'exit') { if (e.button === 2) this.exitMenu(e, px, py, tx, ty); return; }
       if (this.brushMode()) {
-        const edit = app.model.mode === 'l3' ? app.beginLayer3Edit() : app.beginLevelEdit(), c = this.cellAt(px, py);
-        this.drag = { kind: 'paint', edit, changed: this.paintCell(c.x, c.y), x0: c.x, y0: c.y, lastX: c.x, lastY: c.y };
-        if (this.drag.changed) this.scheduleRefresh();
+        this.drag = { kind: 'brush' };
+        this.stroke = { edit: app.model.mode === 'l3' ? app.beginLayer3Edit() : app.beginLevelEdit(), changed: false };
+        this.brushDrag.startPaint(this.cellAt(px, py));
         return;
       }
       // on the selection, or with nothing to place: the context menu
@@ -514,8 +526,8 @@ export class LevelView {
     }
     if (this.brushMode()) {
       // click takes the tile into the brush, dragging a rectangle of tiles
-      const c = this.cellAt(px, py);
-      this.drag = { kind: 'pick', x0: c.x, y0: c.y, x1: c.x, y1: c.y };
+      this.drag = { kind: 'brush' };
+      this.brushDrag.startPick(this.cellAt(px, py));
       this.paint();
       return;
     }
@@ -592,15 +604,8 @@ export class LevelView {
     } else if (d.kind === 'gameView') {
       app.view.gameView = gameViewAt(px - d.offX, py - d.offY, app.images.width, app.images.height, app.cameraReach());
       this.requestPaint();
-    } else if (d.kind === 'paint') {
-      const b = this.brush(), c = this.cellAt(px, py);
-      const x = d.x0 + Math.floor((c.x - d.x0) / b.w) * b.w, y = d.y0 + Math.floor((c.y - d.y0) / b.h) * b.h;
-      if (x === d.lastX && y === d.lastY) return;
-      d.lastX = x; d.lastY = y;
-      if (this.paintCell(x, y)) { d.changed = true; this.scheduleRefresh(); }
-    } else if (d.kind === 'pick') {
-      const c = this.cellAt(px, py);
-      if (d.x1 !== c.x || d.y1 !== c.y) { d.x1 = c.x; d.y1 = c.y; this.requestPaint(); }
+    } else if (d.kind === 'brush') {
+      if (this.brushDrag.move(this.cellAt(px, py))) this.requestPaint();
     } else if (d.kind === 'marker') {
       if (app.moveMarker(d.marker, px - d.offX, py - d.offY)) {
         d.moved = true;
@@ -633,17 +638,13 @@ export class LevelView {
     if (!d) return;
     this.drag = null;
     if (this.hover) this.updateCursor(this.hover.px, this.hover.py, this.hover.top);
-    if (d.kind === 'paint') {
-      if (d.changed) d.edit.commit(); else d.edit.cancel();
+    if (d.kind === 'brush') {
+      const picked = this.brushDrag.picking;
+      this.brushDrag.up();
+      if (picked) this.paint();
       return;
     }
     if (d.kind === 'gameView') { this.paint(); return; }
-    if (d.kind === 'pick') {
-      if (app.model.mode === 'l3') app.pickL3(d.x0, d.y0, d.x1, d.y1); else app.pickBg(d.x0, d.y0, d.x1, d.y1);
-      if (this.hover) this.updateStatus(this.hover.tx, this.hover.ty);
-      this.paint();
-      return;
-    }
     if (d.kind === 'marker') {
       if (!d.edit) { this.paint(); return; }
       if (!d.moved) { d.edit.cancel(); this.paint(); return; }
@@ -681,7 +682,8 @@ export class LevelView {
     this.drag = null;
     if (d.kind === 'move') d.move.cancel();
     else if (d.kind === 'resize') d.resize.cancel();
-    else if (d.kind === 'paint' || d.kind === 'marker') d.edit?.cancel(true);
+    else if (d.kind === 'brush') this.brushDrag.cancel();
+    else if (d.kind === 'marker') d.edit?.cancel(true);
     if (this.hover) this.updateCursor(this.hover.px, this.hover.py, this.hover.top);
     this.paint();
     return true;

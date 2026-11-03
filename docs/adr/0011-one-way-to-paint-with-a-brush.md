@@ -11,7 +11,7 @@ We decided that every editor painting with a brush is operated the same way, the
 - **Ctrl+wheel** zooms about the mouse, the **middle button** pans (dom.ts attachPanZoom).
 - The hints say it in the same words: "Click/drag picks up tiles · Right click/Shift+click paints".
 
-ui/brushsurface.ts holds the convention for a picture painted with a brush (drag state, the brush's grid, the pick rectangle, the frames on an overlay, Esc); the Game workspace uses it. The level and overworld editors keep their own code for it until they move onto it (#332), their behaviour already being this one.
+ui/brushsurface.ts holds the convention: BrushDrag is the drag without the DOM (a stroke on the brush's grid, a pick, Esc cancelling either), drawBrushFrame the frames, paintButton the buttons that paint. The level's BG and layer 3 modes and the overworld's layers 1 and 2 drive a BrushDrag from their own mouse handlers, since their scrolled maps drag other things too (objects, markers, links, sprites) and are drawn with them (#332); BrushSurface puts one on a picture canvas with an overlay for the frames (the Game workspace). A stroke cancelled by Esc puts back what it painted: the level's edit is cancelled, the overworld's stroke restores its maps (OverworldStroke.cancel).
 
 ## Exceptions
 
@@ -27,4 +27,4 @@ ui/brushsurface.ts holds the convention for a picture painted with a brush (drag
 
 ## Consequences
 
-A new editor painting with a brush uses brushsurface.ts, or follows this convention where its picture can't (a scrolled map drawn on one canvas, as the level and the overworld for now).
+A new editor painting with a brush uses brushsurface.ts: BrushSurface for a picture of its own, BrushDrag and drawBrushFrame where the brush is one of several things dragged on a map.

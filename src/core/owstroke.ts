@@ -48,10 +48,21 @@ export class OverworldStroke {
   private readonly isLevelTile: LevelTileTest;
   private readonly ev: OwEventMaps | null;
   private readonly old: OwMaps; // the maps as in the ROM when the stroke began
+  private readonly began: (Uint16Array | Uint8Array)[]; // what it paints in place, as when it began (cancel)
   // `maps` (and an event's `ev.after`/`ev.l1`) are painted in place: the view shows them while the stroke goes on
   constructor(rom: Rom, layer: StrokeLayer, maps: OwMaps, isLevelTile: LevelTileTest, ev: OwEventMaps | null = null) {
     this.rom = rom; this.layer = layer; this.maps = maps; this.isLevelTile = isLevelTile; this.ev = ev;
     this.old = readMaps(rom);
+    this.began = this.painted().map((a) => a.slice());
+  }
+  // the arrays the stroke paints in place
+  private painted(): (Uint16Array | Uint8Array)[] {
+    const { maps, ev } = this;
+    return [maps.l1, maps.l2, maps.tls, ...(ev ? [ev.after, ...(ev.l1 ? [ev.l1] : [])] : [])];
+  }
+  // the stroke dropped (Esc): what it painted put back as when it began; nothing is written
+  cancel(): void {
+    this.painted().forEach((a, k) => a.set(this.began[k]));
   }
 
   // the event the stroke paints as after (-1: the map before events)

@@ -297,5 +297,30 @@ const diff = (a: Uint8Array, b: Uint8Array) => { const out: number[] = []; for (
   check(end.covered(before) === 0, 'at event progress 0: none');
 }
 
+// a stroke cancelled (Esc): the maps it painted are as when it began – layer 1 with its translevels, layer 2, and an
+// event's maps – and nothing is written
+{
+  const rom = new Rom(image.slice()), before = rom.data.slice(), maps = readMaps(rom), was = { l1: maps.l1.slice(), l2: maps.l2.slice(), tls: maps.tls.slice() };
+  const lv = (t: number) => t === 0x56;
+  const st = new OverworldStroke(rom, 'l1', maps, lv);
+  st.paint(0, 3, 3, 0x56);
+  st.paint(0, 4, 3, 0x12);
+  check(!same(maps.l1, was.l1) && !same(maps.tls, was.tls), 'a layer 1 stroke paints a level tile into the maps (a translevel given)');
+  st.cancel();
+  check(same(maps.l1, was.l1) && same(maps.tls, was.tls) && same(maps.l2, was.l2) && same(rom.data, before), 'cancelled: layer 1 and its translevels as before, nothing written');
+  const s2 = new OverworldStroke(rom, 'l2', maps, lv);
+  s2.paint(1, 7, 7, 0x2100);
+  s2.cancel();
+  check(same(maps.l2, was.l2), 'a layer 2 stroke cancelled: layer 2 as before');
+  const after = maps.l2.slice(), l1 = maps.l1.slice();
+  const s3 = new OverworldStroke(rom, 'l1', maps, lv, { event: 5, after, l1, game: l1.slice(), without: l1.slice(), place: () => null });
+  const s4 = new OverworldStroke(rom, 'l2', maps, lv, { event: 5, after, l1, game: l1.slice(), without: l1.slice(), place: () => null });
+  s3.paint(0, 2, 2, 0x56);
+  s4.paint(0, 9, 9, 0x2100);
+  s4.cancel();
+  s3.cancel();
+  check(same(after, maps.l2) && same(l1, maps.l1) && same(maps.tls, was.tls), 'an event\'s maps cancelled: as after the event before the stroke');
+}
+
 if (bad) { console.log(`${bad} failed`); process.exit(1); }
 console.log('overworld edits ok');

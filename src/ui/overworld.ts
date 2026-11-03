@@ -4,7 +4,8 @@ import type { App } from './app.ts';
 import type { Watch } from '../core/romwatch.ts';
 import { StateMemo } from '../core/romdeps.ts';
 import { syncBowsieMaxTile } from '../core/bowsie.ts';
-import { h, toast, select, checkbox, hexInput, attachPanZoom, zoomControl, pixelZoomSteps, snapZoom, attachRectPick, emptyState, putImage } from './dom.ts';
+import { h, toast, select, checkbox, hexInput, attachPanZoom, zoomControl, pixelZoomSteps, snapZoom, attachRectPick, emptyState, putImage, type CellRect } from './dom.ts';
+import { BrushDrag, drawBrushFrame, paintButton } from './brushsurface.ts';
 import {
   type OwRender, gameL1, readL1, readL2, l1Index, l1XY, l2Index, readTranslevels, writeTranslevels, readMaps,
   sharedTranslevels, enterableLevels, translevelToLevel, MAP_NAMES,
@@ -47,9 +48,6 @@ import { OW_OPTIONS, owOption, owOptionValue, setOwOption, revealSpeed, setRevea
 // carry their translevels (`tls`, 0 none), so a level tile placed with them enters the same level
 type Layer = 'l1' | 'l2';
 type Brush = { kind: Layer; w: number; h: number; entries: number[]; tls?: number[] };
-type Drag =
-  | { kind: 'paint'; layer: Layer; x0: number; y0: number; lastX: number; lastY: number } // brush stamped on a grid from (x0, y0)
-  | { kind: 'pick'; x0: number; y0: number; x1: number; y1: number }; // map cells taken into the brush
 
 // a layer 1 tile's number: 2 digits on page 0, 3 on page 1 (82, 1A5)
 export const l1Hex = (t: number): string => hex(t, t > 0xff ? 3 : 2);
@@ -140,7 +138,20 @@ export class OverworldView {
   l2Pal = 0;
   hover: { x: number; y: number } | null = null;
   mouse: { x: number; y: number } | null = null; // the map's pixel under the mouse (on the map)
-  drag: Drag | null = null;
+  // layers 1 and 2 painted with a brush (brushsurface.ts, ADR 0011): a stroke (owstroke.ts) or cells picked
+  private brushDrag = new BrushDrag({
+    brush: () => this.brush,
+    stamp: (x, y) => this.paintAt(x, y),
+    changed: () => { this.redrawMap(); if (this.mode === 'l1') this.buildLeft(); },
+    end: () => this.endStroke(),
+    cancel: () => {
+      this.stroke?.cancel();
+      this.stroke = null;
+      this.redrawMap();
+      if (this.mode === 'l1') this.buildLeft();
+    },
+    pick: (r) => this.pick(this.clampRect(r)),
+  });
   selected = -1; // the layer 1 tile shown in the properties (l1Index)
   mapCanvas = document.createElement('canvas');
   // set by the host: open a level in the level editor
@@ -178,7 +189,7 @@ export class OverworldView {
     this.scroller.addEventListener('contextmenu', (e) => e.preventDefault());
     this.scroller.addEventListener('mousedown', (e) => this.onDown(e));
     this.scroller.addEventListener('dblclick', (e) => this.onDouble(e));
-    this.scroller.addEventListener('mouseleave', () => { this.mouse = null; if (!this.drag) { this.hover = null; this.updateStatus(); this.paint(); } });
+    this.scroller.addEventListener('mouseleave', () => { this.mouse = null; if (!this.brushDrag.active) { this.hover = null; this.updateStatus(); this.paint(); } });
     window.addEventListener('mousemove', (e) => this.onMove(e));
     window.addEventListener('mouseup', (e) => this.onUp(e));
     attachPanZoom(this.scroller, () => this.zoom, (z, ax, ay) => this.setZoom(z, ax, ay), undefined, undefined, pixelZoomSteps);
@@ -187,7 +198,7 @@ export class OverworldView {
     // shown as in the ROM (a stroke being painted is dropped)
     this.watch = app.watchRom(() => {
       if (!this.root.isConnected) return;
-      if (this.drag?.kind === 'paint') { this.drag = null; this.stroke = null; }
+      if (this.brushDrag.painting) { this.brushDrag.drop(); this.stroke = null; }
       this.sync();
     });
     // any ROM edit: the map's load asked for again if it no longer holds (drawn when it comes)
@@ -366,18 +377,10 @@ export class OverworldView {
         ctx.lineWidth = lw;
         ctx.strokeRect(this.hover.x * 16, this.hover.y * 16, 16, 16);
       }
-    } else if (this.drag?.kind === 'pick') {
-      const r = this.pickRect(this.drag);
-      ctx.strokeStyle = '#4cc2ff';
-      ctx.fillStyle = 'rgba(76,194,255,0.15)';
-      ctx.lineWidth = lw;
-      ctx.fillRect(r.x * s, r.y * s, r.w * s, r.h * s);
-      ctx.strokeRect(r.x * s, r.y * s, r.w * s, r.h * s);
-    } else if (this.hover) {
-      // the area the brush would paint
-      ctx.strokeStyle = 'rgba(255,255,0,0.9)';
-      ctx.lineWidth = lw;
-      ctx.strokeRect(this.hover.x * s, this.hover.y * s, this.brush.w * s, this.brush.h * s);
+    } else {
+      // the cells being picked, else the area the brush would paint
+      const pick = this.brushDrag.pickFrame(), r = pick ? this.clampRect(pick) : this.hover && this.brushDrag.hoverFrame(this.hover);
+      if (r) drawBrushFrame(ctx, pick ? 'pick' : 'hover', [r.x * s, r.y * s, r.w * s, r.h * s], lw);
     }
   }
 
@@ -544,20 +547,19 @@ export class OverworldView {
     if ((this.mode === 'links' || this.mode === 'sprites') && !this.views) return;
     if (this.mode === 'links') { if (e.button === 0) this.links.down(c.x, c.y); return; }
     if (this.mode === 'sprites') { if (e.button === 0) { const p = this.point(e); this.sprites.down(p.x, p.y); } return; }
-    if (e.button === 2 || (e.button === 0 && e.shiftKey && !e.ctrlKey)) {
+    if (paintButton(e)) {
       // (a level tile painted gets a translevel: not before the level tiles are known)
       if (this.mode === 'l1' && !this.pathKinds()) { toast('The path tiles are still being learned – layer 1 can be painted in a moment.'); return; }
       if (this.mode === 'l1' && this.ev?.without === null) { toast('Layer 1 can\'t be painted on this event: the map without its layer 1 changes could not be emulated.', 'error'); return; }
       if (this.mode === 'l1' && this.ev && !this.evL1Ready()) { toast('The map after the event is still being emulated – layer 1 can be painted in a moment.'); return; }
-      this.drag = { kind: 'paint', layer: this.mode, x0: c.x, y0: c.y, lastX: c.x, lastY: c.y };
       this.stroke = new OverworldStroke(this.app.rom, this.mode, this, this.isLevelTile,
         this.ev && { event: this.event, after: this.ev.after, l1: this.ev.l1, game: this.ev.game, without: this.ev.without, place: () => this.place(this.event) });
-      this.paintAt(c.x, c.y);
+      this.brushDrag.startPaint(c);
       return;
     }
     if (e.button !== 0) return;
     if (e.altKey || (this.mode === 'l1' && e.ctrlKey)) { this.info(c.x, c.y); return; }
-    this.drag = { kind: 'pick', x0: c.x, y0: c.y, x1: c.x, y1: c.y };
+    this.brushDrag.startPick(c);
     this.paint();
   }
 
@@ -569,7 +571,7 @@ export class OverworldView {
     if (x < 0 || y < 0 || x >= 32 || y >= 32) return;
     const i = l1Index(this.region, x, y), tl = this.tls[i];
     if (!this.isLevelTile(this.l1[i]) || !tl) return;
-    this.drag = null;
+    this.brushDrag.drop();
     this.selectTile(i, false);
     this.onOpenLevel(translevelToLevel(tl));
   }
@@ -577,41 +579,32 @@ export class OverworldView {
   onMove(e: MouseEvent): void {
     const inside = e.target === this.scroller || e.target === this.canvas;
     if (inside) this.mouse = this.point(e);
-    const d = this.drag;
     if (this.sprites.drag) { const p = this.point(e); this.sprites.move(p.x, p.y, e.shiftKey); return; }
-    if (!inside && !d && !this.links.drag) return;
+    if (!inside && !this.brushDrag.active && !this.links.drag) return;
     const c = this.cell(e);
     if (this.hover && this.hover.x === c.x && this.hover.y === c.y) return;
     this.hover = c;
     this.updateStatus();
     if (this.links.drag) { this.links.move(c.x, c.y); return; }
-    if (d?.kind === 'paint') {
-      const x = d.x0 + Math.floor((c.x - d.x0) / this.brush.w) * this.brush.w, y = d.y0 + Math.floor((c.y - d.y0) / this.brush.h) * this.brush.h;
-      if (x !== d.lastX || y !== d.lastY) { d.lastX = x; d.lastY = y; this.paintAt(x, y); return; }
-    } else if (d?.kind === 'pick') { d.x1 = c.x; d.y1 = c.y; }
+    this.brushDrag.move(c);
     this.paint();
   }
 
   onUp(e: MouseEvent): void {
     if (this.links.drag) { this.links.up(); return; }
     if (this.sprites.drag) { const p = this.point(e); this.sprites.up(p.x, p.y); return; }
-    const d = this.drag;
-    if (!d) return;
-    this.drag = null;
-    if (d.kind === 'pick') this.pick(this.pickRect(d));
-    else this.endStroke(d.layer);
+    this.brushDrag.up();
   }
 
-  // the picked rectangle, clamped to the mode's cells
-  pickRect(d: { x0: number; y0: number; x1: number; y1: number }): { x: number; y: number; w: number; h: number } {
-    const n = this.cells;
-    const cx = (v: number) => Math.max(0, Math.min(n.w - 1, v)), cy = (v: number) => Math.max(0, Math.min(n.h - 1, v));
-    const x0 = cx(Math.min(d.x0, d.x1)), x1 = cx(Math.max(d.x0, d.x1)), y0 = cy(Math.min(d.y0, d.y1)), y1 = cy(Math.max(d.y0, d.y1));
-    return { x: x0, y: y0, w: x1 - x0 + 1, h: y1 - y0 + 1 };
+  // a picked rectangle clamped to the mode's cells
+  clampRect(r: CellRect): CellRect {
+    const n = this.cells, x0 = Math.max(0, r.x), y0 = Math.max(0, r.y);
+    const x1 = Math.min(n.w - 1, r.x + r.w - 1), y1 = Math.min(n.h - 1, r.y + r.h - 1);
+    return { x: Math.min(x0, n.w - 1), y: Math.min(y0, n.h - 1), w: Math.max(1, x1 - x0 + 1), h: Math.max(1, y1 - y0 + 1) };
   }
 
   // a stroke is one ROM edit, written when it ends (owstroke.ts)
-  endStroke(layer: Layer): void {
+  endStroke(): void {
     const stroke = this.stroke;
     this.stroke = null;
     if (!stroke) return;
@@ -637,10 +630,11 @@ export class OverworldView {
     for (const w of end.warnings) toast(w);
   }
 
-  paintAt(x: number, y: number): void {
+  // the brush stamped at cell (x, y) into the stroke; whether a cell changed
+  paintAt(x: number, y: number): boolean {
     const b = this.brush;
-    if (b.kind !== this.mode) return;
-    if (this.mode === 'l1' && this.ev && !this.evL1Ready()) return; // (the maps the event is painted with are still emulated)
+    if (b.kind !== this.mode) return false;
+    if (this.mode === 'l1' && this.ev && !this.evL1Ready()) return false; // (the maps the event is painted with are still emulated)
     const n = this.cells;
     let changed = false;
     for (let dy = 0; dy < b.h; dy++) for (let dx = 0; dx < b.w; dx++) {
@@ -649,9 +643,7 @@ export class OverworldView {
       const v = b.entries[dy * b.w + dx];
       if (this.stroke?.paint(this.region, xx, yy, v, b.tls?.[dy * b.w + dx] ?? 0)) changed = true;
     }
-    if (!changed) return;
-    this.redrawMap();
-    if (this.mode === 'l1') this.buildLeft();
+    return changed;
   }
 
   pick(r: { x: number; y: number; w: number; h: number }): void {
@@ -1003,6 +995,8 @@ export class OverworldView {
       if (k === 'v') return this.sprites.paste();
       if (k === 'd') return this.sprites.duplicate();
     }
+    // (Esc with any modifier: a stroke is never left running)
+    if (k === 'escape' && this.brushDrag.cancel()) { this.paint(); return true; }
     if (e.ctrlKey || e.metaKey || e.altKey) return false;
     if (k === 'escape' && this.mode === 'sprites' && this.sprites.unpick()) return true;
     if (k === 'escape' && this.mode === 'links' && this.links.cancelPending()) return true;
