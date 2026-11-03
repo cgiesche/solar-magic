@@ -40,6 +40,28 @@ export function l1Index(map: number, x: number, y: number): number {
 export function l1XY(i: number): { x: number; y: number } {
   return { x: ((i >> 8) & 1) * 16 + (i & 15), y: ((i >> 9) & 1) * 16 + ((i >> 4) & 15) };
 }
+// Where the overworld editor shows a pixel of a region's 512x512 map. The submaps' region is shown moved right by two
+// and down by one 8x8 tile, wrapping around: the clean game puts its submaps there (the left ones' cameras at x −17,
+// Yoshi's Island's ladder starting in the region's last row), the screen wrapping as the camera shows them. So each
+// submap is shown whole. The main map is shown as it is.
+export const SUBMAPS_SHOWN_SHIFT = { x: 16, y: 8 };
+const shownShift = (region: number) => (region ? SUBMAPS_SHOWN_SHIFT : { x: 0, y: 0 });
+// a map pixel's place as shown
+export function owShownAt(region: number, x: number, y: number): { x: number; y: number } {
+  const s = shownShift(region);
+  return { x: (x + s.x) & 511, y: (y + s.y) & 511 };
+}
+// the map pixel shown at (x, y); outside the shown 512x512 moved back by the shift only (a drag past the edge)
+export function owMapAt(region: number, x: number, y: number): { x: number; y: number } {
+  const s = shownShift(region), back = (v: number, d: number) => (v >= 0 && v < 512 ? (v - d) & 511 : v - d);
+  return { x: back(x, s.x), y: back(y, s.y) };
+}
+// the offsets to draw a map's pixels at, clipped to the shown 512x512, so that they appear where owShownAt shows them
+export function owShownCopies(region: number): { x: number; y: number }[] {
+  const s = shownShift(region);
+  if (!s.x && !s.y) return [{ x: 0, y: 0 }];
+  return [[0, 0], [-512, 0], [0, -512], [-512, -512]].map(([dx, dy]) => ({ x: s.x + dx, y: s.y + dy }));
+}
 export function l2Index(map: number, x: number, y: number): number {
   return map * 0x1000 + ((y >> 5) * 2 + (x >> 5)) * 0x400 + (y & 31) * 32 + (x & 31);
 }

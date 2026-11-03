@@ -6,7 +6,7 @@ import type { App } from './app.ts';
 import { h, modal, select, checkbox, toast, putImage } from './dom.ts';
 import { hex2, hex3 } from '../core/names.ts';
 import { OW_ACTIONS, owActionName, type OverworldExit } from '../core/level.ts';
-import { MAP_NAMES, OW_EVENTS, eventNames, readL1, readL2, readTranslevels, translevelToLevel, l1Index, drawOwMap } from '../core/overworld.ts';
+import { MAP_NAMES, OW_EVENTS, eventNames, readL1, readL2, readTranslevels, translevelToLevel, l1Index, drawOwMap, owMapAt, owShownCopies } from '../core/overworld.ts';
 import { readTeleport, readTeleports, locationText, tileText, overworldExitText, type OwTile } from '../core/owteleport.ts';
 
 type Rows = [string, HTMLElement][];
@@ -72,13 +72,23 @@ export function pickOverworldTile(app: App, cur: OwTile | null): Promise<OwTile 
     const paint = () => {
       const ctx = canvas.getContext('2d')!;
       ctx.imageSmoothingEnabled = false;
-      const img = image(map);
-      if (img) ctx.drawImage(img, 0, 0);
-      else {
+      const img = image(map), region = map > 0 ? 1 : 0;
+      if (!img) {
         ctx.fillStyle = '#000'; ctx.fillRect(0, 0, 512, 512);
         ctx.fillStyle = '#fff'; ctx.font = '14px sans-serif'; ctx.fillText(failed.has(map) ? 'The map could not be emulated.' : 'Loading the map…', 16, 28);
       }
-      const region = map > 0 ? 1 : 0;
+      // (the map's pixels where owShownAt shows them, as in the overworld editor)
+      for (const o of owShownCopies(region)) {
+        ctx.save();
+        ctx.beginPath(); ctx.rect(0, 0, 512, 512); ctx.clip();
+        ctx.translate(o.x, o.y);
+        paintMap(img, region);
+        ctx.restore();
+      }
+    };
+    const paintMap = (img: HTMLCanvasElement | undefined, region: number) => {
+      const ctx = canvas.getContext('2d')!;
+      if (img) ctx.drawImage(img, 0, 0);
       ctx.font = 'bold 8px monospace';
       for (let y = 0; y < 32; y++) for (let x = 0; x < 32; x++) {
         const tl = tls[l1Index(region, x, y)];
@@ -96,8 +106,9 @@ export function pickOverworldTile(app: App, cur: OwTile | null): Promise<OwTile 
       if (hover) frame(hover, '#ffff00');
     };
     const cell = (e: MouseEvent) => {
-      const r = canvas.getBoundingClientRect();
-      return { x: Math.max(0, Math.min(31, Math.floor((e.clientX - r.left) / r.width * 32))), y: Math.max(0, Math.min(31, Math.floor((e.clientY - r.top) / r.height * 32))) };
+      const r = canvas.getBoundingClientRect(), clamp = (v: number) => Math.max(0, Math.min(511, Math.floor(v)));
+      const p = owMapAt(map > 0 ? 1 : 0, clamp((e.clientX - r.left) / r.width * 512), clamp((e.clientY - r.top) / r.height * 512));
+      return { x: p.x >> 4, y: p.y >> 4 };
     };
     canvas.addEventListener('mousemove', (e) => {
       hover = cell(e);

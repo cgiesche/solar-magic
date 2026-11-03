@@ -11,7 +11,7 @@ import {
   translevelUse, resetTranslevel, baseEvent, setBaseEvent, eventNames, exitDirections, setExitDirection, DIR_ARROWS, DIR_NAMES, EXIT_NAMES, NO_EVENT,
   initialFlags, setInitialFlags, FLAG, DIR_FLAGS, OW_EVENTS, revealEvents, setRevealEvents, revealAt, revealedTile, revealEventCount,
   readRevealList, writeRevealList, destroyEffects, destroySettingAt, destroyEvent, setDestroyEvent, readDestroyList, levelTilesOf, OW_L1_TILES,
-  eventBits, drawOwMap, drawL1Tile,
+  eventBits, drawOwMap, drawL1Tile, owShownAt, owMapAt, owShownCopies,
 } from '../core/overworld.ts';
 import { hasMessages, isBlank, readMessage } from '../core/messages.ts';
 import { messageRoutineNote, messageRoutineUnknown, MESSAGE_ROUTINE_CHECKING } from '../core/messagedraw.ts';
@@ -357,6 +357,19 @@ export class OverworldView {
     ctx.imageSmoothingEnabled = false;
     ctx.setTransform(z, 0, 0, z, -Math.round(this.scroller.scrollLeft * dpr), -Math.round(this.scroller.scrollTop * dpr));
     const lw = 1 / z;
+    // (the map's pixels where owShownAt shows them: the submaps' region moved, wrapping)
+    for (const o of owShownCopies(this.region)) {
+      ctx.save();
+      ctx.beginPath();
+      ctx.rect(0, 0, 512, 512);
+      ctx.clip();
+      ctx.translate(o.x, o.y);
+      this.paintMap(ctx, lw);
+      ctx.restore();
+    }
+  }
+  // what paint draws in the map's pixels
+  private paintMap(ctx: CanvasRenderingContext2D, lw: number): void {
     if (this.playing) this.paintPlay(ctx);
     else ctx.drawImage(this.mapCanvas, 0, 0);
     if (!this.playing) this.reach.paint(ctx);
@@ -561,10 +574,10 @@ export class OverworldView {
   }
 
   // ---------------- interaction ----------------
-  // the map's pixel under the mouse
+  // the map's pixel under the mouse (owMapAt)
   point(e: MouseEvent): { x: number; y: number } {
     const rc = this.scroller.getBoundingClientRect();
-    return { x: Math.floor((e.clientX - rc.left + this.scroller.scrollLeft) / this.zoom), y: Math.floor((e.clientY - rc.top + this.scroller.scrollTop) / this.zoom) };
+    return owMapAt(this.region, Math.floor((e.clientX - rc.left + this.scroller.scrollLeft) / this.zoom), Math.floor((e.clientY - rc.top + this.scroller.scrollTop) / this.zoom));
   }
 
   // the mode's cell under the mouse (with `s`: the map's cells of that size)
@@ -756,9 +769,9 @@ export class OverworldView {
   selectTile(i: number, center: boolean): void {
     this.selected = i;
     if (center && i >= 0) {
-      const { x, y } = l1XY(i);
-      this.scroller.scrollLeft = (x * 16 + 8) * this.zoom - this.scroller.clientWidth / 2;
-      this.scroller.scrollTop = (y * 16 + 8) * this.zoom - this.scroller.clientHeight / 2;
+      const t = l1XY(i), { x, y } = owShownAt(this.region, t.x * 16 + 8, t.y * 16 + 8);
+      this.scroller.scrollLeft = x * this.zoom - this.scroller.clientWidth / 2;
+      this.scroller.scrollTop = y * this.zoom - this.scroller.clientHeight / 2;
     }
     this.buildProps();
     this.buildLeft();
