@@ -1,5 +1,6 @@
 // The edit session: the open level and everything that changes it or the ROM. It owns
-// - the open level and whether it has unsaved changes (dirty);
+// - the open level and whether it has unsaved changes (dirty: it differs from the saved state, which
+//   undo/redo can come back to);
 // - the level history (level edits: begun, then committed as an undo step or cancelled);
 // - the ROM edit session (romedit.ts), which saves a dirty level before every ROM edit;
 // - the order of level and ROM edits, so one undo/redo serves both. Steps a history dropped beyond its
@@ -46,6 +47,9 @@ export class EditSession {
   readonly romEdits: RomEditSession;
   private current!: Level;
   private dirtyFlag = false;
+  // level steps from the saved state to the open level: + edits/redos made since, - undos; null when the
+  // saved state can no longer be reached (it was dropped from redo by a new edit)
+  private sinceSaved: number | null = 0;
   levelGen = 0; // counts committed level edits (not undo/redo/loading)
   private levelHistory = new LevelHistory<Level>(cloneLevel);
   private editToken = 0; // the latest begun level edit (older handles do nothing)
@@ -84,14 +88,14 @@ export class EditSession {
     if (this.level && this.dirty && !discard) this.save(true);
     this.current = loadLevel(this.rom, n);
     this.levelHistory.clear();
-    this.dirtyFlag = false;
+    this.markSaved();
   }
 
   // saves the open level and loads it again (addresses and sizes); objects and sprites keep their ids
   save(silent = false): boolean {
     try {
       const log = saveLevel(this.rom, this.level);
-      this.dirtyFlag = false;
+      this.markSaved();
       const was = this.level;
       this.current = loadLevel(this.rom, was.number);
       keepUids(was, this.level, isL1Vertical(this.rom, this.level.header.mode));
@@ -102,6 +106,13 @@ export class EditSession {
     }
     if (!this.running) this.hooks.settled?.();
     return true;
+  }
+
+  // the open level is the saved state; saved during an edit (dragging), the state saved is not the one
+  // before the edit nor yet a step: no undo/redo comes back to it
+  private markSaved(): void {
+    this.dirtyFlag = false;
+    this.sinceSaved = this.editing ? null : 0;
   }
 
   // ------------- level edits -------------
@@ -121,7 +132,7 @@ export class EditSession {
       cancel: (restore = false) => {
         if (!live()) return;
         const was = this.levelHistory.cancel();
-        if (restore && was) { this.current = was; this.changed(true); }
+        if (restore && was) { this.current = was; this.show(true, !this.atSaved); }
       },
     };
   }
@@ -143,11 +154,22 @@ export class EditSession {
     return this.editLevel(() => { this.current = lv; }, rerender);
   }
 
-  // the open level changed (outside an edit too, e.g. as part of the latest step or while dragging)
+  // the open level changed (outside an edit too, e.g. as part of the latest step or while dragging). A
+  // change outside an edit to the saved state (the automatic sprite memory after a save) is in no step:
+  // undo/redo no longer come back to the saved state.
   changed(rerender: boolean): void {
-    this.dirtyFlag = true;
+    if (this.atSaved && !this.editing) this.sinceSaved = null;
+    this.show(rerender, true);
+  }
+
+  // the open level is shown as it now is; dirty: it differs from the saved state
+  private show(rerender: boolean, dirty: boolean): void {
+    this.dirtyFlag = dirty;
     this.hooks.changed?.(rerender);
   }
+
+  // the open level is the saved state (not counting an edit in progress)
+  private get atSaved(): boolean { return this.sinceSaved === 0; }
 
   // ------------- ROM edits -------------
   // One undoable ROM edit (see romedit.ts): a dirty level is saved before it.
@@ -203,6 +225,8 @@ export class EditSession {
 
   private levelEditDone(): void {
     this.levelGen++;
+    // a new edit after undos past the saved state drops it from redo
+    if (this.sinceSaved !== null) this.sinceSaved = this.sinceSaved < 0 ? null : this.sinceSaved + 1;
     this.pushOrder('level', this.levelHistory.undoSize);
   }
 
@@ -216,7 +240,8 @@ export class EditSession {
     const lv = undo ? this.levelHistory.undo(this.level) : this.levelHistory.redo(this.level);
     if (!lv) return false;
     this.current = lv;
-    this.changed(true);
+    if (this.sinceSaved !== null) this.sinceSaved += undo ? -1 : 1;
+    this.show(true, !this.atSaved);
     return true;
   }
 

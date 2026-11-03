@@ -184,5 +184,67 @@ const setMem = (s: EditSession, m: number) => s.editLevel(() => { s.level.sprite
   check(settled === 3, 'ROM undo: settled');
 }
 
+// the unsaved mark follows the undo position: undoing or redoing back to the saved state is clean again,
+// so leaving the level saves nothing (#297)
+{
+  const { rom, s, runs } = setup();
+  const m0 = mem(s);
+  setMem(s, m0 ^ 1); setMem(s, m0 ^ 2); setMem(s, m0 ^ 3);
+  s.undo(); s.undo();
+  check(s.dirty, 'undo to a state between: still unsaved');
+  s.undo();
+  check(!s.dirty && mem(s) === m0, 'undo of all edits since opening: clean');
+  s.redo();
+  check(s.dirty, 'redo away from the saved state: unsaved');
+  s.save(true);
+  check(!s.dirty && runs.saved === 1, 'saved: clean');
+  s.undo();
+  check(s.dirty && mem(s) === m0, 'undo past the save: unsaved (the ROM has the later state)');
+  s.redo();
+  check(!s.dirty && mem(s) === (m0 ^ 1), 'redo back to the saved state: clean');
+  setMem(s, m0 ^ 4); s.undo();
+  check(!s.dirty, 'an edit undone after the save: clean');
+  s.undo(); setMem(s, m0 ^ 5); s.undo();
+  check(s.dirty && mem(s) === m0, 'the saved state dropped from redo by a new edit: unsaved from then on');
+  s.romEdit('Color', () => rom.w16(A, 1));
+  check(!s.dirty && runs.saved === 2, 'a ROM edit saves the dirty level: clean');
+  setMem(s, m0 ^ 6); s.undo();
+  check(!s.dirty, 'a level edit after the ROM edit undone: clean');
+  const e = s.beginLevelEdit();
+  s.level.spriteHeader ^= 1; s.changed(true);
+  check(s.dirty, 'a level edit in progress (dragging): unsaved');
+  e.cancel(true);
+  check(!s.dirty, 'the edit cancelled, the level put back: clean');
+  s.open(0x106);
+  check(runs.saved === 2, 'leaving the level after undoing back: nothing saved');
+}
+
+// a change outside an edit right after saving (the automatic sprite memory, part of the latest step): no
+// step leads back to the saved state, so the level stays unsaved through undo/redo (#297)
+{
+  const { s } = setup();
+  const m0 = mem(s);
+  setMem(s, m0 ^ 1);
+  s.save(true);
+  s.level.spriteHeader ^= 2; s.changed(true); // (sprite memory m0 ^ 3, in no step)
+  setMem(s, m0 ^ 4); s.undo();
+  check(s.dirty && mem(s) === (m0 ^ 3), 'a change outside an edit after saving: unsaved after an edit undone');
+}
+
+// saved during an edit (Ctrl+S while dragging): the ROM has the dragged state, so the level put back by
+// cancelling (Esc) or undoing the edit is unsaved (#297)
+{
+  const { s } = setup();
+  const m0 = mem(s);
+  for (const end of ['cancel', 'undo'] as const) {
+    const e = s.beginLevelEdit();
+    s.level.spriteHeader ^= 1; s.changed(true); // (the level as dragged)
+    s.save(true);
+    if (end === 'cancel') e.cancel(true); else s.undo();
+    check(s.dirty && mem(s) === m0, `saved while dragging, then ${end}: unsaved`);
+    s.save(true);
+  }
+}
+
 if (bad) { console.log(`${bad} FAILED`); process.exit(1); }
 console.log('all ok');
