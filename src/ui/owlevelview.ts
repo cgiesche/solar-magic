@@ -2,7 +2,8 @@
 // (its settings in the Properties panel), a drag moves it – it swaps with the tile where it is dropped, its translevel
 // with it –, Delete leaves the stop tile, a right click places a level on a cell ("Place level here…": the level and
 // its look chosen), a level without a level tile is dragged from the list onto the map. Each change one ROM edit of
-// the map before events (owleveltiles.ts), made once the path kinds and the submaps' views are known.
+// the map before events – with "Map after: event X" a layer 1 change of that event (the level tiles as after it) –
+// (owleveltiles.ts), made once the path kinds, the submaps' views and an event's maps are known.
 
 import type { OverworldView } from './overworld.ts';
 import type { Rom } from '../core/rom.ts';
@@ -10,9 +11,11 @@ import { h, toast, modal } from './dom.ts';
 import { contextMenu } from './menu.ts';
 import { levelPicker } from './levelpicker.ts';
 import {
-  l1Index, l1XY, translevelToLevel, freeTranslevel, translevelUse, enterableLevels, levelTilesOf, baseEvent, NO_EVENT,
+  l1Index, l1XY, translevelToLevel, freeTranslevel, translevelUse, enterableLevels, levelTilesOf, baseEvent, readTranslevels, NO_EVENT,
 } from '../core/overworld.ts';
-import { levelTileLooks, invisibleLevelTile, defaultLook, stopTile, moveLevelTile, removeLevelTile, placeLevelTile } from '../core/owleveltiles.ts';
+import {
+  levelTileLooks, invisibleLevelTile, defaultLook, stopTile, moveLevelTile, removeLevelTile, placeLevelTile, levelsWithoutTile, type LevelTileEvent,
+} from '../core/owleveltiles.ts';
 import { hasMessages } from '../core/messages.ts';
 import { levelName, hasLevelName } from '../core/levelnames.ts';
 import { mainTranslevel } from '../core/level.ts';
@@ -40,19 +43,29 @@ export class LevelTileLayer {
   private get rom() { return this.view.app.rom; }
 
   // why the level tiles can't be changed now (null: they can): as layer 1 painting, not before the path kinds (which
-  // tiles are level tiles) and the submaps' views are known; on the map before events only
+  // tiles are level tiles), the submaps' views and, with an event chosen, its maps are known
   blocked(): string | null {
     const v = this.view;
     if (!v.pathKinds()) return 'The path tiles are still being learned – level tiles can be changed in a moment.';
     if (!v.views) return 'The submaps are still being loaded – level tiles can be changed in a moment.';
-    if (v.event >= 0) return 'Level tiles are moved, placed and removed on the map before events – Esc goes back to it.';
-    return null;
+    const ev = v.levelEvent();
+    return typeof ev === 'string' ? ev : null;
   }
   // whether the level tiles can be changed now; if not, said why
   private ready(): boolean {
     const why = this.blocked();
     if (why) toast(why);
     return !why;
+  }
+  // the event the changes go into (null: the map before events; once ready)
+  private event(): LevelTileEvent | null {
+    const ev = this.view.levelEvent();
+    return typeof ev === 'string' ? null : ev;
+  }
+  // an edit's label: in an event, which one
+  private where(label: string): string {
+    const e = this.view.event;
+    return e >= 0 ? `${label} (after event ${hex(e, 2)})` : label;
   }
   // the look of a level tile placed without choosing one (once the path kinds are known)
   private defaultLook(): number {
@@ -63,7 +76,7 @@ export class LevelTileLayer {
     if (!this.ready()) return false;
     try {
       this.view.selected = select;
-      this.view.app.romEdit(label, f);
+      this.view.app.romEdit(this.where(label), f);
       return true;
     } catch (e) {
       toast(`Not changed: ${e instanceof Error ? e.message : e}`, 'error');
@@ -76,7 +89,8 @@ export class LevelTileLayer {
     const tl = this.view.tls[i], { x, y } = l1XY(i);
     return `${lower ? 'l' : 'L'}${tl ? `evel ${levelHex(tl)}` : `evel tile ${hex(x, 2)},${hex(y, 2)}`}`;
   }
-  private isLevelAt(i: number): boolean { return this.view.isLevelTile(this.view.l1[i]); }
+  // (the level tiles as after the event chosen)
+  private isLevelAt(i: number): boolean { return this.view.isLevelTile(this.view.levelL1()[i]); }
   private inside(x: number, y: number): boolean { return x >= 0 && y >= 0 && x < 32 && y < 32; }
 
   // ---- the mouse ----
@@ -103,7 +117,7 @@ export class LevelTileLayer {
     this.view.updateStatus();
     if (!d || d.to === d.from) return;
     const { x, y } = l1XY(d.to);
-    this.edit(`${this.label(d.from)}: moved to ${hex(x, 2)},${hex(y, 2)}`, () => moveLevelTile(this.rom, d.from, d.to), d.to);
+    this.edit(`${this.label(d.from)}: moved to ${hex(x, 2)},${hex(y, 2)}`, () => moveLevelTile(this.rom, d.from, d.to, this.event()), d.to);
   }
   // Esc: the drag dropped, nothing changed; false: none
   cancel(): boolean {
@@ -118,8 +132,10 @@ export class LevelTileLayer {
   remove(): boolean {
     const v = this.view, i = v.selected;
     if (i < 0 || !this.isLevelAt(i)) return false;
-    const label = this.label(i), tl = v.tls[i], alone = !v.tls.some((n, k) => n === tl && k !== i);
-    if (this.edit(`${label}: level tile removed`, () => removeLevelTile(this.rom, i, stopTile(v.pathKinds()!)), i) && tl && alone)
+    // (in an event a level tile removed keeps its translevel where the cell has one on another map: the level keeps a tile)
+    const label = this.label(i), tl = v.tls[i];
+    if (this.edit(`${label}: level tile removed`, () => removeLevelTile(this.rom, i, stopTile(v.pathKinds()!), this.event()), i) && tl
+      && levelsWithoutTile(readTranslevels(this.rom)).includes(tl))
       toast(`${label} has no level tile now (its settings stay with it): it is listed under "Without level tile".`);
     return true;
   }
@@ -129,7 +145,7 @@ export class LevelTileLayer {
     if (!this.inside(x, y)) return;
     const v = this.view, i = l1Index(v.region, x, y), level = this.isLevelAt(i);
     contextMenu(cx, cy, [
-      { heading: `Tile ${hex(x, 2)},${hex(y, 2)} · ${l1Hex(v.l1[i])}` },
+      { heading: `Tile ${hex(x, 2)},${hex(y, 2)} · ${l1Hex(v.levelL1()[i])}` },
       { label: level ? 'Place another level here…' : 'Place level here…', onClick: () => this.placeDialog(i) },
       ...(level ? [{ label: 'Remove level tile', shortcut: 'Del', onClick: () => { v.selectTile(i, false); this.remove(); } }] : []),
     ]);
@@ -147,7 +163,8 @@ export class LevelTileLayer {
     const build = () => body.replaceChildren(
       h('div', { class: 'prop' }, h('label', null, 'Level'), this.levelChoice(tl, i, (t) => { tl = t; build(); })),
       ...(free ? [] : [h('div', { class: 'hint warn-text' }, '⚠ Every level (001–024, 101–13B) already has a level tile: the one chosen will be entered from two.')]),
-      h('div', { class: 'hint' }, `Tile ${hex(x, 2)},${hex(y, 2)} · now ${l1Hex(v.l1[i])}${this.isLevelAt(i) ? ` (level ${levelHex(v.tls[i])}, which will have no level tile)` : ''}`),
+      ...(v.event >= 0 ? [h('div', { class: 'hint' }, `Placed as after event ${hex(v.event, 2)}: the map before it stays.`)] : []),
+      h('div', { class: 'hint' }, `Tile ${hex(x, 2)},${hex(y, 2)} · now ${l1Hex(v.levelL1()[i])}${this.isLevelAt(i) ? ` (level ${levelHex(v.tls[i])}, which will have no level tile)` : ''}`),
       h('div', { class: 'prop' }, h('label', null, 'Look')),
       this.lookPicker(look, (t) => { look = t; build(); }));
     build();
@@ -156,8 +173,8 @@ export class LevelTileLayer {
   // a level (translevel tl) placed at i with look `look`
   place(i: number, look: number, tl: number): void {
     const v = this.view, { x, y } = l1XY(i);
-    const others = levelTilesOf(v.l1, v.tls, tl, v.isLevelTile).filter((k) => k !== i);
-    if (this.edit(`Level ${levelHex(tl)}: placed at ${hex(x, 2)},${hex(y, 2)}`, () => placeLevelTile(this.rom, i, look, tl), i) && others.length)
+    const others = levelTilesOf(v.levelL1(), v.tls, tl, v.isLevelTile).filter((k) => k !== i);
+    if (this.edit(`Level ${levelHex(tl)}: placed at ${hex(x, 2)},${hex(y, 2)}`, () => placeLevelTile(this.rom, i, look, tl, this.event()), i) && others.length)
       toast(`Level ${levelHex(tl)} is entered from ${others.length + 1} tiles – drag a level tile to move it.`);
   }
   // a level dragged from the list dropped on cell (x, y): placed with the default look
@@ -171,7 +188,7 @@ export class LevelTileLayer {
   // the level a tile at i enters, chosen from the levels (notes: where another tile enters it, what a free one brings)
   levelChoice(tl: number, i: number, onPick: (tl: number) => void): HTMLElement {
     const v = this.view, rom = this.rom;
-    const onMap = (t: number) => v.tls.findIndex((n, k) => n === t && k !== i && v.isLevelTile(v.l1[k]));
+    const levels = v.levelL1(), onMap = (t: number) => v.tls.findIndex((n, k) => n === t && k !== i && v.isLevelTile(levels[k]));
     return levelPicker(v.app, translevelToLevel(tl), (lvl) => onPick(mainTranslevel(lvl)!), {
       levels: enterableLevels(),
       note: (lvl) => { const t = mainTranslevel(lvl)!, k = onMap(t); return k >= 0 ? `on ${tilePlace(k)}` : t === v.tls[i] ? '' : freeNote(rom, t); },
@@ -194,7 +211,7 @@ export class LevelTileLayer {
   }
   // the look of the level tile at i changed (its translevel kept)
   setLook(i: number, look: number): void {
-    this.edit(`${this.label(i)}: look ${l1Hex(look)}`, () => placeLevelTile(this.rom, i, look, this.view.tls[i]), i);
+    this.edit(`${this.label(i)}: look ${l1Hex(look)}`, () => placeLevelTile(this.rom, i, look, this.view.tls[i], this.event()), i);
   }
 
   // ---- drawing ----
@@ -229,7 +246,7 @@ export class LevelTileLayer {
   status(): string | null {
     const v = this.view, d = this.drag;
     if (!d || d.to === d.from) return null;
-    const { x, y } = l1XY(d.to), there = this.isLevelAt(d.to) && v.tls[d.to] ? `level ${levelHex(v.tls[d.to])}` : `tile ${l1Hex(v.l1[d.to])}`;
+    const { x, y } = l1XY(d.to), there = this.isLevelAt(d.to) && v.tls[d.to] ? `level ${levelHex(v.tls[d.to])}` : `tile ${l1Hex(v.levelL1()[d.to])}`;
     return `Drop: ${this.label(d.from, true)} to ${hex(x, 2)},${hex(y, 2)}, swapping with ${there} · Esc cancels`;
   }
 

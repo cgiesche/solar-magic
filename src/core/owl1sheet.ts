@@ -6,10 +6,11 @@
 // (overworld.ts installOwMap16Patch) makes the tiles past the game's (C1–1FF) such copies of 000. A free tile is an
 // empty one that also does what 000 does where Mario walks (owpaths.ts): an invisible path or level tile is no free
 // one, even unused. While the path kinds are learned no tile is free (nothing is folded until they are known).
+// Level tiles are no brush tiles (ADR 0012: placed in the Levels mode): shown hatched in the sheet, left out of a brush.
 import type { Rom } from './rom.ts';
 import { OW_L1_TILES, owTileWords, readL1, revealedTile } from './overworld.ts';
 import { readEvents } from './owevents.ts';
-import type { PathKind, PathShapes } from './owpaths.ts';
+import type { PathKind, PathShapes, LevelTileTest } from './owpaths.ts';
 import { pathTileText } from './owpathshape.ts';
 import { hex } from './names.ts';
 
@@ -53,6 +54,16 @@ export function sheetPages(empty: readonly boolean[], free: readonly boolean[], 
 // a layer 1 tile's number as the editor writes it (2 digits on page 0, 3 on page 1)
 export const l1Hex = (t: number): string => hex(t, t > 0xff ? 3 : 2);
 export const KINDS_LEARNING = 'What the tile does is being learned…';
+export const LEVEL_TILE_LINE = 'Level tile: placed, moved and removed in the Levels mode (3)';
+
+// an entry of a layer 1 brush that paints nothing (where a level tile was picked: level tiles are not painted)
+export const NO_TILE = -1;
+// the entries of a layer 1 brush taken from the sheet or the map: level tiles left out (NO_TILE: painted nowhere –
+// they are placed in the Levels mode, ADR 0012); null when nothing is left
+export function l1BrushEntries(tiles: readonly number[], isLevelTile: LevelTileTest): number[] | null {
+  const out = tiles.map((t) => (isLevelTile(t) ? NO_TILE : t));
+  return out.some((t) => t !== NO_TILE) ? out : null;
+}
 // what the popup says about layer 1 tile t below its number: what it does (kinds: the path kinds, null while
 // learned; a path tile's shape in words, owpathshape.ts pathTileText: shapes null while learned), on page 1 the tile of
 // page 0 it acts like, whether it is free
@@ -60,7 +71,7 @@ export function l1TileLines(t: number, kinds: readonly PathKind[] | null, free: 
   const k = kinds?.[t];
   return [
     !kinds || !k ? KINDS_LEARNING
-      : k === 'level' ? 'Level tile: enters a level – gets a free translevel when painted'
+      : k === 'level' ? LEVEL_TILE_LINE
         : k === 'none' ? 'No path: Mario doesn\'t go there' : pathTileText(t, k, shapes),
     t >= PAGE_TILES ? `Acts like tile ${l1Hex(t & 0xff)} where Mario walks` : '',
     free ? `Free: drawn as tile ${l1Hex(0)}, on no map` : '',

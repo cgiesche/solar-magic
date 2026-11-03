@@ -1,15 +1,14 @@
 // Overworld changes are ROM edits: a paint stroke (owstroke.ts) is one undo step; layer 1 changes only the bytes of
 // the painted tiles, layer 2 stays where it is when it fits (each stream in its own place, the other untouched) and
-// moves to free space only otherwise; a level tile painted gets a translevel (the one it was picked up with, the one
-// there, a free one), a stroke warns of levels entered from more than one tile and of a level tile entering none, and
-// counts the painted tiles events change; the game shows the painted map (emulated).
+// moves to free space only otherwise; a layer 1 stroke leaves level tiles alone (paints none, paints over none – they
+// are edited in the Levels mode – the translevels untouched); the game shows the painted map (emulated).
 import { Rom, snesToPc, pcToSnes } from '../src/core/rom.ts';
 import { RomEditSession } from '../src/core/romedit.ts';
 import {
-  OverworldEmulator, OverworldLoads, readL1, readL2, l1Index, l1XY, l2Index, l2Pointers, OW_L1, readMaps, readTranslevels, writeTranslevels, translevelToLevel,
-  freeTranslevel, translevelUse, sharedTranslevels, MAX_TRANSLEVEL,
+  OverworldEmulator, OverworldLoads, readL1, readL2, l1Index, l1XY, l2Index, l2Pointers, OW_L1, readMaps, readTranslevels, writeTranslevels,
 } from '../src/core/overworld.ts';
 import { OverworldStroke, type StrokeLayer, type StrokeEnd } from '../src/core/owstroke.ts';
+import { NO_TILE } from '../src/core/owl1sheet.ts';
 import type { LevelTileTest } from '../src/core/owpaths.ts';
 import { RomWatch } from '../src/core/romwatch.ts';
 import { levelNameTiles, setLevelNameTiles, encodeName } from '../src/core/levelnames.ts';
@@ -21,7 +20,6 @@ import { editorImage, levelTiles } from './fixture.ts';
 
 let bad = 0;
 const check = (ok: boolean, what: string) => { console.log((ok ? 'ok   ' : 'FAIL ') + what); if (!ok) bad++; };
-const hx2 = (t: number) => t.toString(16).toUpperCase().padStart(2, '0');
 const same = (a: ArrayLike<number>, b: ArrayLike<number>) => a.length === b.length && Array.from(a).every((v, i) => v === b[i]);
 const image = await editorImage();
 const fresh = () => { const rom = new Rom(image.slice()); return { rom, s: new RomEditSession(rom) }; };
@@ -34,18 +32,18 @@ const noisyL2 = (rom: Rom) => {
   return l2;
 };
 const noLevel: LevelTileTest = () => false;
-// a stroke begun on the maps as in the ROM: each [region, x, y, v, carried] painted, ended; its ROM edit made in the
+// a stroke begun on the maps as in the ROM: each [region, x, y, v] painted, ended; its ROM edit made in the
 // session (or written without one); the maps painted and its end
-type Cell = [number, number, number, number, number?];
+type Cell = [number, number, number, number];
 function stroke(rom: Rom, layer: StrokeLayer, cells: Cell[], s?: RomEditSession, isLevel = noLevel): { maps: ReturnType<typeof readMaps>; end: StrokeEnd } {
   const maps = readMaps(rom), st = new OverworldStroke(rom, layer, maps, isLevel);
-  for (const [region, x, y, v, carried] of cells) st.paint(region, x, y, v, carried);
+  for (const [region, x, y, v] of cells) st.paint(region, x, y, v);
   const end = st.end();
   if (s) s.edit(end.label, end.write!, { key: null }); else end.write!();
   return { maps, end };
 }
 // layer 1 cell i (l1Index) painted with tile v
-const l1Cell = (i: number, v: number, carried?: number): Cell => { const { x, y } = l1XY(i); return [i >= 0x400 ? 1 : 0, x, y, v, carried]; };
+const l1Cell = (i: number, v: number): Cell => { const { x, y } = l1XY(i); return [i >= 0x400 ? 1 : 0, x, y, v]; };
 // the cells of a region of layer 2 `l2` (all 0x2000 entries) to paint
 const l2Cells = (l2: Uint16Array, region: number): Cell[] => Array.from({ length: 64 * 64 }, (_, k) => [region, k & 63, k >> 6, l2[l2Index(region, k & 63, k >> 6)]]);
 const diff = (a: Uint8Array, b: Uint8Array) => { const out: number[] = []; for (let i = 0; i < Math.max(a.length, b.length); i++) if (a[i] !== b[i]) out.push(i); return out; };
@@ -58,7 +56,7 @@ const diff = (a: Uint8Array, b: Uint8Array) => { const out: number[] = []; for (
   const cells = [[3, 4], [4, 4], [20, 30]].map(([x, y]) => l1Index(0, x, y));
   for (const i of cells) l1[i] = l1[i] === 0x10 ? 0x11 : 0x10;
   const { end } = stroke(rom, 'l1', cells.map((i) => l1Cell(i, l1[i])), s);
-  check(s.history.undoStack.length === 1 && s.history.undoStack[0].label === 'Paint layer 1' && !end.warnings.length, 'layer 1 stroke: one undo step, no warning');
+  check(s.history.undoStack.length === 1 && end.label === 'Paint layer 1', 'layer 1 stroke: one undo step');
   check(same(diff(before, rom.data), cells.map((i) => snesToPc(OW_L1) + i).sort((a, b) => a - b)), 'layer 1 stroke: only the painted tiles\' bytes changed');
   s.undo();
   check(same(rom.data, before), 'layer 1 stroke undone');
@@ -242,41 +240,20 @@ const diff = (a: Uint8Array, b: Uint8Array) => { const out: number[] = []; for (
   check(syncs === 4, 'overworld view: undo resyncs');
 }
 
-// translevels (ADR 0005: per tile): a level tile painted where none is gets a free one (the one translevelUse ranks
-// first), one painted over a level tile keeps its translevel, one picked up from the map (carried) takes the one it
-// had – the level then entered from two tiles is warned of, unless the old tile is painted over in the same stroke
-// (moved); level tiles beyond the free translevels enter none (warned)
+// level tiles (ADR 0012: edited in the Levels mode only): a layer 1 stroke neither paints one nor paints over one,
+// NO_TILE (where a pick left a level tile out of the brush) paints nothing; the translevels stay
 {
   const { rom, s } = fresh();
-  const isLevel = levelTiles(rom), was = readMaps(rom), hx3 = (tl: number) => translevelToLevel(tl).toString(16).toUpperCase().padStart(3, '0');
+  const isLevel = levelTiles(rom), was = readMaps(rom);
   const empty = Array.from({ length: 0x800 }, (_, i) => i).filter((i) => !isLevel(was.l1[i]) && !was.tls[i]);
   const placed = Array.from({ length: 0x800 }, (_, i) => i).filter((i) => isLevel(was.l1[i]) && was.tls[i]);
-  const lt = was.l1[placed[0]], other = was.l1[placed.find((i) => was.l1[i] !== lt) ?? placed[0]];
-  const blank = was.l1[empty[0]];
-  const free = freeTranslevel(was.tls, (tl) => translevelUse(rom, tl));
-  check(empty.length > MAX_TRANSLEVEL && placed.length > 1 && free > 0, `the map: ${placed.length} level tiles with a translevel, ${empty.length} cells without; level tiles ${hx2(lt)} ${hx2(other)}, the free translevel first chosen ${hx3(free)}`);
-  const a = empty[0];
-  let r = stroke(rom, 'l1', [l1Cell(a, lt)], s, isLevel);
-  check(readTranslevels(rom)[a] === free && !r.end.warnings.length && s.history.undoStack.length === 1, `a level tile painted where none was: written with the free translevel (level ${hx3(free)}) in one ROM edit, no warning`);
-  s.undo();
-  const k = placed[0], tl = was.tls[k];
-  r = stroke(rom, 'l1', [l1Cell(k, other)], s, isLevel);
-  check(readL1(rom)[k] === other && readTranslevels(rom)[k] === tl && !r.end.warnings.length, `a level tile painted over one: keeps its translevel (level ${hx3(tl)})`);
-  s.undo();
-  r = stroke(rom, 'l1', [l1Cell(empty[1], lt, tl)], s, isLevel);
-  const shared = sharedTranslevels(readL1(rom), readTranslevels(rom), isLevel).get(tl);
-  check(readTranslevels(rom)[empty[1]] === tl && shared?.length === 2 && r.end.warnings.length === 1 && r.end.warnings[0].startsWith(`Level ${hx3(tl)} is entered from 2 tiles`),
-    `a level tile picked up and painted elsewhere: takes its translevel, warned (“${r.end.warnings[0]}”)`);
-  s.undo();
-  r = stroke(rom, 'l1', [l1Cell(empty[1], lt, tl), l1Cell(k, blank)], s, isLevel);
-  const t1 = readTranslevels(rom);
-  check(t1[empty[1]] === tl && !t1[k] && !r.end.warnings.length, 'moved (the old tile painted over in the same stroke): the new tile enters the level, the old one none, no warning');
-  s.undo();
-  r = stroke(rom, 'l1', empty.slice(0, MAX_TRANSLEVEL).map((i) => l1Cell(i, lt)), s, isLevel);
-  const t2 = readTranslevels(rom), none = empty.slice(0, MAX_TRANSLEVEL).filter((i) => !t2[i]).length;
-  const given = new Set(empty.slice(0, MAX_TRANSLEVEL).map((i) => t2[i]).filter(Boolean));
-  check(none > 0 && given.size === MAX_TRANSLEVEL - none && r.end.warnings.some((w) => w.startsWith('Every level')),
-    `${MAX_TRANSLEVEL} level tiles painted: ${given.size} get a translevel each, ${none} none (warned)`);
+  const lt = was.l1[placed[0]], path = empty.slice(2).find((i) => was.l1[i] !== 0x10)!;
+  check(empty.length > 0 && placed.length > 0, `the map: ${placed.length} level tiles with a translevel, ${empty.length} cells without`);
+  const { maps } = stroke(rom, 'l1', [l1Cell(empty[0], lt), l1Cell(placed[0], 0x10), l1Cell(placed[1], NO_TILE), l1Cell(path, 0x10), l1Cell(empty[1], NO_TILE)], s, isLevel);
+  check(maps.l1[empty[0]] === was.l1[empty[0]] && maps.l1[placed[0]] === lt && maps.l1[placed[1]] === was.l1[placed[1]] && maps.l1[empty[1]] === was.l1[empty[1]] && maps.l1[path] === 0x10,
+    'a stroke over a level tile leaves it, a level tile painted elsewhere is not, NO_TILE paints nothing; the other cell painted');
+  check(same(readL1(rom).filter((_, i) => i !== path), was.l1.filter((_, i) => i !== path)) && same(readTranslevels(rom), was.tls) && s.history.undoStack.length === 1,
+    'written: only the path cell changed, the translevels as they were, one ROM edit');
   s.undo();
   check(same(rom.data, image), 'undone: the ROM as before');
 }
@@ -287,11 +264,11 @@ const diff = (a: Uint8Array, b: Uint8Array) => { const out: number[] = []; for (
   const rom = new Rom(image.slice()), before = rom.data.slice(), maps = readMaps(rom), was = { l1: maps.l1.slice(), l2: maps.l2.slice(), tls: maps.tls.slice() };
   const lv = (t: number) => t === 0x56;
   const st = new OverworldStroke(rom, 'l1', maps, lv);
-  st.paint(0, 3, 3, 0x56);
+  st.paint(0, 3, 3, maps.l1[l1Index(0, 3, 3)] === 0x11 ? 0x12 : 0x11);
   st.paint(0, 4, 3, 0x12);
-  check(!same(maps.l1, was.l1) && !same(maps.tls, was.tls), 'a layer 1 stroke paints a level tile into the maps (a translevel given)');
+  check(!same(maps.l1, was.l1), 'a layer 1 stroke paints into the maps');
   st.cancel();
-  check(same(maps.l1, was.l1) && same(maps.tls, was.tls) && same(maps.l2, was.l2) && same(rom.data, before), 'cancelled: layer 1 and its translevels as before, nothing written');
+  check(same(maps.l1, was.l1) && same(maps.tls, was.tls) && same(maps.l2, was.l2) && same(rom.data, before), 'cancelled: layer 1 as before, nothing written');
   const s2 = new OverworldStroke(rom, 'l2', maps, lv);
   s2.paint(1, 7, 7, 0x2100);
   s2.cancel();
@@ -299,7 +276,7 @@ const diff = (a: Uint8Array, b: Uint8Array) => { const out: number[] = []; for (
   const after = maps.l2.slice(), l1 = maps.l1.slice();
   const s3 = new OverworldStroke(rom, 'l1', maps, lv, { event: 5, after, l1, game: l1.slice(), without: l1.slice(), place: () => null });
   const s4 = new OverworldStroke(rom, 'l2', maps, lv, { event: 5, after, l1, game: l1.slice(), without: l1.slice(), place: () => null });
-  s3.paint(0, 2, 2, 0x56);
+  s3.paint(0, 2, 2, l1[l1Index(0, 2, 2)] === 0x11 ? 0x12 : 0x11);
   s4.paint(0, 9, 9, 0x2100);
   s4.cancel();
   s3.cancel();

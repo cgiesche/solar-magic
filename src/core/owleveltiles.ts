@@ -4,13 +4,21 @@
 // whole; two level tiles swap with their translevels); one removed leaves the stop tile (Mario stops there, enters no
 // level), its level keeping its settings (CONTEXT.md "Level tile"); one placed gets a look and the translevel chosen.
 // Which tiles are level tiles and stop tiles the game's code decides (owpaths.ts path kinds), passed in.
+//
+// With an event chosen ("Map after: event X", LevelTileEvent) the edits are layer 1 changes of that event instead
+// (owevents.ts paintEventL1, as layer 1 painted into an event): the level tile appears, moves or goes from the event
+// on, the map before events stays. The translevel table is per cell for every event progress: a cell entering one
+// level on another map (before events, before the event, by another event or a reveal) can't enter another one after
+// the event – refused – and keeps its translevel when the event takes its level tile away.
 
 import type { Rom } from './rom.ts';
 import {
   readL1, writeL1, readTranslevels, writeTranslevels, owTileWords, l1Index, l1XY, hasDestroyPatch, readDestroyList, writeDestroyList, destroySettingAt,
-  MAX_TRANSLEVEL, OW_L1_TILES, NO_EVENT,
+  revealedTile, translevelToLevel, MAX_TRANSLEVEL, OW_L1_TILES, NO_EVENT,
 } from './overworld.ts';
-import type { PathKind } from './owpaths.ts';
+import { readEvents, writeEvents, paintEventL1 } from './owevents.ts';
+import type { PathKind, LevelTileTest } from './owpaths.ts';
+import { hex } from './names.ts';
 
 // the stop tile of the clean game ("Mario stops, enters no level") and its first level tile
 export const STOP_TILE = 0x81;
@@ -63,7 +71,12 @@ function editMaps(rom: Rom, f: (l1: Uint16Array, tls: Uint8Array) => void): void
 // from the target – unless that is off the map or holds a level tile or a destroyed tile (another castle's top only
 // when the two castles swap) – and the destroys set on the level tile and its top move with them (a castle collapsing
 // is its level). Reveals stay with the cells (they belong to the path).
-export function moveLevelTile(rom: Rom, from: number, to: number): void {
+export function moveLevelTile(rom: Rom, from: number, to: number, ev: LevelTileEvent | null = null): void {
+  if (ev) {
+    const tls = readTranslevels(rom), a = ev.after[from], b = ev.after[to];
+    editInEvent(rom, ev, [[to, a, tls[from]], [from, b, ev.isLevelTile(b) ? tls[to] : 0]]);
+    return;
+  }
   const l1 = readL1(rom), tls = readTranslevels(rom), list = hasDestroyPatch(rom) ? readDestroyList(rom) : [];
   const destroyed = new Set(list.filter((d) => d.event !== NO_EVENT).map((d) => d.tile));
   // the tile whose destroy changes level tile i when another cell (its castle's top), -1 none
@@ -100,11 +113,43 @@ function shifted(i: number, a: number, b: number): number {
 }
 
 // the level tile at i removed: the stop tile (stopTile) in its place, no translevel
-export function removeLevelTile(rom: Rom, i: number, stop: number): void {
-  editMaps(rom, (l1, tls) => { l1[i] = stop; tls[i] = 0; });
+export function removeLevelTile(rom: Rom, i: number, stop: number, ev: LevelTileEvent | null = null): void {
+  if (ev) editInEvent(rom, ev, [[i, stop, 0]]);
+  else editMaps(rom, (l1, tls) => { l1[i] = stop; tls[i] = 0; });
 }
 
 // a level tile of look `look` entering translevel tl placed at i (or a level tile's look changed: its own translevel)
-export function placeLevelTile(rom: Rom, i: number, look: number, tl: number): void {
-  editMaps(rom, (l1, tls) => { l1[i] = look; tls[i] = tl; });
+export function placeLevelTile(rom: Rom, i: number, look: number, tl: number, ev: LevelTileEvent | null = null): void {
+  if (ev) editInEvent(rom, ev, [[i, look, tl]]);
+  else editMaps(rom, (l1, tls) => { l1[i] = look; tls[i] = tl; });
+}
+
+// ---- in an event ----
+// the event the edits go into: layer 1 as after it (`after`, as the game shows it) and as after it without its layer 1
+// changes (`without`, owevents.ts layer1Without), which tiles are level tiles
+export interface LevelTileEvent { event: number; after: ArrayLike<number>; without: ArrayLike<number>; isLevelTile: LevelTileTest }
+
+// cells set as after event ev.event ([cell, tile, translevel]; the translevel only where the tile is a level tile):
+// layer 1 changes of the event, the translevel table with them. Throws (nothing written) where a cell would enter
+// another level than it does on another map (heldElsewhere)
+function editInEvent(rom: Rom, ev: LevelTileEvent, cells: [number, number, number][]): void {
+  const after = Uint16Array.from(ev.after), tls = readTranslevels(rom), was = tls.slice(), held = heldElsewhere(rom, ev);
+  for (const [i, tile, tl] of cells) {
+    after[i] = tile;
+    if (!ev.isLevelTile(tile)) { if (!held(i)) tls[i] = 0; continue; }
+    if (held(i) && was[i] && was[i] !== tl) {
+      const { x, y } = l1XY(i);
+      throw new Error(`tile ${hex(x, 2)},${hex(y, 2)} enters level ${hex(translevelToLevel(was[i]), 3)} before the event or by another one – a tile enters one level at every event progress`);
+    }
+    tls[i] = tl;
+  }
+  writeEvents(rom, paintEventL1(readEvents(rom), ev.event, after, ev.without, new Set(cells.map(([i]) => i))));
+  writeTranslevels(rom, tls);
+}
+// whether cell i's translevel is used on another map than the one after the event: a level tile there before events
+// (or one the reveal list turns it into), before the event (without its layer 1 changes) or put there by another event
+function heldElsewhere(rom: Rom, ev: LevelTileEvent): (i: number) => boolean {
+  const l1 = readL1(rom), lv = ev.isLevelTile, others = new Set<number>();
+  readEvents(rom).silent.forEach((steps, e) => { if (e !== ev.event) for (const s of steps) if (s.layer === 1 && lv(s.tile)) others.add(s.loc); });
+  return (i) => lv(l1[i]) || lv(revealedTile(rom, l1[i])) || lv(ev.without[i]) || others.has(i);
 }

@@ -25,14 +25,14 @@ import {
 import { OverworldStroke, shownMaps } from '../core/owstroke.ts';
 import { isPathKind, type PathKind, type PathShapes } from '../core/owpaths.ts';
 import { pathWays, pathTileText, type PathWay } from '../core/owpathshape.ts';
-import { emptyL1Tiles, freeL1Tiles, sheetPages, l1TileLines, l1Hex, SHEET_COLS, type SheetPage } from '../core/owl1sheet.ts';
+import { emptyL1Tiles, freeL1Tiles, sheetPages, l1TileLines, l1Hex, l1BrushEntries, NO_TILE, SHEET_COLS, type SheetPage } from '../core/owl1sheet.ts';
 import { findL2Brush, l2BrushPalettes, l2SharedBits, l2SheetEntry, L2_SHEET_COLS, L2_SHEET_ROWS, L2_FLIP_X, L2_FLIP_Y, L2_PRIORITY, type SheetMark } from '../core/owl2sheet.ts';
 import { mapPieces, PIECE_COLS } from '../core/owl2pieces.ts';
 import { skipsRevealWalk } from '../core/revealwalk.ts';
 import type { OwSpriteView } from '../core/owsprites.ts';
 import { LinkLayer } from './owlinkview.ts';
 import { LevelTileLayer, tilePlace } from './owlevelview.ts';
-import { levelsWithoutTile } from '../core/owleveltiles.ts';
+import { levelsWithoutTile, type LevelTileEvent } from '../core/owleveltiles.ts';
 import { eventReveal, eventDestroys, revealRefusal, destroyRefusal, addReveal, removeReveal, addDestroy, removeDestroy, cellText, NO_REVEAL_AT_0 } from '../core/oweventtiles.ts';
 import { SpriteLayer } from './owspriteview.ts';
 import { levelTeleports, locationUses, type LevelTeleport } from '../core/owlinks.ts';
@@ -50,10 +50,12 @@ import { ReachLayer } from './owreachview.ts';
 import { layerStrengths, isLayerMode, type OwMode } from '../core/owlayers.ts';
 import { OW_OPTIONS, owOption, owOptionValue, setOwOption, revealSpeed, setRevealSpeed, revealStepFrames, MAX_REVEAL_SPEED, DEFAULT_REVEAL_SPEED, submapLightning, setSubmapLightning, LIGHTNING_TITLE, lightningEditLabel } from '../core/owoptions.ts';
 
-// a w×h block of L1 tiles (16x16) or L2 tilemap entries (8x8), row-major; L1 tiles picked up from the map
-// carry their translevels (`tls`, 0 none), so a level tile placed with them enters the same level
+// a w×h block of L1 tiles (16x16) or L2 tilemap entries (8x8), row-major; a L1 brush has no level tiles (NO_TILE
+// where one was picked: they are placed in the Levels mode, ADR 0012)
 type Layer = 'l1' | 'l2';
-type Brush = { kind: Layer; w: number; h: number; entries: number[]; tls?: number[] };
+type Brush = { kind: Layer; w: number; h: number; entries: number[] };
+// the layer 1 brush to begin with: tile 000
+const FIRST_L1_TILE = 0x00;
 
 // a layer 1 tile's number: 2 digits on page 0, 3 on page 1 (82, 1A5)
 
@@ -64,6 +66,20 @@ type StepKind = 'step' | 'silent' | 'l1' | 'reveal' | 'destroy';
 const NO_REVEAL_WALK = 'the level tile the path leads to gets no way back to this one (as after Yoshi\'s House and the switch palaces in the clean game)';
 // (the level tiles are known with the path tile kinds: until then the list and a selected tile say so – exitpanel.ts says the same)
 const LEVEL_TILES_LEARNED = 'The overworld\'s level tiles are being learned …';
+const LEVEL_TILES_MODE = 'Level tiles are edited in the Levels mode (3)';
+// the hatching of level tiles in the layer 1 mode (on the map and in the sheet)
+const LEVEL_HATCH = 'rgba(255,255,255,0.45)';
+// the cells of size n at `at` (their top left corners) hatched with diagonal lines, lw wide
+function hatchCells(ctx: CanvasRenderingContext2D, at: { x: number; y: number }[], n: number, lw: number): void {
+  ctx.strokeStyle = LEVEL_HATCH;
+  ctx.lineWidth = lw;
+  ctx.beginPath();
+  for (const { x, y } of at) for (let d = n / 4; d < 2 * n; d += n / 4) {
+    ctx.moveTo(x + Math.max(0, d - n), y + Math.min(n, d));
+    ctx.lineTo(x + Math.min(n, d), y + Math.max(0, d - n));
+  }
+  ctx.stroke();
+}
 
 export class OverworldView {
   app: App;
@@ -94,7 +110,7 @@ export class OverworldView {
   private shownViews: Rect[] | null = null;
   private pendingTile = -1; // a tile to show (showTile) once the submaps' views are known
   // the maps as in the ROM, with the stroke being painted (written to the ROM when it ends); tls: the translevel
-  // of each layer 1 tile; rom: the maps as in the ROM; shown: as the game shows them at the event progress, the
+  // of each layer 1 tile (as in the ROM: strokes leave it); rom: the maps as in the ROM; shown: as the game shows them at the event progress, the
   // tiles of the stroke being painted as painted (it goes to the map before events)
   l1: Uint16Array;
   l2: Uint16Array;
@@ -138,7 +154,7 @@ export class OverworldView {
   // whole screen pixels per SNES pixel (pixelZoomSteps): 200 % or the nearest level of the screen's scale
   zoom = snapZoom(2, pixelZoomSteps());
   private zoomCtl = zoomControl(() => this.zoom, (z) => this.setZoom(z), undefined, undefined, pixelZoomSteps);
-  brush: Brush = { kind: 'l1', w: 1, h: 1, entries: [0x56] };
+  brush: Brush = { kind: 'l1', w: 1, h: 1, entries: [FIRST_L1_TILE] };
   l2Pal = 0;
   hover: { x: number; y: number } | null = null;
   mouse: { x: number; y: number } | null = null; // the map's pixel under the mouse (on the map)
@@ -381,12 +397,14 @@ export class OverworldView {
       for (let i = 0; i <= 512; i += step) { ctx.moveTo(i, 0); ctx.lineTo(i, 512); ctx.moveTo(0, i); ctx.lineTo(512, i); }
       ctx.stroke();
     }
-    // level tile labels: the level each enters (in orange where another tile enters it too)
-    const shared = sharedTranslevels(this.l1, this.tls, this.isLevelTile);
+    // level tile labels: the level each enters (in orange where another tile enters it too); on layer 1 hatched (a
+    // stroke leaves them: they are edited in the Levels mode)
+    const levels = this.levelL1(), shared = sharedTranslevels(levels, this.tls, this.isLevelTile);
+    if (this.mode === 'l1') this.hatchLevelTiles(ctx, levels, lw);
     ctx.font = `bold ${8}px monospace`;
     for (let y = 0; y < 32; y++) for (let x = 0; x < 32; x++) {
       const i = l1Index(this.region, x, y), tl = this.tls[i];
-      if (!this.isLevelTile(this.l1[i])) continue;
+      if (!this.isLevelTile(levels[i])) continue;
       ctx.fillStyle = i === this.selected ? 'rgba(76,194,255,0.85)' : shared.has(tl) || !tl ? 'rgba(230,120,0,0.85)' : 'rgba(0,0,0,0.6)';
       ctx.fillRect(x * 16, y * 16 + 10, 16, 7);
       ctx.fillStyle = '#fff';
@@ -413,6 +431,13 @@ export class OverworldView {
       const pick = this.brushDrag.pickFrame(), r = pick ? this.clampRect(pick) : this.hover && this.brushDrag.hoverFrame(this.hover);
       if (r) drawBrushFrame(ctx, pick ? 'pick' : 'hover', [r.x * s, r.y * s, r.w * s, r.h * s], lw);
     }
+  }
+
+  // the level tiles of layer 1 `levels` on the map shown lightly hatched
+  private hatchLevelTiles(ctx: CanvasRenderingContext2D, levels: ArrayLike<number>, lw: number): void {
+    const at: { x: number; y: number }[] = [];
+    for (let y = 0; y < 32; y++) for (let x = 0; x < 32; x++) if (this.isLevelTile(levels[l1Index(this.region, x, y)])) at.push({ x: x * 16, y: y * 16 });
+    hatchCells(ctx, at, 16, lw);
   }
 
   // the kinds of the layer 1 tiles, as the game sees them (null while they are learned)
@@ -467,7 +492,7 @@ export class OverworldView {
     ctx.lineWidth = 2 * lw;
     ctx.strokeRect(x * 16, y * 16, 16, 16);
     const tl = this.tls[i];
-    if (!this.isLevelTile(this.l1[i]) || !tl) return;
+    if (!this.isLevelTile(this.levelL1()[i]) || !tl) return;
     this.paintExitResults(ctx, lw, i, tl);
     const dirs = exitDirections(this.app.rom, tl);
     const step = [[0, -1], [0, 1], [-1, 0], [1, 0]];
@@ -576,7 +601,7 @@ export class OverworldView {
       return;
     }
     if (paintButton(e)) {
-      // (a level tile painted gets a translevel: not before the level tiles are known)
+      // (a stroke leaves level tiles alone: not before the level tiles are known)
       if (this.mode === 'l1' && !this.pathKinds()) { toast('The path tiles are still being learned – layer 1 can be painted in a moment.'); return; }
       if (this.mode === 'l1' && this.ev?.without === null) { toast('Layer 1 can\'t be painted on this event: the map without its layer 1 changes could not be emulated.', 'error'); return; }
       if (this.mode === 'l1' && this.ev && !this.evL1Ready()) { toast('The map after the event is still being emulated – layer 1 can be painted in a moment.'); return; }
@@ -598,7 +623,7 @@ export class OverworldView {
     const { x, y } = this.cell(e, 16);
     if (x < 0 || y < 0 || x >= 32 || y >= 32) return;
     const i = l1Index(this.region, x, y), tl = this.tls[i];
-    if (!this.isLevelTile(this.l1[i]) || !tl) return;
+    if (!this.isLevelTile(this.levelL1()[i]) || !tl) return;
     this.brushDrag.drop();
     this.selectTile(i, false);
     this.onOpenLevel(translevelToLevel(tl));
@@ -646,9 +671,7 @@ export class OverworldView {
     } catch (e) {
       toast(`Not painted: ${e instanceof Error ? e.message : e}`, 'error');
       this.sync();
-      return;
     }
-    for (const w of end.warnings) toast(w);
   }
 
   // the brush stamped at cell (x, y) into the stroke; whether a cell changed
@@ -662,17 +685,26 @@ export class OverworldView {
       const xx = x + dx, yy = y + dy;
       if (xx < 0 || yy < 0 || xx >= n.w || yy >= n.h) continue;
       const v = b.entries[dy * b.w + dx];
-      if (this.stroke?.paint(this.region, xx, yy, v, b.tls?.[dy * b.w + dx] ?? 0)) changed = true;
+      if (this.stroke?.paint(this.region, xx, yy, v)) changed = true;
     }
     return changed;
   }
 
+  // cells picked from the map as the brush; on layer 1 level tiles left out – a click (one cell) on a level tile goes
+  // to the Levels mode with it selected (ADR 0012: level tiles are edited there)
   pick(r: { x: number; y: number; w: number; h: number }): void {
     const src = this.mode === 'l2' ? this.shown.l2 : this.shown.l1;
     const idx = this.mode === 'l2' ? l2Index : l1Index;
     const at = Array.from({ length: r.w * r.h }, (_, i) => idx(this.region, r.x + (i % r.w), r.y + Math.floor(i / r.w)));
-    const entries = at.map((i) => src[i]);
-    this.brush = { kind: this.mode === 'l2' ? 'l2' : 'l1', w: r.w, h: r.h, entries, tls: this.mode === 'l1' ? at.map((i, k) => (this.isLevelTile(entries[k]) ? this.tls[i] : 0)) : undefined };
+    let entries = at.map((i) => src[i]);
+    if (this.mode === 'l1') {
+      const levels = this.levelL1();
+      if (at.length === 1 && this.isLevelTile(levels[at[0]])) { this.toLevelsMode(at[0]); return; }
+      const left = l1BrushEntries(at.map((i, k) => (this.isLevelTile(levels[i]) ? levels[i] : entries[k])), this.isLevelTile);
+      if (!left) { toast(LEVEL_TILES_MODE); this.paint(); return; }
+      entries = left;
+    }
+    this.brush = { kind: this.mode === 'l2' ? 'l2' : 'l1', w: r.w, h: r.h, entries };
     if (this.mode === 'l2') { const p = l2BrushPalettes(entries); if (p.length === 1) this.l2Pal = p[0]; } // (the sheet in the brush's palette)
     this.revealMark = true;
     this.buildSide();
@@ -747,7 +779,7 @@ export class OverworldView {
         if (this.ev && eventL1Tiles(this.ev.data, this.event).includes(i)) t += ' (by this event)';
         else if (shown !== this.l1[i]) t += ` (by events, ${l1Hex(this.l1[i])} before)`;
         const tl = this.tls[i];
-        if (this.isLevelTile(this.l1[i])) t += tl ? `  ·  Level ${hex(translevelToLevel(tl), 3)} “${levelName(this.app.rom, tl)}”` : '  ·  Enters no level';
+        if (this.isLevelTile(this.levelL1()[i])) t += tl ? `  ·  Level ${hex(translevelToLevel(tl), 3)} “${levelName(this.app.rom, tl)}”` : '  ·  Enters no level';
         const k = this.showPaths ? this.pathKinds()?.[shown] : undefined;
         if (k && isPathKind(k)) {
           const what = pathTileText(shown, k, this.pathShapes());
@@ -767,17 +799,18 @@ export class OverworldView {
   }
 
   // ---------------- the event shown and painted ----------------
-  // the badge on the map: the layer painted (in its colour) and where painting goes (or, in the links and sprites modes,
-  // the event the map is shown after)
+  // the badge on the map: the layer painted (in its colour) and where painting goes – in the Levels mode where level
+  // tiles' changes go – (or, in the links and sprites modes, the event the map is shown after)
   private showEventBadge(): void {
-    const e = this.event, painting = isLayerMode(this.mode), layer = `Layer ${this.mode === 'l1' ? 1 : 2}`;
+    const e = this.event, levels = this.mode === 'levels', painting = isLayerMode(this.mode) || levels;
+    const layer = levels ? 'Levels' : `Layer ${this.mode === 'l1' ? 1 : 2}`, verb = levels ? 'changing' : 'painting';
     this.eventsBadge.classList.toggle('show', e >= 0 || painting);
     this.eventsBadge.classList.toggle('ow-l1', this.mode === 'l1');
     this.eventsBadge.classList.toggle('ow-l2', this.mode === 'l2');
-    if (e < 0) { if (painting) this.eventsBadge.textContent = `${layer} · painting the map before events`; return; }
+    if (e < 0) { if (painting) this.eventsBadge.textContent = `${layer} · ${verb} the map before events`; return; }
     const rom = this.app.rom, runners = eventRunners(rom), r = runners.get(e)?.[0];
     const title = `event ${hex(e, 2)}${r ? ` · ${levelName(rom, r.tl)} (${eventTitle(runners, e)})` : ''}`;
-    this.eventsBadge.textContent = painting ? `${layer} · painting into ${title}` : `Map after ${title}`;
+    this.eventsBadge.textContent = painting ? `${layer} · ${verb} into ${title}` : `Map after ${title}`;
   }
 
   // ---------------- painting an event ----------------
@@ -807,6 +840,20 @@ export class OverworldView {
   // layer 1 can be painted on the event: the maps after it with and without its layer 1 changes came
   private evL1Ready(): boolean {
     return !!this.ev?.l1 && !!this.ev.without;
+  }
+  // the layer 1 the level tiles are edited on: as after the event chosen (while it is emulated the map before events),
+  // else the map before events
+  levelL1(): Uint16Array {
+    return this.ev?.l1 ?? this.l1;
+  }
+  // the event level tiles are placed, moved and removed in (owleveltiles.ts LevelTileEvent): null on the map before
+  // events; a string while it can't be (why)
+  levelEvent(): LevelTileEvent | string | null {
+    const ev = this.ev;
+    if (!ev) return null;
+    if (ev.without === null) return 'Level tiles can\'t be changed in this event: the map without its layer 1 changes could not be emulated.';
+    if (!ev.l1 || !ev.without) return 'The map after the event is still being emulated – level tiles can be changed in a moment.';
+    return { event: this.event, after: ev.l1, without: ev.without, isLevelTile: this.isLevelTile };
   }
   // (null while the submaps' views are learned)
   private place(e: number) {
@@ -1065,20 +1112,26 @@ export class OverworldView {
   }
 
   // ---------------- context bar (map, layer, view, zoom) ----------------
+  setMode(m: OwMode): void {
+    if (this.mode === m) return;
+    this.mode = m;
+    this.levelTiles.cancel();
+    if (m !== 'l1' && (this.eventPick?.at ?? -1) >= 0) this.cancelEventPick(); // (the tile a reveal becomes is picked in the layer 1 sheet)
+    this.buildLeft(); // (levels without a level tile are dragged onto the map in the levels mode)
+    if (isLayerMode(m) && this.brush.kind !== m) this.brush = { kind: m, w: 1, h: 1, entries: [m === 'l1' ? FIRST_L1_TILE : 0] };
+    this.buildBar();
+    this.buildSide();
+    this.updateStatus();
+    this.composeMap();
+    this.paint();
+  }
+  // a click on level tile i in the layer 1 mode: the Levels mode with it selected (said how to go back)
+  private toLevelsMode(i: number): void {
+    this.setMode('levels');
+    this.selectTile(i, false);
+    toast(`${LEVEL_TILES_MODE} · 1: back to layer 1`);
+  }
   buildBar(): void {
-    const setMode = (m: OwMode) => {
-      if (this.mode === m) return;
-      this.mode = m;
-      this.levelTiles.cancel();
-      if (m !== 'l1' && (this.eventPick?.at ?? -1) >= 0) this.cancelEventPick(); // (the tile a reveal becomes is picked in the layer 1 sheet)
-      this.buildLeft(); // (levels without a level tile are dragged onto the map in the levels mode)
-      if (isLayerMode(m) && this.brush.kind !== m) this.brush = { kind: m, w: 1, h: 1, entries: [m === 'l1' ? 0x56 : 0] };
-      this.buildBar();
-      this.buildSide();
-      this.updateStatus();
-      this.composeMap();
-      this.paint();
-    };
     const view = (label: string, get: () => boolean, set: (v: boolean) => void, title?: string, shortcut?: string) =>
       ({ label, title, shortcut, checked: get, onToggle: (v: boolean) => { set(v); this.redrawMap(); this.updateStatus(); } });
     this.zoomCtl.update();
@@ -1087,11 +1140,11 @@ export class OverworldView {
       h('label', { class: 'row' }, 'Map ', select(MAP_NAMES.map((n, i) => [i, n] as [number, string]), this.map, (v) => this.setMap(v))),
       h('span', { class: 'sep' }),
       h('div', { class: 'btn-group' },
-        h('button', { class: `ow-l1${this.mode === 'l1' ? ' active' : ''}`, title: 'Layer 1 (1): paths and level tiles painted as tiles · layer 2 dimmed while it is painted, hold Q to hide it', onclick: () => setMode('l1') }, 'Layer 1 (paths)'),
-        h('button', { class: `ow-l2${this.mode === 'l2' ? ' active' : ''}`, title: 'Layer 2 (2) · layer 1 dimmed while it is painted, hold Q to hide it', onclick: () => setMode('l2') }, 'Layer 2 (terrain)'),
-        h('button', { class: this.mode === 'levels' ? 'active' : '', title: 'Levels (3): the level tiles as objects – click selects, drag moves (swaps with the tile there), Delete leaves a stop tile, right click places a level', onclick: () => setMode('levels') }, 'Levels'),
-        h('button', { class: this.mode === 'links' ? 'active' : '', title: 'Overworld links (4): stars, pipes and exit paths leading elsewhere, drawn as arrows; drag from a tile to where it leads', onclick: () => setMode('links') }, 'Overworld links'),
-        h('button', { class: this.mode === 'sprites' ? 'active' : '', title: 'Sprites (5): the overworld\'s sprites as the game shows them at the event progress, the start positions and the Koopa Kids\' places; drag to move', onclick: () => setMode('sprites') }, 'Sprites')),
+        h('button', { class: `ow-l1${this.mode === 'l1' ? ' active' : ''}`, title: 'Layer 1 (1): paths painted as tiles (level tiles, hatched, in the Levels mode: a click on one goes there) · layer 2 dimmed while it is painted, hold Q to hide it', onclick: () => this.setMode('l1') }, 'Layer 1 (paths)'),
+        h('button', { class: `ow-l2${this.mode === 'l2' ? ' active' : ''}`, title: 'Layer 2 (2) · layer 1 dimmed while it is painted, hold Q to hide it', onclick: () => this.setMode('l2') }, 'Layer 2 (terrain)'),
+        h('button', { class: this.mode === 'levels' ? 'active' : '', title: 'Levels (3): the level tiles as objects – click selects, drag moves (swaps with the tile there), Delete leaves a stop tile, right click places a level', onclick: () => this.setMode('levels') }, 'Levels'),
+        h('button', { class: this.mode === 'links' ? 'active' : '', title: 'Overworld links (4): stars, pipes and exit paths leading elsewhere, drawn as arrows; drag from a tile to where it leads', onclick: () => this.setMode('links') }, 'Overworld links'),
+        h('button', { class: this.mode === 'sprites' ? 'active' : '', title: 'Sprites (5): the overworld\'s sprites as the game shows them at the event progress, the start positions and the Koopa Kids\' places; drag to move', onclick: () => this.setMode('sprites') }, 'Sprites')),
       h('button', { title: `${MAP_NAMES[this.map]}'s border (layer 3, fixed on the screen) in the Game workspace`, onclick: () => this.onEditBorder(this.map) }, 'Edit border…'),
       h('span', { class: 'sep' }),
       menuButton({ label: 'View', items: [
@@ -1159,11 +1212,11 @@ export class OverworldView {
       this.tlList.replaceChildren(emptyState(LEVEL_TILES_LEARNED));
       return;
     }
-    const shared = sharedTranslevels(this.l1, this.tls, this.isLevelTile);
+    const levels = this.levelL1(), shared = sharedTranslevels(levels, this.tls, this.isLevelTile);
     const items: HTMLElement[] = [];
     for (let y = 0; y < 32; y++) for (let x = 0; x < 32; x++) {
       const i = l1Index(this.region, x, y), tl = this.tls[i];
-      if (!this.isLevelTile(this.l1[i])) continue;
+      if (!this.isLevelTile(levels[i])) continue;
       const lvl = translevelToLevel(tl), name = tl ? levelName(this.app.rom, tl) : '(enters no level)';
       const cur = i === this.selected, warn = shared.has(tl) || !tl;
       const el = h('div', { class: `level-item${cur ? ' current' : ''}`, title: `${name}\n${warn && tl ? 'Another level tile enters this level too\n' : ''}Click: select · Double click: open in the level editor`,
@@ -1280,7 +1333,7 @@ export class OverworldView {
   // what the levels mode does
   private levelsHelp(): HTMLElement {
     return h('div', { class: 'ow-info' },
-      h('div', { class: 'hint' }, 'Level tiles as objects on layer 1, each change one ROM edit of the map before events:'),
+      h('div', { class: 'hint' }, 'Level tiles as objects on layer 1 – the only place they are changed –, each change one ROM edit of the map before events, or with "Map after: event X" a layer 1 change of the event (the tile changed from the event on):'),
       h('div', { class: 'hint' }, 'Drag a level tile to move it: it swaps with the tile there (a path stays whole), its level and settings go with it.'),
       h('div', { class: 'hint' }, 'Delete: the stop tile 81 in its place – the level keeps its settings and is listed under "Without level tile".'),
       h('div', { class: 'hint' }, 'Right click a cell: Place level here… – or drag a level from "Without level tile" onto the map.'),
@@ -1327,7 +1380,7 @@ export class OverworldView {
   // the level tile at i: the level it enters (chosen from the levels; the translevel only shown), its name
   levelInfo(i: number): HTMLElement {
     const rom = this.app.rom, tl = this.tls[i], { x, y } = l1XY(i);
-    const others = levelTilesOf(this.l1, this.tls, tl, this.isLevelTile).filter((k) => k !== i);
+    const others = levelTilesOf(this.levelL1(), this.tls, tl, this.isLevelTile).filter((k) => k !== i);
     const choose = this.levelTiles.levelChoice(tl || 1, i, (t) => {
       if (t === tl) return;
       const next = this.tls.slice();
@@ -1339,7 +1392,7 @@ export class OverworldView {
       h('div', { class: 'hint' }, `Tile ${hex(x, 2)},${hex(y, 2)}${tl ? ` · translevel ${hex(tl, 2)}` : ''}`),
       ...others.map((k) => h('div', { class: 'hint warn-text' }, `⚠ The level tile at ${tilePlace(k)} enters this level too.`)),
       h('div', { class: 'prop' }, h('label', { title: 'The level tiles\' looks: the visible tiles the game enters a level on, and one drawn on layer 2 – the tile changes, its level stays' }, 'Look')),
-      this.levelTiles.lookPicker(this.l1[i], (t) => this.levelTiles.setLook(i, t)),
+      this.levelTiles.lookPicker(this.levelL1()[i], (t) => this.levelTiles.setLook(i, t)),
     ];
     if (!tl) return h('div', { class: 'ow-info' }, ...head, h('div', { class: 'hint warn-text' }, '⚠ This level tile enters no level.'));
     const lvl = translevelToLevel(tl);
@@ -1379,7 +1432,7 @@ export class OverworldView {
 
   // the selected tile: a level tile's settings, and for every tile the events that reveal it
   tileInfo(i: number): HTMLElement {
-    const { x, y } = l1XY(i), t = this.l1[i];
+    const { x, y } = l1XY(i), t = this.levelL1()[i];
     const known = !!this.pathKinds(); // (whether it is a level tile: not known while the path tiles are learned)
     const info = this.isLevelTile(t) ? this.levelInfo(i) : h('div', { class: 'ow-info' }, h('div', { class: 'hint' }, `Tile ${hex(x, 2)},${hex(y, 2)} · ${l1Hex(t)}${known ? ' (not a level tile)' : ''}`),
       known ? null : h('div', { class: 'hint' }, LEVEL_TILES_LEARNED));
@@ -1481,12 +1534,14 @@ export class OverworldView {
     return this.palPanel.clientWidth - parseFloat(st.paddingLeft) - parseFloat(st.paddingRight);
   }
 
-  // where the brush is a rectangle of exactly its entries in a cols×rows sheet (null: nowhere)
+  // where the brush is a rectangle of exactly its entries in a cols×rows sheet (null: nowhere; a layer 1 brush's
+  // NO_TILE where a level tile is)
   private sheetRect(cols: number, rows: number, sheetValue: (x: number, y: number) => number): SheetMark | null {
     const b = this.brush;
+    const fits = (v: number, t: number) => v === t || (v === NO_TILE && this.isLevelTile(t));
     for (let i = 0; i < cols * rows; i++) {
       const x = i % cols, y = Math.floor(i / cols);
-      if (x + b.w <= cols && y + b.h <= rows && b.entries.every((v, j) => v === sheetValue(x + (j % b.w), y + Math.floor(j / b.w)))) return { kind: 'rect', x, y, w: b.w, h: b.h, flip: 0 };
+      if (x + b.w <= cols && y + b.h <= rows && b.entries.every((v, j) => fits(v, sheetValue(x + (j % b.w), y + Math.floor(j / b.w))))) return { kind: 'rect', x, y, w: b.w, h: b.h, flip: 0 };
     }
     return null;
   }
@@ -1515,7 +1570,11 @@ export class OverworldView {
     attachRectPick(c, cols, rows, draw, (r) => {
       // (a reveal being added: the tile it becomes)
       if (this.mode === 'l1' && (this.eventPick?.at ?? -1) >= 0) { this.pickReveal(sheetValue(r.x, r.y)); return; }
-      this.brush = { kind: this.mode === 'l2' ? 'l2' : 'l1', w: r.w, h: r.h, entries: Array.from({ length: r.w * r.h }, (_, j) => sheetValue(r.x + (j % r.w), r.y + Math.floor(j / r.w))) };
+      let entries: number[] | null = Array.from({ length: r.w * r.h }, (_, j) => sheetValue(r.x + (j % r.w), r.y + Math.floor(j / r.w)));
+      // (layer 1: level tiles left out, none but them: refused)
+      if (this.mode === 'l1') entries = l1BrushEntries(entries, this.isLevelTile);
+      if (!entries) { toast(LEVEL_TILES_MODE); draw(null); return; }
+      this.brush = { kind: this.mode === 'l2' ? 'l2' : 'l1', w: r.w, h: r.h, entries };
       this.buildSide();
     });
     previewSheet(c, () => sheet, cols, rows, cell, scale, describe);
@@ -1558,7 +1617,7 @@ export class OverworldView {
       const ctx = c.getContext('2d')!;
       const id = ctx.createImageData(W, H);
       const px = new Uint32Array(id.data.buffer);
-      list.forEach((t, i) => this.drawL1Tile(px, tc, t, (i % w) * 16, Math.floor(i / w) * 16, W, H));
+      list.forEach((t, i) => { if (t !== NO_TILE) this.drawL1Tile(px, tc, t, (i % w) * 16, Math.floor(i / w) * 16, W, H); });
       // (whether each cell has a pixel, before the checkerboard fills the others)
       const seen = list.map((_, i) => {
         const x0 = (i % w) * 16, y0 = Math.floor(i / w) * 16;
@@ -1572,6 +1631,8 @@ export class OverworldView {
         if (!seen[i] && isPathKind(k)) drawPathMark(ctx, k, x, y, 0.5, pathWays(t, k, shapes));
         else if (KIND_BORDER[k]) { ctx.strokeStyle = KIND_BORDER[k]; ctx.lineWidth = 1; ctx.strokeRect(x + 0.5, y + 0.5, 15, 15); }
       });
+      // the level tiles hatched (no brush tiles: placed in the Levels mode)
+      hatchCells(ctx, list.flatMap((t, i) => (this.isLevelTile(t) ? [{ x: (i % w) * 16, y: Math.floor(i / w) * 16 }] : [])), 16, 1);
       return c;
     };
     const b = this.brush;
@@ -1594,7 +1655,7 @@ export class OverworldView {
     };
     const [p0, p1] = sheetPages(empty, free, this.openPage1);
     return h('div', null,
-      h('div', { class: 'hint' }, `${one ? `Tile ${l1Hex(b.entries[0])}` : b.kind === 'l1' ? `Block ${b.w}×${b.h}` : ''} · Level tiles: 56–80 (156–180)`),
+      h('div', { class: 'hint' }, `${one ? `Tile ${l1Hex(b.entries[0])}` : b.kind === 'l1' ? `Block ${b.w}×${b.h}` : ''} · Levels: mode 3`),
       ...page(p0),
       h('div', { class: 'hint ow-page' }, 'Page 1 (100–1FF): acts like 00–FF where Mario walks'),
       ...page(p1));

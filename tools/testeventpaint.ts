@@ -1,6 +1,6 @@
 // Painting a layer 2 event (owevents.ts paintEvent, ADR 0005): the map after the event becomes its steps; a paint
-// stroke on the event (owstroke.ts) is one ROM edit; a level tile painted on layer 1 as after an event where none was
-// gets a translevel. Every
+// stroke on the event (owstroke.ts) is one ROM edit; layer 1 painted as after an event leaves level tiles alone (the
+// Levels mode places them). Every
 // clean game's event painted as it is (its own map after it) and written back leaves the layer 2 of every event
 // progress as it was; a painted change is shown by the game – passing the level, the steps on its submap appear one
 // after the other in their order (VRAM, frame by frame), those on another submap at once in the tilemap (silent);
@@ -11,7 +11,6 @@ import { PlaySession } from '../src/core/playsession.ts';
 import { RomEditSession } from '../src/core/romedit.ts';
 import {
   OverworldEmulator, OverworldLoads, gameL1, gameL2, readL1, readL2, readMaps, readTranslevels, baseEvent, OW_EVENTS, l1XY, l2Index,
-  freeTranslevel, translevelUse,
 } from '../src/core/overworld.ts';
 import { OverworldStroke, type OwEventMaps } from '../src/core/owstroke.ts';
 import {
@@ -24,6 +23,7 @@ import { editorImage, romDiff, levelTiles } from './fixture.ts';
 let bad = 0;
 const check = (ok: boolean, what: string) => { console.log((ok ? 'ok   ' : 'FAIL ') + what); if (!ok) bad++; };
 const hx = (v: number) => v.toString(16).toUpperCase().padStart(2, '0');
+const same = (a: ArrayLike<number>, b: ArrayLike<number>) => a.length === b.length && Array.from(a).every((v, i) => v === b[i]);
 const diff = (a: ArrayLike<number>, b: ArrayLike<number>) => { let n = 0; for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) n++; return n; };
 const progressMaps = (d: EventData, base: Uint16Array) => { const out = [base]; for (let e = 0; e < OW_EVENTS; e++) out.push(applyEvents(out[e], d, e, e + 1)); return out; };
 
@@ -147,22 +147,25 @@ check(romDiff(image, rom.data) === 0, 'undone: the ROM as before');
     `event ${hx(ev)}: shown from event progress ${hx(ev + 1)} on, not at ${hx(ev)} (emulated)`);
 }
 
-// a level tile painted on layer 1 as after level 105's normal exit, where none is: one ROM edit, the tile a layer 1
-// change of the event with a free translevel (the game shows it from the event on, not before)
+// layer 1 painted as after level 105's normal exit: a path tile painted a layer 1 change of the event (the game shows it
+// from the event on, not before); a level tile is neither painted nor painted over (the Levels mode places them), the
+// translevels stay
 {
   const r3 = new Rom(image.slice()), isLevel = levelTiles(r3), maps = readMaps(r3), em = new OverworldEmulator(r3);
-  const game = gameL1(em.load(0, e + 1)), without = layer1Without(r3, e);
+  const game = gameL1(em.load(0, e + 1)), without = layer1Without(r3, e), tls = maps.tls.slice();
   const i = Array.from({ length: 0x400 }, (_, k) => k).find((k) => !isLevel(game[k]) && !maps.tls[k] && game[k] === readL1(r3)[k] && game[k] === without[k])!;
-  const lt = maps.l1[maps.tls.findIndex((t, k) => !!t && isLevel(maps.l1[k]))], free = freeTranslevel(maps.tls, (tl) => translevelUse(r3, tl));
+  const lvAt = Array.from({ length: 0x400 }, (_, k) => k).find((k) => isLevel(game[k]))!;
+  const lt = maps.l1[maps.tls.findIndex((t, k) => !!t && isLevel(maps.l1[k]))], v = game[i] === 0x10 ? 0x11 : 0x10;
   const ev: OwEventMaps = { event: e, after: applyEvents(readL2(r3), readEvents(r3), 0, e + 1), l1: game.slice(), game, without, place: () => place };
-  const st = new OverworldStroke(r3, 'l1', maps, isLevel, ev), { x, y } = l1XY(i);
-  st.paint(0, x, y, lt);
+  const st = new OverworldStroke(r3, 'l1', maps, isLevel, ev), { x, y } = l1XY(i), at = l1XY(lvAt);
+  st.paint(0, x, y, v);
+  const levelPainted = st.paint(0, x + 1 < 32 ? x + 1 : x - 1, y, lt) || st.paint(0, at.x, at.y, v);
   const end = st.end(), s3 = new RomEditSession(r3);
   s3.edit(end.label, end.write!);
   const steps = readEvents(r3).silent[e].filter((p) => p.layer === 1 && p.loc === i);
-  check(s3.history.undoStack.length === 1 && end.label === `${eventTitle(runners, e)}: paint layer 1` && !end.warnings.length && readTranslevels(r3)[i] === free && readL1(r3)[i] === game[i]
-    && steps.length === 1 && steps[0].tile === lt, `layer 1 as after the event: the level tile a change of the event, with the free translevel ${hx(free)}, the map before events as it was`);
-  check(gameL1(em.load(0, e + 1))[i] === lt && gameL1(em.load(0, e))[i] === game[i], `the game shows it at event progress ${hx(e + 1)}, at ${hx(e)} not`);
+  check(s3.history.undoStack.length === 1 && end.label === `${eventTitle(runners, e)}: paint layer 1` && !levelPainted && readL1(r3)[i] === game[i]
+    && steps.length === 1 && steps[0].tile === v && same(readTranslevels(r3), tls), `layer 1 as after the event: the path tile a change of the event, the map before events as it was; a level tile neither painted nor painted over, the translevels as they were`);
+  check(gameL1(em.load(0, e + 1))[i] === v && gameL1(em.load(0, e))[i] === game[i], `the game shows it at event progress ${hx(e + 1)}, at ${hx(e)} not`);
 }
 
 if (bad) { console.log(`${bad} failed`); process.exit(1); }
