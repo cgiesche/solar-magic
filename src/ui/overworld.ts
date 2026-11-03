@@ -24,7 +24,7 @@ import {
 } from '../core/owevents.ts';
 import { OverworldStroke, shownMaps } from '../core/owstroke.ts';
 import { isPathKind, PATH_KIND_NAMES, type PathKind } from '../core/owpaths.ts';
-import { emptyL1Tiles, freeL1Tiles, sheetPages, l1TileLines, SHEET_COLS, type SheetPage } from '../core/owl1sheet.ts';
+import { emptyL1Tiles, freeL1Tiles, sheetPages, l1TileLines, l1Hex, SHEET_COLS, type SheetPage } from '../core/owl1sheet.ts';
 import { skipsRevealWalk } from '../core/revealwalk.ts';
 import type { OwSpriteView } from '../core/owsprites.ts';
 import { LinkLayer } from './owlinkview.ts';
@@ -43,7 +43,7 @@ import { songLabel, playButton } from './musicdialog.ts';
 import { musicPlayer, submapMusicLabel } from './musicplayer.ts';
 import type { Rom } from '../core/rom.ts';
 import { ReachLayer } from './owreachview.ts';
-import { layerStrengths } from './owlayers.ts';
+import { layerStrengths, isLayerMode, type OwMode } from '../core/owlayers.ts';
 import { OW_OPTIONS, owOption, owOptionValue, setOwOption, revealSpeed, setRevealSpeed, revealStepFrames, MAX_REVEAL_SPEED, DEFAULT_REVEAL_SPEED, submapLightning, setSubmapLightning, LIGHTNING_TITLE, lightningEditLabel } from '../core/owoptions.ts';
 
 // a w×h block of L1 tiles (16x16) or L2 tilemap entries (8x8), row-major; L1 tiles picked up from the map
@@ -52,7 +52,6 @@ type Layer = 'l1' | 'l2';
 type Brush = { kind: Layer; w: number; h: number; entries: number[]; tls?: number[] };
 
 // a layer 1 tile's number: 2 digits on page 0, 3 on page 1 (82, 1A5)
-export const l1Hex = (t: number): string => hex(t, t > 0xff ? 3 : 2);
 
 // what the timeline shows: an animated step, a silent one, the layer 1 changes
 type StepKind = 'step' | 'silent' | 'l1';
@@ -105,11 +104,12 @@ export class OverworldView {
   rom: { l1: Uint16Array; l2: Uint16Array };
   shown: { l1: Uint16Array; l2: Uint16Array };
   tls: Uint8Array;
-  mode: Layer | 'links' | 'sprites' = 'l1';
+  mode: OwMode = 'l1';
   showL1 = true;
   showL2 = true;
   dimOther = loadDim(); // the layer not painted dimmed (View → Layers, kept in the browser)
   private solo = false; // Q held: the layer not painted hidden
+  private openPage1 = false; // page 1 of the layer 1 sheet shown though none of its tiles is the ROM's own
   showLinks = false; // the links' arrows also while painting (always in the links mode)
   links = new LinkLayer(this);
   showSprites = false; // the sprites also while painting (always in the sprites mode)
@@ -686,7 +686,7 @@ export class OverworldView {
       return;
     }
     if (!c) {
-      const solo = ` · Q held: layer ${this.mode === 'l1' ? 2 : 1} hidden`;
+      const solo = isLayerMode(this.mode) ? ` · Hold Q: hide layer ${this.mode === 'l1' ? 2 : 1}` : '';
       this.statusText.textContent = this.ev
         ? `Painting layer ${this.mode === 'l1' ? 1 : 2} as after ${eventTitle(this.ev.runners, this.event)} · Click/drag picks up tiles · Right click/Shift+click paints · Esc: the map before events${solo}`
         : `Click/drag picks up tiles · Right click/Shift+click paints · Alt/Ctrl+click: tile settings${solo}`;
@@ -719,14 +719,14 @@ export class OverworldView {
   // the badge on the map: the layer painted (in its colour) and where painting goes (or, in the links and sprites modes,
   // the event the map is shown after)
   private showEventBadge(): void {
-    const e = this.event, painting = this.mode === 'l1' || this.mode === 'l2';
+    const e = this.event, painting = isLayerMode(this.mode), layer = `Layer ${this.mode === 'l1' ? 1 : 2}`;
     this.eventsBadge.classList.toggle('show', e >= 0 || painting);
     this.eventsBadge.classList.toggle('ow-l1', this.mode === 'l1');
     this.eventsBadge.classList.toggle('ow-l2', this.mode === 'l2');
-    if (e < 0) { if (painting) this.eventsBadge.textContent = `Layer ${this.mode === 'l1' ? 1 : 2} · painting the map before events`; return; }
+    if (e < 0) { if (painting) this.eventsBadge.textContent = `${layer} · painting the map before events`; return; }
     const rom = this.app.rom, runners = eventRunners(rom), r = runners.get(e)?.[0];
     const title = `event ${hex(e, 2)}${r ? ` · ${levelName(rom, r.tl)} (${eventTitle(runners, e)})` : ''}`;
-    this.eventsBadge.textContent = painting ? `Layer ${this.mode === 'l1' ? 1 : 2} · painting into ${title}` : `Map after ${title}`;
+    this.eventsBadge.textContent = painting ? `${layer} · painting into ${title}` : `Map after ${title}`;
   }
 
   // ---------------- painting an event ----------------
@@ -904,10 +904,10 @@ export class OverworldView {
 
   // ---------------- context bar (map, layer, view, zoom) ----------------
   buildBar(): void {
-    const setMode = (m: Layer | 'links' | 'sprites') => {
+    const setMode = (m: OwMode) => {
       if (this.mode === m) return;
       this.mode = m;
-      if ((m === 'l1' || m === 'l2') && this.brush.kind !== m) this.brush = { kind: m, w: 1, h: 1, entries: [m === 'l1' ? 0x56 : 0] };
+      if (isLayerMode(m) && this.brush.kind !== m) this.brush = { kind: m, w: 1, h: 1, entries: [m === 'l1' ? 0x56 : 0] };
       this.buildBar();
       this.buildSide();
       this.updateStatus();
@@ -932,8 +932,8 @@ export class OverworldView {
         { heading: 'Layers' },
         view('Layer 1', () => this.showL1, (v) => (this.showL1 = v)),
         view('Layer 2', () => this.showL2, (v) => (this.showL2 = v)),
-        view('Dim the layer not painted', () => this.dimOther, (v) => { this.dimOther = v; storeDim(v); },
-          'While layer 1 or 2 is painted the other one is drawn dimmed (Q held hides it)'),
+        { label: 'Dim the layer not painted', title: 'While layer 1 or 2 is painted the other one is drawn dimmed (Q held hides it)', checked: () => this.dimOther,
+          onToggle: (v: boolean) => { this.dimOther = v; storeDim(v); this.composeMap(); this.paint(); } },
         { heading: 'Guides' },
         view('Grid', () => this.showGrid, (v) => (this.showGrid = v), undefined, 'G'),
         view('Path tiles', () => this.showPaths, (v) => (this.showPaths = v),
@@ -969,8 +969,8 @@ export class OverworldView {
     if (k === 'escape' && this.mode === 'links' && this.links.cancelPending()) return true;
     if (k === 'escape' && this.event >= 0) { this.setEvent(-1); return true; }
     if (k === 'g') { this.showGrid = !this.showGrid; this.paint(); return true; }
-    if (k === 'q' && (this.mode === 'l1' || this.mode === 'l2')) { this.setSolo(true); return true; }
-    if (k === 'm' && this.selected >= 0 && (this.mode === 'l1' || this.mode === 'l2')) { this.editTile(this.selected); return true; }
+    if (k === 'q' && isLayerMode(this.mode)) { this.setSolo(true); return true; }
+    if (k === 'm' && this.selected >= 0 && isLayerMode(this.mode)) { this.editTile(this.selected); return true; }
     if (k === ',' || k === '.') { this.setEvent(stepEvent(this.event, k === ',' ? -1 : 1)); return true; }
     if (k >= '1' && k <= '4') { (this.bar.querySelectorAll('.btn-group button')[+k - 1] as HTMLButtonElement).click(); return true; }
     if ((k === 'delete' || k === 'backspace') && this.mode === 'sprites') return this.sprites.remove();
@@ -1347,7 +1347,8 @@ export class OverworldView {
   // the layer 1 sheet (owl1sheet.ts): pages 0 and 1 (tiles 100–1FF do where Mario walks what 00–FF do) in number
   // order, 16 a row; transparent pixels on a checkerboard, a path tile invisible in the game with its mark of the map's
   // "Path tiles" overlay, a visible tile doing something with a border of its colour (none while the kinds are learned);
-  // the rows of free tiles at a page's end folded into one row (page 1 whole while none of its tiles is the ROM's own)
+  // the rows of free tiles at a page's end folded into one row (page 1 whole while none of its tiles is the ROM's own,
+  // "Show page 1" opens it: its invisible path and level tiles acting as page 0's)
   l1Palette(): HTMLElement {
     const r = this.render();
     if (!r) return h('div', { class: 'hint' }, 'Loading the overworld…');
@@ -1378,10 +1379,12 @@ export class OverworldView {
     const b = this.brush;
     const one = b.kind === 'l1' && b.entries.length === 1;
     const page = (p: SheetPage) => {
-      const fold = p.free ? h('div', { class: 'row ow-fold' },
-        h('span', { class: 'hint' }, `${p.free} free tile${p.free === 1 ? '' : 's'}`),
-        h('button', { title: `Edit tile ${l1Hex(p.firstFree)}, the first free one, in the Map16 tab`,
-          onclick: () => this.app.editTile(p.firstFree, 'ow', { submap: this.map, progress: this.progress }) }, 'New tile…')) : null;
+      const n = (k: number, what: string) => `${k} ${what}${k === 1 ? '' : 's'}`;
+      const fold = p.folded || p.hidden || (p.page && this.openPage1) ? h('div', { class: 'row ow-fold' },
+        h('span', { class: 'hint' }, [p.folded ? n(p.folded, 'free tile') : '', p.hidden ? `${n(p.hidden, 'invisible path/level tile')} acting as page 0's` : ''].filter(Boolean).join(' · ')),
+        p.firstFree >= 0 ? h('button', { title: `Edit tile ${l1Hex(p.firstFree)}, the first free one, in the Map16 tab`,
+          onclick: () => this.app.editTile(p.firstFree, 'ow', { submap: this.map, progress: this.progress }) }, 'New tile…') : null,
+        p.page && (p.hidden || this.openPage1) ? h('button', { onclick: () => { this.openPage1 = !this.openPage1; this.buildSide(); } }, this.openPage1 ? 'Fold page 1' : 'Show page 1') : null) : null;
       if (!p.rows) return [fold];
       const sheet = tiles(Array.from({ length: p.rows * SHEET_COLS }, (_, k) => p.first + k), SHEET_COLS, SHEET_COLS * 16, p.rows * 16);
       const at = (x: number, y: number) => p.first + y * SHEET_COLS + x;
@@ -1390,7 +1393,7 @@ export class OverworldView {
         (q) => (q.w * q.h > 1 ? [`Block ${q.w}×${q.h} from tile ${l1Hex(at(q.x, q.y))}`]
           : [`Tile ${l1Hex(at(q.x, q.y))}`, ...l1TileLines(at(q.x, q.y), kinds, free[at(q.x, q.y)])])), fold];
     };
-    const [p0, p1] = sheetPages(empty, free);
+    const [p0, p1] = sheetPages(empty, free, this.openPage1);
     return h('div', null,
       h('div', { class: 'hint' }, `${one ? `Tile ${l1Hex(b.entries[0])}` : b.kind === 'l1' ? `Block ${b.w}×${b.h}` : ''} · Level tiles: 56–80 (156–180)`),
       ...page(p0),
@@ -1482,7 +1485,9 @@ export class OverworldView {
 
 // the mark of a path tile of kind k (isPathKind) on the 16x16 tile at (px, py), as the map's "Path tiles" overlay
 // draws it: walk green, climb green with rungs, swim blue, exit red, stop a cross (lw: the width of a pixel)
-const PATH_FILL: Partial<Record<PathKind, string>> = { walk: 'rgba(90,230,100,0.7)', climb: 'rgba(90,230,100,0.7)', swim: 'rgba(60,140,255,0.75)', exit: 'rgba(235,60,60,0.8)' };
+// (each kind's colour, r,g,b: the mark's fill with its alpha, the sheet's border opaque; a level tile has no mark)
+const KIND_RGB: Partial<Record<PathKind, [string, number]>> = { walk: ['90,230,100', 0.7], climb: ['90,230,100', 0.7], swim: ['60,140,255', 0.75], exit: ['235,60,60', 0.8], stop: ['255,255,255', 1], level: ['255,210,60', 1] };
+const PATH_FILL = Object.fromEntries(Object.entries(KIND_RGB).map(([k, [c, a]]) => [k, `rgba(${c},${a})`])) as Partial<Record<PathKind, string>>;
 function drawPathMark(ctx: CanvasRenderingContext2D, k: PathKind, px: number, py: number, lw: number): void {
   if (k === 'stop') {
     for (const [c, w] of [['rgba(0,0,0,0.8)', 4], ['#fff', 2]] as [string, number][]) {
@@ -1507,7 +1512,7 @@ function drawPathMark(ctx: CanvasRenderingContext2D, k: PathKind, px: number, py
   }
 }
 // the colour of the border a visible tile of kind k gets in the paint sheet (the overlay's; a level tile yellow)
-const KIND_BORDER: Partial<Record<PathKind, string>> = { walk: '#5ae664', climb: '#5ae664', swim: '#3c8cff', exit: '#eb3c3c', stop: '#ffffff', level: '#ffd23c' };
+const KIND_BORDER = Object.fromEntries(Object.entries(KIND_RGB).map(([k, [c]]) => [k, `rgb(${c})`])) as Partial<Record<PathKind, string>>;
 // the background of transparent pixels in the paint sheet: a checkerboard of 4x4 pixel squares (layer 2 shows there)
 const checker = (x: number, y: number): number => (((x >> 2) ^ (y >> 2)) & 1 ? 0xff2a2a2a : 0xff1c1c1c);
 
@@ -1532,8 +1537,9 @@ function storeDim(on: boolean): void {
 
 // a map region's layers drawn apart: layer 1 transparent where it has no pixel, layer 2 black there (the back area)
 function putLayers(l1c: HTMLCanvasElement, l2c: HTMLCanvasElement, rom: Rom, r: OwRender, region: number, l1: Uint16Array, l2: Uint16Array): void {
-  putImage(l1c, drawOwMap(rom, r, region, l1, undefined), 512, 0);
-  putImage(l2c, drawOwMap(rom, r, region, undefined, l2));
+  const tc = new TileCache(r.vram, r.cgram, 0);
+  putImage(l1c, drawOwMap(rom, r, region, l1, undefined, tc), 512, 0);
+  putImage(l2c, drawOwMap(rom, r, region, undefined, l2, tc));
 }
 // the map from its layers: black, layer 2, layer 1 over it, each at its strength (0: left out)
 function composeLayers(out: HTMLCanvasElement, l1c: HTMLCanvasElement, l2c: HTMLCanvasElement, s: { l1: number; l2: number }): void {

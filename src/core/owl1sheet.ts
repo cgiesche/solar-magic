@@ -5,7 +5,7 @@
 // (before events) and not put there by an event (its layer 1 tiles, a reveal). The editor's Map16 extension
 // (overworld.ts installOwMap16Patch) makes the tiles past the game's (C1–1FF) such copies of 000. A free tile is an
 // empty one that also does what 000 does where Mario walks (owpaths.ts): an invisible path or level tile is no free
-// one, even unused. While the path kinds are learned an empty tile counts as free.
+// one, even unused. While the path kinds are learned no tile is free (nothing is folded until they are known).
 import type { Rom } from './rom.ts';
 import { OW_L1_TILES, owTileWords, readL1, revealedTile } from './overworld.ts';
 import { readEvents } from './owevents.ts';
@@ -30,28 +30,27 @@ export function emptyL1Tiles(rom: Rom): boolean[] {
   return Array.from({ length: OW_L1_TILES }, (_, t) => t > 0 && !used.has(t) && owTileWords(rom, t).every((w, q) => w === zero[q]));
 }
 
-// per tile whether it is free: empty and (when known) of tile 000's path kind
+// per tile whether it is free: empty and of tile 000's path kind (none while the kinds are learned)
 export function freeL1Tiles(empty: readonly boolean[], kinds: readonly PathKind[] | null): boolean[] {
-  return empty.map((e, t) => e && (!kinds || kinds[t] === kinds[0]));
+  return empty.map((e, t) => !!kinds && e && kinds[t] === kinds[0]);
 }
 
-// a page of the sheet (0: 000–0FF, 1: 100–1FF): its rows shown (from its first; the rows after them hold free tiles
-// only and are folded), its free tiles and the first of them (-1 none). Page 1 is folded whole (rows 0) while none
-// of its tiles is the ROM's own (every one empty).
-export interface SheetPage { page: number; first: number; rows: number; free: number; firstFree: number }
-export function sheetPages(empty: readonly boolean[], free: readonly boolean[]): SheetPage[] {
+// a page of the sheet (0: 000–0FF, 1: 100–1FF): its rows shown (from its first; the rows after them are folded), the
+// free tiles and the other tiles folded with them, and the page's first free tile (-1 none). The rows after the last
+// tile not free hold free tiles only. Page 1 is folded whole while none of its tiles is the ROM's own (every one
+// empty) – unless open1: then shown as page 0 is (its invisible path and level tiles acting as page 0's among them).
+export interface SheetPage { page: number; first: number; rows: number; folded: number; hidden: number; firstFree: number }
+export function sheetPages(empty: readonly boolean[], free: readonly boolean[], open1 = false): SheetPage[] {
   return [0, 1].map((page) => {
     const first = page * PAGE_TILES, tiles = Array.from({ length: PAGE_TILES }, (_, k) => first + k);
     const own = tiles.filter((t) => !free[t]);
-    const rows = page && tiles.every((t) => empty[t]) ? 0 : own.length ? Math.floor((own[own.length - 1] - first) / SHEET_COLS) + 1 : 0;
-    const frees = tiles.filter((t) => free[t]);
-    return { page, first, rows, free: frees.length, firstFree: frees.length ? frees[0] : -1 };
+    const rows = page && !open1 && tiles.every((t) => empty[t]) ? 0 : own.length ? Math.floor((own[own.length - 1] - first) / SHEET_COLS) + 1 : 0;
+    const past = tiles.slice(rows * SHEET_COLS), frees = tiles.filter((t) => free[t]);
+    return { page, first, rows, folded: past.filter((t) => free[t]).length, hidden: past.filter((t) => !free[t]).length, firstFree: frees.length ? frees[0] : -1 };
   });
 }
-
-// the tile number as the editor writes it (2 digits on page 0, 3 on page 1)
-const tileHex = (t: number): string => hex(t, t > 0xff ? 3 : 2);
-
+// a layer 1 tile's number as the editor writes it (2 digits on page 0, 3 on page 1)
+export const l1Hex = (t: number): string => hex(t, t > 0xff ? 3 : 2);
 export const KINDS_LEARNING = 'What the tile does is being learned…';
 // what the popup says about layer 1 tile t below its number: what it does (kinds: the path kinds, null while
 // learned), on page 1 the tile of page 0 it acts like, whether it is free
@@ -61,7 +60,7 @@ export function l1TileLines(t: number, kinds: readonly PathKind[] | null, free: 
     !kinds || !k ? KINDS_LEARNING
       : k === 'level' ? 'Level tile: enters a level – gets a free translevel when painted'
         : k === 'none' ? 'No path: Mario doesn\'t go there' : PATH_KIND_NAMES[k],
-    t >= PAGE_TILES ? `Acts like tile ${tileHex(t & 0xff)} where Mario walks` : '',
-    free ? `Free: drawn as tile ${tileHex(0)}, on no map` : '',
+    t >= PAGE_TILES ? `Acts like tile ${l1Hex(t & 0xff)} where Mario walks` : '',
+    free ? `Free: drawn as tile ${l1Hex(0)}, on no map` : '',
   ].filter(Boolean);
 }

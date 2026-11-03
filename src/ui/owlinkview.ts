@@ -6,7 +6,8 @@
 // Koopa Kid's place moves it; a tile on the other map region is linked by choosing it after the source ("…to a tile
 // on another map"); Delete removes the selected link. Each change is one ROM edit (owlinks.ts).
 
-import { l1Hex, type OverworldView } from './overworld.ts';
+import type { OverworldView } from './overworld.ts';
+import { l1Hex } from '../core/owl1sheet.ts';
 import { h, toast, checkbox, select, emptyState } from './dom.ts';
 import {
   readLinks, makeLink, removeLink, setBothWays, moveLocation, locationUses, pathSide, koopaTeleport, setKoopaTeleport, opposite,

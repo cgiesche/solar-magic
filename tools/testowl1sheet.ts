@@ -29,14 +29,19 @@ check(invisible.length > 0 && invisible.every((t) => !free[t]), `tiles drawn as 
 check(range(0x100, 0x200).every((t) => empty[t]), 'page 1 is all empty');
 check(range(0x100, 0x200).every((t) => free[t] === (kinds[t] === kinds[0])), 'page 1: free where the tile does what 000 does');
 // while the kinds are learned an empty tile counts as free
-check(freeL1Tiles(empty, null).every((f, t) => f === empty[t]), 'kinds not known: free = empty');
+check(freeL1Tiles(empty, null).every((f) => !f), 'kinds not known: no tile free (nothing folded)');
 
 // ---- the pages ----
 const [p0, p1] = sheetPages(empty, free);
 check(p0.rows === 0xd, `page 0 shows rows 00–C0 (${p0.rows} rows), D0–FF folded`);
-check(p0.free === 0x3f && p0.firstFree === 0xc1, `page 0: ${p0.free} free tiles, the first ${hx(p0.firstFree)}`);
+check(p0.folded === 0x30 && p0.hidden === 0 && p0.firstFree === 0xc1, `page 0: ${p0.folded} free tiles folded (D0–FF, the count those of the folded rows), the first free ${hx(p0.firstFree)}`);
 check(p1.rows === 0, 'page 1 folded whole (none of its tiles is the ROM\'s own)');
-check(p1.free === range(0x100, 0x200).filter((t) => free[t]).length && p1.firstFree === 0x100, `page 1: ${p1.free} free tiles, the first ${hx(p1.firstFree)}`);
+check(p1.folded === range(0x100, 0x200).filter((t) => free[t]).length && p1.hidden === 0x100 - p1.folded && p1.hidden > 0 && p1.firstFree === 0x100,
+  `page 1: ${p1.folded} free tiles and ${p1.hidden} others (invisible path and level tiles) folded, the first free ${hx(p1.firstFree)}`);
+{
+  const [, o1] = sheetPages(empty, free, true), last = Math.max(...range(0x100, 0x200).filter((t) => !free[t]));
+  check(o1.rows === ((last - 0x100) >> 4) + 1 && o1.hidden === 0, `page 1 opened: shown up to its last tile not free, ${hx(last)} (${o1.rows} rows), nothing else hidden`);
+}
 // a tile of the ROM's own on page 1: drawn (not as 000) – page 1 shown up to its row
 {
   const r = new Rom(rom.data.slice());
@@ -53,7 +58,7 @@ check(p1.free === range(0x100, 0x200).filter((t) => free[t]).length && p1.firstF
   l1[5] = 0xf3;
   writeL1(r, l1);
   const e = emptyL1Tiles(r), [q0] = sheetPages(e, freeL1Tiles(e, kinds));
-  check(!e[0xf3] && q0.rows === 0x10 && q0.free === 0x3e, `tile F3 on the main map: not free, page 0 shows all its rows (${hx(q0.rows)}), ${q0.free} free`);
+  check(!e[0xf3] && q0.rows === 0x10 && q0.folded === 0, `tile F3 on the main map: not free, page 0 shows all its rows (${hx(q0.rows)}), none folded`);
   l1[5] = 0x1f3;
   writeL1(r, l1);
   const e1 = emptyL1Tiles(r), [, q1] = sheetPages(e1, freeL1Tiles(e1, kinds));

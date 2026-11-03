@@ -819,10 +819,10 @@ export function gameL2(r: OwRender): Uint16Array {
 }
 // the 512x512 image of a map region (0 the main map, 1 the submaps) drawn with a load's graphics: layer 2 (`l2`), then
 // layer 1 (`l1`, null: the state after the events in `r`) with its Map16 tiles from the ROM; undefined leaves a layer out
-export function drawOwMap(rom: RomRead, r: OwRender, region: number, l1: Uint16Array | null | undefined, l2: Uint16Array | undefined): Uint32Array {
+// (tc: the load's 8x8 tiles, passed to share them between the layers drawn apart)
+export function drawOwMap(rom: RomRead, r: OwRender, region: number, l1: Uint16Array | null | undefined, l2: Uint16Array | undefined, tc = new TileCache(r.vram, r.cgram, 0)): Uint32Array {
   const W = 512;
   const img = new Uint32Array(W * W);
-  const tc = new TileCache(r.vram, r.cgram, 0);
   if (l2) for (let y = 0; y < 64; y++) for (let x = 0; x < 64; x++) blit8(img, W, W, tc.get(l2[l2Index(region, x, y)]), x * 8, y * 8);
   if (l1 !== undefined) {
     const src = l1 ?? gameL1(r);
