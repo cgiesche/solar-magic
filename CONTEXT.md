@@ -265,6 +265,10 @@ _Avoid_: extra option, setting (for these)
 The overworld of another ROM the editor made (or the clean game) replacing this one's, Lunar Magic's "Copy Overworld to Another ROM" the other way round (core/owimport.ts): its maps, level tiles with their translevels, events and their steps, the translevels' settings (names, messages), overworld links, start positions, the game's overworld sprites, overworld options, and each submap's music, graphics slots, palettes and animations, read from the other ROM and written through the same modules. One ROM edit; no file format of its own. Package content (custom overworld sprites, graphics files, songs) is not copied: what the import refers to that this ROM lacks or has otherwise is told as a warning.
 _Avoid_: overworld transfer, overworld export
 
+**Refusal**:
+An overworld edit the game's limits or rules don't allow, told before or instead of writing anything: the core returns it as data (its kind and the numbers involved, core/owrefusal.ts), the editor words it (ui/owrefusal.ts) as the consequence in the player's terms (an event named by the level exit running it), the reason without table names, and a way out – a fix button where one exists, else what to do instead. The technical line (event, table, number) is folded out under "Details".
+_Avoid_: error (for these), limit message
+
 ### The game
 
 **Game workspace**:

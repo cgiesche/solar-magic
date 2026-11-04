@@ -18,7 +18,7 @@ import {
 } from './overworld.ts';
 import { readEvents, writeEvents, paintEventL1, submapOf, type Rect } from './owevents.ts';
 import type { PathKind, LevelTileTest } from './owpaths.ts';
-import { hex } from './names.ts';
+import { OwRefusal, type OwRefusalData } from './owrefusal.ts';
 
 // the stop tile of the clean game ("Mario stops, enters no level") and its first level tile
 export const STOP_TILE = 0x81;
@@ -136,15 +136,15 @@ export function placeLevelTile(rom: Rom, i: number, look: number, tl: number, ev
 // ---- where a level tile can go (#348: the cells hatched while one is dragged or placed) ----
 // why the level tile at `from` can't be moved to each cell (null: it can) – in an event a cell entering another level
 // on another map; the ROM read once
-export function moveLevelTileCheck(rom: Rom, from: number, ev: LevelTileEvent | null): (to: number) => string | null {
+export function moveLevelTileCheck(rom: Rom, from: number, ev: LevelTileEvent | null): (to: number) => OwRefusalData | null {
   return cellsCheck(rom, ev, (tls, ev, to) => (to === from ? [] : moveCells(tls, ev, from, to)));
 }
 // why a level tile of look `look` entering translevel tl can't be placed at each cell (null: it can), as moveLevelTileCheck
-export function placeLevelTileCheck(rom: Rom, look: number, tl: number, ev: LevelTileEvent | null): (i: number) => string | null {
+export function placeLevelTileCheck(rom: Rom, look: number, tl: number, ev: LevelTileEvent | null): (i: number) => OwRefusalData | null {
   return cellsCheck(rom, ev, (_, __, i) => [[i, look, tl]]);
 }
 // why the cells an edit at cell i sets as after the event can't be (eventCellsRefusal); before events nothing is refused
-function cellsCheck(rom: Rom, ev: LevelTileEvent | null, cells: (tls: Uint8Array, ev: LevelTileEvent, i: number) => [number, number, number][]): (i: number) => string | null {
+function cellsCheck(rom: Rom, ev: LevelTileEvent | null, cells: (tls: Uint8Array, ev: LevelTileEvent, i: number) => [number, number, number][]): (i: number) => OwRefusalData | null {
   if (!ev) return () => null;
   const tls = readTranslevels(rom), held = heldElsewhere(rom, ev);
   return (i) => eventCellsRefusal(ev, held, tls, cells(tls, ev, i));
@@ -158,11 +158,10 @@ function moveCells(tls: ArrayLike<number>, ev: LevelTileEvent, from: number, to:
 }
 // why cells set as after the event can't be (null: they can): a level tile on a cell entering another level on
 // another map (held: heldElsewhere; tls: the translevels as in the ROM)
-function eventCellsRefusal(ev: LevelTileEvent, held: (i: number) => boolean, tls: ArrayLike<number>, cells: [number, number, number][]): string | null {
+function eventCellsRefusal(ev: LevelTileEvent, held: (i: number) => boolean, tls: ArrayLike<number>, cells: [number, number, number][]): OwRefusalData | null {
   for (const [i, tile, tl] of cells) {
     if (!ev.isLevelTile(tile) || !held(i) || !tls[i] || tls[i] === tl) continue;
-    const { x, y } = l1XY(i);
-    return `tile ${hex(x, 2)},${hex(y, 2)} enters level ${hex(translevelToLevel(tls[i]), 3)} before the event or by another one – a tile enters one level at every event progress`;
+    return { kind: 'levelTileHeld', cell: i, tl: tls[i] };
   }
   return null;
 }
@@ -176,7 +175,7 @@ export interface LevelTileEvent { event: number; after: ArrayLike<number>; witho
 function editInEvent(rom: Rom, ev: LevelTileEvent, cells: [number, number, number][]): void {
   const after = Uint16Array.from(ev.after), tls = readTranslevels(rom), held = heldElsewhere(rom, ev);
   const why = eventCellsRefusal(ev, held, tls, cells);
-  if (why) throw new Error(why);
+  if (why) throw new OwRefusal(why);
   for (const [i, tile, tl] of cells) {
     after[i] = tile;
     if (!ev.isLevelTile(tile)) { if (!held(i)) tls[i] = 0; continue; }

@@ -9,6 +9,7 @@
 
 import type { OverworldView } from './overworld.ts';
 import { h, select, hexInput, emptyState } from './dom.ts';
+import { refusedToast } from './owrefusal.ts';
 import { CustomSpriteLayer, tag, type CustomItem, type Box } from './owcustomview.ts';
 import { thumbCanvas } from './thumbs.ts';
 import {
@@ -200,7 +201,7 @@ export class SpriteLayer {
     if (sp.num) this.edit(`Overworld sprite ${s.k + 1}: none`, () => writeOwSprite(this.rom, s.k, { ...sp, num: 0 }));
     return true;
   }
-  private edit(what: string, f: () => void): void { this.view.app.romEdit(what, f); }
+  private edit(what: string, f: () => void): void { try { this.view.app.romEdit(what, f); } catch (e) { refusedToast(this.rom, e); } }
 
   // the side panel in the sprites mode: the installed custom sprites to place
   palette(): HTMLElement[] {

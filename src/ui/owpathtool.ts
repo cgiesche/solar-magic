@@ -8,6 +8,7 @@
 import type { OverworldView } from './overworld.ts';
 import { drawPathMark } from './overworld.ts';
 import { toast } from './dom.ts';
+import { refusalWords, refusedToast } from './owrefusal.ts';
 import { l1Index, l1XY, exitDirections, DIR_NAMES, EXIT_NAMES, translevelToLevel } from '../core/overworld.ts';
 import { pathWays } from '../core/owpathshape.ts';
 import { routeTiles, routeExits, routeKind, writeRoute, type RouteTiles } from '../core/owroute.ts';
@@ -80,7 +81,7 @@ export class PathTool {
     try {
       this.view.app.romEdit(e >= 0 ? `Path (after event ${hex(e, 2)})` : 'Path', () => writeRoute(rom, r, solved.tiles, ev));
     } catch (err) {
-      toast(`Route not drawn: ${err instanceof Error ? err.message : err}`, 'error');
+      refusedToast(this.view.app.rom, err, 'Route not drawn: ');
       this.view.sync();
       return;
     }
@@ -108,7 +109,8 @@ export class PathTool {
   private refusalText(s: RouteTiles): string {
     const f = s.refusal!, { x, y } = l1XY(f.cell);
     const alt = [f.stop && 'a stop tile there would work', f.turns.length && `a turn ${f.turns.map((d) => DIR_NAMES[d]).join(' or ')} would`].filter(Boolean);
-    return `${hex(x, 2)},${hex(y, 2)}: ${f.why}${alt.length ? ` (${alt.join(', ')})` : ''}`;
+    const why = refusalWords(this.view.app.rom, f.why).reason;
+    return `${hex(x, 2)},${hex(y, 2)}: ${why.charAt(0).toUpperCase() + why.slice(1)}${alt.length ? ` (${alt.join(', ')})` : ''}`;
   }
 
   // the status bar while a route is drawn (null: none)

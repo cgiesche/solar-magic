@@ -13,7 +13,8 @@ import {
   newOverworldExit, hasRelativeCamera, levelMode, isSized, levelRows, setExitSecondary, SEC_ENT, midwaySpot, type Level,
 } from './level.ts';
 import { ExitGraph, entrancesInto, isOverworldExit } from './exitgraph.ts';
-import { locationFor, tileText, type OwTile } from './owteleport.ts';
+import { locationFor, tileText, TELEPORTS, type OwTile } from './owteleport.ts';
+import { OwRefusal } from './owrefusal.ts';
 import { hex } from './names.ts';
 
 const ENTRANCES = 0x200;
@@ -190,7 +191,7 @@ export class SecondaryEntrances {
   teleport(idx: number, tile: OwTile): void {
     this.session.romEdit(label(idx, `: teleport to ${tileText(tile)}`), () => {
       const loc = locationFor(this.rom, tile);
-      if (loc === null) throw new Error('All 256 locations of the overworld\'s star/pipe table are in use.');
+      if (loc === null) throw new OwRefusal({ kind: 'locationsFull', max: TELEPORTS });
       const e = this.get(idx);
       e.overworld = { ...e.overworld!, teleport: 1, location: loc };
       writeSecondaryEntrance(this.rom, idx, e);

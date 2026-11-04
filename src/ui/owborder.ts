@@ -8,6 +8,8 @@
 
 import type { App, Brush } from './app.ts';
 import { h, toast } from './dom.ts';
+import { refusedToast, refusalToast, refusalText } from './owrefusal.ts';
+import type { OwRefusalData } from '../core/owrefusal.ts';
 import { TileCache, blit8 } from '../core/render.ts';
 import { hex } from '../core/names.ts';
 import { MAP_NAMES, type OwRender } from '../core/overworld.ts';
@@ -23,8 +25,6 @@ import { fillPixels, hidePickerPreview } from './pickerview.ts';
 import { BrushSurface, PAINT_HINT, PAINT_TITLE } from './brushsurface.ts';
 
 const W = OW_L3_COLS * 8, H = OW_L3_ROWS * 8;
-const GAME_CELL = 'The game writes the lives and the level name here when the overworld loads: not painted';
-const OUTSIDE_FILE = 'Not in the part of the screen the map\'s layer 3 tilemap file holds: not painted';
 
 export class BorderView {
   canvas = h('canvas', { class: 'game-canvas', width: W, height: H });
@@ -61,8 +61,8 @@ export class BorderView {
       cellAt: (px, py) => (this.r && px >= 0 && py >= 0 && px < W && py < H ? { x: Math.floor(px / 8), y: Math.floor(py / 8) } : null),
       box: (q) => ({ x: q.x * 8, y: q.y * 8, w: q.w * 8, h: q.h * 8 }),
       brush: () => this.brush,
-      whyNot: (x, y) => this.refusal(x, y),
-      tell: (why) => toast(why),
+      whyNot: (x, y) => (this.refused = this.refusal(x, y))?.kind ?? '',
+      tell: () => { if (this.refused) refusalToast(this.app.rom, this.refused); },
       stamp: (x, y) => this.stamp(x, y),
       end: () => this.save(),
       cancel: () => { this.stroke.clear(); this.paint(); },
@@ -72,7 +72,7 @@ export class BorderView {
         this.buildPicker();
       },
       changed: () => this.paint(),
-      moved: (c) => { this.canvas.title = c ? this.refusal(c.x, c.y) : ''; this.updateStatus(c); },
+      moved: (c) => { const no = c && this.refusal(c.x, c.y); this.canvas.title = no ? refusalText(this.app.rom, no) : ''; this.updateStatus(c); },
     });
     new ResizeObserver(() => requestAnimationFrame(() => { if (this.pickPixels && fillPixels(this.side.clientWidth, 128) !== this.pickPixels) this.buildPicker(); })).observe(this.side);
   }
@@ -171,10 +171,11 @@ export class BorderView {
     return cells.size > 0;
   }
   // why cell (x, y) is not painted ('' where it is)
-  private refusal(x: number, y: number): string {
-    if (owL3GameWrites(x, y)) return GAME_CELL;
+  private refused: OwRefusalData | null = null; // the last cell's (told when its stroke doesn't start)
+  private refusal(x: number, y: number): OwRefusalData | null {
+    if (owL3GameWrites(x, y)) return { kind: 'borderGameCell', x, y };
     const r = this.r, i = r ? owLayer3Grid(r).entry(x, y) : -1;
-    return r && (i < 0 || !lt3Covers(submapLt3Target(this.app.rom, this.map).place, i)) ? OUTSIDE_FILE : '';
+    return r && (i < 0 || !lt3Covers(submapLt3Target(this.app.rom, this.map).place, i)) ? { kind: 'borderOutsideFile', x, y } : null;
   }
 
   // the stroke saved: one ROM edit into the map's file
@@ -191,7 +192,7 @@ export class BorderView {
     try {
       this.app.romEdit(label, () => { f(); });
     } catch (e) {
-      toast(String(e instanceof Error ? e.message : e), 'error');
+      refusedToast(this.app.rom, e, '');
       this.stroke.clear();
       this.paint();
     }

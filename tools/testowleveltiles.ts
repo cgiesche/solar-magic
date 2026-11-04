@@ -17,6 +17,7 @@ import {
   levelTileLooks, invisibleLevelTile, defaultLook, stopTile, levelsWithoutTile, moveLevelTile, removeLevelTile, placeLevelTile, alsoUsedBy, STOP_TILE, DEFAULT_LOOK,
   type LevelTileEvent,
 } from '../src/core/owleveltiles.ts';
+import { refusalOf } from '../src/core/owrefusal.ts';
 import { editorImage, pathKinds } from './fixture.ts';
 
 let bad = 0;
@@ -163,8 +164,8 @@ check(from >= 0, `a level tile with a path beside it (${hx(from)} → ${hx(to)})
 
   // a cell entering a level before the event can't enter another one after it
   let refused = '';
-  try { placeLevelTile(rom, lt, l1b[lt], free, ev0); } catch (x) { refused = x instanceof Error ? x.message : String(x); }
-  check(!!refused && same(rom.data, before), `another level placed in the event on a level tile of the map before events: refused, nothing written (“${refused}”)`);
+  try { placeLevelTile(rom, lt, l1b[lt], free, ev0); } catch (x) { refused = JSON.stringify(refusalOf(x)); }
+  check(refused === JSON.stringify({ kind: 'levelTileHeld', cell: lt, tl }) && same(rom.data, before), `another level placed in the event on a level tile of the map before events: refused, nothing written (“${refused}”)`);
   // its look changed in the event (the same translevel): fine
   s.edit('look', () => placeLevelTile(rom, lt, l1b[lt] === 0x56 ? 0x58 : 0x56, tl, ev0), { key: null });
   check(at(e + 1)[lt] !== l1b[lt] && at(e)[lt] === l1b[lt], 'its look changed in the event: from the event on');

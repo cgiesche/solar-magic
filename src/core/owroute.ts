@@ -16,9 +16,10 @@
 
 import { DX, DY, PATH_TILES_END, reverse, shapeVector, type PathKind, type PathShapes } from './owpaths.ts';
 import { neighbor } from './owreach.ts';
-import { tileWays, wayText, SHAPED_KINDS, type PathWay } from './owpathshape.ts';
+import { tileWays, SHAPED_KINDS, type PathWay } from './owpathshape.ts';
 import { stopTile, type LevelTileEvent } from './owleveltiles.ts';
 import type { Rom } from './rom.ts';
+import type { OwRefusalData } from './owrefusal.ts';
 import { readL1, writeL1, readTranslevels, setExitDirection } from './overworld.ts';
 import { readEvents, writeEvents, paintEventL1, eventRunners } from './owevents.ts';
 
@@ -34,9 +35,10 @@ export interface RouteInput {
   stops?: ReadonlySet<number>;
 }
 
-// The first cell no tile fits: its index in the route and its layer 1 cell, why, and what would work instead – a stop
+// The first cell no tile fits: its index in the route and its layer 1 cell, why (as data, worded by ui/owrefusal.ts),
+// and what would work instead – a stop
 // tile there (stop), or the route turning another way there (turns: the directions some tile leads him on in).
-export interface RouteRefusal { at: number; cell: number; why: string; stop: boolean; turns: number[] }
+export interface RouteRefusal { at: number; cell: number; why: OwRefusalData; stop: boolean; turns: number[] }
 
 // Per route cell the tile to write (null: left alone – a level, stop or exit tile, or a cell of the route after a
 // refusal), and the refusal (null: every cell fits).
@@ -65,7 +67,7 @@ interface Solving { route: readonly number[]; roles: Role[]; dirs: number[]; inp
 function solve(route: readonly number[], inp: RouteInput, askAlternatives: boolean): RouteTiles {
   const { l1, kinds } = inp;
   const tiles: (number | null)[] = route.map(() => null);
-  const refuse = (at: number, why: string, alt: { stop?: boolean; turns?: number[] } = {}): RouteTiles =>
+  const refuse = (at: number, why: OwRefusalData, alt: { stop?: boolean; turns?: number[] } = {}): RouteTiles =>
     ({ tiles, refusal: { at, cell: route[at], why, stop: alt.stop ?? false, turns: alt.turns ?? [] } });
   if (!route.length) return { tiles, refusal: null };
 
@@ -73,7 +75,7 @@ function solve(route: readonly number[], inp: RouteInput, askAlternatives: boole
   const dirs: number[] = [];
   for (let k = 1; k < route.length; k++) {
     const d = dirTo(route[k - 1], route[k]);
-    if (d === undefined) return refuse(k, 'Not next to the cell before');
+    if (d === undefined) return refuse(k, { kind: 'routeGap' });
     dirs.push(d);
   }
 
@@ -85,12 +87,12 @@ function solve(route: readonly number[], inp: RouteInput, askAlternatives: boole
     return SHAPED_KINDS.includes(kind) && joins(c, route[k - 1], route[k + 1], inp) ? 'stop' : 'path';
   });
   for (let k = 1; k < route.length - 1; k++) {
-    if (kinds[l1[route[k]]] === 'exit' && roles[k] === 'path') return refuse(k, 'An exit tile takes Mario to another submap: the route can only end there');
+    if (kinds[l1[route[k]]] === 'exit' && roles[k] === 'path') return refuse(k, { kind: 'routeExitInside' });
   }
   const seen = new Map<number, number>();
   for (let k = 0; k < route.length; k++) {
     const j = seen.get(route[k]);
-    if (j !== undefined && (roles[k] === 'path' || roles[j] === 'path')) return refuse(k, 'The route crosses itself here');
+    if (j !== undefined && (roles[k] === 'path' || roles[j] === 'path')) return refuse(k, { kind: 'routeCrosses' });
     seen.set(route[k], k);
   }
 
@@ -134,7 +136,7 @@ const key = (p: readonly number[]) => `${p[0]},${p[1]}`;
 
 // The path cells between cells a and b of the route (stop, level or exit tiles) solved into the tiles; null when every
 // cell fits, else the first that doesn't, why, and the directions some tile leads on in there.
-function solveStretch(sv: Solving, a: number, b: number): { at: number; why: string; turns: number[] } | null {
+function solveStretch(sv: Solving, a: number, b: number): { at: number; why: OwRefusalData; turns: number[] } | null {
   if (b - a < 2) return null;
   const { route, roles, dirs, inp, tiles } = sv, { l1, kinds, shapes } = inp;
   const exitAt = (k: number) => kinds[l1[route[k]]] === 'exit' && roles[k] === 'keep';
@@ -173,10 +175,7 @@ function solveStretch(sv: Solving, a: number, b: number): { at: number; why: str
       // the cells before it as far as they fit (the cheapest way there)
       fill(cheapest(layer), k - 1, tiles);
       const turns = [0, 1, 2, 3].filter((t) => t !== o && t !== reverse(d) && cands.some((c) => c.ways.some((w) => w.dir === d && w.out === t && steppedOn(c, w))));
-      const way = wayText(d, o);
-      const why = !any ? `No path tile leads Mario ${way}`
-        : !met ? `No path tile leads Mario ${way} from where ${first ? 'his first step off the stop' : 'the path before'} leaves him`
-        : `No path tile leads Mario ${way} to where his first step off the stop after it leaves him walking back`;
+      const why: OwRefusalData = { kind: 'routeNoTile', dir: d, out: o, where: !any ? 'any' : !met ? (first ? 'stopStep' : 'pathBefore') : 'stepBack' };
       return { at: k, why, turns };
     }
     layer = next;

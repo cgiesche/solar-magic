@@ -9,7 +9,7 @@ import {
   readL1, writeL1, l1XY, revealAt, setRevealAt, revealEventCount, revealedTile, readRevealList, readDestroyList, writeDestroyList,
   destroySettingAt, destroySettings, DESTROYS, NO_EVENT, OW_EVENTS, OW_MAIN_TILES,
 } from './overworld.ts';
-import { l1Hex } from './owl1sheet.ts';
+import { OwRefusal, type OwRefusalData } from './owrefusal.ts';
 import { hex } from './names.ts';
 
 // "main map 09,06": a layer 1 cell as the editor names it
@@ -17,7 +17,6 @@ export function cellText(i: number): string {
   const { x, y } = l1XY(i);
   return `${i >= OW_MAIN_TILES ? 'submaps' : 'main map'} ${hex(x, 2)},${hex(y, 2)}`;
 }
-export const NO_REVEAL_AT_0 = 'The top left tile of the main map can\'t be revealed (0 stands for none).';
 
 // ---- reveals ----
 // the cell event e reveals, -1 none
@@ -25,11 +24,11 @@ export function eventReveal(rom: Rom, e: number): number {
   return e < revealEventCount(rom) ? revealAt(rom, e) || -1 : -1;
 }
 // why event e can't reveal a tile (null: it can) – one tile per event, the events the reveal table has
-export function revealRefusal(rom: Rom, e: number): string | null {
+export function revealRefusal(rom: Rom, e: number): OwRefusalData | null {
   const n = revealEventCount(rom);
-  if (e >= n) return `Event ${hex(e, 2)} can't reveal a tile: the reveal table has events 00–${hex(n - 1, 2)}.`;
+  if (e >= n) return { kind: 'revealPastTable', event: e, events: n };
   const at = revealAt(rom, e);
-  return at ? `An event reveals one tile: event ${hex(e, 2)} already reveals the tile at ${cellText(at)} – remove that first.` : null;
+  return at ? { kind: 'revealTaken', event: e, cell: at } : null;
 }
 // the tile a cell holding t must hold to become `into` when revealed: t when it does, else a tile the reveal list turns
 // into it (the game writes the low byte: the high byte stays), -1 none
@@ -43,19 +42,19 @@ export function revealSource(rom: Rom, t: number, into: number): number {
 }
 // "+ Reveal"'s pick (#348): why event e can't reveal each cell clicked (null: it can – a cell whose tile the reveal list
 // doesn't turn into the tile picked gets one that it does, addReveal)
-export function revealPickCheck(rom: Rom, e: number): (i: number) => string | null {
+export function revealPickCheck(rom: Rom, e: number): (i: number) => OwRefusalData | null {
   const why = revealRefusal(rom, e);
-  return (i) => why ?? (i ? null : NO_REVEAL_AT_0);
+  return (i) => why ?? (i ? null : { kind: 'revealTopLeft' });
 }
 // event e reveals cell i (l1Index), which becomes tile `into` (by default what its tile becomes): a cell whose tile
-// doesn't become it gets the tile that does (revealSource) on the map before events. Throws the reason when refused.
+// doesn't become it gets the tile that does (revealSource) on the map before events. Throws the refusal (OwRefusal).
 export function addReveal(rom: Rom, e: number, i: number, into?: number): void {
   const why = revealPickCheck(rom, e)(i);
-  if (why) throw new Error(why);
+  if (why) throw new OwRefusal(why);
   const l1 = readL1(rom), t = l1[i], to = into ?? revealedTile(rom, t);
-  if (to < 0) throw new Error(`Tile ${l1Hex(t)} is not in the reveal list: revealing it changes nothing – pick the tile it becomes.`);
+  if (to < 0) throw new OwRefusal({ kind: 'revealUnchanged', tile: t });
   const from = revealSource(rom, t, to);
-  if (from < 0) throw new Error(`No tile becomes ${l1Hex(to)} when revealed: add it to the reveal list first.`);
+  if (from < 0) throw new OwRefusal({ kind: 'revealNoSource', tile: to });
   if (from !== t) { l1[i] = from; writeL1(rom, l1); }
   setRevealAt(rom, e, i);
 }
@@ -70,11 +69,11 @@ export function eventDestroys(rom: Rom, e: number): number[] {
   return readDestroyList(rom).filter((d) => d.event === e).map((d) => d.tile);
 }
 // why event e can't destroy a tile (null: it can) – one tile per event, 0x18 in all
-export function destroyRefusal(rom: Rom, e: number): string | null {
-  if (e >= OW_EVENTS) return `Event ${hex(e, 2)} is past the last event (${hex(OW_EVENTS - 1, 2)}).`;
+export function destroyRefusal(rom: Rom, e: number): OwRefusalData | null {
+  if (e >= OW_EVENTS) return { kind: 'destroyPastEvents', event: e, events: OW_EVENTS };
   const l = readDestroyList(rom), own = l.find((d) => d.event === e);
-  if (own) return `An event destroys one tile: event ${hex(e, 2)} already destroys the tile at ${cellText(own.tile)} – remove that first.`;
-  if (!l.some((d) => d.event === NO_EVENT)) return `All ${DESTROYS} destroyed level tiles of the game are used – remove one first.`;
+  if (own) return { kind: 'destroyTaken', event: e, cell: own.tile };
+  if (!l.some((d) => d.event === NO_EVENT)) return { kind: 'destroysFull', event: e, max: DESTROYS };
   return null;
 }
 // the cell to set a destroy on for cell i clicked: i or the tile whose destroy changes it (a castle's level tile: its
@@ -84,19 +83,18 @@ export function destroyTarget(rom: Rom, i: number, shown?: ArrayLike<number>): n
   const l1 = readL1(rom);
   return destroySettingAt(rom, l1, shown ?? l1, i).at;
 }
-const notDestroyed = (t: number) => `The game destroys no tile ${l1Hex(t)}: destroying it would change nothing (castles, fortresses and switch palaces collapse).`;
 // "+ Destroy"'s pick (#348): why event e can't destroy each cell clicked (null: it can) – a cell destroyTarget
 // resolves; the ROM read once
-export function destroyPickCheck(rom: Rom, e: number, shown?: ArrayLike<number>): (i: number) => string | null {
+export function destroyPickCheck(rom: Rom, e: number, shown?: ArrayLike<number>): (i: number) => OwRefusalData | null {
   const why = destroyRefusal(rom, e);
   if (why) return () => why;
   const l1 = readL1(rom), target = destroySettings(rom, l1, shown ?? l1);
-  return (i) => (target(i).at < 0 ? notDestroyed(l1[i]) : null);
+  return (i) => (target(i).at < 0 ? { kind: 'destroyNothing', tile: l1[i] } : null);
 }
-// event e destroys the tile clicked at cell i (set where destroyTarget says). Throws the reason when refused.
+// event e destroys the tile clicked at cell i (set where destroyTarget says). Throws the refusal (OwRefusal).
 export function addDestroy(rom: Rom, e: number, i: number, shown?: ArrayLike<number>): void {
   const why = destroyPickCheck(rom, e, shown)(i);
-  if (why) throw new Error(why);
+  if (why) throw new OwRefusal(why);
   const at = destroyTarget(rom, i, shown);
   const l = readDestroyList(rom);
   l[l.findIndex((d) => d.event === NO_EVENT)] = { event: e, tile: at };

@@ -214,18 +214,28 @@ export function clearLog(): void {
 }
 
 let toastStack: HTMLElement | null = null;
-// action: a button in the toast (e.g. Show), which closes it
-export function toast(msg: string, kind: 'info' | 'error' = 'info', action?: { label: string; run: () => void }): void {
+// extra: a button in the toast (e.g. Show), which closes it; or a body shown instead of msg (which the log gets),
+// e.g. with buttons and folded-out details. A toast with either stays while the pointer is on it. Returns a function
+// closing it.
+export function toast(msg: string, kind: 'info' | 'error' = 'info', extra?: { label: string; run: () => void } | HTMLElement): () => void {
   log(msg, kind);
   // one column for all toasts: a toast shown while others are visible goes below them instead of on top
   if (!toastStack?.isConnected) toastStack = document.body.appendChild(h('div', { class: 'toast-stack' }));
-  const t = h('div', { class: `toast ${kind}` }, msg,
+  const body = extra instanceof HTMLElement ? extra : null, action = extra instanceof HTMLElement ? null : extra;
+  const t = h('div', { class: `toast ${kind}` }, body ?? msg,
     action ? h('button', { class: 'toast-action', onclick: () => { action.run(); t.remove(); } }, action.label) : null);
   toastStack.appendChild(t);
   // a burst (Ctrl+Z held, many errors) keeps only the newest few on screen; the log has them all
   while (toastStack.childElementCount > 5) toastStack.firstElementChild!.remove();
   setTimeout(() => t.classList.add('show'), 10);
-  setTimeout(() => { t.classList.remove('show'); setTimeout(() => t.remove(), 300); }, kind === 'error' || action ? 6000 : 2500);
+  const close = () => { t.classList.remove('show'); setTimeout(() => t.remove(), 300); };
+  const ms = kind === 'error' || action ? 6000 : 2500;
+  let timer = setTimeout(close, body ? ms * 1.5 : ms);
+  if (body || action) {
+    t.addEventListener('mouseenter', () => clearTimeout(timer));
+    t.addEventListener('mouseleave', () => { clearTimeout(timer); timer = setTimeout(close, ms / 2); });
+  }
+  return () => { clearTimeout(timer); close(); };
 }
 
 // beforeClose: asked on every way of closing (buttons, ✕, Esc, click beside the dialog); false keeps it

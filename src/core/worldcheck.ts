@@ -13,6 +13,7 @@ import type { OwMode } from './owlayers.ts';
 import { reachProblems, WARP_TILES, ANY_WAY_TILE, type Reached, type ReachKind, type CheckSeverity } from './owreach.ts';
 import { hex3 } from './names.ts';
 import type { PathKind } from './owpaths.ts';
+import type { OwRefusalData } from './owrefusal.ts';
 import type { ExitGraph } from './exitgraph.ts';
 import { checkContext, eventsNeverRun, stranded, untiledLevelsEntered, eventOrderProblems } from './owchecks.ts';
 
@@ -41,7 +42,7 @@ export interface WorldProblem {
   tile: number; // where it is (l1Index): shown and outlined
   progress: number; // the event progress it is found at (OW_EVENTS: every event passed)
   fix?: WorldFix;
-  noFix?: string; // why a problem a fix exists for has none here
+  noFix?: OwRefusalData; // why a problem a fix exists for has none here (owrefusal.ts)
   budget?: Budget; // a budget amber or full (tile -1: Show goes to where the limit applies, budgetPlace)
 }
 
@@ -64,8 +65,8 @@ export function worldProblems(rom: Rom, now: CheckedAt, all: CheckedAt, place: (
     // he is stuck on (an event changing it would put its own back)
     const t = now.inp.l1[p.tile];
     if (p.kind !== 'dead-end' || kinds[t] === 'stop' || kinds[t] === 'level') return q;
-    if (stop < 0) q.noFix = 'the overworld has no stop tile to put there';
-    else if (l1[p.tile] !== t) q.noFix = 'an event puts the tile there – paint a stop tile into that event';
+    if (stop < 0) q.noFix = { kind: 'deadEndNoStopTile' };
+    else if (l1[p.tile] !== t) q.noFix = { kind: 'deadEndEventTile', cell: p.tile };
     else {
       q.fix = { label: 'Add a stop tile here', tile: p.tile, to: stop,
         title: `Tile ${hex3(stop)} (a stop tile) in place of the path tile Mario gets stuck on, on the map before events: he stops there and can walk back` };

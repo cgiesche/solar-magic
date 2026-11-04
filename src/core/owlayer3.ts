@@ -19,6 +19,7 @@ import { MAP_NAMES, type OverworldLoads } from './overworld.ts';
 import { PPU } from './ppu.ts';
 import type { Job } from './jobrunner.ts';
 import { hex } from './names.ts';
+import { OwRefusal } from './owrefusal.ts';
 
 // a new LT3 file of a submap: the start of layer 3, 256x256
 export const SUBMAP_NEW_LT3: Lt3Place = { dest: SUBMAP_LT3_DEST, size: 2 };
@@ -91,9 +92,9 @@ export function submapBorderFile(rom: Rom, map: number): { file: number | null; 
 // the others keep theirs. What was done
 export function ownBorderFile(rom: Rom, map: number): string {
   const t = submapLt3Target(rom, map);
-  if (t.file === null) throw new Error(`${MAP_NAMES[map]} has no layer 3 tilemap file to copy`);
+  if (t.file === null) throw new OwRefusal({ kind: 'borderNoFile', map: MAP_NAMES[map] });
   const num = freeGfx(rom, new Set(), gfxRangeFor({ slot: LT3_SLOT }));
-  if (num < 0) throw new Error('No free ExGFX number left for the layer 3 tilemap');
+  if (num < 0) throw new OwRefusal({ kind: 'borderNoExGfx' });
   importGfxFile(rom, num, gfxBytes(rom, t.file)!.data.slice());
   const e = submapGfxEntry(map);
   setLevelLayer3(rom, e, { ...levelLayer3(rom, e), lt3: num, ...t.place });

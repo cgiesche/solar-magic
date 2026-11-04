@@ -9,6 +9,8 @@
 import type { OverworldView, PickCheck } from './overworld.ts';
 import { l1Hex } from '../core/owl1sheet.ts';
 import { h, toast, checkbox, select, emptyState } from './dom.ts';
+import { refusedToast, refusalWords } from './owrefusal.ts';
+import { OwRefusal, type OwRefusalData } from '../core/owrefusal.ts';
 import {
   readLinks, makeLink, removeLink, setBothWays, moveLocation, locationUses, pathSide, koopaTeleport, setKoopaTeleport, opposite,
   KOOPAS, KOOPA_TILE, koopaOfTile, koopaPlaceRefusal, linkCheck, locationMoveRefusal, type OwLink, type LinkEnd, type LinkKind,
@@ -28,7 +30,7 @@ type Moved = { sel: Sel; target: boolean };
 // a drag from a tile (l1Index) to another: a new link, or moving something
 type Drag = { from: number; to: number; move: Moved | null };
 // what a tile links by: an exit path, a star/pipe link, a Koopa Kid's place; null with why it doesn't
-type Source = { kind: LinkKind | 'koopa'; why?: undefined } | { kind: null; why: string };
+type Source = { kind: LinkKind | 'koopa'; why?: undefined } | { kind: null; why: string; refusal?: OwRefusalData };
 
 const COLORS = { star: '#c58cff', exit: '#ff6b6b', location: '#4cc2ff', koopa: '#ffa94c' };
 const center = (t: { x: number; y: number }) => ({ x: t.x * 16 + 8, y: t.y * 16 + 8 });
@@ -91,7 +93,8 @@ export class LinkLayer {
     const k = kinds[this.view.shown.l1[i]];
     if (k === 'exit') return { kind: 'exit' };
     if (k === 'stop' || k === 'level') return { kind: 'star' };
-    return { kind: null, why: `Mario doesn't stop on tile ${l1Hex(this.view.shown.l1[i])} (${PATH_KIND_NAMES[k].toLowerCase()}): a star or pipe is a tile he stops on, an exit path an exit path tile` };
+    const refusal: OwRefusalData = { kind: 'linkNoStart', tile: this.view.shown.l1[i], path: PATH_KIND_NAMES[k].toLowerCase() };
+    return { kind: null, why: refusalWords(this.rom, refusal).reason, refusal };
   }
   // an exit path tile's end: the side its path goes on (toward a path tile around it)
   private exitEnd(t: OwTile): LinkEnd {
@@ -226,7 +229,7 @@ export class LinkLayer {
     this.apply(() => (d.move ? this.moveTo(d.move, this.tile(d.to)) : this.make(this.tile(d.from), this.tile(d.to))));
   }
   private apply(f: () => void): void {
-    try { f(); } catch (e) { toast(`Overworld link not changed: ${e instanceof Error ? e.message : e}`, 'error'); }
+    try { f(); } catch (e) { refusedToast(this.rom, e, 'Overworld link not changed: '); }
     this.view.paint();
     this.view.buildProps();
     this.view.updateStatus();
@@ -272,7 +275,7 @@ export class LinkLayer {
   // a new link from tile a to tile b
   private make(a: OwTile, b: OwTile): void {
     const src = this.source(this.index(a));
-    if (!src.kind) throw new Error(src.why);
+    if (!src.kind) throw src.refusal ? new OwRefusal(src.refusal) : new Error(src.why);
     if (src.kind === 'koopa') { this.setKoopa(this.koopaAt(this.index(a)), a, b); return; }
     const kind = src.kind, end = this.endOf(kind), ea = end(a), eb = end(b);
     let made: OwLink | null = null;
@@ -282,7 +285,7 @@ export class LinkLayer {
   // Koopa Kid k (of tile `from`) puts Mario at `to`: a place of the submap of its tile
   private setKoopa(k: number, from: OwTile, to: OwTile): void {
     const why = koopaPlaceRefusal(from, to);
-    if (why) throw new Error(why);
+    if (why) throw new OwRefusal(why);
     this.edit(`Koopa Kid ${k + 1}: place`, () => setKoopaTeleport(this.rom, k, to));
     this.sel = { kind: 'koopa', k };
   }

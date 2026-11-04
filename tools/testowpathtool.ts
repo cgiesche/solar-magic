@@ -79,7 +79,7 @@ if (found) {
   const ev: LevelTileEvent = { event: e, after: mapAt(e + 1), without: layer1Without(rom, e), isLevelTile: isLevel };
   const solved = routeTiles(route, { l1: ev.after, kinds, shapes, prefer: routeKind(route, ev.after, kinds) });
   check(!solved.refusal && solved.tiles[0] === null && solved.tiles.at(-1) === null && solved.tiles.slice(1, -1).every((t) => t !== null),
-    `its tiles: ${solved.tiles.map((t) => (t === null ? '–' : hx(t))).join(' ')}${solved.refusal ? ` refused: ${solved.refusal.why}` : ''}`);
+    `its tiles: ${solved.tiles.map((t) => (t === null ? '–' : hx(t))).join(' ')}${solved.refusal ? ` refused: ${solved.refusal.why.kind}` : ''}`);
   const before = rom.data.slice(), l1b = readL1(rom), tl = tls[from], exit = e - baseEvent(rom, tl), dir = [0, 1, 2, 3].find((d) => neighbor(from, d) === route[1])!;
   let set: ReturnType<typeof writeRoute> = [];
   s.edit('Path', () => { set = writeRoute(rom, route, solved.tiles, ev); }, { key: null });

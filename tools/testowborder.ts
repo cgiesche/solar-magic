@@ -16,6 +16,7 @@ import {
   submapLayer3, saveSubmapLayer3, owLayer3Grid, OW_L3_COLS, OW_L3_ROWS,
   owL3GameWrites, borderStamp, submapBorderFile, submapLt3Target, ownBorderFile, takeBorder, resetBorder, owScreen,
 } from '../src/core/owlayer3.ts';
+import { refusalOf } from '../src/core/owrefusal.ts';
 import { editorImage } from './fixture.ts';
 
 let bad = 0;
@@ -95,7 +96,7 @@ const games = Array.from({ length: 7 }, (_, m) => screen(m));
   saveSubmapLayer3(rom, 4, map);
   check(same(screen(3), fo), 'painting it leaves Forest of Illusion\'s border');
   let refused = false;
-  try { ownBorderFile(rom, 1); } catch { refused = true; }
+  try { ownBorderFile(rom, 1); } catch (e) { refused = JSON.stringify(refusalOf(e)) === JSON.stringify({ kind: 'borderNoFile', map: 'Yoshi\'s Island' }); }
   check(refused, 'no own copy where there is no file (Yoshi\'s Island: the game\'s border)');
 }
 

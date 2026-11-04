@@ -11,6 +11,7 @@ import {
 } from './overworld.ts';
 import { readEvents, writeEvents, paintEvent, paintEventL1, eventRunners, eventTitle, type EventPlace } from './owevents.ts';
 import type { LevelTileTest } from './owpaths.ts';
+import { OwRefusal } from './owrefusal.ts';
 
 export type StrokeLayer = 'l1' | 'l2';
 
@@ -88,7 +89,7 @@ export class OverworldStroke {
         return {
           label: `${title}: paint`,
           write: () => {
-            if (!place) throw new Error('the submaps are still being loaded, try again');
+            if (!place) throw new OwRefusal({ kind: 'submapsLoading' });
             writeEvents(rom, paintEvent(readEvents(rom), readL2(rom), e, after, place));
           },
         };

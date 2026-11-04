@@ -6,6 +6,7 @@
 
 import type { OverworldView } from './overworld.ts';
 import { h, select, hexInput, toast } from './dom.ts';
+import { refusalToast } from './owrefusal.ts';
 import { thumbCanvas } from './thumbs.ts';
 import { budgetRow } from './budgetgauge.ts';
 import type { OwSpriteView } from '../core/owsprites.ts';
@@ -83,8 +84,8 @@ export class CustomSpriteLayer {
   private edit(what: string, f: (lists: CustomOwSprite[][]) => void): boolean {
     const lists = this.lists();
     f(lists);
-    const why = customSpritesProblem(lists);
-    if (why) { toast(why, 'error'); this.view.paint(); return false; }
+    const why = customSpritesProblem(lists, bowsieInstalled(this.rom));
+    if (why) { refusalToast(this.rom, why); this.view.paint(); return false; }
     this.view.app.romEdit(what, () => writeCustomSprites(this.rom, lists));
     return true;
   }

@@ -13,6 +13,7 @@ import { Rom, snesToPc } from './rom.ts';
 import { Snes } from './snes.ts';
 import { assemble } from './asar.ts';
 import { RAM } from './ram.ts';
+import type { OwRefusalData } from './owrefusal.ts';
 
 export const NAME_LEN = 19; // tiles of a name on the overworld's border
 export const NAME_TRANSLEVELS = 0x60;
@@ -151,12 +152,12 @@ export function trimName(tiles: number[]): number[] {
   while (n && tiles[n - 1] === NAME_SPACE) n--;
   return tiles.slice(0, n);
 }
-// a character typed at the caret: its tile put in; why it is refused (a string): the font has no tile for it (a tile
-// by number is typed in the properties' name field, `\XX`), the name has its 19 tiles
-export function typeNameChar(n: NameCaret, ch: string): NameCaret | string {
+// a character typed at the caret: its tile put in; why it is refused (a refusal, owrefusal.ts): the font has no tile for
+// it (a tile by number is typed in the properties' name field, `\XX`), the name has its 19 tiles
+export function typeNameChar(n: NameCaret, ch: string): NameCaret | OwRefusalData {
   const t = CHAR_TILE.get(ch);
-  if (t === undefined) return `The font has no “${ch}”`;
-  if (n.tiles.length >= NAME_LEN) return `The name is full (${NAME_LEN} tiles)`;
+  if (t === undefined) return { kind: 'nameNoChar', ch };
+  if (n.tiles.length >= NAME_LEN) return { kind: 'nameFull', max: NAME_LEN };
   return { tiles: [...n.tiles.slice(0, n.at), t, ...n.tiles.slice(n.at)], at: n.at + 1 };
 }
 // Backspace, Delete, ←, →, Home, End at the caret (null: not one of them)

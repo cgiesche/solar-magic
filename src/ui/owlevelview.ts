@@ -8,6 +8,7 @@
 import type { OverworldView, PickCheck } from './overworld.ts';
 import type { Rom } from '../core/rom.ts';
 import { h, toast, modal } from './dom.ts';
+import { refusedToast } from './owrefusal.ts';
 import { contextMenu } from './menu.ts';
 import { levelPicker } from './levelpicker.ts';
 import {
@@ -80,7 +81,7 @@ export class LevelTileLayer {
       this.view.app.romEdit(this.where(label), f);
       return true;
     } catch (e) {
-      toast(`Not changed: ${e instanceof Error ? e.message : e}`, 'error');
+      refusedToast(this.rom, e);
       this.view.sync();
       return false;
     }

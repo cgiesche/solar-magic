@@ -14,6 +14,7 @@
 // to that this ROM lacks (or has otherwise) is told as a warning; the part is still copied where it can be.
 
 import type { Rom } from './rom.ts';
+import { OwRefusal, type OwRefusalData } from './owrefusal.ts';
 import {
   readL1, writeL1, readL2, writeL2, readTranslevels, writeTranslevels, owTileWords, setOwTileWords, OW_L1_TILES,
   exitDirections, setExitDirection, MAX_TRANSLEVEL, initialFlags, setInitialFlags, baseEvent, setBaseEvent, revealEventCount, revealAt,
@@ -46,18 +47,18 @@ const START_SIZE = 0x16; // the start positions' bytes (owsprites.ts)
 const linkTables = (r: Rom) => teleportDataRanges(r).map(([a, b]) => b - a);
 
 // why the overworld of `src` can't be imported into `dst`, null when it can
-export function overworldImportProblem(dst: Rom, src: Rom): string | null {
+export function overworldImportProblem(dst: Rom, src: Rom): OwRefusalData | null {
   const rs = overworldReplacement(src), rd = overworldReplacement(dst);
-  if (rs) return `The other ROM's overworld is replaced by ${rs}`;
-  if (rd) return `This ROM's overworld is replaced by ${rd}`;
-  if (linkTables(src).join() !== linkTables(dst).join()) return 'The overworld link tables of the two ROMs differ';
+  if (rs) return { kind: 'importReplaced', rom: 'other', by: rs };
+  if (rd) return { kind: 'importReplaced', rom: 'this', by: rd };
+  if (linkTables(src).join() !== linkTables(dst).join()) return { kind: 'importLinkTables' };
   return null;
 }
 
 // writes the overworld of `src` into `dst` (call it inside one ROM edit); throws what can't be written
 export function importOverworld(dst: Rom, src: Rom): OverworldImport {
   const why = overworldImportProblem(dst, src);
-  if (why) throw new Error(why);
+  if (why) throw new OwRefusal(why);
   const warnings: string[] = [];
   const warn = (s: string) => warnings.push(s);
 

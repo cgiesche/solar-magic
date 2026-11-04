@@ -9,6 +9,7 @@ import { OW_OPTIONS, owOptionValue, setOwOption, submapLightning, setSubmapLight
 import { GM, RAM, PAD, get16, set16 } from '../src/core/ram.ts';
 import { PlaySession } from '../src/core/playsession.ts';
 import { setSubmapPalette, SUBMAP_PALETTE_SIZE } from '../src/core/submapgfx.ts';
+import { refusalOf } from '../src/core/owrefusal.ts';
 import { cleanImage, editorImage } from './fixture.ts';
 
 let bad = 0;
@@ -44,7 +45,7 @@ const with_ = (id: OwOptionId, on: boolean) => { const rom = fresh(); setOwOptio
   rom.w8(0x049307, 0xea);
   check(owOptionValue(rom, 'hardcodedPaths') === null, 'changed by a patch: unknown');
   let threw = false;
-  try { setOwOption(rom, 'hardcodedPaths', false); } catch { threw = true; }
+  try { setOwOption(rom, 'hardcodedPaths', false); } catch (e) { threw = refusalOf(e)?.kind === 'codePatched'; }
   check(threw && rom.r8(0x049307) === 0xea, 'not written then');
 }
 // the bytes Lunar Magic 3.71 saved with the option checked and unchecked (docs/research/lunar-magic-overworld-options.md)
@@ -193,7 +194,7 @@ for (const tl of [0x29, 0x15]) {
   setOwOption(rom, 'pathFade', true);
   check(owOptionValue(rom, 'pathFade') === true && owOptionValue(rom, 'translucency') === true, 'the fade on again: translucent as in the game');
   let threw = false;
-  try { setRevealSpeed(fresh(), 3); } catch { threw = true; }
+  try { setRevealSpeed(fresh(), 3); } catch (e) { threw = refusalOf(e)?.kind === 'revealSpeedFade'; }
   check(threw, 'no reveal speed with the fade on');
 }
 
@@ -328,7 +329,7 @@ function gameOver(rom: Rom): { max: number; player: number } {
   // a patch's code there: unknown, not written
   rom.w8(LIGHTNING_MASK - 1, 0xad);
   threw = false;
-  try { setSubmapLightning(rom, 4, false); } catch { threw = true; }
+  try { setSubmapLightning(rom, 4, false); } catch (e) { threw = refusalOf(e)?.kind === 'codePatched'; }
   check(submapLightning(rom, 4) === null && threw && mask() === 0xf7, 'lightning: changed by a patch: unknown, not written');
 }
 

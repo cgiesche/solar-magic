@@ -1,5 +1,5 @@
 // The overworld editor's picks show their valid targets before the click (#348), on the editor's test ROM: per pick,
-// the cells its check refuses are exactly those the edit refuses, with the same reason – "+ Reveal" (any cell but the
+// the cells its check refuses are exactly those the edit refuses, with the same refusal (kind and data) – "+ Reveal" (any cell but the
 // main map's top left one, in an event revealing nothing yet), "+ Destroy" (a cell destroyTarget resolves), a level
 // tile moved or a level placed in an event (no cell entering another level on another map; before events every
 // cell), a star/pipe link's and an exit path's target, also of a link's end moved (another tile, the entries it needs
@@ -16,21 +16,26 @@ import {
 } from '../src/core/owlinks.ts';
 import { readTeleports, writeTeleport, readExitPaths, writeExitPath, TELEPORTS, EXIT_PATHS, type OwTile } from '../src/core/owteleport.ts';
 import { levelTileTest } from '../src/core/owpaths.ts';
+import { refusalOf, type OwRefusalData } from '../src/core/owrefusal.ts';
 import { editorImage, pathKinds } from './fixture.ts';
 
 let bad = 0;
 const check = (ok: boolean, what: string) => { console.log((ok ? 'ok   ' : 'FAIL ') + what); if (!ok) bad++; };
 const hx = (v: number) => v.toString(16).toUpperCase();
 const range = (a: number, b: number) => Array.from({ length: b - a }, (_, k) => a + k);
-const tried = (f: () => void): string | null => { try { f(); return null; } catch (e) { return e instanceof Error ? e.message : String(e); } };
+// the refusal f throws as JSON (null: none; another error's message)
+const tried = (f: () => void): string | null => { try { f(); return null; } catch (e) { const r = refusalOf(e); return r ? JSON.stringify(r) : e instanceof Error ? e.message : String(e); } };
+// a check's refusal as JSON (null: none)
+const json = <A extends unknown[]>(c: (...a: A) => OwRefusalData | null) => (...a: A): string | null => { const r = c(...a); return r ? JSON.stringify(r) : null; };
 
 const image = await editorImage();
 const kinds = pathKinds(new Rom(image.slice()));
 const isLevel = levelTileTest(kinds);
 const fresh = () => { const rom = new Rom(image.slice()); return { rom, s: new RomEditSession(rom) }; };
 // the cells where the check and the edit (made, then undone) differ – in what they refuse or why
-function differ(cells: number[], check: (i: number) => string | null, edit: (i: number) => string | null): number[] {
-  return cells.filter((i) => check(i) !== edit(i));
+function differ(cells: number[], check: (i: number) => OwRefusalData | null, edit: (i: number) => string | null): number[] {
+  const c = json(check);
+  return cells.filter((i) => c(i) !== edit(i));
 }
 
 // ---- "+ Reveal" ----
@@ -43,7 +48,7 @@ function differ(cells: number[], check: (i: number) => string | null, edit: (i: 
   const d = differ(cells, check1, edit);
   check(!d.length, `the cells refused are those addReveal refuses, with its reason${d.length ? ` (differ: ${d.slice(0, 8).map(hx).join(' ')})` : ''}`);
   const yi2 = revealPickCheck(rom, 3);
-  check(cells.every((i) => /already reveals/.test(yi2(i) ?? '')), 'an event revealing a tile already: every cell refused, saying so');
+  check(cells.every((i) => yi2(i)?.kind === 'revealTaken'), 'an event revealing a tile already: every cell refused, saying so');
 }
 
 // ---- "+ Destroy" ----
@@ -57,7 +62,7 @@ function differ(cells: number[], check: (i: number) => string | null, edit: (i: 
   const d = differ(cells, check1, edit);
   check(!d.length, `the cells refused are those addDestroy refuses, with its reason${d.length ? ` (differ: ${d.slice(0, 8).map(hx).join(' ')})` : ''}`);
   const iggy = destroyPickCheck(rom, 6);
-  check(cells.every((i) => /destroys one tile/.test(iggy(i) ?? '')), 'an event destroying a tile already: every cell refused, saying so');
+  check(cells.every((i) => iggy(i)?.kind === 'destroyTaken'), 'an event destroying a tile already: every cell refused, saying so');
 }
 
 // ---- a level tile moved or a level placed ----
@@ -113,7 +118,7 @@ function differ(cells: number[], check: (i: number) => string | null, edit: (i: 
   // the table full: a location taken from a star's entry can't move (the star needs another one)
   writeTeleport(rom, readTeleports(rom).findIndex((t) => !t.from && !t.to), { from: null, to: { submap: 6, x: 1, y: 1 } });
   const loc = star.entries[0], why = locationMoveRefusal(rom, loc);
-  check(!!why && why === tried(() => moveLocation(rom, loc, { submap: 0, x: 1, y: 1 })), `the table full: a star's entry as a location can't be moved, as moveLocation refuses ("${why}")`);
+  check(!!why && JSON.stringify(why) === tried(() => moveLocation(rom, loc, { submap: 0, x: 1, y: 1 })), `the table full: a star's entry as a location can't be moved, as moveLocation refuses (${JSON.stringify(why)})`);
   // the exit path table full but one entry
   for (let i = 0, n = 0; i < EXIT_PATHS; i++) if (!readExitPaths(rom)[i] && n++ > 0) writeExitPath(rom, i, { from: { submap: 6, x: 8, y: 8 }, to: { submap: 6, x: 8, y: 8 }, tile: { x: 0, y: 0 } });
   targets('exit', { ...a, side: 1 }, true, 'one exit path entry free, both ways');

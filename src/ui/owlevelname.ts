@@ -7,6 +7,7 @@
 
 import type { OverworldView } from './overworld.ts';
 import { h, checkbox } from './dom.ts';
+import { refusalText } from './owrefusal.ts';
 import { nameFont } from './levelnamefield.ts';
 import { l1XY, owShownAt, translevelToLevel, levelTilesOf, initialFlags, setInitialFlags, FLAG, type OwRender } from '../core/overworld.ts';
 import { levelNameTiles, setLevelNameTiles, levelNamePatch, trimName, typeNameChar, nameKey, NAME_LEN, type NameCaret } from '../core/levelnames.ts';
@@ -204,7 +205,7 @@ export class LevelNameEditor {
       let n = p.name, why = '';
       for (const ch of text.replace(/\r?\n/g, ' ')) {
         const t = typeNameChar(n, ch);
-        if (typeof t === 'string') { why = t; break; }
+        if ('kind' in t) { why = refusalText(this.view.app.rom, t); break; }
         n = t;
       }
       set(n);

@@ -19,6 +19,7 @@
 // - life exchange ($04828D, the window), L/R opening it ($04836E)
 // - the game's lightning per submap ($04F709, submapLightning)
 import type { Rom } from './rom.ts';
+import { OwRefusal } from './owrefusal.ts';
 
 // 1: the game's save tiles bring up the save prompt – in the initial level flags patch's save prompt routine (overworld.ts
 // asserts it). Here, not there: this module imports nothing, so patchapply.ts can import it inside the import cycle.
@@ -123,7 +124,7 @@ export function owOptionValue(rom: Rom, id: OwOptionId): boolean | null {
 // turns the option on or off (its bytes as the clean game's or Lunar Magic's); throws when a patch changed them
 export function setOwOption(rom: Rom, id: OwOptionId, on: boolean): void {
   const o = owOption(id), cur = owOptionValue(rom, id);
-  if (cur === null) throw new Error(`"${o.label}": its code in the ROM was changed by a patch`);
+  if (cur === null) throw new OwRefusal({ kind: 'codePatched', what: o.label });
   if (cur === on) return;
   const which = on === o.game ? 'game' : 'changed';
   for (const b of o.bytes) b[which].forEach((v, k) => rom.w8(b.at + k, v));
@@ -136,8 +137,8 @@ export function revealSpeed(rom: Rom): number | null {
   return owOptionValue(rom, 'pathFade') === false ? rom.r8(FADE_SPEED) : null;
 }
 export function setRevealSpeed(rom: Rom, v: number): void {
-  if (owOptionValue(rom, 'pathFade') !== false) throw new Error('The path reveal speed applies with the event path fade off');
-  if (v < 1 || v > MAX_REVEAL_SPEED) throw new Error(`The path reveal speed is 1–${MAX_REVEAL_SPEED.toString(16).toUpperCase()}`);
+  if (owOptionValue(rom, 'pathFade') !== false) throw new OwRefusal({ kind: 'revealSpeedFade' });
+  if (v < 1 || v > MAX_REVEAL_SPEED) throw new OwRefusal({ kind: 'revealSpeedRange', max: MAX_REVEAL_SPEED });
   rom.w8(FADE_SPEED, v);
 }
 
@@ -169,7 +170,7 @@ export function submapLightning(rom: Pick<Rom, 'r8'>, submap: number): boolean |
 // throws when a patch changed the game's code there
 export function setSubmapLightning(rom: Rom, submap: number, on: boolean): void {
   if (submap < 0 || submap >= SUBMAPS) throw new RangeError(`no submap ${submap}`);
-  if (!gameCode(rom)) throw new Error('The lightning: its code in the ROM was changed by a patch');
+  if (!gameCode(rom)) throw new OwRefusal({ kind: 'codePatched', what: 'Lightning' });
   const bit = rom.r8(SUBMAP_BITS + submap), v = rom.r8(LIGHTNING_MASK);
   rom.w8(LIGHTNING_MASK, on ? v & ~bit : v | bit);
 }

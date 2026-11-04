@@ -8,6 +8,7 @@
 
 import type { OverworldView } from './overworld.ts';
 import { h, toast, emptyState } from './dom.ts';
+import { refusalWords, refusedToast } from './owrefusal.ts';
 import { l1XY, OW_EVENTS } from '../core/overworld.ts';
 import { tileText } from '../core/owteleport.ts';
 import { hex2 } from '../core/names.ts';
@@ -122,7 +123,8 @@ export class WorldCheck {
         this.budgetShow(p.budget));
     }
     const map = p.progress === OW_EVENTS ? 'with every event passed' : p.progress ? `after event ${hex2(p.progress - 1)}` : 'before events';
-    return h('div', { class: `problem problem-${p.severity}`, title: `${p.title ? `${p.title}\n` : ''}Found on the map ${map}${p.noFix ? `\nNo fix: ${p.noFix}` : ''}` },
+    const noFix = p.noFix && refusalWords(this.view.app.rom, p.noFix), why = noFix ? `${noFix.reason}${noFix.instead ? ` – ${noFix.instead}` : ''}` : '';
+    return h('div', { class: `problem problem-${p.severity}`, title: `${p.title ? `${p.title}\n` : ''}Found on the map ${map}${why ? `\nNo fix: ${why}` : ''}` },
       h('span', { class: 'problem-icon' }, ICON[p.severity]),
       h('span', { class: 'wc-text' }, p.text),
       h('button', { class: 'problem-fix', disabled: p.tile < 0, title: p.tile < 0 ? 'Not on the map' : `Show the tile, on the map ${map}`, onclick: () => this.show(p) }, 'Show'),
@@ -161,7 +163,7 @@ export class WorldCheck {
     try {
       this.view.app.romEdit(`World check: ${f.label.toLowerCase()} (${tileText({ submap: this.view.submapAt(f.tile), ...l1XY(f.tile) })})`, () => applyFix(this.view.app.rom, f));
       this.view.showTile(p.tile);
-    } catch (e) { toast(`Not fixed: ${e instanceof Error ? e.message : e}`, 'error'); }
+    } catch (e) { refusedToast(this.view.app.rom, e, 'Not fixed: '); }
   }
 }
 

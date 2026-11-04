@@ -19,6 +19,7 @@ import {
 } from './owteleport.ts';
 import { readSecondaryEntrance, levelTranslevel } from './level.ts';
 import type { ExitGraph } from './exitgraph.ts';
+import { OwRefusal, type OwRefusalData } from './owrefusal.ts';
 
 const SECONDARY_ENTRANCES = 0x200;
 
@@ -104,45 +105,45 @@ export function locationUses(rom: Rom): Map<number, number[]> {
 // tile gets another entry. Returns the link; throws when the table is full.
 export function makeLink(rom: Rom, kind: LinkKind, a: LinkEnd, b: LinkEnd, both: boolean): OwLink {
   const why = linkCheck(rom, kind, both)(a, b);
-  if (why) throw new Error(why);
+  if (why) throw new OwRefusal(why);
   const entries = kind === 'star' ? linkStars(rom, a, b, both) : linkExits(rom, a, b, both);
   return { kind, a: { ...a }, b: { ...b }, both, entries };
 }
 
-const NOT_ITSELF = 'A link leads to another tile';
-const starsFull = () => `Every one of the ${TELEPORTS} star/pipe entries is used`;
-const exitsFull = () => `Every one of the ${EXIT_PATHS} exit path entries is used`;
+const NOT_ITSELF: OwRefusalData = { kind: 'linkToItself' };
+const starsFull: OwRefusalData = { kind: 'teleportsFull', max: TELEPORTS };
+const exitsFull: OwRefusalData = { kind: 'exitPathsFull', max: EXIT_PATHS };
 // why a link of `kind` (both: also back) can't lead from a to b (null: it can, as makeLink makes it): b is another
 // tile, and the entries it needs are free – a's and b's own reused (a star's that a location keeps leading elsewhere
 // not); replacing: the link it replaces, removed first (removeLink: its entries free again, a location's kept). The ROM
 // read once (#348: the tiles hatched while a link's end is dragged).
-export function linkCheck(rom: Rom, kind: LinkKind, both: boolean, replacing: OwLink | null = null): (a: LinkEnd, b: LinkEnd) => string | null {
-  let free: number, needs: (from: LinkEnd, to: LinkEnd) => number, full: string;
+export function linkCheck(rom: Rom, kind: LinkKind, both: boolean, replacing: OwLink | null = null): (a: LinkEnd, b: LinkEnd) => OwRefusalData | null {
+  let free: number, needs: (from: LinkEnd, to: LinkEnd) => number, full: OwRefusalData;
   const gone = new Set(replacing?.kind === kind ? replacing.entries : []);
   if (kind === 'star') {
     const kept = locationUses(rom), all = readTeleports(rom).map((t, k): Teleport => (gone.has(k) ? { from: null, to: kept.has(k) ? t.to : null } : t));
     free = all.filter((t, k) => !t.from && !t.to && !kept.has(k)).length;
     needs = (from, to) => { const i = all.findIndex((t) => t.from && same(t.from, from)); return i < 0 || (kept.has(i) && !same(all[i].to!, to)) ? 1 : 0; };
-    full = starsFull();
+    full = starsFull;
   } else {
     const all = readExitPaths(rom).map((x, k) => (gone.has(k) ? null : x));
     free = all.filter((x) => !x).length;
     needs = (from, to) => { const f = exitEntry(from, to).from; return all.some((x) => x && samePos(x.from, f)) ? 0 : 1; };
-    full = exitsFull();
+    full = exitsFull;
   }
   return (a, b) => (same(a, b) ? NOT_ITSELF : needs(a, b) + (both ? needs(b, a) : 0) > free ? full : null);
 }
 // why a Koopa Kid on tile `from` can't put Mario at tile `to` (null: it can): a place of the submap of its tile
-export function koopaPlaceRefusal(from: OwTile, to: OwTile): string | null {
-  return to.submap !== from.submap ? `a Koopa Kid's place is on the submap of its tile (${tileText(from)})` : null;
+export function koopaPlaceRefusal(from: OwTile, to: OwTile): OwRefusalData | null {
+  return to.submap !== from.submap ? { kind: 'koopaPlaceSubmap', from: { ...from } } : null;
 }
 // why location i (a star/pipe entry exits to the overworld teleport to) can't be moved (null: it can, moveLocation): a
 // star's or pipe's entry needs a free one to keep leading where it does
-export function locationMoveRefusal(rom: Rom, i: number): string | null {
+export function locationMoveRefusal(rom: Rom, i: number): OwRefusalData | null {
   const all = readTeleports(rom), t = all[i];
   if (!t.from || !t.to) return null;
   const kept = locationUses(rom);
-  return all.some((e, n) => !e.from && !e.to && !kept.has(n)) ? null : starsFull();
+  return all.some((e, n) => !e.from && !e.to && !kept.has(n)) ? null : { kind: 'locationsFull', max: TELEPORTS };
 }
 
 function linkStars(rom: Rom, a: OwTile, b: OwTile, both: boolean): number[] {
@@ -151,7 +152,7 @@ function linkStars(rom: Rom, a: OwTile, b: OwTile, both: boolean): number[] {
     let i = all.findIndex((t, k) => !taken.has(k) && t.from && same(t.from, from));
     if (i >= 0 && kept.has(i) && !same(all[i].to!, to)) { writeTeleport(rom, i, { from: null, to: all[i].to }); all[i] = { from: null, to: all[i].to }; i = -1; }
     if (i < 0) i = all.findIndex((t, k) => !taken.has(k) && !t.from && !t.to && !kept.has(k));
-    if (i < 0) throw new Error(starsFull());
+    if (i < 0) throw new OwRefusal(starsFull);
     taken.add(i);
     const e: Teleport = { from: { submap: from.submap, x: from.x, y: from.y }, to: { submap: to.submap, x: to.x, y: to.y } };
     writeTeleport(rom, i, e);
@@ -169,7 +170,7 @@ function linkExits(rom: Rom, a: LinkEnd, b: LinkEnd, both: boolean): number[] {
     const e = exitEntry(from, to);
     let i = all.findIndex((x, k) => !taken.has(k) && x && samePos(x.from, e.from));
     if (i < 0) i = all.findIndex((x, k) => !taken.has(k) && !x);
-    if (i < 0) throw new Error(exitsFull());
+    if (i < 0) throw new OwRefusal(exitsFull);
     taken.add(i);
     writeExitPath(rom, i, e);
     all[i] = e;
@@ -211,7 +212,7 @@ export function pathSide(t: OwTile, isPath: (x: number, y: number) => boolean): 
 // where it did, in another entry (throws when the table is full)
 export function moveLocation(rom: Rom, i: number, to: OwTile): void {
   const why = locationMoveRefusal(rom, i);
-  if (why) throw new Error(why);
+  if (why) throw new OwRefusal(why);
   const all = readTeleports(rom), t = all[i];
   if (t.from && t.to) {
     const kept = locationUses(rom);

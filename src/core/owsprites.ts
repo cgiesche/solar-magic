@@ -15,6 +15,7 @@
 import type { Rom } from './rom.ts';
 import { loadKey, type OverworldLoads } from './overworld.ts';
 import type { Job } from './jobrunner.ts';
+import { OwRefusal } from './owrefusal.ts';
 import { RAM, set16, getS16 } from './ram.ts';
 import { readPpuOam, drawTiles, tileKey, type SpriteImage } from './spritegfx.ts';
 import { bowsieInstalled, bowsieMaxTile, readCustomSprites, customEntryAddrs, type CustomOwSprite } from './owcustom.ts';
@@ -62,7 +63,7 @@ export function koopaKidPos(rom: Rom, k: number): { x: number; y: number } {
   return { x: rom.r8(KOOPA_KID.xlo + k) | (rom.r8(KOOPA_KID.xhi + k) << 8), y: rom.r8(KOOPA_KID.ylo + k) | (rom.r8(KOOPA_KID.yhi + k) << 8) };
 }
 export function setKoopaKidPos(rom: Rom, k: number, p: { x: number; y: number }): void {
-  if (!hasKoopaKidTable(rom)) throw new Error('With BOWSIE\'s MaxTile there is no Koopa Kid table: its code is there');
+  if (!hasKoopaKidTable(rom)) throw new OwRefusal({ kind: 'koopaTableBowsie' });
   rom.w8(KOOPA_KID.xlo + k, p.x & 0xff); rom.w8(KOOPA_KID.xhi + k, (p.x >> 8) & 0xff);
   rom.w8(KOOPA_KID.ylo + k, p.y & 0xff); rom.w8(KOOPA_KID.yhi + k, (p.y >> 8) & 0xff);
 }

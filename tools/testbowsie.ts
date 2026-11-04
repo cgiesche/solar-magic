@@ -19,6 +19,7 @@ import { setOwOption, owOptionValue } from '../src/core/owoptions.ts';
 import { hasKoopaKidTable, koopaKidPos, setKoopaKidPos } from '../src/core/owsprites.ts';
 import { importOverworld } from '../src/core/owimport.ts';
 import { readCustomSprites, writeCustomSprites, customSizeTable, customSpriteRanges, customEntryAddrs, type CustomOwSprite } from '../src/core/owcustom.ts';
+import { refusalOf } from '../src/core/owrefusal.ts';
 import { editorImage, romDiff } from './fixture.ts';
 
 let bad = 0;
@@ -106,7 +107,7 @@ const slots = (w: Uint8Array) => Array.from({ length: 24 }, (_, k) => ({ num: ge
   check(got.some((g) => g.num === 4 && g.x === 0x58 && g.y === 0x48) && got.some((g) => g.num === 0x12 && g.x === 0x60 && g.y === 0x50), `Forest of Illusion: both spawned, the odd X too ${JSON.stringify(got)}`);
   check(ptr === at, `5 extra bytes: their address ${hx(at)} in the extra tables (${hx(ptr)})`);
   let threw = false;
-  try { l[3] = [{ id: 0x7f, x: 0, y: 0, z: 0, extra: [] }]; writeCustomSprites(r2, l); } catch { threw = true; }
+  try { l[3] = [{ id: 0x7f, x: 0, y: 0, z: 0, extra: [] }]; writeCustomSprites(r2, l); } catch (e) { threw = JSON.stringify(refusalOf(e)) === JSON.stringify({ kind: 'customSpriteId', id: 0x7f, max: 0x7e }); }
   check(threw, 'with BOWSIE, sprite 7F refused (its tables end at 7E)');
 }
 
@@ -190,7 +191,7 @@ const slots = (w: Uint8Array) => Array.from({ length: 24 }, (_, k) => ({ num: ge
   // MaxTile's code is where the Koopa Kids' table was: no table, moving one refused; without MaxTile it is there
   {
     let threw = false;
-    try { setKoopaKidPos(r2, 0, { x: 0x10, y: 0x10 }); } catch { threw = true; }
+    try { setKoopaKidPos(r2, 0, { x: 0x10, y: 0x10 }); } catch (e) { threw = refusalOf(e)?.kind === 'koopaTableBowsie'; }
     check(!hasKoopaKidTable(r2) && threw && hasKoopaKidTable(rom), 'with MaxTile: no Koopa Kid table, moving one refused; without it, there');
   }
   // an overworld imported from a ROM with the fade on: BOWSIE re-inserted without MaxTile, the Koopa Kids copied

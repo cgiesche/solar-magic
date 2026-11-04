@@ -38,6 +38,8 @@ import { levelsWithoutTile, type LevelTileEvent } from '../core/owleveltiles.ts'
 import {
   eventReveal, eventDestroys, revealRefusal, destroyRefusal, addReveal, removeReveal, addDestroy, removeDestroy, cellText, revealPickCheck, destroyPickCheck,
 } from '../core/oweventtiles.ts';
+import { refusalToast, refusedToast, refusalWords, refusalText } from './owrefusal.ts';
+import type { OwRefusalData } from '../core/owrefusal.ts';
 import { SpriteLayer } from './owspriteview.ts';
 import { CellHistoryPopup, tileWords } from './owcellhistoryview.ts';
 import { exitSentences, teleportExit, type Clause } from '../core/owexitsentence.ts';
@@ -69,7 +71,7 @@ const FIRST_L1_TILE = 0x00;
 
 // a pick's checks (#348): its key and what they read besides the ROM (dep, by identity: the same pick, the same checks),
 // the check of a cell (l1Index) made when needed
-export type PickCheck = { key: string; dep?: unknown; make: () => (i: number) => string | null };
+export type PickCheck = { key: string; dep?: unknown; make: () => (i: number) => OwRefusalData | null };
 
 // what the timeline shows: an animated step, a silent one, the layer 1 changes, the tile revealed, a tile destroyed
 type StepKind = 'step' | 'silent' | 'l1' | 'reveal' | 'destroy';
@@ -479,7 +481,7 @@ export class OverworldView {
   // dropped, a link's target – the cells it would refuse are hatched, the reason shown over them; a click there is
   // refused as before. Each pick's checks (core: revealPickCheck, destroyPickCheck, moveLevelTileCheck,
   // placeLevelTileCheck, linkTargetCheck) run once per cell of the map shown, kept while the pick and the ROM stay.
-  private pickMemo: { key: string; dep: unknown; gen: number; region: number; why: (string | null)[] } | null = null;
+  private pickMemo: { key: string; dep: unknown; gen: number; region: number; why: (OwRefusalData | null)[] } | null = null;
   private pickCheck(): PickCheck | null {
     const rom = this.app.rom, pick = this.eventPick, e = this.event;
     if (pick && pick.at < 0) return pick.kind === 'reveal' ? { key: `reveal:${e}`, make: () => revealPickCheck(rom, e) }
@@ -489,7 +491,7 @@ export class OverworldView {
     return null;
   }
   // why each cell of the map shown (l1Index − region × 0x400) can't be picked (null: it can); null: no pick pending
-  pickRefusals(): (string | null)[] | null {
+  pickRefusals(): (OwRefusalData | null)[] | null {
     const p = this.pickCheck();
     if (!p) return null;
     const gen = this.app.rom.gen, m = this.pickMemo, region = this.region;
@@ -501,7 +503,7 @@ export class OverworldView {
   }
   // why the cell under the mouse can't be picked (null: it can, or no pick pending)
   // (a level tile dragged off the map lands on the edge: that cell's)
-  private pickRefusalAtMouse(): string | null {
+  private pickRefusalAtMouse(): OwRefusalData | null {
     const m = this.mouse, clamp = (v: number) => Math.max(0, Math.min(31, Math.floor(v / 16)));
     if (!m || (!this.levelTiles.drag && (m.x < 0 || m.y < 0 || m.x >= 512 || m.y >= 512))) return null;
     const why = this.pickRefusals();
@@ -805,14 +807,14 @@ export class OverworldView {
   // confirmation naming the count) becomes `to` (core/owl2pieces.ts replacePiece): one stroke, one ROM edit; in an
   // event painted as the map after it
   private async replacePieces(from: number[], to: number[]): Promise<void> {
-    if (samePiece(from, to)) { toast('Not replaced: the new piece is the one to replace', 'error'); return; }
+    if (samePiece(from, to)) { refusalToast(this.app.rom, { kind: 'pieceSame' }); return; }
     const views = this.views;
     if (!views) { toast('The submaps are still being loaded, try again'); return; }
     const sel = this.l2Sel, inside = sel && gridInside(sel);
-    if (sel && !inside) { toast('Not replaced: no piece lies wholly inside the selection', 'error'); return; }
+    if (sel && !inside) { refusalToast(this.app.rom, { kind: 'pieceNoneInside' }); return; }
     const area = () => inside ?? views[this.map];
     const n = piecesAt(this.paintedL2(), this.region, area(), from).length;
-    if (!n) { toast(`Not replaced: the piece is not ${sel ? 'in the selection' : 'on this map'}`, 'error'); return; }
+    if (!n) { refusalToast(this.app.rom, { kind: 'pieceNotFound', selection: !!sel }); return; }
     if (!sel) {
       const map = this.map, ev = this.event;
       const ok = await choose('Replace piece', `Replace ${n === 1 ? 'the 1 piece' : `all ${n} pieces`} of this kind on the whole map${this.ev ? ` (as after event ${hex(this.event, 2)})` : ''} with the new one? (undoable; to replace only in a part of the map, select a rectangle on it first)`,
@@ -837,7 +839,7 @@ export class OverworldView {
       this.app.romEdit(label ?? end.label, end.write);
       return true;
     } catch (e) {
-      toast(`Not painted: ${e instanceof Error ? e.message : e}`, 'error');
+      refusedToast(this.app.rom, e, 'Not painted: ');
       this.sync();
       return false;
     }
@@ -925,8 +927,8 @@ export class OverworldView {
     const refused = this.pickRefusalAtMouse();
     this.scroller.style.cursor = refused ? 'not-allowed' : '';
     if (refused) {
-      this.scroller.title = refused;
-      this.statusText.textContent = `Can't pick this tile: ${refused}`;
+      this.scroller.title = refusalText(this.app.rom, refused);
+      this.statusText.textContent = `Can't pick this tile: ${refusalWords(this.app.rom, refused).reason}`;
       return;
     }
     if (this.eventPick) {
@@ -1154,14 +1156,14 @@ export class OverworldView {
     const entry = (kind: StepKind, k: number, i: number, text: string, title: string, what: string, remove: () => void) =>
       h('div', { class: 'ow-step silent ow-tile-change', title: `${title} – click to show it`, ...hover(kind, k), onclick: () => this.showTile(i) }, text,
         h('button', { class: 'link-btn', title: `The event no longer ${what} it`, onclick: (ev: MouseEvent) => { ev.stopPropagation(); this.tileEdit(`no longer ${what} ${cellText(i)}`, remove); } }, '×'));
-    const into = reveal >= 0 ? revealedTile(rom, this.l1[reveal]) : -1;
+    const into = reveal >= 0 ? revealedTile(rom, this.l1[reveal]) : -1, noReveal = revealRefusal(rom, e);
     return [
       reveal >= 0 ? entry('reveal', 0, reveal, `Reveals tile at ${cellText(reveal)}: ${l1Hex(this.l1[reveal])} → ${into < 0 ? '(not in the reveal list)' : l1Hex(into)}`,
         'The tile the event reveals: turned into its counterpart of the reveal list when the event passes', 'reveals', () => removeReveal(rom, e)) : null,
       ...destroys.map((i, k) => entry('destroy', k, i, `Destroys tile ${l1Hex(this.l1[i])} at ${cellText(i)}`,
         'A tile the event destroys (a castle, fortress or switch palace collapsing) when it passes', 'destroys', () => removeDestroy(rom, e, i))),
       h('button', { title: 'The event reveals a tile: click it on the map, then pick what it becomes in the layer 1 sheet (an event reveals one tile)', onclick: () => this.startEventPick('reveal') }, '+ Reveal'),
-      e < revealEventCount(rom) ? budgetGauge(this.budget('revealPairs')) : budgetBlocked('reveals none', revealRefusal(rom, e) ?? ''),
+      e < revealEventCount(rom) ? budgetGauge(this.budget('revealPairs')) : budgetBlocked('reveals none', noReveal ? refusalText(rom, noReveal) : ''),
       hasDestroyPatch(rom) ? h('button', { title: 'The event destroys a tile (a castle, fortress or switch palace): click it on the map (an event destroys one tile, 0x18 in all)', onclick: () => this.startEventPick('destroy') }, '+ Destroy') : null,
       budgetGauge(this.budget('destroys')),
     ];
@@ -1172,7 +1174,7 @@ export class OverworldView {
       this.app.romEdit(`${eventTitle(eventRunners(this.app.rom), e)}: ${what}`, f);
       return true;
     } catch (err) {
-      toast(`Not changed: ${err instanceof Error ? err.message : err}`, 'error');
+      refusedToast(this.app.rom, err);
       return false;
     }
   }
@@ -1180,7 +1182,7 @@ export class OverworldView {
   // reveal's tile is then picked in the layer 1 sheet (the layer 1 mode shown)
   private startEventPick(kind: 'reveal' | 'destroy'): void {
     const rom = this.app.rom, why = kind === 'reveal' ? revealRefusal(rom, this.event) : destroyRefusal(rom, this.event);
-    if (why) { toast(`Not added: ${why}`, 'error'); return; }
+    if (why) { refusalToast(rom, why); return; }
     this.eventPick = { kind, at: -1 };
     this.buildTimeline();
     this.updateStatus();
@@ -1204,7 +1206,7 @@ export class OverworldView {
     const i = l1Index(this.region, x, y);
     if (pick.kind === 'reveal') {
       const why = this.pickRefusals()?.[i - this.region * 0x400];
-      if (why) { toast(`Not added: ${why}`, 'error'); return; }
+      if (why) { refusalToast(rom, why); return; }
       this.eventPick = { kind: 'reveal', at: i };
       if (this.mode !== 'l1') this.bar.querySelector<HTMLButtonElement>('.btn-group button.ow-l1')?.click(); else this.buildSide();
       this.buildTimeline();
@@ -1519,7 +1521,7 @@ export class OverworldView {
         try {
           const warnings = this.app.romEdit(`${o.label}: ${on ? 'on' : 'off'}`, () => { setOwOption(rom, o.id, on); return o.id === 'pathFade' ? syncBowsieMaxTile(rom) : []; });
           if (warnings.length) toast(warnings.join(' '));
-        } catch (e) { toast(`Not changed: ${e instanceof Error ? e.message : e}`, 'error'); this.buildProps(); }
+        } catch (e) { refusedToast(rom, e); this.buildProps(); }
       });
       if (o.needs && owOptionValue(rom, o.needs) === false) {
         c.querySelector('input')!.disabled = true;
@@ -1728,7 +1730,7 @@ export class OverworldView {
   // the Map16 tab on layer 1 tile i's tile (as in the ROM), drawn as on this map at the event progress
   private editTile(i: number): void {
     const t = this.l1[i];
-    if (t >= OW_L1_TILES) { toast(`Tile ${l1Hex(t)} is past the overworld's layer 1 tiles (000–${hex(OW_L1_TILES - 1, 3)})`); return; }
+    if (t >= OW_L1_TILES) { refusalToast(this.app.rom, { kind: 'l1TilePast', tile: t, tiles: OW_L1_TILES }); return; }
     this.app.editTile(t, 'ow', { submap: this.map, progress: this.progress });
   }
 

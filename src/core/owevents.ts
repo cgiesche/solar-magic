@@ -24,6 +24,7 @@ import { snesToPc, Rom } from './rom.ts';
 import { assemble } from './asar.ts';
 import { rleEncode } from './rle.ts';
 import { missingPatch } from './patches.ts';
+import { OwRefusal } from './owrefusal.ts';
 import {
   OW_EVENTS, OverworldEmulator, type OverworldLoads, gameL1, readL1, readTranslevels, baseEvent, translevelToLevel, l1XY, revealAt, revealEventCount, readDestroyList,
   destroyEffects, destroyChanges, l1Index,
@@ -256,7 +257,7 @@ export function paintEvent(d: EventData, base: Uint16Array, e: number, after: Ui
         if (score > best) { best = score; bx = x; by = y; }
       }
       if (best < 0) break;
-      if (!take(r, bx, by, 2)) throw new Error(`The event storage is full (${STORAGE_MAX} places)`);
+      if (!take(r, bx, by, 2)) throw new OwRefusal({ kind: 'eventStorageFull', max: STORAGE_MAX });
     }
   }
   // steps in the view, in order along the path; the rest silent
@@ -506,7 +507,7 @@ const words = (v: number[]) => Uint8Array.from(v.flatMap((w) => [w & 0xff, (w >>
 // writes the steps, the storage and the silent steps (needs the patch); a table that didn't change keeps its bytes
 export function writeEvents(rom: Rom, d: EventData): void {
   if (!hasEventPatch(rom)) missingPatch('Event steps (Lunar Magic format)');
-  if (d.storage.length > STORAGE_MAX) throw new Error(`The event tiles need ${d.storage.length} of ${STORAGE_MAX} places`);
+  if (d.storage.length > STORAGE_MAX) throw new OwRefusal({ kind: 'eventStorageFull', max: STORAGE_MAX, need: d.storage.length });
   const div: number[] = [0];
   for (const s of d.steps) div.push(div[div.length - 1] + s.length);
   rom.writeBytes(DIVIDERS, words(div));

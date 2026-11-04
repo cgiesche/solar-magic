@@ -11,6 +11,7 @@
 //   (one extra byte). Sizes 3–0xF.
 
 import { snesToPc, type Rom } from './rom.ts';
+import { OwRefusal, type OwRefusalData } from './owrefusal.ts';
 
 export const OW_CUSTOM_PTR = 0x0ef55d;
 export const OW_CUSTOM_SIZES = 0x0de18c; // pointer, then $42 at +3 when used
@@ -106,14 +107,17 @@ export function customTableBytes(lists: CustomOwSprite[][], sizes: Uint8Array | 
 }
 
 // why the lists can't be written (Lunar Magic's limits), null when they can
-export function customSpritesProblem(lists: CustomOwSprite[][]): string | null {
-  if (lists.length !== OW_CUSTOM_SUBMAPS) return `${OW_CUSTOM_SUBMAPS} submaps expected`;
+// (with BOWSIE, whose pointer tables end at 7E, the ids are 01–7E); lists for another number of submaps than
+// OW_CUSTOM_SUBMAPS are no refusal but a mistake of the caller: thrown (RangeError)
+export function customSpritesProblem(lists: CustomOwSprite[][], bowsie = false): OwRefusalData | null {
+  if (lists.length !== OW_CUSTOM_SUBMAPS) throw new RangeError(`${OW_CUSTOM_SUBMAPS} submaps expected`);
+  const ids = bowsie ? 0x7e : OW_CUSTOM_IDS;
   for (const [m, l] of lists.entries()) {
-    if (l.length > OW_CUSTOM_MAX) return `At most ${OW_CUSTOM_MAX} custom sprites a submap (submap ${m} has ${l.length})`;
+    if (l.length > OW_CUSTOM_MAX) return { kind: 'customSpritesPerSubmap', submap: m, count: l.length, max: OW_CUSTOM_MAX };
     for (const s of l) {
-      if (s.id < 1 || s.id > OW_CUSTOM_IDS) return `Custom overworld sprites are 01–7F (${s.id.toString(16).toUpperCase()})`;
-      if (s.x < 0 || s.y < 0 || s.x > OW_CUSTOM_POS_MAX || s.y > OW_CUSTOM_POS_MAX) return 'A custom overworld sprite is at most 3F,3F (8px steps)';
-      if (s.z < 0 || s.z > OW_CUSTOM_Z_MAX) return 'A custom overworld sprite\'s height is at most 1F (8px steps)';
+      if (s.id < 1 || s.id > ids) return { kind: 'customSpriteId', id: s.id, max: ids };
+      if (s.x < 0 || s.y < 0 || s.x > OW_CUSTOM_POS_MAX || s.y > OW_CUSTOM_POS_MAX) return { kind: 'customSpritePos' };
+      if (s.z < 0 || s.z > OW_CUSTOM_Z_MAX) return { kind: 'customSpriteHeight' };
     }
   }
   return null;
@@ -123,10 +127,8 @@ export function customSpritesProblem(lists: CustomOwSprite[][]): string | null {
 // game, 0 with BOWSIE (its loader stops at a bank of 0, it would read $FFFFFF as a table). Sizes: those to write with
 // (by default the ROM's).
 export function writeCustomSprites(rom: Rom, lists: CustomOwSprite[][], sizes = customSizeTable(rom)): void {
-  const why = customSpritesProblem(lists);
-  if (why) throw new Error(why);
-  // (BOWSIE's pointer tables end at 7E)
-  if (bowsieInstalled(rom) && lists.some((l) => l.some((s) => s.id > 0x7e))) throw new Error('With BOWSIE, custom overworld sprites are 01–7E');
+  const why = customSpritesProblem(lists, bowsieInstalled(rom));
+  if (why) throw new OwRefusal(why);
   const old = customTable(rom);
   if (old !== null) rom.freeAt(old);
   rom.w24(OW_CUSTOM_PTR, lists.some((l) => l.length) ? rom.allocWrite(customTableBytes(lists, sizes)) : bowsieInstalled(rom) ? 0 : 0xffffff);

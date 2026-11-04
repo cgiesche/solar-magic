@@ -8,6 +8,7 @@ import {
   OW_CUSTOM_PTR, OW_CUSTOM_SIZES, OW_CUSTOM_MAX, type CustomOwSprite,
 } from '../src/core/owcustom.ts';
 import { overworldDataRanges } from '../src/core/overworld.ts';
+import { refusalOf } from '../src/core/owrefusal.ts';
 import { editorImage } from './fixture.ts';
 
 let bad = 0;
@@ -72,15 +73,17 @@ const spr = (id: number, x: number, y: number, z: number, extra: number) => [id 
 {
   const lists = none();
   lists[2] = Array.from({ length: OW_CUSTOM_MAX + 1 }, () => ({ id: 1, x: 0, y: 0, z: 0, extra: [] }));
-  check(!!customSpritesProblem(lists), `more than 0x18 a submap: ${customSpritesProblem(lists)}`);
+  check(JSON.stringify(customSpritesProblem(lists)) === JSON.stringify({ kind: 'customSpritesPerSubmap', submap: 2, count: OW_CUSTOM_MAX + 1, max: OW_CUSTOM_MAX }), `more than 0x18 a submap: ${JSON.stringify(customSpritesProblem(lists))}`);
   lists[2] = [{ id: 0, x: 0, y: 0, z: 0, extra: [] }];
-  check(!!customSpritesProblem(lists), `sprite 00: ${customSpritesProblem(lists)}`);
+  check(JSON.stringify(customSpritesProblem(lists)) === JSON.stringify({ kind: 'customSpriteId', id: 0, max: 0x7f }), `sprite 00: ${JSON.stringify(customSpritesProblem(lists))}`);
+  lists[2] = [{ id: 0x7f, x: 0, y: 0, z: 0, extra: [] }];
+  check(!customSpritesProblem(lists) && customSpritesProblem(lists, true)?.kind === 'customSpriteId', 'sprite 7F: fine, with BOWSIE refused');
   lists[2] = [{ id: 1, x: 0x40, y: 0, z: 0, extra: [] }];
-  check(!!customSpritesProblem(lists), `X 40: ${customSpritesProblem(lists)}`);
+  check(customSpritesProblem(lists)?.kind === 'customSpritePos', 'X 40 refused');
   lists[2] = [{ id: 1, x: 0, y: 0, z: 0x20, extra: [] }];
-  check(!!customSpritesProblem(lists), `height 20: ${customSpritesProblem(lists)}`);
+  check(customSpritesProblem(lists)?.kind === 'customSpriteHeight', 'height 20 refused');
   let threw = false;
-  try { writeCustomSprites(new Rom(rom.data.slice()), lists); } catch { threw = true; }
+  try { writeCustomSprites(new Rom(rom.data.slice()), lists); } catch (e) { threw = refusalOf(e)?.kind === 'customSpriteHeight'; }
   check(threw, 'writing them refused');
 }
 

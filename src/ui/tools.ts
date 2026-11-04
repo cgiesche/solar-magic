@@ -21,6 +21,7 @@ import { PREFAB_EXT } from '../core/prefabs.ts';
 import { Rom } from '../core/rom.ts';
 import { prepareRom } from '../core/editorpatches.ts';
 import { importOverworld, overworldImportProblem } from '../core/owimport.ts';
+import { refusalToast, refusedToast } from './owrefusal.ts';
 
 // overview of all secondary entrances (000-1FF): where each leads, which exits use it
 export function openEntrancesDialog(app: App): void {
@@ -239,12 +240,12 @@ export async function importOverworldFrom(app: App): Promise<void> {
     await prepareRom(src); // (the clean game gets the editor's patches, in this copy only)
   } catch (e) { toast(`Could not read “${f.name}”: ${e instanceof Error ? e.message : e}`, 'error'); return; }
   const why = overworldImportProblem(app.rom, src);
-  if (why) { toast(`The overworld can't be imported: ${why}`, 'error'); return; }
+  if (why) { refusalToast(app.rom, why); return; }
   const ok = await choose('Import overworld', `Replace this ROM's overworld with the one of “${f.name}”? Its maps, level tiles, events, level names, messages and settings, overworld links, sprites, options and each submap's music, graphics files, palettes and animations are copied; its packages (custom overworld sprites, graphics files, songs) are not. (undoable)`,
     [{ label: 'Cancel' }, { label: 'Import', primary: true }]);
   if (ok !== 1) return;
   let warnings: string[];
-  try { ({ warnings } = app.romEdit(`Overworld imported from ${f.name}`, () => importOverworld(app.rom, src))); } catch (e) { toast(String(e instanceof Error ? e.message : e), 'error'); return; }
+  try { ({ warnings } = app.romEdit(`Overworld imported from ${f.name}`, () => importOverworld(app.rom, src))); } catch (e) { refusedToast(app.rom, e, ''); return; }
   if (!warnings.length) { toast(`Overworld of “${f.name}” imported.`); return; }
   modal('Overworld imported', h('div', { style: 'max-width:520px' },
     h('p', null, `The overworld of “${f.name}” was imported. It refers to things this ROM has otherwise or lacks:`),

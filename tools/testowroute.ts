@@ -17,6 +17,7 @@ import { DX, DY, PATH_TILES_END, reverse, type PathKind } from '../src/core/owpa
 import { tileWays, SHAPED_KINDS } from '../src/core/owpathshape.ts';
 import { routeTiles, type RouteInput } from '../src/core/owroute.ts';
 import { stopTile } from '../src/core/owleveltiles.ts';
+import { refusalDetails } from '../src/core/owrefusal.ts';
 import { editorImage, pathKinds, pathShapes } from './fixture.ts';
 
 let bad = 0;
@@ -71,7 +72,7 @@ for (const p of paths) {
     const firstPath = route.find((c, k) => k > 0 && shaped(game[c]));
     if (firstPath === undefined) continue;
     const res = routeTiles(route, solveInput(l1, kinds[game[firstPath]]));
-    if (res.refusal) { failed.push(`${at(p.from)} ${DIR_NAMES[p.dir]}: refused at ${at(res.refusal.cell)} (${res.refusal.why})`); continue; }
+    if (res.refusal) { failed.push(`${at(p.from)} ${DIR_NAMES[p.dir]}: refused at ${at(res.refusal.cell)} (${refusalDetails(res.refusal.why)})`); continue; }
     for (let k = 1; k < route.length - 1; k++) {
       const c = route[k], t = res.tiles[k];
       if (!shaped(game[c])) continue;
@@ -128,7 +129,7 @@ console.log(`     ${tilesN} path tiles: ${samePoints} with the game's line, ${sa
       l1[j] = through;
       for (const c of route.slice(1, -1)) if (shaped(game[c])) l1[c] = 0;
       const res = routeTiles(route, solveInput(l1, 'walk'));
-      if (res.refusal || res.tiles.at(-1) !== STOP) results.push(`${at(j)}: ${res.refusal?.why ?? hx(res.tiles.at(-1) ?? 0)}`);
+      if (res.refusal || res.tiles.at(-1) !== STOP) results.push(`${at(j)}: ${res.refusal ? refusalDetails(res.refusal.why) : hx(res.tiles.at(-1) ?? 0)}`);
     }
   }
   check(tried.length >= 4 && !results.length, `the game's junctions: a route running into the path through one gets a stop tile there (${tried.join(', ')}) ${results.join('; ')}`);
@@ -183,23 +184,23 @@ const CX = 16, CY = 16;
   const route = [cell(CX - 2, CY), cell(CX - 1, CY), cell(CX, CY), cell(CX, CY - 1), cell(CX, CY - 2)];
   const res = routeTiles(route, { l1, kinds: straight, shapes, prefer: 'walk' });
   const f = res.refusal;
-  check(!!f && f.at === 2 && f.cell === route[2] && f.why === 'No path tile leads Mario from the left up' && f.stop && f.turns.join() === '3',
-    `no bend: refused at the corner (${f ? `${at(f.cell)}: "${f.why}", a stop tile there: ${f.stop}, turns: ${f.turns.map((d) => DIR_NAMES[d])}` : 'not refused'})`);
+  check(!!f && f.at === 2 && f.cell === route[2] && f.why.kind === 'routeNoTile' && refusalDetails(f.why) === 'No path tile leads Mario from the left up.' && f.stop && f.turns.join() === '3',
+    `no bend: refused at the corner (${f ? `${at(f.cell)}: "${refusalDetails(f.why)}", a stop tile there: ${f.stop}, turns: ${f.turns.map((d) => DIR_NAMES[d])}` : 'not refused'})`);
   check(res.tiles[1] !== null && kinds[res.tiles[1]!] === 'walk', `the cells before it still get their tiles (${res.tiles.map((t) => t === null ? '–' : hx(t)).join(' ')})`);
 }
 // not a route: a cell not next to the one before, an exit tile in the middle, crossing itself
 {
   const l1 = empty(CX, CY), cell = (x: number, y: number) => l1Index(0, x, y);
   const gap = routeTiles([cell(CX, CY), cell(CX + 2, CY)], solveInput(l1, 'walk'));
-  check(gap.refusal?.at === 1 && gap.refusal.why === 'Not next to the cell before', `a gap: refused (${gap.refusal?.why})`);
+  check(gap.refusal?.at === 1 && gap.refusal.why.kind === 'routeGap', `a gap: refused (${gap.refusal?.why.kind})`);
   const exit = kinds.findIndex((k) => k === 'exit');
   l1[cell(CX, CY)] = exit;
   const ex = routeTiles([cell(CX - 1, CY), cell(CX, CY), cell(CX + 1, CY)], solveInput(l1, 'walk'));
-  check(ex.refusal?.at === 1, `an exit tile in the middle: refused (${ex.refusal?.why})`);
+  check(ex.refusal?.at === 1 && ex.refusal.why.kind === 'routeExitInside', `an exit tile in the middle: refused (${ex.refusal?.why.kind})`);
   l1[cell(CX, CY)] = 0;
   const loop = [cell(CX, CY), cell(CX + 1, CY), cell(CX + 1, CY + 1), cell(CX, CY + 1), cell(CX, CY), cell(CX - 1, CY)];
   const cross = routeTiles([cell(CX - 1, CY), ...loop.slice(0, -1), cell(CX + 1, CY)], solveInput(l1, 'walk'));
-  check(cross.refusal?.why === 'The route crosses itself here', `a route over its own path tile: refused (${cross.refusal?.why})`);
+  check(cross.refusal?.why.kind === 'routeCrosses', `a route over its own path tile: refused (${cross.refusal?.why.kind})`);
 }
 
 console.log(bad ? `\n${bad} FAILED` : '\nall ok');
