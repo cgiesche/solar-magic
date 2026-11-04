@@ -743,7 +743,7 @@ export class OverworldView {
     this.paint();
   }
 
-  // a stroke, a pick, a link or a level tile being dragged (followed off the map too)
+  // a stroke, a pick, a link or a level tile or a route being dragged (followed off the map too)
   private dragging(): boolean {
     return this.brushDrag.active || !!this.links.drag || !!this.levelTiles.drag || this.pathTool.drawing;
   }
