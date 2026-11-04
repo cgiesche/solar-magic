@@ -20,8 +20,8 @@
 // Flags only open, so the search runs until nothing more opens.
 
 import { Rom, snesToPc } from './rom.ts';
-import { l1Index, l1XY, DIR_FLAGS, DIR_NAMES, NO_EVENT, baseEvent, exitDirections, translevelToLevel, MAX_TRANSLEVEL, initialFlags } from './overworld.ts';
-import { readEvents, eventRunners, exitChanges, eventTitle, type EventChanges, type EventRunner } from './owevents.ts';
+import { l1Index, l1XY, DIR_FLAGS, DIR_NAMES, NO_EVENT, baseEvent, exitDirections, translevelToLevel, MAX_TRANSLEVEL, initialFlags, revealAt, revealEventCount, readDestroyList } from './overworld.ts';
+import { readEvents, eventRunners, exitChanges, eventTitle, eventL1Tiles, type EventData, type EventChanges, type EventRunner } from './owevents.ts';
 import { hex2, hex3 } from './names.ts';
 import type { Severity } from './problems.ts';
 import { readTeleports, readExitPaths, starEntryAt, type OwTile } from './owteleport.ts';
@@ -287,11 +287,29 @@ const CLEAN_UNREACHED: readonly { cell: number; level: number }[] = [
   { cell: l1Index(1, 0x12, 0x07), level: 0x112 },
 ];
 const unreachedInCleanGame = (cell: number, level: number): boolean => CLEAN_UNREACHED.some((u) => u.cell === cell && u.level === level);
+// The level exits whose events reveal nothing Mario reaches in the clean game: level 112's normal exit (at its place
+// of CLEAN_UNREACHED) running event 43, which destroys its own level tile only (tile 078 with every event passed) –
+// no reveal, no other layer 1 change, no layer 2. A fixed list as CLEAN_UNREACHED: that exit running that event changing just
+// that is a warning "as in the original game"; any other change of the event or the level (another event, exit or
+// place, another tile there, a layer 1 change of its own, layer 2 steps) a warning as any other.
+const CLEAN_REVEALS_NOTHING: readonly { cell: number; level: number; exit: number; event: number; tile: number }[] = [
+  { ...CLEAN_UNREACHED[1], exit: 0, event: 0x43, tile: 0x078 },
+];
+// whether exit `run` running event c.event (changing `c`) is one of CLEAN_REVEALS_NOTHING; l1: layer 1 with every
+// event passed
+function revealsNothingInCleanGame(rom: Rom, d: EventData, run: EventRunner | undefined, c: EventChanges, l1: ArrayLike<number>): boolean {
+  const e = c.event, destroys = readDestroyList(rom).filter((x) => x.event === e);
+  const destroysOnly = (cell: number) => c.l1.length === 1 && c.l1[0] === cell && !c.l2.length && !eventL1Tiles(d, e).length
+    && (e >= revealEventCount(rom) || !revealAt(rom, e)) && destroys.length === 1 && destroys[0].tile === cell;
+  return !!run && CLEAN_REVEALS_NOTHING.some((u) => u.event === e && u.exit === run.exit && u.cell === run.tile
+    && u.level === translevelToLevel(run.tl) && destroysOnly(u.cell) && l1[u.cell] === u.tile);
+}
 
 // What keeps Mario from tiles: at the event progress shown (now) the ways that end nowhere (a path without a stop tile
 // at its end, an exit path tile no exit path is taken from where Mario comes); with every event passed (all) the
 // level tiles he reaches neither then nor now, and the level exits whose events change layer 1 only where he doesn't
-// get (layer 1 with every event passed) – one the clean game leaves unreached there too only a warning (CLEAN_UNREACHED).
+// get (layer 1 with every event passed) – one the clean game leaves unreached there too only a warning
+// (CLEAN_UNREACHED), an event the clean game has revealing nothing reached too said so (CLEAN_REVEALS_NOTHING).
 // place: a tile's name ("Main map 0C,09"). A tile several ways get stuck on is one problem (the first way named).
 export function reachProblems(rom: Rom, now: Reached, all: Reached, place: (tile: number) => string): ReachProblem[] {
   const out: ReachProblem[] = [];
@@ -314,9 +332,10 @@ export function reachProblems(rom: Rom, now: Reached, all: Reached, place: (tile
       // (the tiles Mario walks or stands on it changes; one changing scenery only is no path)
       const path = c.l1.filter((i) => kinds[l1[i]] !== 'none');
       if (!path.length || path.some((i) => all.r.tiles[i])) continue;
+      const asClean = revealsNothingInCleanGame(rom, d, runners.get(c.event)?.[0], c, l1);
       add({ key: `event-reveals-nothing:${c.event}`, kind: 'event-reveals-nothing', severity: 'warn', tile: path[0], at: 'all',
-        text: `${eventTitle(runners, c.event)}: its event reveals nothing Mario reaches`, brief: `event ${hex2(c.event)} revealing nothing reached`,
-        title: `None of the path or level tiles event ${hex2(c.event)} changes is reached with every event passed.` });
+        text: `${eventTitle(runners, c.event)}: its event reveals nothing Mario reaches${asClean ? ' – as in the original game' : ''}`, brief: `event ${hex2(c.event)} revealing nothing reached`,
+        title: `None of the path or level tiles event ${hex2(c.event)} changes is reached with every event passed.${asClean ? '\nThe original game has this event here, revealing nothing reached too.' : ''}` });
     }
   }
   return out;

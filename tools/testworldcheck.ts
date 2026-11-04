@@ -1,7 +1,8 @@
 // The World check (worldcheck.ts): the problems of the overworld in groups, errors and warnings, at the event progress
 // they are found at, with a stable key (kind and place). The clean game: the two level tiles nothing leads to (warnings:
-// the original game's, #379) and the event of one of them (a warning), no error, nothing else; a level tile placed
-// where nothing leads and level 019 moved elsewhere are errors; the same keys searched again. A path made to lead nowhere on the test ROM
+// the original game's, #379) and the event of one of them (a warning, the original game's too), no error, nothing
+// else; a level tile placed where nothing leads and level 019 moved elsewhere are errors; level 112's event or tile
+// changed: its warning one as any other; the same keys searched again. A path made to lead nowhere on the test ROM
 // (a ROM edit): a dead end, its fix "Add a stop tile here" – one layer 1 tile of the map before events – leaves Mario
 // stopping there, the dead end gone, the other problems' keys as before. What an edit changed (diffProblems, diffText):
 // the new dead end and up to three errors named, then "and N more"; its undo and the fix say them fixed; warnings
@@ -58,7 +59,9 @@ console.log(list(clean.problems));
     && levels.map((p) => at(p.tile)).join() === 'main 03,19,submaps 12,07',
     'the clean game: the two level tiles nothing leads to (019, 112) are warnings of Progress ("as in the original game"), found with every event passed');
   const events = ps.filter((p) => p.key.startsWith('event-reveals-nothing:'));
-  check(events.length === 1 && events[0].severity === 'warn' && events[0].group === 'progress', 'the event of level 112 reveals nothing Mario reaches: a warning');
+  check(events.length === 1 && events[0].severity === 'warn' && events[0].group === 'progress' && events[0].key === `event-reveals-nothing:${0x43}`
+    && events[0].text.endsWith('reveals nothing Mario reaches – as in the original game'),
+    `the event of level 112 (43) reveals nothing Mario reaches: a warning, "as in the original game" (${events[0]?.text})`);
   check(ps.length === 3 && errorCount(ps) === 0, `nothing else, no error (${ps.length} problems, ${errorCount(ps)} errors)`);
   check(ps.every((p, k) => k === 0 || !(p.severity === 'error' && ps[k - 1].severity === 'warn')), 'errors listed before warnings');
   const again = checkRom(new Rom(rom.data.slice())).problems;
@@ -102,6 +105,22 @@ console.log(list(clean.problems));
     writeTranslevels(r, tls);
     const ps = checkRom(r).problems, p = ps.find((q) => q.key === `unreached-level:${lonely}`);
     check(p?.severity === 'error' && p.text.startsWith('Level 019') && !ps.some((q) => q.key === `unreached-level:${at019}`), `level 019 moved to ${at(lonely)}, still not reached: an error (${p?.text})`);
+  }
+  // level 112's event changing another cell too (nothing leads there either): a warning as any other
+  {
+    const r = new Rom(rom.data.slice()), d = readEvents(r);
+    d.silent[0x43].push({ layer: 1, tile: levelTile, loc: lonely });
+    writeEvents(r, d);
+    const p = checkRom(r).problems.find((q) => q.key === `event-reveals-nothing:${0x43}`);
+    check(p?.severity === 'warn' && !p.text.includes('original game'), `level 112's event also changing ${at(lonely)}: a warning, not the original game's (${p?.text})`);
+  }
+  // another level tile at level 112's place (its event revealing that): a warning as any other
+  {
+    const r = new Rom(rom.data.slice()), m = readL1(r), cell = l1Index(1, 0x12, 0x07), t = kinds.findIndex((k, t) => k === 'level' && t !== m[cell]);
+    m[cell] = t;
+    writeL1(r, m);
+    const p = checkRom(r).problems.find((q) => q.key === `event-reveals-nothing:${0x43}`);
+    check(p?.severity === 'warn' && !p.text.includes('original game'), `tile ${hx(t, 3)} at level 112's place: its event's warning not the original game's (${p?.text})`);
   }
 }
 
