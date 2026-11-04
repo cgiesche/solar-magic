@@ -128,6 +128,15 @@ console.log(list(clean.problems));
   check(!base.change && checkAgainst(base.baseline, 1, 0, cutCheck.problems).change === null && checkAgainst(base.baseline, 2, 5, cutCheck.problems).change === null
     && checkAgainst(base.baseline, 2, 0, cutCheck.problems).change?.added.length === cutCheck.problems.length - clean.problems.length,
     'said after an edit at the same event progress; not first, not without an edit, not at another progress');
+  // the problems at every event progress learned (#377): the dead end found at the progress shown listed once – with
+  // the first progress they have it at, kept where they don't have it (a hack whose overworld code differs from the
+  // maps built from the events)
+  {
+    const once = (every: WorldProblem[]) => worldProblems(r, cutCheck.now, cutCheck.all, at, [], every).filter((p) => p.key === dead?.key);
+    const kept = once([]), later = once(dead ? [{ ...dead, progress: 5 }] : []);
+    check(kept.length === 1 && kept[0].progress === 0 && !!kept[0].fix, 'the problems at every progress without the dead end shown: it is kept, at the progress shown, with its fix');
+    check(later.length === 1 && later[0].progress === 5, 'the problems at every progress with it (first found at progress 5): listed once, at 5');
+  }
   const undone = diffText(diffProblems(cutCheck.problems, clean.problems));
   check(!!undone && undone.text.startsWith(`Fixed: dead end at ${at(end)}; `) && !undone.text.includes('New') && !undone.show, `its undo says: "${undone?.text}"`);
   const stop = stopTile(readL1(rom), kinds);

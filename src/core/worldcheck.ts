@@ -55,14 +55,17 @@ const GROUP_OF: Record<ReachKind, CheckGroup> = {
 };
 
 // The World check's problems: those of the paths at the event progress shown (`now`) and with every event passed
-// (`all`), with the problems of worldChecks (`checks`, found with every event passed: kept while the ROM is the same),
-// errors first, then by group. everyProgress: the problems found at every event progress (stuckAtEveryProgress, the
-// Look group's paths), once they are learned – the dead ends and exit path tiles leading nowhere at every progress then in place of those at
-// the progress shown (each named with the first progress it is found at). place: a tile's name ("Main map 0C,09")
+// (`all`), with the problems of worldChecks (`checks`, found with every event passed: kept while the ROM is the
+// same), errors first, then by group. everyProgress: the problems found at every event progress
+// (stuckAtEveryProgress, the Look group's paths), once they are learned – a dead end or exit path tile leading
+// nowhere at the progress shown then listed once, with the first progress it is found at: everyProgress's where that
+// has its key, else the progress shown (those come from the emulated maps, everyProgress's from the maps built from
+// the events: on a hack whose overworld code differs a real one may be missing there). place: a tile's name ("Main
+// map 0C,09")
 export function worldProblems(rom: Rom, now: CheckedAt, all: CheckedAt, place: (tile: number) => string, checks: readonly WorldProblem[] = [], everyProgress: readonly WorldProblem[] | null = null): WorldProblem[] {
-  const l1 = readL1(rom), stop = stopTile(l1, now.inp.kinds);
+  const l1 = readL1(rom), stop = stopTile(l1, now.inp.kinds), every = new Set(everyProgress?.map((p) => p.key));
   const out = reachProblems(rom, now, all, place)
-    .filter((p) => !everyProgress || p.at !== 'now')
+    .filter((p) => p.at !== 'now' || !every.has(p.key))
     .map((p) => reachProblem(p, p.at === 'now' ? now : all, l1, stop));
   out.push(...checks, ...everyProgress ?? []);
   const order = (p: WorldProblem) => (p.severity === 'error' ? 0 : 10) + CHECK_GROUPS.findIndex((g) => g.id === p.group);

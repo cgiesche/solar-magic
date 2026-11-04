@@ -6,8 +6,8 @@
 // ROM edit and undo, and when what the search needs is learned (owreachview.ts); what an edit changed is said in a
 // toast (new errors named, with Show). The problems found at every event progress – dead ends, exit path tiles leading
 // nowhere and the paths without a look (core/owlook.ts) – come once the saves at every event progress are learned
-// (until then the dead ends at the progress shown are listed): what an edit changed there is said when they come
-// (with the rest when it is there by then).
+// (until then the dead ends at the progress shown are listed; after, those they miss too): what an edit changed there
+// is said when they come (with the rest when it is there by then).
 
 import type { OverworldView } from './overworld.ts';
 import type { OwMode } from '../core/owlayers.ts';
@@ -114,14 +114,14 @@ export class WorldCheck {
   // what the ROM edits since the problems last checked changed, in a toast (at most one per check, none when nothing
   // changed; checkAgainst): those found at every event progress (`every`, null while learned) against those last
   // checked, once they come – at any event progress shown (the dead ends at the progress shown meanwhile not said:
-  // they are said with them)
+  // they are said with them, as are those at the progress shown they miss, kept in the list: worldProblems)
   private tell(ps: WorldProblem[], every: WorldProblem[] | null): void {
     const v = this.view, gen = v.app.rom.gen;
     const main = checkAgainst(this.baseline, gen, v.progress, ps.filter((p) => !isFoundAtEveryProgress(p)));
     this.baseline = main.baseline;
     let change = main.change;
     if (every) {
-      const l = checkAgainst(this.everyBaseline, gen, 0, every);
+      const l = checkAgainst(this.everyBaseline, gen, 0, ps.filter(isFoundAtEveryProgress));
       this.everyBaseline = l.baseline;
       if (l.change) change = change ? { added: [...change.added, ...l.change.added], gone: [...change.gone, ...l.change.gone] } : l.change;
     }
