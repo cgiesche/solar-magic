@@ -363,6 +363,7 @@ function buildUi(app: App): { start: (at: NavLoc | null) => Promise<void> } {
         ow.onNav = () => nav?.mark();
         ow.onEditGraphics = (map, progress) => void setWorkspace('gfx', { tab: 'pal', at: { submap: map, progress } });
         ow.onEditBorder = (map) => { gameBorder = map; void setWorkspace('game'); };
+        ow.onTestPlay = () => testOverworld();
       }
       owRight.replaceChildren(ow.side);
       showLayout(ow.bar, ow.left, ow.root, owRight);

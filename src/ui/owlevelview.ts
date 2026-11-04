@@ -2,7 +2,7 @@
 // (its settings in the Properties panel), a drag moves it – it swaps with the tile where it is dropped, its translevel
 // with it –, Delete leaves the stop tile, a right click places a level on a cell ("Place level here…": the level and
 // its look chosen), a level without a level tile is dragged from the list onto the map. Each change one ROM edit of
-// the map before events – with "Map after: event X" a layer 1 change of that event (the level tiles as after it) –
+// the map before events – with event X chosen in the strip a layer 1 change of that event (the level tiles as after it) –
 // (owleveltiles.ts), made once the path kinds, the submaps' views and an event's maps are known.
 
 import type { OverworldView } from './overworld.ts';

@@ -335,7 +335,14 @@ canvas.sheet-fill { width: 100%; height: auto; image-rendering: auto; }
 .btn-group button.ow-l2 { box-shadow: inset 0 -3px 0 var(--ow-l2); }
 .btn-group button.ow-l1.active { border-color: var(--ow-l1); }
 .btn-group button.ow-l2.active { border-color: var(--ow-l2); }
-.ow-event-pick { max-width: 240px; }
+.ow-strip { display: flex; align-items: stretch; gap: 4px; flex: 0 0 auto; padding: 4px 8px; background: var(--panel); border-top: 1px solid var(--border); }
+.ow-strip-list { position: relative; display: flex; gap: 4px; flex: 1; min-width: 0; overflow-x: auto; scrollbar-width: thin; padding-bottom: 2px; }
+.ow-strip-chip { flex: 0 0 auto; white-space: nowrap; padding: 2px 8px; }
+.ow-strip-chip small { color: var(--muted); font-family: ui-monospace, monospace; }
+.ow-strip-chip.unrun { color: var(--muted); }
+.ow-strip-chip.active { border-color: #ffd34c; box-shadow: inset 0 -3px 0 #ffd34c; color: inherit; }
+.ow-strip-test { flex: 0 0 auto; white-space: nowrap; }
+.ow-strip-step { flex: 0 0 auto; }
 .ow-timeline { display: none; flex: 0 0 auto; padding: 5px 8px; background: var(--panel); border-top: 1px solid var(--border); }
 .ow-timeline.show { display: block; }
 .ow-timeline-head { display: flex; align-items: center; gap: 6px; }

@@ -1,5 +1,7 @@
 # Level tiles as objects on top of layer 1
 
+_The "Map after" select named below was replaced by the playthrough strip (ADR 0013): "Map after: event X" reads as event X chosen in the strip._
+
 A level tile (CONTEXT.md) is a layer 1 tile entering a level, its translevel moving with it. It could only be painted: moving one meant picking it up (the brush carries its translevel), painting it elsewhere and painting over the old one, which only a toast hinted at; placing one meant knowing which tile numbers are level tiles (56–80 in the clean game). For users level tiles are objects, as overworld links and sprites are, which have modes of their own (#335).
 
 We decided that the overworld editor has a **Levels mode** (key 3, between the layers and the overworld links; no layer dimmed) in which level tiles are objects on top of layer 1 – the only way to place, move or remove one (#340) –, each change one ROM edit of layer 1 and the translevel table on the map before events, or with "Map after: event X" a layer 1 change of event X (core/owleveltiles.ts):

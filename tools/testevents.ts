@@ -3,7 +3,8 @@
 // event progress (emulated); the patch changes no event's effect.
 import { Rom } from '../src/core/rom.ts';
 import { OverworldEmulator, gameL2, readL2, OW_EVENTS } from '../src/core/overworld.ts';
-import { readEvents, applyEvents, hasEventPatch, eventList, stepEvent, type EventData, type EventRunner } from '../src/core/owevents.ts';
+import { readEvents, applyEvents, hasEventPatch, playthroughStrip, eventRunners, stepEvent, type EventData, type EventRunner } from '../src/core/owevents.ts';
+import { levelName } from '../src/core/levelnames.ts';
 import { cleanImage, editorImage } from './fixture.ts';
 
 let bad = 0;
@@ -37,19 +38,24 @@ for (const n of [0, 0x20, 0x6f]) for (const r of [0, 1]) {
   check(!d, `progress ${hx(n)}, region ${r}: the editor's ROM shows the clean game's layer 2${d ? ` (${d} tiles differ)` : ''}`);
 }
 
-// ---- the editor's "Map after" list: before events, then the events by the level exit running them ----
+// ---- the playthrough strip: before events, then every event in number order, labelled by the level exit running it ----
 {
   const runners = new Map<number, EventRunner[]>([
-    [5, [{ tl: 0x02, exit: 1, tile: 0 }]], // level 002 secret exit
-    [3, [{ tl: 0x02, exit: 0, tile: 0 }]], // level 002 normal exit
-    [9, [{ tl: 0x01, exit: 0, tile: 0 }]], // level 001
+    [5, [{ tl: 0x02, exit: 1, tile: 0 }, { tl: 0x07, exit: 0, tile: 0 }]], // level 002's secret exit (and level 007's normal one)
+    [3, [{ tl: 0x02, exit: 0, tile: 0 }]], // level 002's normal exit
+    [9, [{ tl: 0x01, exit: 2, tile: 0 }]], // level 001's secret exit 2
   ]);
-  const list = eventList(runners);
-  check(list.length === OW_EVENTS + 1 && list[0].event === -1 && list[0].label === 'Before events', 'the list: "Before events", then every event once');
-  check(list.slice(1, 4).map((x) => x.event).join() === '9,3,5', 'events run by a level exit first, by level, then exit');
-  check(list[4].event === 0 && list[5].event === 1 && list[6].event === 2 && list[7].event === 4, 'the others by number');
-  check(list[1].label === 'Level 001 · normal exit (09)' && list[4].label === 'Event 00', `labels: ${list[1].label}, ${list[4].label}`);
-  check(new Set(list.map((x) => x.event)).size === OW_EVENTS + 1, 'no event twice');
+  const strip = playthroughStrip(runners, (tl) => `Level ${tl}`);
+  check(strip.length === OW_EVENTS + 1 && strip[0].event === -1 && strip[0].label === 'Before events', 'the strip: "Before events", then every event once');
+  check(strip.slice(1).every((x, k) => x.event === k), 'in number order (the order the game applies them)');
+  check(strip[4].label === 'Level 2 · normal exit' && strip[4].number === '03', `an event by the exit running it, the number apart: ${strip[4].label} (${strip[4].number})`);
+  check(strip[6].label === 'Level 2 · secret exit' && strip[6].others.join() === 'Level 7 · normal exit', `the first exit running it, the others apart: ${strip[6].label}; ${strip[6].others}`);
+  check(strip[10].label === 'Level 1 · secret exit 2', `secret exits 2 and 3 numbered: ${strip[10].label}`);
+  check(strip[0x50].label === 'Event 4F (run by no level exit)' && strip[0x50].number === '', `an event no exit runs: ${strip[0x50].label}`);
+  // the test ROM: labelled by the levels' names
+  const real = playthroughStrip(eventRunners(rom), (tl) => levelName(rom, tl));
+  const yi2 = real.filter((x) => /YOSHI'S ISLAND 2/i.test(x.label)).map((x) => `${x.label} (${x.number})`);
+  check(yi2.length > 0 && yi2.every((l) => / · (normal|secret) exit \(\w\w\)$/.test(l)), `the test ROM's labels by level name: ${yi2.join(', ')}`);
   check(stepEvent(-1, -1) === -1 && stepEvent(-1, 1) === 0 && stepEvent(0, -1) === -1 && stepEvent(5, 1) === 6, 'stepping: one event back/further in number order, -1 the map before events');
   check(stepEvent(OW_EVENTS - 1, 1) === OW_EVENTS - 1, 'stepping stops at the last event');
 }

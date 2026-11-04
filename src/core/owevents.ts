@@ -410,18 +410,27 @@ export function eventTitle(runners: Map<number, EventRunner[]>, e: number): stri
   return r ? `Level ${hex3(translevelToLevel(r.tl))} · ${EXIT_SHORT[r.exit]}` : `Event ${hex2(e)}`;
 }
 
-// the editor's "Map after" list (CONTEXT.md "Event progress"): the map before events (-1), then the events run by a
-// level exit (by level, then exit; labelled by it, the event's number after it), then those no level exit runs by
-// number
-export function eventList(runners: Map<number, EventRunner[]>): { event: number; label: string }[] {
-  const first = (e: number) => runners.get(e)?.[0];
-  const events = Array.from({ length: OW_EVENTS }, (_, e) => e).sort((a, b) => {
-    const ra = first(a), rb = first(b);
-    if (!ra || !rb) return ra ? -1 : rb ? 1 : a - b;
-    return translevelToLevel(ra.tl) - translevelToLevel(rb.tl) || ra.exit - rb.exit;
-  });
-  return [{ event: -1, label: 'Before events' },
-    ...events.map((e) => ({ event: e, label: first(e) ? `${eventTitle(runners, e)} (${hex2(e)})` : eventTitle(runners, e) }))];
+// a level exit in the player's words: "Yoshi's Island 2 · secret exit" (name: the level's name by translevel)
+const EXIT_WORDS = ['normal exit', 'secret exit', 'secret exit 2', 'secret exit 3'];
+export const exitWords = (r: { tl: number; exit: number }, name: (tl: number) => string): string => `${name(r.tl)} · ${EXIT_WORDS[r.exit]}`;
+// an event in the player's words: by the level exit running it (exitWords), one no level exit runs as "Event 4F (run
+// by no level exit)"
+export function eventWords(runners: Map<number, EventRunner[]>, e: number, name: (tl: number) => string): string {
+  const r = runners.get(e)?.[0];
+  return r ? exitWords(r, name) : `Event ${hex2(e)} (run by no level exit)`;
+}
+
+// The playthrough strip under the overworld map (CONTEXT.md "Event progress", ADR 0013): "Before events" (-1), then
+// every event in number order – the order the game applies them loading a save –, each labelled in the player's
+// words (eventWords) with the event's number apart (shown small after it; none for an event no level exit runs, its
+// label has it). others: the further level exits running the event (the first one is the one passed at the progress)
+export interface StripEntry { event: number; label: string; number: string; others: string[] }
+export function playthroughStrip(runners: Map<number, EventRunner[]>, name: (tl: number) => string): StripEntry[] {
+  return [{ event: -1, label: 'Before events', number: '', others: [] },
+    ...Array.from({ length: OW_EVENTS }, (_, e) => {
+      const more = runners.get(e)?.slice(1) ?? [];
+      return { event: e, label: eventWords(runners, e, name), number: runners.has(e) ? hex2(e) : '', others: more.map((r) => exitWords(r, name)) };
+    })];
 }
 
 // one event back (d -1) or further (+1) in number order from e (-1: the map before events), clamped
