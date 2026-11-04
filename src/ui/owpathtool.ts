@@ -3,8 +3,8 @@
 // (owroute.ts routeTiles) – a cell no tile fits in red, why in the status bar. Released, the tiles are written as one
 // ROM edit into the progress chosen ("Map after": the event's layer 1 changes, else the map before events), as a
 // stroke, and a level tile at an end whose exit runs the event gets that exit's direction (owroute.ts writeRoute). A
-// stop tile it puts takes a level without level tile (its translevel: the ways Mario walks off it), refused where none
-// is left.
+// stop tile it puts takes a level without level tile and without name, base event or messages (its translevel: the
+// ways Mario walks off it), refused where none is left.
 // Layer 2 is not touched.
 
 import type { OverworldView } from './overworld.ts';
@@ -13,13 +13,14 @@ import { toast } from './dom.ts';
 import { refusalWords, refusedToast } from './owrefusal.ts';
 import { l1Index, l1XY, exitDirections, DIR_NAMES, EXIT_NAMES, translevelToLevel } from '../core/overworld.ts';
 import { pathWays } from '../core/owpathshape.ts';
-import { routeTiles, routeExits, routeKind, writeRoute, type RouteTiles } from '../core/owroute.ts';
+import { routeTiles, routeExits, routeKind, writeRoute, stopTranslevels, type RouteTiles, type StopTranslevels } from '../core/owroute.ts';
 import { hex } from '../core/names.ts';
 
 export class PathTool {
   on = false; // the tool chosen (the layer 1 mode's left button draws routes)
   private route: number[] | null = null; // the route being drawn (l1Index), its tiles
   private solved: RouteTiles | null = null;
+  private stopTls: StopTranslevels | null = null; // (the translevels a stop may take, read once per drag)
   constructor(private view: OverworldView) {}
 
   // why a route can't be drawn now (null: it can): not before the path kinds and shapes are learned and, with an
@@ -41,6 +42,7 @@ export class PathTool {
     if (why) { toast(why); return; }
     if (!this.inside(x, y)) return;
     this.route = [l1Index(this.view.region, x, y)];
+    this.stopTls = stopTranslevels(this.view.app.rom, this.view.tls);
     this.solved = this.solve(this.route);
     this.shown();
   }
@@ -69,7 +71,7 @@ export class PathTool {
   // another event chosen during the drag)
   up(): void {
     const r = this.route;
-    this.route = this.solved = null;
+    this.route = this.solved = this.stopTls = null;
     this.shown();
     if (!r || r.length < 2) return;
     const why = this.blocked();
@@ -94,7 +96,7 @@ export class PathTool {
   // Esc: the route dropped; false: none
   cancel(): boolean {
     if (!this.route) return false;
-    this.route = this.solved = null;
+    this.route = this.solved = this.stopTls = null;
     this.shown();
     return true;
   }
@@ -102,7 +104,7 @@ export class PathTool {
   // the route's tiles as the editor chooses them, on layer 1 as shown (after the event chosen)
   private solve(r: readonly number[]): RouteTiles {
     const v = this.view, kinds = v.pathKinds()!, l1 = v.levelL1();
-    return routeTiles(r, { l1, kinds, shapes: v.pathShapes()!, prefer: routeKind(r, l1, kinds), tls: v.tls });
+    return routeTiles(r, { l1, kinds, shapes: v.pathShapes()!, prefer: routeKind(r, l1, kinds), stopTranslevels: this.stopTls ?? stopTranslevels(v.app.rom, v.tls) });
   }
   private shown(): void {
     this.view.paint();

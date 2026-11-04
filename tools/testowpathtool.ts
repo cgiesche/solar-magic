@@ -6,12 +6,13 @@
 // and no exit is set. A second route across it (#376): its stop tiles – the junction and its ends – take translevels
 // no tile held, their initial flags the stops' ways, and Mario leaves the junction in every direction at every
 // progress from the event on (with translevel 0 he doesn't); undo frees them; no translevel left: refused, nothing
-// written.
+// written. Translevels without tile with a name, base event or messages are never taken (#382): only those left,
+// refused at the first stop, nothing written, the refusal saying why.
 // node tools/testowpathtool.ts
 import { Rom } from '../src/core/rom.ts';
 import { RomEditSession } from '../src/core/romedit.ts';
 import {
-  OverworldEmulator, OverworldLoads, gameL1, readL1, readTranslevels, writeTranslevels, baseEvent, exitDirections, initialFlags, l1XY, translevelToLevel,
+  OverworldEmulator, OverworldLoads, gameL1, readL1, readTranslevels, writeTranslevels, baseEvent, setBaseEvent, hasNameEventOrMessages, exitDirections, initialFlags, l1XY, translevelToLevel,
   DIR_NAMES, DIR_FLAGS, NO_EVENT, OW_EVENTS,
 } from '../src/core/overworld.ts';
 import { progressSaves } from '../src/core/owprogress.ts';
@@ -20,9 +21,12 @@ import { readStart } from '../src/core/owsprites.ts';
 import { readEvents, layer1Without, eventL1Tiles, submapViews, submapOf } from '../src/core/owevents.ts';
 import { levelTileTest } from '../src/core/owpaths.ts';
 import { RAM } from '../src/core/ram.ts';
-import { routeTiles, routeKind, writeRoute } from '../src/core/owroute.ts';
+import { routeTiles, routeKind, writeRoute, stopTranslevels } from '../src/core/owroute.ts';
 import { levelsWithoutTile, type LevelTileEvent } from '../src/core/owleveltiles.ts';
 import { refusalOf, refusalDetails } from '../src/core/owrefusal.ts';
+import { refusalWords } from '../src/ui/owrefusal.ts';
+import { setLevelNameTiles } from '../src/core/levelnames.ts';
+import { readMessage, writeMessages, isBlank } from '../src/core/messages.ts';
 import { editorImage, pathKinds, pathShapes } from './fixture.ts';
 
 let bad = 0;
@@ -130,16 +134,17 @@ if (found) {
   check(!!cross, cross ? `a route across it: ${cross.map(at).join(' → ')}` : 'a route across the first one');
   if (cross) {
     const j = cross[(cross.length - 1) / 2], ev2: LevelTileEvent = { ...ev, after: after1 };
-    const tls0 = readTranslevels(rom), solved2 = routeTiles(cross, { l1: after1, kinds, shapes, prefer: routeKind(cross, after1, kinds), tls: tls0 });
+    const tls0 = readTranslevels(rom), solved2 = routeTiles(cross, { l1: after1, kinds, shapes, prefer: routeKind(cross, after1, kinds), stopTranslevels: stopTranslevels(rom, tls0) });
     const js = solved2.stops.find((x) => x.cell === j);
     check(!solved2.refusal && solved2.stops.length === 3 && !!js && js.dirs.join() === '0,1,2,3',
       `its stop tiles: both ends and the junction, ways ${js?.dirs.map((d) => DIR_NAMES[d]).join(', ')}${solved2.refusal ? ` refused: ${solved2.refusal.why.kind}` : ''}`);
-    const before2 = rom.data.slice(), without0 = levelsWithoutTile(tls0);
+    const before2 = rom.data.slice(), without0 = levelsWithoutTile(tls0), kept0 = without0.filter((tl) => hasNameEventOrMessages(rom, tl));
     let taken: number[] = [];
     s.edit('Path', () => { taken = writeRoute(rom, cross!, solved2, ev2).taken; }, { key: null });
     const tls2 = readTranslevels(rom), got = solved2.stops.map((x) => tls2[x.cell]);
     check(got.every((tl) => without0.includes(tl)) && new Set(got).size === 3 && levelsWithoutTile(tls2).length === without0.length - 3 && got.join() === taken.join(),
       `each stop tile a translevel no tile held (${got.map((tl) => hx(tl)).join(', ')}): 3 fewer levels without level tile`);
+    check(!got.some((tl) => kept0.includes(tl)), `none of those without tile with a name, base event or messages taken (${kept0.map((tl) => hx(tl)).join(', ') || 'none'})`);
     check(got.every((tl) => baseEvent(rom, tl) === NO_EVENT && exitDirections(rom, tl).every((d) => d === 0)), 'their settings reset: no event');
     check(solved2.stops.every((x) => initialFlags(rom, tls2[x.cell]) === x.dirs.reduce((f, d) => f | DIR_FLAGS[d], 0)), 'their initial flags: the stops\' ways');
     const reachedAt = reacher(rom), stuck: string[] = [];
@@ -161,7 +166,7 @@ if (found) {
     check(same(rom.data, before2) && levelsWithoutTile(readTranslevels(rom)).join() === without0.join(), 'undone: the translevels free again, as before');
 
     // on the map before events: the stop tiles take translevels too
-    const l1b2 = readL1(rom), solved3 = routeTiles(cross, { l1: l1b2, kinds, shapes, prefer: 'walk', tls: tls0 });
+    const l1b2 = readL1(rom), solved3 = routeTiles(cross, { l1: l1b2, kinds, shapes, prefer: 'walk', stopTranslevels: stopTranslevels(rom, tls0) });
     s.edit('Path', () => { writeRoute(rom, cross!, solved3, null); }, { key: null });
     const tls3 = readTranslevels(rom);
     check(!solved3.refusal && solved3.stops.length >= 2 && solved3.stops.every((x) => without0.includes(tls3[x.cell]) && initialFlags(rom, tls3[x.cell]) === x.dirs.reduce((f, d) => f | DIR_FLAGS[d], 0)),
@@ -172,7 +177,7 @@ if (found) {
     // no translevel free: refused at the stop tile it runs out at, nothing written
     const full = Uint8Array.from(tls0), left = levelsWithoutTile(full);
     for (let i = 0x7ff; left.length > 1; i--) if (!full[i] && !cross.includes(i)) full[i] = left.pop()!;
-    const one = routeTiles(cross, { l1: after1, kinds, shapes, prefer: 'walk', tls: full });
+    const one = routeTiles(cross, { l1: after1, kinds, shapes, prefer: 'walk', stopTranslevels: stopTranslevels(rom, full) });
     check(one.refusal?.why.kind === 'routeNoTranslevel' && one.refusal.at === solved2.stops[1].at && one.tiles.slice(one.refusal.at).every((t) => t === null),
       `one translevel free for three stop tiles: refused at the second (${one.refusal ? `${at(one.refusal.cell)}: ${refusalDetails(one.refusal.why)}` : 'not refused'})`);
     writeTranslevels(rom, full);
@@ -180,6 +185,36 @@ if (found) {
     let thrown: unknown = null;
     try { writeRoute(rom, cross, solved2, ev2); } catch (err) { thrown = err; }
     check(refusalOf(thrown)?.kind === 'routeNoTranslevel' && same(rom.data, before3), 'written anyway: refused (routeNoTranslevel), nothing written');
+
+    // (#382) three translevels without tile, but each with a name, base event or messages: never taken – refused at
+    // the first stop tile, nothing written, the refusal saying why
+    {
+      const r2 = new Rom(rom.data.slice()), t2 = Uint8Array.from(tls0), left2 = levelsWithoutTile(t2);
+      for (let i = 0x7ff; left2.length > 3; i--) if (!t2[i] && !cross.includes(i)) t2[i] = left2.pop()!;
+      writeTranslevels(r2, t2);
+      for (const tl of left2) { setBaseEvent(r2, tl, NO_EVENT); setLevelNameTiles(r2, tl, []); }
+      const withMsg = Array.from({ length: 0x5f }, (_, k) => k + 1).find((tl) => !left2.includes(tl) && !isBlank(readMessage(r2, tl, 1)))!;
+      setBaseEvent(r2, left2[0], 0x10);
+      setLevelNameTiles(r2, left2[1], [0x00, 0x01]);
+      writeMessages(r2, [{ translevel: left2[2], msg: 1, message: readMessage(r2, withMsg, 1) }]);
+      const st = stopTranslevels(r2);
+      check(st.free.length === 0 && st.kept === 3, `three without tile, each with settings: none free for a stop (${st.free.length} free, ${st.kept} kept)`);
+      const none = routeTiles(cross, { l1: after1, kinds, shapes, prefer: 'walk', stopTranslevels: st }), why = none.refusal?.why;
+      check(why?.kind === 'routeNoTranslevel' && why.kept === 3 && none.refusal!.at === solved2.stops[0].at,
+        `refused at the first stop tile: ${why ? refusalDetails(why) : 'not refused'}`);
+      const words = why ? refusalWords(r2, why) : null;
+      check(!!words && /name, base event or messages/.test(words.reason) && /Without level tile/.test(words.instead), `the player's words: "${words?.reason}" ${words?.instead}`);
+      const before4 = r2.data.slice();
+      let thrown2: unknown = null;
+      try { writeRoute(r2, cross, solved2, ev2); } catch (err) { thrown2 = err; }
+      check(refusalOf(thrown2)?.kind === 'routeNoTranslevel' && same(r2.data, before4), 'written anyway: refused, nothing written (their settings kept)');
+      // one of them without settings again: the stops take it – refused at the second
+      setBaseEvent(r2, left2[0], NO_EVENT);
+      const one2 = routeTiles(cross, { l1: after1, kinds, shapes, prefer: 'walk', stopTranslevels: stopTranslevels(r2) });
+      const why2 = one2.refusal?.why;
+      check(why2?.kind === 'routeNoTranslevel' && why2.kept === 2 && one2.refusal!.at === solved2.stops[1].at,
+        `one of them without settings: the first stop takes it, refused at the second (${why2 ? refusalWords(r2, why2).reason : 'not refused'})`);
+    }
   }
 }
 

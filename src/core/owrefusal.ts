@@ -41,7 +41,7 @@ export type OwRefusalData =
   // no path tile leads Mario in direction dir and out toward out (where: at all, from where his first step off the stop
   // or the path before leaves him, to where his first step off the stop after it leaves him walking back)
   | { kind: 'routeNoTile'; dir: number; out: number; where: 'any' | 'stopStep' | 'pathBefore' | 'stepBack' }
-  | { kind: 'routeNoTranslevel'; max: number } // a stop tile the route puts: every translevel 01…max held by a tile
+  | { kind: 'routeNoTranslevel'; max: number; kept: number } // a stop tile the route puts: every translevel 01…max held by a tile, by a stop before or (kept of them) with a name, base event or messages
   // ---- layer 2 pieces replaced (owl2pieces.ts, the layer 2 sheet's "Replace piece…") ----
   | { kind: 'pieceSame' } // the new piece is the one to replace
   | { kind: 'pieceNoneInside' } // no piece lies wholly inside the selection
@@ -104,7 +104,7 @@ export function refusalDetails(r: OwRefusalData): string {
     case 'routeExitInside': return 'An exit tile takes Mario to another submap: the route can only end there.';
     case 'routeCrosses': return 'The route crosses itself here.';
     case 'routeNoTile': return `${routeNoTileText(r)}.`;
-    case 'routeNoTranslevel': return `All ${r.max} translevels (01–${hex(r.max, 2)}) are held by a tile: a stop tile needs one of its own (its flags open the ways Mario walks off it).`;
+    case 'routeNoTranslevel': return `All ${r.max} translevels (01–${hex(r.max, 2)}) are held by a tile or a stop before on the route${r.kept ? `, or have a name, base event or messages a stop tile would erase (${r.kept})` : ''}: a stop tile needs one of its own (its flags open the ways Mario walks off it).`;
     case 'pieceSame': return 'The new piece is the one to replace.';
     case 'pieceNoneInside': return 'No piece lies wholly inside the selection (2x2 blocks on the 16-pixel grid).';
     case 'pieceNotFound': return `The piece is not ${r.selection ? 'in the selection' : 'on this map'}.`;

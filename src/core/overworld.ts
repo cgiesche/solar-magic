@@ -542,8 +542,13 @@ export function installLevelFlagsPatch(rom: Rom): void {
 export type TranslevelUse = 0 | 1 | 2;
 export function translevelUse(rom: Rom, tl: number): TranslevelUse {
   if (hasOwnContent(rom, translevelToLevel(tl))) return 2;
-  return hasLevelName(rom, tl) || baseEvent(rom, tl) !== NO_EVENT || hasMessages(rom, tl) || initialFlags(rom, tl) ? 1 : 0;
+  return hasNameEventOrMessages(rom, tl) || initialFlags(rom, tl) ? 1 : 0;
 }
+
+// whether translevel tl has a name, base event or messages – what a level without level tile keeps for a tile
+// placed later, so a new stop tile never takes it (owroute.ts stopTranslevels)
+export const hasNameEventOrMessages = (rom: Rom, tl: number): boolean =>
+  hasLevelName(rom, tl) || baseEvent(rom, tl) !== NO_EVENT || hasMessages(rom, tl);
 
 // the settings of translevel tl as the game's unused ones: no name, no base event, every exit enabling up, no
 // message, no initial flags

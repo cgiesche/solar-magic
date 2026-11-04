@@ -60,7 +60,7 @@ export function owBudgets(rom: Rom, submap: number, kinds: readonly PathKind[] |
       'Exit paths', 'Exit paths to another submap (a link both ways: one each way)');
   }
   add('translevels', MAX_TRANSLEVEL - levelsWithoutTile(readTranslevels(rom)).length, MAX_TRANSLEVEL,
-    'Levels on the overworld', 'Levels a level tile enters or a stop tile holds (a route\'s stops: the ways Mario walks off them) – the others are without level tile, free to place');
+    'Levels on the overworld', 'Levels a level tile enters or a stop tile holds (a route\'s stops: the ways Mario walks off them) – the others are without level tile, free to place; a new stop takes only one without name, base event or messages');
   if (hasEventPatch(rom)) add('eventStorage', storagePlacesUsed(readEvents(rom)), STORAGE_MAX,
     'Event tile storage', 'Room for the layer 2 tiles events write (each step\'s piece of 2×2 or 6×6 tiles)');
   add('customSprites', readCustomSprites(rom)[submap]?.length ?? 0, OW_CUSTOM_MAX,

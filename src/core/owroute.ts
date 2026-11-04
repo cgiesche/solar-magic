@@ -14,7 +14,8 @@
 // into a path already there (the cell's tile leads on to a cell off the route Mario walks onto): the junction, as in
 // the game. A path tile the route runs along is replaced, kept where it fits.
 //
-// A stop tile put gets a translevel no tile holds: standing on a stop, Mario walks off only in
+// A stop tile put gets a translevel no tile holds and without name, base event or messages (a stop never takes one
+// with them, the route is refused instead): standing on a stop, Mario walks off only in
 // the directions its translevel's flags ($1EA2) open, and coming onto it opens only the way back – a stop with
 // translevel 0 shares the flags of every such tile, so at a junction he could not walk on. Its initial flags (Lunar
 // Magic's table, every new game) open the ways the stop has: the route's and those of the path it runs into.
@@ -26,7 +27,7 @@ import { stopTile, levelsWithoutTile, type LevelTileEvent } from './owleveltiles
 import type { Rom } from './rom.ts';
 import { OwRefusal, type OwRefusalData } from './owrefusal.ts';
 import {
-  readL1, writeL1, readTranslevels, writeTranslevels, setExitDirection, setInitialFlags, translevelUse, freeTranslevel, resetTranslevel,
+  readL1, writeL1, readTranslevels, writeTranslevels, setExitDirection, setInitialFlags, translevelUse, hasNameEventOrMessages, freeTranslevel, resetTranslevel,
   DIR_FLAGS, MAX_TRANSLEVEL,
 } from './overworld.ts';
 import { readEvents, writeEvents, paintEventL1, eventRunners } from './owevents.ts';
@@ -34,8 +35,8 @@ import { readEvents, writeEvents, paintEventL1, eventRunners } from './owevents.
 // What the solver needs: layer 1 as it is (l1Index order: the route's cells, the paths it may run into), the path
 // kinds and shapes, the kind of path to use where a tile of it fits (the kind at the route's start), the stop tile to
 // put (default: owleveltiles.ts stopTile), route cells (indices into the route) to make stop tiles anyway, and the
-// translevels as in the ROM (tls: a stop tile put on a cell without one takes a free one – refused where none is
-// left; without them not checked).
+// translevels as in the ROM (stopTranslevels: a stop tile put on a cell without one takes a free one – refused where
+// none is left; without them not checked).
 export interface RouteInput {
   l1: ArrayLike<number>;
   kinds: readonly PathKind[];
@@ -43,8 +44,18 @@ export interface RouteInput {
   prefer: PathKind;
   stop?: number;
   stops?: ReadonlySet<number>;
-  tls?: ArrayLike<number>;
+  stopTranslevels?: StopTranslevels;
 }
+
+// each layer 1 tile's translevel (tls) and those a new stop tile may take (free): no tile holds them and they have
+// no name, base event or messages (hasNameEventOrMessages) – a level without level tile keeps them for a tile placed
+// later, and a stop taking it would erase them; kept: how many without level tile are left out for that
+export interface StopTranslevels { tls: ArrayLike<number>; free: readonly number[]; kept: number }
+export function stopTranslevels(rom: Rom, tls: ArrayLike<number> = readTranslevels(rom)): StopTranslevels {
+  const without = levelsWithoutTile(tls), free = without.filter((tl) => !hasNameEventOrMessages(rom, tl));
+  return { tls, free, kept: without.length - free.length };
+}
+const noTranslevel = (t: StopTranslevels): OwRefusalData => ({ kind: 'routeNoTranslevel', max: MAX_TRANSLEVEL, kept: t.kept });
 
 // The first cell no tile fits: its index in the route and its layer 1 cell, why (as data, worded by ui/owrefusal.ts),
 // and what would work instead – a stop
@@ -129,11 +140,12 @@ function solve(route: readonly number[], inp: RouteInput, askAlternatives: boole
   }
   const stops = routeStops(sv);
   // (a translevel for each stop tile on a cell without one)
-  if (inp.tls) {
-    const need = stops.filter((s) => !inp.tls![s.cell]), free = levelsWithoutTile(inp.tls).length;
+  const st = inp.stopTranslevels;
+  if (st) {
+    const need = stops.filter((s) => !st.tls[s.cell]), free = st.free.length;
     if (need.length > free) {
       tiles.fill(null, need[free].at);
-      return refuse(need[free].at, { kind: 'routeNoTranslevel', max: MAX_TRANSLEVEL });
+      return refuse(need[free].at, noTranslevel(st));
     }
   }
   return { tiles, stops, refusal: null };
@@ -264,13 +276,14 @@ export function routeExits(rom: Rom, route: readonly number[], ev: LevelTileEven
 
 // The route's tiles (routeTiles' tiles: null left alone) written: into the map before events, or with an event (ev) as
 // layer 1 changes of it (owevents.ts paintEventL1, as layer 1 painted into the event), and the exits routeExits gives
-// set. Each stop tile put on a cell without a translevel gets a free one (the one bringing least along, freeTranslevel
-// by translevelUse; one for every event progress, the table being per cell): its settings reset (no name shown on the
-// stop, no event – resetTranslevel), its initial flags the stop's directions (stopFlags). Throws (nothing written)
-// where no translevel is left for one. Layer 2 is not touched. The exits it set, the translevels the stops took.
+// set. Each stop tile put on a cell without a translevel gets a free one (stopTranslevels: none with a name, base
+// event or messages; of them the one bringing least along, freeTranslevel by translevelUse; one for every event
+// progress, the table being per cell): its settings reset (no exit directions, resetTranslevel), its initial flags the
+// stop's directions (stopFlags). Throws (nothing written) where no translevel is left for one. Layer 2 is not
+// touched. The exits it set, the translevels the stops took.
 export function writeRoute(rom: Rom, route: readonly number[], solved: Pick<RouteTiles, 'tiles' | 'stops'>, ev: LevelTileEvent | null): { exits: RouteExit[]; taken: number[] } {
-  const { tiles } = solved, tls = readTranslevels(rom), need = solved.stops.filter((s) => !tls[s.cell]);
-  if (need.length > levelsWithoutTile(tls).length) throw new OwRefusal({ kind: 'routeNoTranslevel', max: MAX_TRANSLEVEL });
+  const { tiles } = solved, tls = readTranslevels(rom), need = solved.stops.filter((s) => !tls[s.cell]), st = stopTranslevels(rom, tls);
+  if (need.length > st.free.length) throw new OwRefusal(noTranslevel(st));
   const cells = route.flatMap((c, k) => (tiles[k] === null ? [] : [[c, tiles[k]!] as const]));
   if (ev) {
     const after = Uint16Array.from(ev.after);
@@ -282,7 +295,8 @@ export function writeRoute(rom: Rom, route: readonly number[], solved: Pick<Rout
     writeL1(rom, l1);
   }
   const taken = need.map((s) => {
-    const tl = freeTranslevel(tls, (n) => translevelUse(rom, n));
+    // (one with a name, base event or messages ranked out: never taken)
+    const tl = freeTranslevel(tls, (n) => (st.free.includes(n) ? translevelUse(rom, n) : Infinity));
     tls[s.cell] = tl;
     resetTranslevel(rom, tl);
     setInitialFlags(rom, tl, stopFlags(s));
