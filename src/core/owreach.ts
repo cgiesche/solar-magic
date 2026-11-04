@@ -24,7 +24,7 @@ import { l1Index, l1XY, DIR_FLAGS, DIR_NAMES, NO_EVENT, baseEvent, exitDirection
 import { readEvents, eventRunners, exitChanges, eventTitle, type EventChanges, type EventRunner } from './owevents.ts';
 import { hex2, hex3 } from './names.ts';
 import type { Severity } from './problems.ts';
-import { readTeleports, readExitPaths, type OwTile } from './owteleport.ts';
+import { readTeleports, readExitPaths, starEntryAt, type OwTile } from './owteleport.ts';
 import { DX, DY, PATH_TILES_END, dirOf, reverse, shapeVector, turnedAt, type PathKind, type PathShapes } from './owpaths.ts';
 
 // the tile next to layer 1 tile i in direction dir on its map, -1 off the map
@@ -66,7 +66,7 @@ export interface ReachInput {
   kinds: readonly PathKind[];
   shapes: PathShapes;
   start: number;
-  stars: Map<number, number[]>; // star/pipe entries: from a tile to the tiles they lead to
+  stars: Map<number, number[]>; // star/pipe entries: from a tile to the tile it leads to (the entry the game finds)
   // exit path entries: the pixel position Mario leaves at (the region: main map 0, submaps 1), the tile he comes to
   // and the direction he walks onto it in (-1: on as before)
   exitPaths: { from: { region: number; x: number; y: number }; to: { x: number; y: number }; tile: number; dir: number }[];
@@ -219,11 +219,9 @@ export function waysFrom(inp: ReachInput, r: Reach, s: number): { path: number[]
 export function reachInput(rom: Rom, l1: ArrayLike<number>, tls: ArrayLike<number>, flags: ArrayLike<number>, kinds: readonly PathKind[],
   shapes: PathShapes, start: OwTile, levelWarps?: (tl: number) => OwTile[]): ReachInput {
   const stars = new Map<number, number[]>();
-  for (const t of readTeleports(rom)) {
-    if (!t.from || !t.to) continue;
-    const f = tileOf(t.from);
-    (stars.get(f) ?? stars.set(f, []).get(f)!).push(tileOf(t.to));
-  }
+  readTeleports(rom).forEach((t, i, all) => {
+    if (t.from && t.to && starEntryAt(all, t.from) === i) stars.set(tileOf(t.from), [tileOf(t.to)]); // the entry the game finds
+  });
   const exitPaths = readExitPaths(rom).flatMap((e) => {
     if (!e) return [];
     const tile = l1Index(e.to.submap ? 1 : 0, e.tile.x, e.tile.y), dx = e.tile.x * 16 + 8 - e.to.x, dy = e.tile.y * 16 + 8 - e.to.y;

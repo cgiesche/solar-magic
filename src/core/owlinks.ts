@@ -15,7 +15,7 @@
 
 import type { Rom } from './rom.ts';
 import {
-  readTeleports, writeTeleport, readExitPaths, writeExitPath, sameTile as same, tileText, TELEPORTS, EXIT_PATHS, type OwTile, type OwPos, type ExitPath, type Teleport,
+  readTeleports, writeTeleport, readExitPaths, writeExitPath, sameTile as same, starEntryAt, exitEntryAt, tileText, TELEPORTS, EXIT_PATHS, type OwTile, type OwPos, type ExitPath, type Teleport,
 } from './owteleport.ts';
 import { readSecondaryEntrance, levelTranslevel } from './level.ts';
 import type { ExitGraph } from './exitgraph.ts';
@@ -31,7 +31,6 @@ export interface OwLink { kind: LinkKind; a: LinkEnd; b: LinkEnd; both: boolean;
 
 export const SIDES = [[0, -1], [0, 1], [-1, 0], [1, 0]] as const;
 export const opposite = (side: number): number => side ^ 1;
-const samePos = (a: OwPos, b: OwPos) => a.submap === b.submap && a.x === b.x && a.y === b.y;
 
 // ---- exit path entries ↔ tiles ----
 const stand = (t: OwTile, side: number, d: number): OwPos => ({ submap: t.submap, x: t.x * 16 + 8 + SIDES[side][0] * d, y: t.y * 16 + 8 + SIDES[side][1] * d });
@@ -59,14 +58,15 @@ function exitTarget(e: ExitPath): LinkEnd {
 }
 
 // The links of the tables: an entry and the one leading back from its target (both ways), the star/pipe table's
-// first, then the exit paths'. The tile an exit path is taken from is half a tile off where Mario is: the one an
-// entry leads to (both ways), else the one `isExit` tells (an exit path tile), else the one after it.
+// first, then the exit paths'; of an entry the game never finds (starEntryAt, exitEntryAt: a later one has its tile)
+// none. The tile an exit path is taken from is half a tile off where Mario is: the one an entry leads to (both ways),
+// else the one `isExit` tells (an exit path tile), else the one after it.
 export function readLinks(rom: Rom, isExit: (t: OwTile) => boolean = () => false): OwLink[] {
   const out: OwLink[] = [], warps = readTeleports(rom), exits = readExitPaths(rom);
   const done = new Set<number>();
   warps.forEach((w, i) => {
-    if (!w.from || !w.to || done.has(i)) return;
-    const back = warps.findIndex((v, j) => j !== i && !done.has(j) && v.from && v.to && same(v.from, w.to!) && same(v.to, w.from!));
+    if (!w.from || !w.to || done.has(i) || starEntryAt(warps, w.from) !== i) return;
+    const j = starEntryAt(warps, w.to), v = warps[j], back = j !== i && !done.has(j) && v?.to && same(v.to, w.from) ? j : -1;
     done.add(i);
     if (back >= 0) done.add(back);
     out.push({ kind: 'star', a: { ...w.from }, b: { ...w.to }, both: back >= 0, entries: back >= 0 ? [i, back] : [i] });
@@ -78,10 +78,11 @@ export function readLinks(rom: Rom, isExit: (t: OwTile) => boolean = () => false
     return c.find((t) => targets.some((b) => b && same(b, t))) ?? c.find(isExit) ?? c[1];
   };
   done.clear();
+  const gameFinds = (i: number) => exitEntryAt(exits, exits[i]!.from) === i;
   exits.forEach((e, i) => {
-    if (!e || done.has(i)) return;
+    if (!e || done.has(i) || !gameFinds(i)) return;
     const a = source(i), b = targets[i]!;
-    const back = exits.findIndex((v, j) => j !== i && !done.has(j) && v && same(targets[j]!, a) && same(source(j), b));
+    const back = exits.findIndex((v, j) => j !== i && !done.has(j) && v && gameFinds(j) && same(targets[j]!, a) && same(source(j), b));
     done.add(i);
     if (back >= 0) done.add(back);
     out.push({ kind: 'exit', a, b: { ...b }, both: back >= 0, entries: back >= 0 ? [i, back] : [i] });
@@ -123,12 +124,12 @@ export function linkCheck(rom: Rom, kind: LinkKind, both: boolean, replacing: Ow
   if (kind === 'star') {
     const kept = locationUses(rom), all = readTeleports(rom).map((t, k): Teleport => (gone.has(k) ? { from: null, to: kept.has(k) ? t.to : null } : t));
     free = all.filter((t, k) => !t.from && !t.to && !kept.has(k)).length;
-    needs = (from, to) => { const i = all.findIndex((t) => t.from && same(t.from, from)); return i < 0 || (kept.has(i) && !same(all[i].to!, to)) ? 1 : 0; };
+    needs = (from, to) => { const i = starEntryAt(all, from); return i < 0 || (kept.has(i) && !same(all[i].to!, to)) ? 1 : 0; };
     full = starsFull;
   } else {
     const all = readExitPaths(rom).map((x, k) => (gone.has(k) ? null : x));
     free = all.filter((x) => !x).length;
-    needs = (from, to) => { const f = exitEntry(from, to).from; return all.some((x) => x && samePos(x.from, f)) ? 0 : 1; };
+    needs = (from, to) => (exitEntryAt(all, exitEntry(from, to).from) >= 0 ? 0 : 1);
     full = exitsFull;
   }
   return (a, b) => (same(a, b) ? NOT_ITSELF : needs(a, b) + (both ? needs(b, a) : 0) > free ? full : null);
@@ -138,22 +139,40 @@ export function koopaPlaceRefusal(from: OwTile, to: OwTile): OwRefusalData | nul
   return to.submap !== from.submap ? { kind: 'koopaPlaceSubmap', from: { ...from } } : null;
 }
 // why location i (a star/pipe entry exits to the overworld teleport to) can't be moved (null: it can, moveLocation): a
-// star's or pipe's entry needs a free one to keep leading where it does
+// star's or pipe's entry the game finds (starEntryAt) needs a free one to keep leading where it does
 export function locationMoveRefusal(rom: Rom, i: number): OwRefusalData | null {
   const all = readTeleports(rom), t = all[i];
-  if (!t.from || !t.to) return null;
+  if (!t.from || !t.to || starEntryAt(all, t.from) !== i) return null;
   const kept = locationUses(rom);
   return all.some((e, n) => !e.from && !e.to && !kept.has(n)) ? null : { kind: 'locationsFull', max: TELEPORTS };
 }
 
+// star/pipe entry k unused (in the ROM and `all`), one a location an entrance teleports to (`kept`) staying that location
+function unsetStar(rom: Rom, all: Teleport[], kept: Map<number, number[]>, k: number): void {
+  all[k] = { from: null, to: kept.has(k) ? all[k].to : null };
+  writeTeleport(rom, k, all[k]);
+}
+// every star/pipe entry of tile `from` unused (unsetStar), the earlier ones the game never found too
+function unsetStarsOf(rom: Rom, all: Teleport[], kept: Map<number, number[]>, from: OwTile): void {
+  for (let k; (k = starEntryAt(all, from)) >= 0;) unsetStar(rom, all, kept, k);
+}
+// every exit path entry of position `from` unused, the earlier ones the game never found too
+function unsetExitsOf(rom: Rom, all: (ExitPath | null)[], from: OwPos): void {
+  for (let k; (k = exitEntryAt(all, from)) >= 0;) { writeExitPath(rom, k, null); all[k] = null; }
+}
+
+// the entry of a tile is the one the game finds (starEntryAt); one taken anew for it is the last: the tile's earlier
+// entries (the game never found them) lose it, a location's staying the location
 function linkStars(rom: Rom, a: OwTile, b: OwTile, both: boolean): number[] {
-  const all = readTeleports(rom), kept = locationUses(rom), taken = new Set<number>();
+  const all = readTeleports(rom), kept = locationUses(rom);
   const write = (from: OwTile, to: OwTile): number => {
-    let i = all.findIndex((t, k) => !taken.has(k) && t.from && same(t.from, from));
-    if (i >= 0 && kept.has(i) && !same(all[i].to!, to)) { writeTeleport(rom, i, { from: null, to: all[i].to }); all[i] = { from: null, to: all[i].to }; i = -1; }
-    if (i < 0) i = all.findIndex((t, k) => !taken.has(k) && !t.from && !t.to && !kept.has(k));
-    if (i < 0) throw new OwRefusal(starsFull);
-    taken.add(i);
+    let i = starEntryAt(all, from);
+    if (i >= 0 && kept.has(i) && !same(all[i].to!, to)) { unsetStar(rom, all, kept, i); i = -1; }
+    if (i < 0) {
+      i = all.findIndex((t, k) => !t.from && !t.to && !kept.has(k));
+      if (i < 0) throw new OwRefusal(starsFull);
+      unsetStarsOf(rom, all, kept, from);
+    }
     const e: Teleport = { from: { submap: from.submap, x: from.x, y: from.y }, to: { submap: to.submap, x: to.x, y: to.y } };
     writeTeleport(rom, i, e);
     all[i] = e;
@@ -165,13 +184,12 @@ function linkStars(rom: Rom, a: OwTile, b: OwTile, both: boolean): number[] {
 }
 
 function linkExits(rom: Rom, a: LinkEnd, b: LinkEnd, both: boolean): number[] {
-  const all = readExitPaths(rom), taken = new Set<number>();
+  const all = readExitPaths(rom);
   const write = (from: LinkEnd, to: LinkEnd): number => {
     const e = exitEntry(from, to);
-    let i = all.findIndex((x, k) => !taken.has(k) && x && samePos(x.from, e.from));
-    if (i < 0) i = all.findIndex((x, k) => !taken.has(k) && !x);
+    let i = exitEntryAt(all, e.from);
+    if (i < 0) i = all.findIndex((x) => !x);
     if (i < 0) throw new OwRefusal(exitsFull);
-    taken.add(i);
     writeExitPath(rom, i, e);
     all[i] = e;
     return i;
@@ -181,13 +199,16 @@ function linkExits(rom: Rom, a: LinkEnd, b: LinkEnd, both: boolean): number[] {
   return out;
 }
 
-// removes a link: its entries unused, a star/pipe entry an entrance teleports to kept as that location
+// removes a link: its entries unused, a star/pipe entry an entrance teleports to kept as that location; so are the
+// earlier entries of its tiles the game never found (else the game would find one now: the tile still leading there)
 export function removeLink(rom: Rom, l: OwLink): void {
-  const kept = l.kind === 'star' ? locationUses(rom) : new Map<number, number[]>(), all = l.kind === 'star' ? readTeleports(rom) : [];
-  for (const i of l.entries) {
-    if (l.kind === 'exit') writeExitPath(rom, i, null);
-    else writeTeleport(rom, i, { from: null, to: kept.has(i) ? all[i].to : null });
+  if (l.kind === 'exit') {
+    const all = readExitPaths(rom);
+    for (const i of l.entries) { const from = all[i]?.from; writeExitPath(rom, i, null); all[i] = null; if (from) unsetExitsOf(rom, all, from); }
+    return;
   }
+  const kept = locationUses(rom), all = readTeleports(rom);
+  for (const i of l.entries) { const from = all[i].from; unsetStar(rom, all, kept, i); if (from) unsetStarsOf(rom, all, kept, from); }
 }
 
 // a link made one-way (a → b only) or both ways again
@@ -208,17 +229,19 @@ export function pathSide(t: OwTile, isPath: (x: number, y: number) => boolean): 
 }
 
 // ---- the locations exits to the overworld teleport to ----
-// moves location i (an entry of the star/pipe table) to tile `to`; a star or pipe whose entry it is keeps leading
-// where it did, in another entry (throws when the table is full)
+// moves location i (an entry of the star/pipe table) to tile `to`; a star or pipe whose entry the game finds it is keeps
+// leading where it did, in another entry – the tile's last: its earlier entries (never found) lose it (throws when the
+// table is full). The entry of a star the game never finds just loses its tile.
 export function moveLocation(rom: Rom, i: number, to: OwTile): void {
   const why = locationMoveRefusal(rom, i);
   if (why) throw new OwRefusal(why);
-  const all = readTeleports(rom), t = all[i];
-  if (t.from && t.to) {
-    const kept = locationUses(rom);
-    writeTeleport(rom, all.findIndex((e, n) => !e.from && !e.to && !kept.has(n)), t);
-  }
-  writeTeleport(rom, i, { from: null, to: { submap: to.submap, x: to.x, y: to.y } });
+  const all = readTeleports(rom), t = all[i], kept = locationUses(rom);
+  const star = t.from && t.to && starEntryAt(all, t.from) === i ? all.findIndex((e, n) => !e.from && !e.to && !kept.has(n)) : -1;
+  all[i] = { from: null, to: { submap: to.submap, x: to.x, y: to.y } };
+  writeTeleport(rom, i, all[i]);
+  if (star < 0) return;
+  unsetStarsOf(rom, all, kept, t.from!);
+  writeTeleport(rom, star, t);
 }
 
 // the locations the exits of translevel tl's levels (it and its sub-levels) teleport to through entrances to the

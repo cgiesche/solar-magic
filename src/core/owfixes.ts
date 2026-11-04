@@ -10,7 +10,7 @@
 import type { Rom } from './rom.ts';
 import { readL1, writeL1, readRevealList, writeRevealList, revealedTile, owTileWords, OW_L1_TILES } from './overworld.ts';
 import { readEvents, writeEvents } from './owevents.ts';
-import { readTeleports, writeTeleport, readExitPaths, writeExitPath, sameTile, type ExitPath } from './owteleport.ts';
+import { readTeleports, writeTeleport, readExitPaths, writeExitPath, starEntryAt, exitEntryAt } from './owteleport.ts';
 import { locationUses, type LinkKind } from './owlinks.ts';
 import { tilesOnMaps, l1Hex, emptyL1Tiles, freeL1Tiles } from './owl1sheet.ts';
 import { OwRefusal } from './owrefusal.ts';
@@ -44,11 +44,10 @@ export function addRevealPair(rom: Rom, t: number, into: number): string {
 export function unusedLinkEntries(rom: Rom, kind: LinkKind): number[] {
   if (kind === 'star') {
     const all = readTeleports(rom), kept = locationUses(rom);
-    return all.flatMap((e, i) => (kept.has(i) || (!e.from && !e.to)
-      || (e.from && !all.slice(i + 1).some((f) => f.from && sameTile(f.from, e.from!))) ? [] : [i]));
+    return all.flatMap((e, i) => (kept.has(i) || (!e.from && !e.to) || (e.from && starEntryAt(all, e.from) === i) ? [] : [i]));
   }
-  const all = readExitPaths(rom), key = (e: ExitPath) => `${e.from.submap},${e.from.x},${e.from.y}`;
-  return all.flatMap((e, i) => (e && all.slice(i + 1).some((f) => f && key(f) === key(e)) ? [i] : []));
+  const all = readExitPaths(rom);
+  return all.flatMap((e, i) => (e && exitEntryAt(all, e.from) !== i ? [i] : []));
 }
 // the entries unusedLinkEntries gives removed
 export function freeLinkEntries(rom: Rom, kind: LinkKind, entries: number[]): string {

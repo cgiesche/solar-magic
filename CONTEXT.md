@@ -247,7 +247,7 @@ A layer 1 tile an event writes when it ends (a silent step on layer 1, shown whe
 _Avoid_: layer 1 event (Lunar Magic's mode)
 
 **Overworld link**:
-A star, pipe or exit path tile leading to another place of the overworld (one-way or both ways: an entry leading back), a location that an exit to the overworld teleports to, or the place a Koopa Kid puts Mario; an entry of the star/pipe table (0x100) or the exit path table (0x80), as in Lunar Magic. Made by dragging from the tile, drawn as an arrow.
+A star, pipe or exit path tile leading to another place of the overworld (one-way or both ways: an entry leading back), a location that an exit to the overworld teleports to, or the place a Koopa Kid puts Mario; an entry of the star/pipe table (0x100) or the exit path table (0x80), as in Lunar Magic; of two entries with the same tile the game finds the last (it searches from the last entry down), an edit changes that one. Made by dragging from the tile, drawn as an arrow.
 _Avoid_: link (that is a part's), warp, teleport (for the tile)
 
 **Overworld sprite**:

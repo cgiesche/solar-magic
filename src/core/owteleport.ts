@@ -241,6 +241,13 @@ export function teleportDataRanges(rom: Rom): [number, number][] {
 }
 
 export const sameTile = (a: OwTile, b: OwTile) => a.submap === b.submap && a.x === b.x && a.y === b.y;
+// The entry the game takes for a star/pipe tile (by the tile it is taken from) or an exit path position (by where Mario
+// is when he leaves): the last one with it – the game searches both tables from the last entry down, an earlier entry
+// with the same tile it never finds. -1: none. Every lookup of an entry by the tile or position it is taken from goes
+// through these.
+const lastIndex = <T>(all: readonly T[], f: (e: T) => boolean): number => { for (let k = all.length - 1; k >= 0; k--) if (f(all[k])) return k; return -1; };
+export const starEntryAt = (all: readonly Teleport[], t: OwTile): number => lastIndex(all, (e) => !!e.from && sameTile(e.from, t));
+export const exitEntryAt = (all: readonly (ExitPath | null)[], p: OwPos): number => lastIndex(all, (e) => !!e && e.from.submap === p.submap && e.from.x === p.x && e.from.y === p.y);
 // the location index that teleports to a tile: an entry leading there (a star's or pipe's, or a location), else
 // a new location in an unused entry (written), else null (all 0x100 in use); `keep`: entries in use that may look
 // unused (a teleport not set up yet)

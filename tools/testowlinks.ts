@@ -6,7 +6,7 @@
 import { Rom, snesToPc } from '../src/core/rom.ts';
 import { LevelEmulator } from '../src/core/levelemu.ts';
 import { PlaySession } from '../src/core/playsession.ts';
-import { readExitPaths, readExitPath, writeExitPath, readTeleports, writeTeleport, EXIT_PATHS, EXIT_HOOK, FIND_HOOK, GAME_EXIT_TABLES, GAME_EXITS, type OwTile, type OwPos } from '../src/core/owteleport.ts';
+import { readExitPaths, readExitPath, writeExitPath, readTeleports, writeTeleport, EXIT_PATHS, EXIT_HOOK, FIND_HOOK, GAME_EXIT_TABLES, GAME_EXITS, sameTile as same, type OwTile, type OwPos } from '../src/core/owteleport.ts';
 import { readLinks, makeLink, removeLink, setBothWays, moveLocation, exitEntry, pathSide, koopaTeleport, setKoopaTeleport, opposite, SIDES, KOOPA_X, type LinkEnd, type OwLink } from '../src/core/owlinks.ts';
 import { l1Index, overworldDataRanges } from '../src/core/overworld.ts';
 import { readSecondaryEntrance, writeSecondaryEntrance, newOverworldExit } from '../src/core/level.ts';
@@ -159,22 +159,67 @@ function yiLink(): OwLink { return links.find((l) => l.kind === 'exit' && l.a.su
   const there = exitRoutine(r2, exitEntry(yi.a, vdEnd).from), home = exitRoutine(r2, exitEntry(vdEnd, yi.a).from);
   check(leads(there, vdEnd) && leads(home, yi.a), `a link made both ways (entries ${made.entries}): there ${res(there)}, back ${res(home)}`);
 }
-{
-  // a star made to warp: Mario on its tile, the patch's search finds the entry, the overworld loads at its target
-  const r = new Rom(rom.data.slice());
-  const from: OwTile = { submap: 0, x: 0x0c, y: 0x09 }, to: OwTile = { submap: 4, x: 7, y: 8 };
-  const l = makeLink(r, 'star', from, to, false);
+// Mario on star tile `from`: the entry the patch's search finds, where the overworld loads
+function warp(r: Rom, from: OwTile) {
   const e = new LevelEmulator(r);
   e.startGame(0);
   const w = e.snes.wram;
-  w[RAM.playerIndex] = 0; w[RAM.currentPlayer] = 0; w[RAM.submap] = 0;
+  w[RAM.playerIndex] = 0; w[RAM.currentPlayer] = 0; w[RAM.submap] = from.submap;
   w[RAM.owPlayerTileX] = from.x; w[RAM.owPlayerTileY] = from.y; w[RAM.owPlayerTileX + 1] = w[RAM.owPlayerTileY + 1] = 0;
   e.call(r.r24(FIND_HOOK + 1), 0);
   const found = w[RAM.owWarpIndex];
   w[RAM.owWarp] = 1; w[RAM.gameMode] = GM.overworldLoad;
   for (let f = 0; f < 400 && w[RAM.gameMode] !== GM.overworld; f++) e.snes.runFrame();
-  check(found === l.entries[0] && w[RAM.submap] === 4 && get16(w, RAM.owPlayerTileX) === 7 && get16(w, RAM.owPlayerTileY) === 8,
-    `a star link stars: entry ${found}, Mario on submap ${w[RAM.submap]} at ${get16(w, RAM.owPlayerTileX)},${get16(w, RAM.owPlayerTileY)}`);
+  return { found, submap: w[RAM.submap], x: get16(w, RAM.owPlayerTileX), y: get16(w, RAM.owPlayerTileY) };
+}
+{
+  // a star made to warp: Mario on its tile, the patch's search finds the entry, the overworld loads at its target
+  const r = new Rom(rom.data.slice());
+  const from: OwTile = { submap: 0, x: 0x0c, y: 0x09 }, to: OwTile = { submap: 4, x: 7, y: 8 };
+  const l = makeLink(r, 'star', from, to, false), got = warp(r, from);
+  check(got.found === l.entries[0] && got.submap === 4 && got.x === 7 && got.y === 8,
+    `a star link stars: entry ${got.found}, Mario on submap ${got.submap} at ${got.x},${got.y}`);
+}
+{
+  // #374: of two entries with a star's tile the game takes the last – the link read there, led elsewhere and moved there
+  const r = new Rom(rom.data.slice());
+  const star = links.find((l) => l.kind === 'star' && l.both)!, game = readTeleports(r)[star.entries[0]];
+  const LATE = 0x40, EARLY = 0x30, decoy: OwTile = { submap: 5, x: 3, y: 3 }, to: OwTile = { submap: 4, x: 7, y: 8 };
+  writeTeleport(r, star.entries[0], { from: null, to: null });
+  writeTeleport(r, LATE, game); // the game's entry, later in the table
+  writeTeleport(r, EARLY, { from: game.from, to: decoy }); // an earlier one with its tile, never found
+  const before = warp(r, star.a);
+  check(before.found === LATE && before.submap === star.b.submap && before.x === star.b.x && before.y === star.b.y,
+    `${show(star)} with an earlier entry of its tile: the game takes the last (${hx(before.found)})`);
+  const read = readLinks(r).filter((l) => l.kind === 'star' && (same(l.a, star.a) || same(l.b, star.a)));
+  check(read.length === 1 && read[0].both && read[0].entries.includes(LATE) && !read[0].entries.includes(EARLY) && same(read[0].a, star.b),
+    `read: the link of the last entry only (${read.map(show).join(' ')}, entries ${read[0]?.entries.map(hx)})`);
+  const led = makeLink(new Rom(r.data.slice()), 'star', star.a, to, false);
+  check(led.entries[0] === LATE, `led elsewhere: entry ${hx(led.entries[0])} changed (the last)`);
+  // its target moved, as the editor's drag does: the link removed (the earlier entry with it, else the tile would lead
+  // to the decoy now), made again
+  removeLink(r, read[0]);
+  check(!readTeleports(r).some((t) => t.from && (same(t.from, star.a) || same(t.from, star.b))), 'removed: no entry of its tiles left, the earlier one too');
+  const moved = makeLink(r, 'star', star.a, to, true), got = warp(r, star.a);
+  check(got.found === moved.entries[0] && got.submap === to.submap && got.x === to.x && got.y === to.y,
+    `moved: the game takes entry ${hx(got.found)} (made ${moved.entries.map(hx)}), Mario on submap ${got.submap} at ${got.x},${got.y}`);
+  // the last entry a location too, moved: the star keeps leading where it did, not to the earlier entry's decoy
+  const r3 = new Rom(r.data.slice());
+  writeTeleport(r3, moved.entries[0], { from: null, to: null });
+  writeTeleport(r3, LATE, { from: star.a, to });
+  writeTeleport(r3, EARLY, { from: star.a, to: decoy });
+  writeSecondaryEntrance(r3, 0x40, { ...readSecondaryEntrance(r3, 0x40), destLevel: 0x105, overworld: { ...newOverworldExit(), teleport: 1, location: LATE } });
+  moveLocation(r3, LATE, { submap: 3, x: 1, y: 2 });
+  const loc = warp(r3, star.a), t3 = readTeleports(r3);
+  check(loc.submap === to.submap && loc.x === to.x && loc.y === to.y && !t3[LATE].from && same(t3[LATE].to!, { submap: 3, x: 1, y: 2 }) && !t3[EARLY].from,
+    `a location moved from the star's last entry: the game takes entry ${hx(loc.found)}, Mario on submap ${loc.submap} at ${loc.x},${loc.y}`);
+  // an exit path: the last entry of a position changes too
+  const r2 = new Rom(rom.data.slice()), yi = yiLink(), from = exitEntry(yi.a, yi.b).from;
+  const k = readExitPaths(r2).findIndex((x) => !!x && x.from.submap === from.submap && x.from.x === from.x && x.from.y === from.y);
+  writeExitPath(r2, EXIT_PATHS - 1, readExitPath(r2, k));
+  const ex = makeLink(r2, 'exit', yi.a, { submap: 2, x: 5, y: 0x14, side: 0 }, false);
+  check(ex.entries[0] === EXIT_PATHS - 1 && JSON.stringify(readExitPath(r2, k)) === JSON.stringify(readExitPath(rom, k)),
+    `an exit path led elsewhere: entry ${hx(ex.entries[0])} changed (the last), ${hx(k)} not`);
 }
 {
   // losing to Koopa Kid 1 (a level of Yoshi's Island left by dying while it is there): Mario at its place
