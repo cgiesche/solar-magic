@@ -5,16 +5,22 @@
 // before and after an edit can be compared.
 
 import type { Rom } from './rom.ts';
-import { readL1, writeL1, readDestroyList, revealEventCount, NO_EVENT, OW_EVENTS } from './overworld.ts';
+import { readL1, writeL1, readDestroyList, revealEventCount, gameL1, l1XY, NO_EVENT, OW_EVENTS, type OverworldLoads } from './overworld.ts';
 import { eventReveal } from './oweventtiles.ts';
-import { readEvents } from './owevents.ts';
-import { budgetLevel, budgetText, type Budget } from './owbudget.ts';
+import { readEvents, submapViews, submapOf } from './owevents.ts';
+import { budgetLevel, budgetText, owBudgets, fullestSubmap, type Budget } from './owbudget.ts';
+import { progressSaves, progressMapsFromEvents, progressInput, progressSearches } from './owprogress.ts';
+import { l1OwnLooks, lookProblems } from './owlook.ts';
+import { tileText } from './owteleport.ts';
+import { ExitGraph } from './exitgraph.ts';
+import type { ScreenExit } from './level.ts';
+import type { Job } from './jobrunner.ts';
+import { RAM } from './ram.ts';
 import type { OwMode } from './owlayers.ts';
-import { reachProblems, stuckProblems, WARP_TILES, ANY_WAY_TILE, type Reached, type ReachKind, type ReachProblem, type CheckSeverity } from './owreach.ts';
+import { reach, reachProblems, stuckProblems, WARP_TILES, ANY_WAY_TILE, type Reached, type ReachKind, type ReachProblem, type CheckSeverity } from './owreach.ts';
 import { hex3 } from './names.ts';
-import type { PathKind } from './owpaths.ts';
+import type { PathKind, PathShapes } from './owpaths.ts';
 import type { OwRefusalData } from './owrefusal.ts';
-import type { ExitGraph } from './exitgraph.ts';
 import { checkContext, eventsNeverRun, stranded, untiledLevelsEntered, eventOrderProblems } from './owchecks.ts';
 
 export type CheckGroup = 'paths' | 'progress' | 'links' | 'look' | 'budget';
@@ -109,6 +115,34 @@ export const isFoundAtEveryProgress = (p: WorldProblem): boolean => /^(dead-end|
 export function worldChecks(rom: Rom, all: CheckedAt, place: (tile: number) => string, graph: ExitGraph): WorldProblem[] {
   const c = checkContext(rom, all, place);
   return [...eventsNeverRun(c), ...stranded(c), ...untiledLevelsEntered(c, graph), ...eventOrderProblems(c)];
+}
+
+// What the World check learns in the probe worker (worldCheckJob): the problems of worldChecks and the budgets' (found
+// with every event passed, the budgets with the custom sprites of the submap with the most), every budget, and the
+// problems found at every event progress (stuckAtEveryProgress, owlook.ts lookProblems). Places named by the submaps'
+// views
+export interface WorldCheckLearned { checks: WorldProblem[]; budgets: Budget[]; every: WorldProblem[] }
+
+// The World check's part that is the same at every event progress shown, as a job of the result learner (probe worker),
+// so that the editor's main thread only searches at the progress shown: the saves (owprogress.ts progressSaves, kept by
+// the loads); the map with every event passed as emulated (as the overworld view's search has it), the submaps' views
+// and the tiles' own looks; worldChecks and the budgets; then the searches at every progress over the maps built from
+// the events – each a step. kinds, shapes: the path kinds and shapes; open: the open level with its exits as edited (as
+// the editor's exits, ExitGraph) – all sent with the job
+export function* worldCheckJob(rom: Rom, loads: OverworldLoads, kinds: readonly PathKind[], shapes: PathShapes, open?: { number: number; exits: ScreenExit[] }): Job<WorldCheckLearned> {
+  const saves = progressSaves(loads);
+  yield;
+  const views = submapViews(loads), every = loads.get(0, OW_EVENTS), ownLooks = l1OwnLooks(rom, loads);
+  const emulated = [{ l1: gameL1(every).slice(), tls: every.wram.slice(RAM.owTranslevels, RAM.owTranslevelsEnd), flags: saves[OW_EVENTS].levelFlags }];
+  yield;
+  const graph = new ExitGraph(rom, open), place = (i: number) => tileText({ submap: submapOf(views, i), ...l1XY(i) });
+  const inp = progressInput(rom, emulated, kinds, shapes, graph)(0);
+  const all: CheckedAt = { inp, r: reach(inp), progress: OW_EVENTS };
+  const budgets = owBudgets(rom, fullestSubmap(rom), kinds), checks = [...worldChecks(rom, all, place, graph), ...budgetProblems(budgets)];
+  yield;
+  const maps = progressMapsFromEvents(rom, saves.map((s) => s.levelFlags));
+  const search = progressSearches(progressInput(rom, maps, kinds, shapes, graph));
+  return { checks, budgets, every: [...stuckAtEveryProgress(rom, search, place), ...lookProblems({ rom, maps, ownLooks, kinds, views, search, place })] };
 }
 
 // ---- budgets (owbudget.ts) ----

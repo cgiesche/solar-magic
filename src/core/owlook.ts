@@ -17,7 +17,6 @@ import { hex2 } from './names.ts';
 import type { Reached } from './owreach.ts';
 import type { PathKind } from './owpaths.ts';
 import type { ProgressMap } from './owprogress.ts';
-import type { Job } from './jobrunner.ts';
 import type { WorldProblem } from './worldcheck.ts';
 
 const pixels = new Uint8Array(64);
@@ -38,10 +37,6 @@ export function l1OwnLooks(rom: Rom, loads: OverworldLoads): Uint8Array[] {
       return Uint8Array.from(words, (w) => (hasOwnLook(r, w) ? 1 : 0));
     });
   });
-}
-// l1OwnLooks as a job of the result learner (probe worker), one step (overworld.ts overworldMapJob)
-export function* l1OwnLooksJob(rom: Rom, loads: OverworldLoads): Job<Uint8Array[]> {
-  return l1OwnLooks(rom, loads);
 }
 
 // what the rules look at

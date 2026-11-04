@@ -81,29 +81,11 @@ export function progressInput(rom: Rom, maps: readonly ProgressMap[], kinds: rea
   return (p) => reachInput(rom, maps[p].l1, maps[p].tls, maps[p].flags, kinds, shapes, start, levelWarps);
 }
 
-// the searches at every event progress 0 … OW_EVENTS from their inputs, each searched once when first asked for: what
-// the World check (stuckAtEveryProgress, owlook.ts lookProblems) and the exits' edges (owexitedges.ts) share
+// the searches at every event progress 0 … OW_EVENTS from their inputs, each searched once when first asked for: how
+// the World check (worldcheck.ts worldCheckJob) and the exits' edges (owexitedges.ts) search, each in its own job
 export function progressSearches(input: (progress: number) => ReachInput): (progress: number) => CheckedAt {
   const found: CheckedAt[] = [];
   return (p) => (found[p] ??= (() => { const inp = input(p); return { inp, r: reach(inp), progress: p }; })());
-}
-
-// the maps at every event progress from the events (progressMapsFromEvents) and the searches over them
-// (progressSearches): what the World check and the exits' arrows share
-export interface ProgressSearch { maps: ProgressMap[]; search: (progress: number) => CheckedAt }
-
-// ProgressSearch from the ROM as it is and the saves' level flags (progressFlagsJob), the path kinds and shapes and
-// the levels' exits, the last one kept while the ROM generation and those (by identity) are the same: the World
-// check and the exits' arrows asking for it after an edit search each progress once
-export function progressSearchKeeper(): (rom: Rom, flags: readonly number[][], kinds: readonly PathKind[], shapes: PathShapes, graph: ExitGraph) => ProgressSearch {
-  let kept: { from: unknown[]; s: ProgressSearch } | null = null;
-  return (rom, flags, kinds, shapes, graph) => {
-    const from = [rom, rom.gen, flags, kinds, shapes, graph];
-    if (kept && kept.from.every((x, k) => x === from[k])) return kept.s;
-    const maps = progressMapsFromEvents(rom, flags);
-    kept = { from, s: { maps, search: progressSearches(progressInput(rom, maps, kinds, shapes, graph)) } };
-    return kept.s;
-  };
 }
 
 // where the switches pressed are learned: the levels' tiles (kept, else loaded on emu) and the tiles' probe

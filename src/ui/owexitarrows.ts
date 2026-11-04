@@ -2,16 +2,15 @@
 // arrow to each level its exits open – solid for the normal exit, dashed for a secret one, ending at the link leaving
 // the submap when the level is on another; an exit opening nothing Mario reaches a short red stub – a grey
 // dotted one when Mario doesn't reach its level even with every event passed (nothing can't be told). Hovering one
-// says what it is in the status bar; the "When beaten…" sentences tell the same levels. Derived once per ROM edit from
-// the searches at every event progress (the view's progressSearch, shared with the World check: the maps built from
-// the events, the saves' level flags learned in the probe worker), the path kinds and shapes; nothing is drawn while
-// those are learned. The rule with the events still passable without an exit's event takes seconds: it runs in the
-// probe worker (passableEdgesJob), the cheap one with every event but the exit's shown until it comes.
+// says what it is in the status bar; the "When beaten…" sentences tell the same levels. Learned in the probe worker
+// once per ROM edit (passableEdgesJob: the searches at every event progress over the maps built from the events and
+// the saves' level flags, the rule with the events still passable without an exit's event), from the path kinds and
+// shapes; nothing is drawn while those are learned.
 
 import type { OverworldView } from './overworld.ts';
 import { arrow } from './owlinkview.ts';
 import { l1XY, EXIT_NAMES, MAP_NAMES, translevelToLevel } from '../core/overworld.ts';
-import { exitEdges, type ExitEdge } from '../core/owexitedges.ts';
+import type { ExitEdge } from '../core/owexitedges.ts';
 import { levelName } from '../core/levelnames.ts';
 import { hex } from '../core/names.ts';
 
@@ -24,9 +23,7 @@ interface Drawn { p: Pt; q: Pt; color: string; dashed: boolean; head: boolean; t
 
 export class ExitArrowLayer {
   show = true; // drawn in the Levels mode
-  // the edges found, for the searches (by identity: the ROM edited or what they need learned again) they were found with
-  private found: { searches: unknown; edges: ExitEdge[] } | null = null;
-  // the probe worker's edges (with the events still passable) for the ROM generation (not asked again while it holds)
+  // the probe worker's edges for the ROM generation (not asked again while it holds)
   private passable: { gen: number; edges: ExitEdge[] } | null = null;
   private asked = -1; // the ROM generation they were asked for at (until something comes: not asked again each paint)
   constructor(private view: OverworldView) {}
@@ -39,21 +36,17 @@ export class ExitArrowLayer {
     if (this.edges()) this.view.buildSide(); // (the sentences tell them once they are found)
   };
 
-  // the edges of the ROM as it is, null while something they need is learned (also the "When beaten…" sentences'):
-  // those with the events still passable without each exit's event once the probe worker has them, the cheap rule's
-  // before
+  // the edges of the ROM as it is (the probe worker's), null while they or something they need are learned (also the
+  // "When beaten…" sentences')
   edges(): ExitEdge[] | null {
     const v = this.view, app = v.app, rom = app.rom;
     if (this.passable?.gen === rom.gen) return this.passable.edges;
-    const kinds = v.pathKinds(), shapes = app.pathShapes(this.learned), searches = v.progressSearch(this.learned);
-    if (!kinds || !shapes || !searches || !v.views) return null;
-    const passable = this.asked === rom.gen ? undefined : app.overworldExitEdges(kinds, shapes, this.learned);
+    const kinds = v.pathKinds(), shapes = app.pathShapes(this.learned);
+    if (!kinds || !shapes || this.asked === rom.gen) return null;
+    const passable = app.overworldExitEdges(kinds, shapes, this.learned);
     if (passable) { this.passable = { gen: rom.gen, edges: passable }; return passable; }
     this.asked = rom.gen;
-    if (this.found?.searches === searches) return this.found.edges;
-    const edges = exitEdges(rom, searches.search, (i) => v.submapAt(i));
-    this.found = { searches, edges };
-    return edges;
+    return null;
   }
 
   // the lines of the region shown: arrows, stubs (fanned out by exit), an arrow to the other region as a short one

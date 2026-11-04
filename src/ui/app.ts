@@ -77,6 +77,7 @@ import type { Rect } from '../core/owevents.ts';
 import type { OwSpriteView } from '../core/owsprites.ts';
 import type { ProgressSave } from '../core/owprogress.ts';
 import type { ExitEdge } from '../core/owexitedges.ts';
+import type { WorldCheckLearned } from '../core/worldcheck.ts';
 import type { Map16Target } from './gfx/target.ts';
 import type { WsTarget } from './gfxworkspace.ts';
 
@@ -1140,10 +1141,12 @@ export class App {
   overworldProgressFlags(done: () => void): number[][] | undefined {
     return this.probes.learn<number[][]>('owpf1', { kind: 'owProgressFlags' }, { lane: 'owps', label: 'Overworld progress', done });
   }
-  // per submap per layer 1 tile whether it has a look of its own (owlook.ts l1OwnLooks: the World check's paths without
-  // a look), learned and kept as overworldProgressFlags
-  overworldOwnLooks(done: () => void): Uint8Array[] | undefined {
-    return this.probes.learn<Uint8Array[]>('owol1', { kind: 'owOwnLooks' }, { lane: 'owol', label: 'Overworld tile looks', done });
+  // the World check's part the same at every event progress shown (worldcheck.ts worldCheckJob: the problems with
+  // every event passed, the budgets, those found at every event progress), from the path kinds and shapes and the open
+  // level's exits as edited, learned and kept as overworldProgressFlags (seconds: the saves at every progress first)
+  overworldWorldCheck(kinds: PathKind[], shapes: PathShapes, done: () => void): WorldCheckLearned | undefined {
+    const open = { number: this.level.number, exits: this.level.exits };
+    return this.probes.learn<WorldCheckLearned>('owwc1', { kind: 'owWorldCheck', kinds, shapes, open }, { lane: 'owwc', label: 'World check', input: [kinds, shapes, open], done });
   }
   // the exits' edges with the events still passable without each exit's event (owexitedges.ts passableEdgesJob, the
   // Levels mode's arrows), from the path kinds and shapes, learned and kept as overworldProgressFlags (seconds: the saves

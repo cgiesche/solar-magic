@@ -8,8 +8,8 @@
 // result, it goes on where it stood. The result learner's jobs (CONTEXT.md; probeprotocol.ts LearnJob: the sprite images,
 // the levels' uses, the sprite memory check, the animated tiles and colors, the layer 3 kinds, the tiles of the level as
 // edited, the object thumbnails, the placement preview, the jump arcs, the layer 2 motions, the overworld path kinds, the
-// prefab suggestions, the object boxes for resizing, the overworld's maps, submap views, sprite images and exit edges, the levels'
-// game BGs, a prefab's places, the loads comparing a broken up prefab, the slippery entrance actions, the object
+// prefab suggestions, the object boxes for resizing, the overworld's maps, submap views, sprite images and exit edges,
+// the World check, the levels' game BGs, a prefab's places, the loads comparing a broken up prefab, the slippery entrance actions, the object
 // tables) run here too, in lanes (one job at a time, a request replacing the lane's others drops them), taking turns
 // with the tasks; they choose whether the display data counts for them (pictures: it does; the probes and tasks: it
 // doesn't, ADR 0008).
@@ -36,7 +36,7 @@ import { jumpArcsJob } from './jumparcs.ts';
 import { layer2MotionsJob } from './l2scroll.ts';
 import { pathKindsJob, pathShapesJob } from './owpaths.ts';
 import { passableEdgesJob } from './owexitedges.ts';
-import { l1OwnLooksJob } from './owlook.ts';
+import { worldCheckJob } from './worldcheck.ts';
 import { revealWalkJob } from './revealwalk.ts';
 import { KeptSuggestions, prefabSuggestionsJob } from './prefabsuggest.ts';
 import { SizeProbe, sizesJob } from './objresize.ts';
@@ -127,8 +127,8 @@ function learnJob(j: LearnJob, state: LearnState, show: (items: unknown[] | null
     case 'owSave': return (emu) => progressSaveJob(owLoads(state), j.progress, { uses: state.uses, emu, prober: state.prober });
     case 'owL1Without': return () => layer1WithoutJob(state.l1Copy ??= new EventL1Copy(), state.rom, j.event);
     case 'owProgressFlags': return () => progressFlagsJob(owLoads(state));
-    case 'owOwnLooks': return () => l1OwnLooksJob(state.rom, owLoads(state));
     case 'owExitEdges': return () => passableEdgesJob(state.rom, owLoads(state), j.kinds, j.shapes);
+    case 'owWorldCheck': return () => worldCheckJob(state.rom, owLoads(state), j.kinds, j.shapes, j.open);
     case 'msgRoutine': return (emu) => messageRoutineJob(state.rom, emu);
     case 'gameBg': return (emu) => gameBgJob(emu, j.level);
     case 'prefabPlaces': return (emu) => prefabPlacesJob(state.rom, emu, j.prefab, j.levels, j.open, j.skip);

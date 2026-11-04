@@ -5,7 +5,7 @@
 // draws them as arrows (ui/owexitarrows.ts).
 //
 // It searches the maps at every event progress built from the events (owprogress.ts progressMapsFromEvents: layer 1
-// through the events, the saves' level flags), the searches there shared with the World check (progressSearches).
+// through the events, the saves' level flags), searched as the World check searches them (progressSearches).
 
 import type { Rom } from './rom.ts';
 import { OW_EVENTS, DIR_FLAGS, exitDirections, readL1, readDestroyList, destroyEffects, destroyedCells, type OverworldLoads } from './overworld.ts';
@@ -39,16 +39,16 @@ function searched(inp: ReachInput, destroyed: ReadonlySet<number>, r: Reach = re
 
 // The edges of every level exit running an event whose level is the first to run it (owevents.ts eventRunners: the
 // event is that exit's, as exitChanges has it – a secret exit only where the level can have it), in event order; a
-// secret exit whose event changes nothing on the map and opens nothing is left out (one the level likely hasn't).
-// A level is opened by either rule: reached with every event passed and not without the exit's event – what the exit
-// is needed for, whatever order the events pass in –, or reached at the progress after the event and not at the one
-// before (events in number order) – of those the first on the way (nextLevels). "Without the exit's event": here
-// with every event but the exit's (its layer 1 changes undone, the way the exit opens closed: cheap, shown until the
-// probe worker's passableEdgesJob comes, which has the events still passable without it – this misses levels Mario
-// reaches backwards with every event passed). Its level not reached, what the exit opens is still told by the rules –
-// where the event's way leads from tiles reached, not from the level. at(p): the search at event progress p
-// (0 … OW_EVENTS; owprogress.ts progressSearches, each searched once); submapAt: the submap a layer 1 tile is on
-// (default its region: main map 0, submaps 1).
+// secret exit whose event changes nothing on the map and opens nothing is left out (one the level likely hasn't). A
+// level is opened by either rule: reached with every event passed and not without the exit's event – what the exit is
+// needed for, whatever order the events pass in –, or reached at the progress after the event and not at the one before
+// (events in number order) – of those the first on the way (nextLevels). "Without the exit's event": here with every
+// event but the exit's (its layer 1 changes undone, the way the exit opens closed: cheap, the tests' rule to compare
+// with – the arrows are the probe worker's passableEdgesJob's, which has the events still passable without it; this
+// misses levels Mario reaches backwards with every event passed). Its level not reached, what the exit opens is still
+// told by the rules – where the event's way leads from tiles reached, not from the level. at(p): the search at event
+// progress p (0 … OW_EVENTS; owprogress.ts progressSearches, each searched once); submapAt: the submap a layer 1 tile
+// is on (default its region: main map 0, submaps 1).
 export function exitEdges(rom: Rom, at: (progress: number) => Reached, submapAt: (tile: number) => number = (i) => i >> 10): ExitEdge[] {
   const steps = exitEdgeSteps(rom, at, submapAt, false);
   for (;;) { const s = steps.next(); if (s.done) return s.value; }

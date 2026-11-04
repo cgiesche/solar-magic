@@ -9,7 +9,7 @@ import type { CameraAt } from './camerareach.ts';
 import type { SpriteLevel } from './spritegfx.ts';
 import type { SpriteMemLevel } from './spritemem.ts';
 import type { LevelOverride } from './levelemu.ts';
-import type { Level, LevelObject } from './level.ts';
+import type { Level, LevelObject, ScreenExit } from './level.ts';
 import type { EditState } from './inputs.ts';
 import { spriteSetParts } from './spritegfx.ts';
 import type { Keep } from './jobrunner.ts';
@@ -65,20 +65,22 @@ export type ProbeReply = ProbeDone | KindsDone | ScanDone | CameraDone | Learned
 // (their uses, levelusage.ts), a level's sprite memory check, the tiles and colors animating in a level, what the four
 // layer 3 settings do in a level as given (layer3.ts), the tiles of a level as edited (levelusage.ts levelTilesAll),
 // the object picker's thumbnails (objthumbs.ts; keys: each object's key, objKey), the placement preview (objthumbs.ts
-// placementPreviewJob: the objects placed in the level as edited, withPlaced), the jump arcs from a tile (jumparcs.ts; level: the hash of the level as loaded, load: what it
-// is loaded with), what the layer 2 scroll settings do in a level (l2scroll.ts), what Mario does on each overworld
-// layer 1 tile and how path tiles move him (owpaths.ts), the prefab suggestions (prefabsuggest.ts; open: the open level as edited) and the boxes
-// of objects at sizes (objresize.ts; layer2Pointer: the level's layer 2 objects as the probe loads take them); the
-// overworld's map at an event progress (overworld.ts overworldMapJob), it with the event triggers of its animations
-// switched and the colors the game keeps setting there (owanimview.ts), the submaps' views (owevents.ts submapViews),
-// the overworld sprites' images at a map and event progress (owsprites.ts owSpriteImages) and the save at an event
-// progress (owprogress.ts progressSaves), layer 1 as after an event without its layer 1 changes (owevents.ts
-// layer1Without); whether the game draws the editor's messages (messagedraw.ts messageRoutine); a level's game BG as
-// its load as saved has it (tilemove.ts gameBgJob), where a prefab's arrangement already is (prefabplaces.ts
-// prefabPlacesJob; open: the open level as edited, skip: the objects that are no place's), whether two loads of a level
-// draw the same tiles (prefabsources.ts sameTilesJob: a prefab broken up into its sources), the entrance actions that
-// make a level slippery (slippery.ts slipperyJob), the object table of a tileset (objectnames.ts objectTableJob), the level
-// scan of a level an image draws (levelscan.ts; the open level's own scan is a task, its result under the same key)
+// placementPreviewJob: the objects placed in the level as edited, withPlaced), the jump arcs from a tile (jumparcs.ts;
+// level: the hash of the level as loaded, load: what it is loaded with), what the layer 2 scroll settings do in a level
+// (l2scroll.ts), what Mario does on each overworld layer 1 tile and how path tiles move him (owpaths.ts), the prefab
+// suggestions (prefabsuggest.ts; open: the open level as edited) and the boxes of objects at sizes (objresize.ts;
+// layer2Pointer: the level's layer 2 objects as the probe loads take them); the overworld's map at an event progress
+// (overworld.ts overworldMapJob), it with the event triggers of its animations switched and the colors the game keeps
+// setting there (owanimview.ts), the submaps' views (owevents.ts submapViews), the overworld sprites' images at a map
+// and event progress (owsprites.ts owSpriteImages) and the save at an event progress (owprogress.ts progressSaves),
+// layer 1 as after an event without its layer 1 changes (owevents.ts layer1Without), the World check's part the same at
+// every progress shown (worldcheck.ts worldCheckJob; open: the open level with its exits as edited); whether the game
+// draws the editor's messages (messagedraw.ts messageRoutine); a level's game BG as its load as saved has it
+// (tilemove.ts gameBgJob), where a prefab's arrangement already is (prefabplaces.ts prefabPlacesJob; open: the open
+// level as edited, skip: the objects that are no place's), whether two loads of a level draw the same tiles
+// (prefabsources.ts sameTilesJob: a prefab broken up into its sources), the entrance actions that make a level slippery
+// (slippery.ts slipperyJob), the object table of a tileset (objectnames.ts objectTableJob), the level scan of a level
+// an image draws (levelscan.ts; the open level's own scan is a task, its result under the same key)
 export type LearnJob =
   | { kind: 'sprites'; level: SpriteLevel; nums: number[]; input?: string } // (input: of each test level load, spriteSetJob)
   | { kind: 'spriteAt'; level: SpriteLevel; id: number; x: number; y: number }
@@ -109,8 +111,8 @@ export type LearnJob =
   | { kind: 'owAnimated'; map: number; progress: number }
   | { kind: 'owL1Without'; event: number }
   | { kind: 'owProgressFlags' }
-  | { kind: 'owOwnLooks' }
   | { kind: 'owExitEdges'; kinds: PathKind[]; shapes: PathShapes }
+  | { kind: 'owWorldCheck'; kinds: PathKind[]; shapes: PathShapes; open?: { number: number; exits: ScreenExit[] } }
   | { kind: 'msgRoutine' }
   | { kind: 'gameBg'; level: number }
   | { kind: 'prefabPlaces'; prefab: Prefab; levels: number[]; open?: Level; skip?: PrefabSkip }
@@ -138,7 +140,8 @@ export function learnRetargets(was: LearnJob, now: LearnJob): boolean {
 // result cache. The overworld's jobs run on the overworld's own emulator (layer 1 without an event's changes on a ROM
 // copy's), not on one booted for levels: its boot doesn't count for them (boot false, jobrunner.ts JobSpec); it has no
 // skip mask, so they count the display data, the submaps' views, the save at a progress, layer 1 without an event's
-// changes, the maps at every progress and the saves' level flags there (no pictures) too: marked pictures (ADR 0008). They change with the map
+// changes, the maps at every progress and the saves' level flags there, the World check (no pictures) too: marked
+// pictures (ADR 0008). They change with the map
 // painted, the event progress slider goes through many (memory only). A level's game BG (Map16 numbers, no picture) goes to the result cache; the places of
 // a prefab and whether two loads draw the same tiles are asked for once, by a dialog or an action (to the editor only).
 // A sprite set's images are kept as their parts only (whole false, learnParts).
@@ -172,8 +175,8 @@ export const LEARN_KINDS: { [K in LearnJob['kind']]: { keep: Keep; picture: bool
   owAnimated: { keep: 'memory', picture: true, boot: false },
   owL1Without: { keep: 'memory', picture: true, boot: false },
   owProgressFlags: { keep: 'memory', picture: true, boot: false },
-  owOwnLooks: { keep: 'memory', picture: true, boot: false },
   owExitEdges: { keep: 'memory', picture: true, boot: false },
+  owWorldCheck: { keep: 'memory', picture: true, boot: false },
   msgRoutine: { keep: true, picture: false },
   gameBg: { keep: true, picture: false },
   prefabPlaces: { keep: false, picture: false },
@@ -197,7 +200,7 @@ export type LearnLane =
   | 'sprites' | 'variants' | 'bytes' | 'spritemem' | 'animated' | 'layer3' | 'l2' | 'lt' | 'uses' | 'arcs' | 'thumbs'
   | 'placement' | 'sizes' | 'prefab-suggest' | 'msgr' | 'level-png' | 'level-images' | 'gamebg' | 'prefab-places'
   | 'breakup' | 'slippery' | 'otab'
-  | 'ow' | 'owpick' | 'owpk1' | 'owsh' | 'owreach' | 'owrw' | 'owlw' | 'owps' | 'owol' | 'owxe' | 'owv' | 'owt' | 'owgc' | 'ows' | 'owbs' | 'owbt' | 'owl' | 'owan' | `owc${number}`;
+  | 'ow' | 'owpick' | 'owpk1' | 'owsh' | 'owreach' | 'owrw' | 'owlw' | 'owps' | 'owxe' | 'owwc' | 'owv' | 'owt' | 'owgc' | 'ows' | 'owbs' | 'owbt' | 'owl' | 'owan' | `owc${number}`;
 
 // what the probe client shows as busy: the probes, the tasks, the learn jobs' lanes
 export type ProbeBusyKey = 'probe' | TaskType | LearnLane;

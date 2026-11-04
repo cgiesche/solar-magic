@@ -25,7 +25,6 @@ import {
 import { OverworldStroke, shownMaps } from '../core/owstroke.ts';
 import { PathTool } from './owpathtool.ts';
 import { isPathKind, type PathKind, type PathShapes } from '../core/owpaths.ts';
-import { progressSearchKeeper, type ProgressSearch } from '../core/owprogress.ts';
 import { pathWays, pathTileText, type PathWay } from '../core/owpathshape.ts';
 import { emptyL1Tiles, freeL1Tiles, sheetPages, l1TileLines, l1Hex, l1BrushEntries, NO_TILE, SHEET_COLS, type SheetPage } from '../core/owl1sheet.ts';
 import { findL2Brush, l2BrushPalettes, l2SharedBits, l2SheetEntry, L2_SHEET_COLS, L2_SHEET_ROWS, L2_FLIP_X, L2_FLIP_Y, L2_PRIORITY, type SheetMark } from '../core/owl2sheet.ts';
@@ -552,14 +551,6 @@ export class OverworldView {
       this.shapes = { gen, shapes };
     }
     return this.shapes.shapes;
-  }
-  // the maps and searches at every event progress (owprogress.ts ProgressSearch), one shared by the exits' arrows and
-  // the World check: null while the path kinds and shapes or the saves' level flags are learned (then `done` is called)
-  private searches = progressSearchKeeper();
-  progressSearch(done: () => void): ProgressSearch | null {
-    const app = this.app, kinds = this.pathKinds(), shapes = app.pathShapes(done), flags = app.overworldProgressFlags(done);
-    if (!kinds || !shapes || !flags) return null;
-    return this.searches(app.rom, flags, kinds, shapes, app.entrances.graph());
   }
   // (the selected level tile's settings say which exits skip the reveal walk once that is learned)
   private revealWalksLearned = () => { if (this.root.isConnected) this.buildSide(); };

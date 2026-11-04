@@ -10,7 +10,8 @@
 // level tile amber), none an error; the destroy list amber, then full (an error said new); the fullest submap's custom
 // sprites; where Show goes. Dead ends at every event progress (#377): none in the clean game; a path tile a late
 // event (the last) takes away gives one, found after that event, listed with the playthrough strip at progress 0; the searches at progress 0 from the maps at every progress
-// find the dead ends the World check's search there finds.
+// find the dead ends the World check's search there finds. The part learned in the probe worker (worldCheckJob, #387):
+// the same problems, budgets and problems at every progress as found from those searches, in steps, as sent.
 import { Rom } from '../src/core/rom.ts';
 import { OverworldEmulator, OverworldLoads, gameL1, l1XY, l1Index, readL1, writeL1, readTranslevels, writeTranslevels, freeTranslevel, OW_EVENTS, readDestroyList, writeDestroyList, revealEventCount, NO_EVENT } from '../src/core/overworld.ts';
 import { reach, reachInput, stuckProblems } from '../src/core/owreach.ts';
@@ -19,10 +20,12 @@ import { ExitGraph } from '../src/core/exitgraph.ts';
 import type { Job } from '../src/core/jobrunner.ts';
 import { readStart } from '../src/core/owsprites.ts';
 import { RAM } from '../src/core/ram.ts';
-import { worldProblems, stuckAtEveryProgress, applyFix, errorCount, stopTile, diffProblems, diffText, checkAgainst, budgetProblems, budgetPlace, type CheckedAt, type WorldProblem } from '../src/core/worldcheck.ts';
+import { worldProblems, worldChecks, worldCheckJob, stuckAtEveryProgress, applyFix, errorCount, stopTile, diffProblems, diffText, checkAgainst, budgetProblems, budgetPlace, type CheckedAt, type WorldProblem } from '../src/core/worldcheck.ts';
 import { owBudgets, fullestSubmap } from '../src/core/owbudget.ts';
 import { eventReveal } from '../src/core/oweventtiles.ts';
-import { readEvents, writeEvents } from '../src/core/owevents.ts';
+import { readEvents, writeEvents, submapViews, submapOf } from '../src/core/owevents.ts';
+import { l1OwnLooks, lookProblems } from '../src/core/owlook.ts';
+import { tileText } from '../src/core/owteleport.ts';
 import { readCustomSprites, writeCustomSprites, OW_CUSTOM_MAX } from '../src/core/owcustom.ts';
 import { editorImage, pathKinds, pathShapes, loadedProgressMaps } from './fixture.ts';
 
@@ -214,6 +217,27 @@ console.log(list(clean.problems));
   const keysOf = (c: CheckedAt) => stuckProblems(c, at).map((p) => p.key).sort().join();
   check(keysOf(search(0)) === keysOf(shown.now) && keysOf(search(OW_EVENTS)) === keysOf(shown.all) && keysOf(shown.all) === dead.map((p) => p.key).join(),
     'the searches from the maps at every progress find what the search at the progress shown finds (progress 0, every event passed)');
+
+  // ---- the World check learned in the probe worker (#387) ----
+  // worldCheckJob (what the editor's main thread no longer finds): the problems found with every event passed and the
+  // budgets, those found at every event progress – the same as found from the searches the overworld view has, places
+  // named by the submaps' views; a job of steps, its result as the worker sends it (structured clone)
+  const learned = (x: Rom) => {
+    const loads = new OverworldLoads(new OverworldEmulator(x), 4), job = worldCheckJob(x, loads, kinds, shapes);
+    let steps = 0, st = job.next();
+    while (!st.done) { steps++; st = job.next(); }
+    const views = submapViews(loads), place = (i: number) => tileText({ submap: submapOf(views, i), ...l1XY(i) });
+    return { got: structuredClone(st.value), steps, place, loads };
+  };
+  const same = (a: WorldProblem[], b: WorldProblem[]) => JSON.stringify(a) === JSON.stringify(b);
+  for (const [name, x] of [['the clean game', rom], [`the path tile at ${at(cut)} taken away`, r]] as [string, Rom][]) {
+    const { got, steps, place, loads } = learned(x), shownX = checkRom(x), graph = new ExitGraph(x), budgets = owBudgets(x, fullestSubmap(x), kinds);
+    const maps = progressMapsFromEvents(x, runJob(progressFlagsJob(loads))), search = progressSearches(progressInput(x, maps, kinds, shapes, graph));
+    const checks = [...worldChecks(x, shownX.all, place, graph), ...budgetProblems(budgets)];
+    const everyX = [...stuckAtEveryProgress(x, search, place), ...lookProblems({ rom: x, maps, ownLooks: l1OwnLooks(x, loads), kinds, views: submapViews(loads), search, place })];
+    check(steps >= 3 && same(got.checks, checks) && JSON.stringify(got.budgets) === JSON.stringify(budgets) && same(got.every, everyX) && checks.length > 0,
+      `${name}: worldCheckJob (${steps + 1} steps) finds the problems with every event passed (${got.checks.length}), the budgets and those at every progress (${got.every.map((p) => p.brief).join('; ') || 'none'}) as found on the main thread before`);
+  }
 }
 
 // ---- budgets ----
