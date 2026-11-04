@@ -1,15 +1,19 @@
 // The World check panel (core/worldcheck.ts): the status bar button (the number of errors) opens a panel above the
 // overworld's paint panel listing the problems – errors and warnings apart, each in its group (Paths, Progress, Links,
 // Look, Budget; empty ones not shown) – each with Show (the map at the event progress it is found at, the tile shown
-// and outlined) and Fix where one exists (one ROM edit). Checked again after every ROM edit and undo, and when what
-// the search needs is learned (owreachview.ts); what an edit changed is said in a toast (new errors named, with Show).
+// and outlined) and Fix where one exists (one ROM edit). Under them every budget (core/owbudget.ts) as a gauge with
+// Show (where its limit applies); one full is an error, from 80 % a warning (budgetProblems). Checked again after every
+// ROM edit and undo, and when what the search needs is learned (owreachview.ts); what an edit changed is said in a
+// toast (new errors named, with Show).
 
 import type { OverworldView } from './overworld.ts';
 import { h, toast, emptyState } from './dom.ts';
 import { l1XY, OW_EVENTS } from '../core/overworld.ts';
 import { tileText } from '../core/owteleport.ts';
 import { hex2 } from '../core/names.ts';
-import { worldProblems, worldChecks, applyFix, errorCount, checkAgainst, diffText, CHECK_GROUPS, type CheckBaseline, type WorldProblem, type CheckSeverity } from '../core/worldcheck.ts';
+import { worldProblems, worldChecks, applyFix, errorCount, checkAgainst, diffText, budgetProblems, budgetPlace, CHECK_GROUPS, type CheckBaseline, type WorldProblem, type CheckSeverity } from '../core/worldcheck.ts';
+import { owBudgets, fullestSubmap, type Budget } from '../core/owbudget.ts';
+import { budgetGauge } from './budgetgauge.ts';
 
 const ICON: Record<CheckSeverity, string> = { error: '⛔', warn: '⚠' };
 const SECTIONS: { severity: CheckSeverity; name: string; title: string }[] = [
@@ -23,7 +27,8 @@ export class WorldCheck {
   readonly root = h('div', { class: 'panel world-check', hidden: true });
   // (the tiles' places named once the submaps' views are known: searched again then)
   private found: { from: object; views: boolean; problems: WorldProblem[] } | null = null;
-  private checks: { key: string; problems: WorldProblem[] } | null = null;
+  // (the checks with every event passed and the budgets: kept while the ROM is the same)
+  private checks: { key: string; problems: WorldProblem[]; budgets: Budget[] } | null = null;
   // the problems last checked: what an edit changed is said against them
   private baseline: CheckBaseline | null = null;
 
@@ -47,7 +52,11 @@ export class WorldCheck {
     const place = (i: number) => tileText({ submap: v.submapAt(i), ...l1XY(i) }), rom = v.app.rom, all = { ...st.all, progress: OW_EVENTS };
     // (the checks with every event passed: the same at every event progress, searched again after a ROM edit)
     const key = `${rom.gen}:${views}`;
-    if (this.checks?.key !== key) this.checks = { key, problems: worldChecks(rom, all, place, v.app.entrances.graph()) };
+    if (this.checks?.key !== key) {
+      // (the custom sprites: of the submap with the most)
+      const budgets = owBudgets(rom, fullestSubmap(rom), st.now.inp.kinds);
+      this.checks = { key, budgets, problems: [...worldChecks(rom, all, place, v.app.entrances.graph()), ...budgetProblems(budgets)] };
+    }
     const problems = worldProblems(rom, { ...st.now, progress: v.progress }, all, place, this.checks.problems);
     this.found = { from: st, views, problems };
     return problems;
@@ -73,7 +82,7 @@ export class WorldCheck {
     this.baseline = baseline;
     const said = change && diffText(change);
     if (!said) return;
-    const show = said.show && said.show.tile >= 0 ? said.show : null;
+    const show = said.show && canShow(said.show) ? said.show : null;
     toast(`World check: ${said.text}`, show ? 'error' : 'info', show ? { label: 'Show', run: () => this.show(show) } : undefined);
   }
   // the problems checked from now on are the baseline (the overworld shown again: edits made elsewhere not said)
@@ -86,8 +95,8 @@ export class WorldCheck {
     const head = h('div', { class: 'panel-title' }, 'World check',
       h('button', { class: 'msg-close', title: 'Close', onclick: () => this.toggle(false) }, '×'));
     if (!ps) { this.root.replaceChildren(head, emptyState('Searching… (the path tiles, the maps or the saves are being learned)')); return; }
-    if (!ps.length) { this.root.replaceChildren(head, emptyState('No problems found: Mario gets everywhere, every way ends at a level or stop tile.')); return; }
     const body: HTMLElement[] = [];
+    if (!ps.length) body.push(emptyState('No problems found: Mario gets everywhere, every way ends at a level or stop tile.'));
     for (const s of SECTIONS) {
       const of = ps.filter((p) => p.severity === s.severity);
       if (!of.length) continue;
@@ -99,11 +108,19 @@ export class WorldCheck {
         for (const p of ofGroup) body.push(this.row(p));
       }
     }
+    body.push(...this.budgetList());
     this.root.replaceChildren(head, h('div', { class: 'wc-list' }, ...body));
     this.root.scrollTop = scroll;
   }
 
   private row(p: WorldProblem): HTMLElement {
+    if (p.budget) {
+      return h('div', { class: `problem problem-${p.severity}`, title: p.title ?? '' },
+        h('span', { class: 'problem-icon' }, ICON[p.severity]),
+        h('span', { class: 'wc-text' }, p.text),
+        budgetGauge(p.budget),
+        this.budgetShow(p.budget));
+    }
     const map = p.progress === OW_EVENTS ? 'with every event passed' : p.progress ? `after event ${hex2(p.progress - 1)}` : 'before events';
     return h('div', { class: `problem problem-${p.severity}`, title: `${p.title ? `${p.title}\n` : ''}Found on the map ${map}${p.noFix ? `\nNo fix: ${p.noFix}` : ''}` },
       h('span', { class: 'problem-icon' }, ICON[p.severity]),
@@ -112,11 +129,31 @@ export class WorldCheck {
       p.fix ? h('button', { class: 'problem-fix', title: p.fix.title, onclick: () => this.fix(p) }, p.fix.label) : null);
   }
 
-  // the map at the event progress the problem is found at, its tile shown and outlined
+  // every budget, the numbers of the gauges beside the actions (the custom sprites': the submap with the most)
+  private budgetList(): HTMLElement[] {
+    const budgets = this.checks?.budgets ?? [], g = CHECK_GROUPS.find((x) => x.id === 'budget')!;
+    if (!budgets.length) return [];
+    return [h('div', { class: 'wc-section', title: g.title }, `All budgets (${g.name})`),
+      ...budgets.map((b) => h('div', { class: 'problem wc-budget', title: `${b.help}${b.submap !== undefined ? ' – the submap with the most is listed' : ''}` },
+        h('span', { class: 'wc-text' }, b.name), budgetGauge(b), this.budgetShow(b)))];
+  }
+  private budgetShow(b: Budget): HTMLElement {
+    return h('button', { class: 'problem-fix', title: 'Show where the limit applies: the gauge beside the action it stops', onclick: () => this.showBudget(b) }, 'Show');
+  }
+
+  // the map at the event progress the problem is found at, its tile shown and outlined; a budget: where it applies
   private show(p: WorldProblem): void {
+    if (p.budget) { this.showBudget(p.budget); return; }
     const v = this.view;
     if (p.progress !== v.progress) v.setEvent(p.progress - 1);
     v.showTile(p.tile);
+  }
+  // the mode (and submap) of the budget's gauge; one beside an event's actions: an event chosen (budgetPlace)
+  private showBudget(b: Budget): void {
+    const v = this.view, place = budgetPlace(v.app.rom, b, v.event);
+    if (place.submap !== undefined) v.setMap(place.submap);
+    v.setMode(place.mode);
+    if (place.event !== undefined) v.setEvent(place.event);
   }
 
   private fix(p: WorldProblem): void {
@@ -127,3 +164,6 @@ export class WorldCheck {
     } catch (e) { toast(`Not fixed: ${e instanceof Error ? e.message : e}`, 'error'); }
   }
 }
+
+// a problem Show goes to: a tile, or where a budget's limit applies
+const canShow = (p: WorldProblem): boolean => p.tile >= 0 || !!p.budget;

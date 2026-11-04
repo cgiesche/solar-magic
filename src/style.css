@@ -253,6 +253,7 @@ input.invalid, input.invalid:focus { outline: 1px solid var(--danger); border-co
 .world-check .wc-section.problem-warn { color: #ffa020; }
 .world-check .problem { align-items: flex-start; }
 .world-check .wc-text { flex: 1; padding: 2px 0; }
+.world-check .wc-budget { padding-left: 28px; }
 .problems-pop { position: fixed; top: auto; left: auto; min-width: 320px; max-width: min(560px, 90vw); max-height: 50vh; overflow-y: auto; }
 .problem { display: flex; align-items: center; gap: 6px; padding: 2px 4px; }
 .problem-icon { flex: none; width: 18px; text-align: center; }

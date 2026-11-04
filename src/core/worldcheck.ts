@@ -5,7 +5,11 @@
 // before and after an edit can be compared.
 
 import type { Rom } from './rom.ts';
-import { readL1, writeL1 } from './overworld.ts';
+import { readL1, writeL1, readDestroyList, revealEventCount, NO_EVENT, OW_EVENTS } from './overworld.ts';
+import { eventReveal } from './oweventtiles.ts';
+import { readEvents } from './owevents.ts';
+import { budgetLevel, budgetText, type Budget } from './owbudget.ts';
+import type { OwMode } from './owlayers.ts';
 import { reachProblems, WARP_TILES, ANY_WAY_TILE, type Reached, type ReachKind, type CheckSeverity } from './owreach.ts';
 import { hex3 } from './names.ts';
 import type { PathKind } from './owpaths.ts';
@@ -38,6 +42,7 @@ export interface WorldProblem {
   progress: number; // the event progress it is found at (OW_EVENTS: every event passed)
   fix?: WorldFix;
   noFix?: string; // why a problem a fix exists for has none here
+  budget?: Budget; // a budget amber or full (tile -1: Show goes to where the limit applies, budgetPlace)
 }
 
 // a search of owreach.ts at an event progress
@@ -77,6 +82,55 @@ export function worldProblems(rom: Rom, now: CheckedAt, all: CheckedAt, place: (
 export function worldChecks(rom: Rom, all: CheckedAt, place: (tile: number) => string, graph: ExitGraph): WorldProblem[] {
   const c = checkContext(rom, all, place);
   return [...eventsNeverRun(c), ...stranded(c), ...untiledLevelsEntered(c, graph), ...eventOrderProblems(c)];
+}
+
+// ---- budgets (owbudget.ts) ----
+
+// A budget's problem: full an error, from 80 % a warning – the reveal list's at most a warning: its pairs are a fixed
+// list, the clean game's every one used, and full it only stops a tile of a kind no pair turns into another from being
+// revealed. The key is its budget (with the submap of the custom sprites) and level: amber turning full is new.
+export function budgetProblems(budgets: readonly Budget[]): WorldProblem[] {
+  const out: WorldProblem[] = [];
+  for (const b of budgets) {
+    const level = budgetLevel(b);
+    if (level === 'ok') continue;
+    const full = level === 'full', reveal = b.key === 'revealPairs';
+    const left = b.max - b.used;
+    out.push({
+      key: `budget:${b.key}${b.submap !== undefined ? `:${b.submap}` : ''}:${level}`,
+      group: 'budget',
+      severity: full && !reveal ? 'error' : 'warn',
+      text: full ? (reveal ? `${b.name} full: a new kind of tile to reveal needs a pair changed` : `${b.name} full: no room for another`)
+        : `${b.name} almost full: ${left} left`,
+      brief: `${b.name} ${full ? 'full' : 'almost full'}`,
+      title: `${b.help}\n${budgetText(b)}${reveal && full ? '\nA warning: tiles of the kinds the list turns are still revealed' : ''}`,
+      tile: -1,
+      progress: OW_EVENTS,
+      budget: b,
+    });
+  }
+  return out;
+}
+
+// where a budget's limit applies – its gauge beside the action it stops: the mode, the submap (custom sprites), the
+// event to choose for the gauges beside an event's reveal, destroys and steps: the one chosen (`chosen`, -1 none) where
+// it shows the gauge, else the first using the table (none: event 0)
+export interface BudgetPlace { mode: OwMode; submap?: number; event?: number }
+export function budgetPlace(rom: Rom, b: Budget, chosen = -1): BudgetPlace {
+  const first = (uses: (e: number) => boolean) => Math.max(0, Array.from({ length: OW_EVENTS }, (_, e) => e).findIndex(uses));
+  // (an event past the reveal table shows "reveals none" in place of the reveal list's gauge)
+  if (chosen >= 0 && (b.key === 'destroys' || b.key === 'eventStorage' || (b.key === 'revealPairs' && chosen < revealEventCount(rom)))) {
+    return { mode: b.key === 'eventStorage' ? 'l2' : 'l1', event: chosen };
+  }
+  switch (b.key) {
+    case 'l1Tiles': return { mode: 'l1' };
+    case 'translevels': return { mode: 'levels' };
+    case 'stars': case 'exitPaths': return { mode: 'links' };
+    case 'customSprites': return { mode: 'sprites', submap: b.submap ?? 0 };
+    case 'destroys': return { mode: 'l1', event: readDestroyList(rom).find((d) => d.event !== NO_EVENT)?.event ?? 0 };
+    case 'revealPairs': return { mode: 'l1', event: first((e) => eventReveal(rom, e) >= 0) };
+    case 'eventStorage': { const steps = readEvents(rom).steps; return { mode: 'l2', event: first((e) => !!steps[e]?.length) }; }
+  }
 }
 
 // (the star and pipe tiles stop Mario too, but look like a way on; tile 82 is a stop tile he walks off any way)

@@ -28,7 +28,8 @@ import { hex } from './names.ts';
 
 export type BudgetKey = 'destroys' | 'revealPairs' | 'l1Tiles' | 'stars' | 'exitPaths' | 'translevels' | 'eventStorage' | 'customSprites';
 // a budget: `used` of `max`; `name` what it counts in the player's terms, `help` what using it up means
-export interface Budget { key: BudgetKey; used: number; max: number; name: string; help: string }
+// (submap: the custom sprites' submap)
+export interface Budget { key: BudgetKey; used: number; max: number; name: string; help: string; submap?: number }
 
 // the reveal list's pairs doing something: the last pair of its tile (the game looks from the last one down), turning
 // it into another tile
@@ -41,7 +42,8 @@ function revealPairsUsed(rom: Rom): number {
 // tiles' path kinds (owpaths.ts) – without them (being learned) no layer 1 tile budget
 export function owBudgets(rom: Rom, submap: number, kinds: readonly PathKind[] | null = null): Budget[] {
   const out: Budget[] = [];
-  const add = (key: BudgetKey, used: number, max: number, name: string, help: string) => out.push({ key, used, max, name, help });
+  const add = (key: BudgetKey, used: number, max: number, name: string, help: string, submap?: number) =>
+    out.push({ key, used, max, name, help, ...(submap !== undefined ? { submap } : {}) });
   if (hasDestroyPatch(rom)) add('destroys', readDestroyList(rom).filter((d) => d.event !== NO_EVENT).length, DESTROYS,
     'Destroyed level tiles', 'Tiles events destroy (castles, fortresses and switch palaces collapsing) – an event destroys one');
   add('revealPairs', revealPairsUsed(rom), readRevealList(rom).length,
@@ -62,8 +64,14 @@ export function owBudgets(rom: Rom, submap: number, kinds: readonly PathKind[] |
   if (hasEventPatch(rom)) add('eventStorage', storagePlacesUsed(readEvents(rom)), STORAGE_MAX,
     'Event tile storage', 'Room for the layer 2 tiles events write (each step\'s piece of 2×2 or 6×6 tiles)');
   add('customSprites', readCustomSprites(rom)[submap]?.length ?? 0, OW_CUSTOM_MAX,
-    `Custom sprites on ${MAP_NAMES[submap] ?? `submap ${submap}`}`, 'Custom overworld sprites placed on this submap');
+    `Custom sprites on ${MAP_NAMES[submap] ?? `submap ${submap}`}`, 'Custom overworld sprites placed on this submap', submap);
   return out;
+}
+
+// the submap with the most custom overworld sprites (of several the first): the one whose budget the World check lists
+export function fullestSubmap(rom: Rom): number {
+  const lists = readCustomSprites(rom), n = MAP_NAMES.map((_, m) => lists[m]?.length ?? 0);
+  return n.indexOf(Math.max(...n));
 }
 
 // how full a budget is: below 80 % ok, from 80 % amber, full red

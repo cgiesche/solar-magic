@@ -4,14 +4,20 @@
 // (a ROM edit): a dead end, its fix "Add a stop tile here" – one layer 1 tile of the map before events – leaves Mario
 // stopping there, the dead end gone, the other problems' keys as before. What an edit changed (diffProblems, diffText):
 // the new dead end and up to three errors named, then "and N more"; its undo and the fix say them fixed; warnings
-// counted; nothing changed, nothing said.
+// counted; nothing changed, nothing said. Budgets: the clean game's two warnings (the reveal list full, the levels with a
+// level tile amber), none an error; the destroy list amber, then full (an error said new); the fullest submap's custom
+// sprites; where Show goes.
 import { Rom } from '../src/core/rom.ts';
-import { OverworldEmulator, OverworldLoads, gameL1, l1XY, readL1, writeL1, OW_EVENTS } from '../src/core/overworld.ts';
+import { OverworldEmulator, OverworldLoads, gameL1, l1XY, readL1, writeL1, OW_EVENTS, readDestroyList, writeDestroyList, revealEventCount, NO_EVENT } from '../src/core/overworld.ts';
 import { progressSaves } from '../src/core/owprogress.ts';
 import { reach, reachInput } from '../src/core/owreach.ts';
 import { readStart } from '../src/core/owsprites.ts';
 import { RAM } from '../src/core/ram.ts';
-import { worldProblems, applyFix, errorCount, stopTile, diffProblems, diffText, checkAgainst, type CheckedAt, type WorldProblem } from '../src/core/worldcheck.ts';
+import { worldProblems, applyFix, errorCount, stopTile, diffProblems, diffText, checkAgainst, budgetProblems, budgetPlace, type CheckedAt, type WorldProblem } from '../src/core/worldcheck.ts';
+import { owBudgets, fullestSubmap } from '../src/core/owbudget.ts';
+import { eventReveal } from '../src/core/oweventtiles.ts';
+import { readEvents } from '../src/core/owevents.ts';
+import { readCustomSprites, writeCustomSprites, OW_CUSTOM_MAX } from '../src/core/owcustom.ts';
 import { editorImage, pathKinds, pathShapes } from './fixture.ts';
 
 let bad = 0;
@@ -96,6 +102,50 @@ console.log(list(clean.problems));
     const saidFix = diffText(diffProblems(cutCheck.problems, fixed.problems));
     check(!!saidFix && saidFix.text.startsWith(`Fixed: dead end at ${at(end)}`) && !saidFix.text.includes('New'), `the fix says: "${saidFix?.text}"`);
   }
+}
+
+// ---- budgets ----
+{
+  // the World check's budgets: those of owbudget.ts, the custom sprites of the submap with the most
+  const budgets = (r: Rom) => owBudgets(r, fullestSubmap(r), kinds);
+  const all = budgets(rom), ps = budgetProblems(all);
+  console.log(list(ps));
+  check(all.length === 8 && owBudgets(rom, 0, kinds).every((b, k) => b.used === all[k].used && b.max === all[k].max), 'the clean game: every budget listed, the numbers of the gauges (owBudgets)');
+  const reveal = ps.find((p) => p.budget?.key === 'revealPairs'), levels = ps.find((p) => p.budget?.key === 'translevels');
+  check(ps.length === 2 && !errorCount(ps) && ps.every((p) => p.group === 'budget' && p.tile < 0), `the clean game: two budget warnings, no error (${ps.map((p) => p.brief).join(', ')})`);
+  check(reveal?.severity === 'warn' && reveal.text.startsWith('Reveal list full'), `the reveal list (full, 22 of 22) only a warning: "${reveal?.text}"`);
+  check(levels?.severity === 'warn' && levels.text.endsWith('almost full: 3 left'), `levels with a level tile (92 of 95): amber, a warning: "${levels?.text}"`);
+  check(keys(budgetProblems(budgets(new Rom(rom.data.slice())))) === keys(ps), 'checked again: the same keys');
+  // the destroy list amber (20 of 24), then full: a warning, then an error said new
+  const r = new Rom(rom.data.slice()), d = readDestroyList(r);
+  const fill = (n: number) => { let k = 0; for (const e of d) if (e.event === NO_EVENT && k < n) { e.event = 0x60 + k; e.tile = 0x10 + k; k++; } writeDestroyList(r, d); };
+  fill(4);
+  const amber = budgetProblems(budgets(r)), dAmber = amber.find((p) => p.budget?.key === 'destroys');
+  check(dAmber?.severity === 'warn' && dAmber.text.endsWith('almost full: 4 left'), `20 destroys of 24: a warning "${dAmber?.text}"`);
+  fill(4);
+  const full = budgetProblems(budgets(r)), dFull = full.find((p) => p.budget?.key === 'destroys');
+  check(dFull?.severity === 'error' && errorCount(full) === 1, `24 of 24: an error "${dFull?.text}"`);
+  const said = diffText(diffProblems(amber, full));
+  check(said?.text === 'New: Destroyed level tiles full · −1 warning' && said.show === dFull, `amber turning full says: "${said?.text}"`);
+  const place = budgetPlace(r, dFull!.budget!);
+  check(place.mode === 'l1' && place.event === readDestroyList(rom).find((x) => x.event !== NO_EVENT)!.event, `Show: the event of the first destroy (${place.event?.toString(16)}), its gauge beside "+ Destroy"`);
+  // the custom sprites: the fullest submap's budget, Show goes there
+  const lists = readCustomSprites(r);
+  lists[3] = Array.from({ length: OW_CUSTOM_MAX }, (_, k) => ({ id: 1, x: k, y: 3, z: 0, extra: [] }));
+  lists[2] = [{ id: 1, x: 3, y: 3, z: 0, extra: [] }];
+  writeCustomSprites(r, lists);
+  const cs = budgetProblems(budgets(r)).find((p) => p.budget?.key === 'customSprites');
+  check(cs?.severity === 'error' && cs.key === 'budget:customSprites:3:full' && cs.text.startsWith('Custom sprites on Forest of Illusion full'), `24 custom sprites on submap 3: "${cs?.text}"`);
+  const csPlace = cs && budgetPlace(r, cs.budget!);
+  check(csPlace?.mode === 'sprites' && csPlace.submap === 3, 'Show: the sprites mode on that submap');
+  // where each other limit applies
+  const of = (k: string) => budgetPlace(rom, all.find((b) => b.key === k)!);
+  check(of('l1Tiles').mode === 'l1' && of('translevels').mode === 'levels' && of('stars').mode === 'links' && of('exitPaths').mode === 'links', 'Show: layer 1 tiles in the layer 1 mode, levels in the Levels mode, links in the links mode');
+  const rv = of('revealPairs'), st = of('eventStorage'), revealBudget = all.find((b) => b.key === 'revealPairs')!;
+  const past = revealEventCount(rom); // (the editor's reveal table has every event: nothing past it)
+  check(budgetPlace(rom, revealBudget, 5).event === 5 && (past >= OW_EVENTS || budgetPlace(rom, revealBudget, past).event === rv.event),
+    `Show keeps the event chosen where it shows the gauge, not one past the reveal table (events 00–${hx(past - 1)})`);
+  check(eventReveal(rom, rv.event!) >= 0 && readEvents(rom).steps[st.event!].length > 0, `Show: reveals at event ${rv.event?.toString(16)} (it reveals a tile), the tile storage at event ${st.event?.toString(16)} (it has steps)`);
 }
 
 if (bad) { console.log(`${bad} failed`); process.exit(1); }
