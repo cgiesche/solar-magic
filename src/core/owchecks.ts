@@ -3,9 +3,9 @@
 // ran in play. Each a plain function of the ROM and the searches of owreach.ts with every event passed.
 
 import type { Rom } from './rom.ts';
-import { OW_EVENTS, MAX_TRANSLEVEL, DIR_FLAGS, baseEvent, translevelToLevel, readL1, readTranslevels, l1Index, exitDirections, initialFlags } from './overworld.ts';
+import { OW_EVENTS, MAX_TRANSLEVEL, baseEvent, translevelToLevel, readL1, readTranslevels, l1Index } from './overworld.ts';
 import { readEvents, eventChanges, eventRunners, eventPieces, drawPiece, l2XY, type EventData, type EventChanges } from './owevents.ts';
-import { reach, WARP_TILES, type Reach } from './owreach.ts';
+import { reach, inputWithout, WARP_TILES, type Reach } from './owreach.ts';
 import { readSecondaryEntrance, mainTranslevel, OW_NORMAL, OW_SECRET } from './level.ts';
 import type { ExitGraph } from './exitgraph.ts';
 import { hex2, hex3 } from './names.ts';
@@ -121,13 +121,7 @@ export function eventsNeeded(c: CheckContext): number[][] {
   return Array.from({ length: OW_EVENTS }, (_, b) => {
     const ch = c.changes[b], by = runners.get(b) ?? [];
     if (!ch.l1.length && !by.length) return [];
-    const l1 = Uint16Array.from(inp.l1), flags = Uint8Array.from(inp.flags);
-    for (const i of ch.l1) l1[i] = before[i];
-    for (const { tl, exit } of by) {
-      const dirs = exitDirections(rom, tl), d = dirs[exit];
-      if (!dirs.some((o, x) => x !== exit && o === d)) flags[tl] &= ~(DIR_FLAGS[d] & ~initialFlags(rom, tl));
-    }
-    const without = reach({ ...inp, l1, flags });
+    const without = reach(inputWithout(rom, inp, ch, by, before));
     return [...runners.keys()].filter((a) => { const t = tileOf(a); return a !== b && r.stops.has(t) && !without.stops.has(t); });
   });
 }

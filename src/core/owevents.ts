@@ -27,7 +27,7 @@ import { missingPatch } from './patches.ts';
 import { OwRefusal } from './owrefusal.ts';
 import {
   OW_EVENTS, OverworldEmulator, type OverworldLoads, gameL1, readL1, readTranslevels, baseEvent, translevelToLevel, l1XY, revealAt, revealEventCount, readDestroyList,
-  destroyEffects, destroyChanges, l1Index,
+  destroyEffects, destroyedCells, l1Index,
 } from './overworld.ts';
 import { RAM, getS16 } from './ram.ts';
 import { record, countReads } from './romdeps.ts';
@@ -404,7 +404,7 @@ export function eventChanges(rom: Rom, d: EventData = readEvents(rom)): (e: numb
   const destroys = readDestroyList(rom), effects = destroyEffects(rom), map = readL1(rom), reveals = revealEventCount(rom);
   return (e) => {
     const reveal = e < reveals ? revealAt(rom, e) : 0;
-    const destroyed = destroys.filter((x) => x.event === e).flatMap((x) => [x.tile, ...destroyChanges(effects, map, x.tile).map((c) => c.cell)]);
+    const destroyed = destroys.filter((x) => x.event === e).flatMap((x) => destroyedCells(effects, map, x.tile));
     const l1 = new Set([...eventL1Tiles(d, e), ...(reveal ? [reveal] : []), ...destroyed]);
     return { event: e, l1: [...l1], l2: [...new Set(eventPieces(d, e).flatMap((p) => pieceTiles(d, p)))] };
   };

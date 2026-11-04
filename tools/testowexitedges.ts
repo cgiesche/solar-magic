@@ -1,7 +1,9 @@
-// What a level exit opens (owexitedges.ts): exit E opens level B when B is reached at the event progress after E's
-// event and not at the one before. On the test ROM (the clean game): Yoshi's Island's edges as the game has them,
-// an arrow to another submap ending at the link leaving the exit's submap, the maps of progressMapsJob the same as
-// the loads'.
+// What a level exit opens (owexitedges.ts): exit E opens level B when B is reached with every event passed and not
+// with every event but E's – or at the event progress after E's event and not at the one before – the first levels
+// on the way only. On the test ROM (the clean game): Yoshi's Island's edges as the game has them, Forest of Illusion's
+// and Chocolate Island's (events out of number order there), a castle opening the level behind it (not the exit
+// before it), an arrow to another submap ending at the link leaving the exit's submap, the maps of progressMapsJob
+// the same as the loads'.
 import { Rom } from '../src/core/rom.ts';
 import { OverworldEmulator, OverworldLoads, translevelToLevel, l1XY, gameL1, OW_EVENTS, EXIT_NAMES } from '../src/core/overworld.ts';
 import { progressSaves } from '../src/core/owprogress.ts';
@@ -43,8 +45,25 @@ const graph = new ExitGraph(rom), warps = new Map<number, ReturnType<typeof leve
 const levelWarps = (tl: number) => (warps.get(tl) ?? warps.set(tl, levelTeleports(rom, graph, tl)).get(tl)!).map((t) => t.to);
 const input = (p: number) => reachInput(rom, maps[p].l1, maps[p].tls, maps[p].flags, kinds, shapes, start, levelWarps);
 const t0 = performance.now(), edges = exitEdges(rom, input, sub);
-console.log(`     ${edges.length} exits in ${Math.round(performance.now() - t0)} ms`);
+console.log(`     ${edges.length} exits in ${Math.round(performance.now() - t0)} ms: ${edges.filter((e) => e.opens.length).length} with arrows (${edges.reduce((n, e) => n + e.opens.length, 0)})`);
 const text = (e: (typeof edges)[number]) => `${lv(e.tl)} ${EXIT_NAMES[e.exit].toLowerCase()} → ${e.opens.map((o) => lv(o.tl)).join(' ') || 'nothing'}`;
+
+// ---- events out of number order: Forest of Illusion, Chocolate Island; castles; the first level on the way only ----
+for (const w of [
+  '11E normal exit → 120', // Forest of Illusion 1: Forest of Illusion 2
+  '11E secret exit 1 → 11D', // Forest of Illusion 1: the Forest Ghost House
+  '11D secret exit 1 → 11F', // Forest Ghost House: Forest of Illusion 4
+  '11F secret exit 1 → 122', // Forest of Illusion 4: the Forest Secret Area
+  '122 normal exit → 01F', // Forest Secret Area: the Forest Fortress
+  '123 secret exit 1 → 020', // Forest of Illusion 3: Roy's Castle (not Chocolate Island 1 behind it)
+  '021 normal exit → 024', // Choco-Ghost House: Chocolate Island 2 (not the levels behind it)
+  '024 normal exit → 023', // Chocolate Island 2: Chocolate Island 3
+  '024 secret exit 1 → 117', // Chocolate Island 2: the Chocolate Secret
+  '01D normal exit → 01C', // Chocolate Island 4: Chocolate Island 5
+  '006 normal exit → 007', // Donut Plains 4: Morton's Castle – destroyed with every event passed, still a level
+  '007 normal exit → 11A', // Morton's Castle: Vanilla Dome 1
+  '116 normal exit → 115', // Valley of Bowser 1: Valley of Bowser 2
+]) check(edges.some((e) => text(e) === w), `opens the first level on the way: ${w}`);
 
 // ---- Yoshi's Island (submap 1) ----
 const yi = edges.filter((e) => sub(e.from) === 1);
@@ -73,9 +92,17 @@ check(yi.filter((e) => e.opens.length).length === want.length, `no other exit on
 {
   const none = edges.filter((e) => e.reached && !e.opens.length), unknown = edges.filter((e) => !e.reached);
   console.log(`     opening nothing: ${none.map(text).join(', ')}`);
-  console.log(`     the level not reached after its event: ${unknown.map(text).join(', ')}`);
+  // (besides switch palaces, star roads, stars and castles: exits whose way leads to a level reached another way with
+  // every event passed – Donut Secret 1, Donut Secret 2, Cookie Mountain, Forest of Illusion 3 and 4, the Forest Ghost
+  // House; the Valley of Bowser and the Chocolate Island exits leading there, whose levels Mario reaches back through
+  // Star Road with every event passed: Valley of Bowser 2's secret exit, the Valley Ghost House's, Valley of Bowser 3
+  // and 4, Chocolate Island 5, Wendy's Castle, the Sunken Ghost Ship)
+  check(edges.filter((e) => e.opens.length).length === 68, `68 exits with arrows (${edges.length - none.length - unknown.length} of ${edges.length})`);
+  console.log(`     the level not reached: ${unknown.map(text).join(', ')}`);
   // (the Yellow Switch Palace: its event reveals no way on)
-  check(none.some((e) => lv(e.tl) === '014'), `exits opening nothing listed with no level, the Yellow Switch Palace's among them (${none.length}; ${unknown.length} levels not reached after their event)`);
+  check(none.some((e) => lv(e.tl) === '014'), `exits opening nothing listed with no level, the Yellow Switch Palace's among them (${none.length})`);
+  // (112: a level tile of the clean game no way leads to)
+  check(unknown.map((e) => lv(e.tl)).join() === '112', `what an exit opens can't be told only where its level isn't reached with every event passed either (${unknown.map(text).join(', ')})`);
   // (124 has its normal exit only: the events of secret exits 1–3 after its base event change nothing)
   const t124 = edges.filter((e) => lv(e.tl) === '124');
   check(t124.length === 1 && t124[0].exit === 0, `a level's secret exits whose events change and open nothing left out (124: ${t124.map(text).join(', ')})`);

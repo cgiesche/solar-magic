@@ -729,6 +729,9 @@ export function destroyChanges(effects: DestroyChange[][], l1: ArrayLike<number>
     return cx >= 0 && cy >= 0 && cx < 32 && cy < 32 ? [{ cell: base + l1Index(0, cx, cy), tile: c.tile }] : [];
   });
 }
+// the cells (l1Index) destroying tile j touches: j and those destroyChanges gives
+export const destroyedCells = (effects: DestroyChange[][], l1: ArrayLike<number>, j: number): number[] =>
+  [j, ...destroyChanges(effects, l1, j).map((c) => c.cell)];
 // the layer 1 tile whose destroy changes tile i (l1: the tiles; i itself first, else a neighbour), -1 none
 export function destroyedAt(effects: DestroyChange[][], l1: ArrayLike<number>, i: number): number {
   if (effects[l1[i]].length) return i;

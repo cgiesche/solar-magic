@@ -1,7 +1,7 @@
 // The exits' arrows in the Levels mode (View → "Exit arrows", on by default; owexitedges.ts): from each level tile an
 // arrow to each level its exits open – solid for the normal exit, dashed for a secret one, ending at the link leaving
 // the submap when the level is on another; an exit opening nothing Mario reaches a short red stub – a grey
-// dotted one when Mario doesn't reach its level at the progress after its event either (nothing can't be told). Hovering one
+// dotted one when Mario doesn't reach its level even with every event passed (nothing can't be told). Hovering one
 // says what it is in the status bar. Derived once per ROM edit from the maps at every event progress (learned in the
 // probe worker), the path kinds and shapes; nothing is drawn while those are learned.
 
@@ -56,7 +56,7 @@ export class ExitArrowLayer {
       const exit = `${EXIT_NAMES[e.exit]} of ${levelText(e.tl)}`, p = center(e.from), dashed = e.exit > 0;
       if (!e.reached && !e.opens.length) {
         out.push({ p, q: stub(e.from, e.exit), color: COLORS.unknown, dashed: true, head: false,
-          text: `${exit} (event ${hex(e.event, 2)}): what it opens can't be told – Mario doesn't reach the level at the progress after its event (events pass in number order)` });
+          text: `${exit} (event ${hex(e.event, 2)}): what it opens can't be told – Mario doesn't reach the level, not even with every event passed` });
         continue;
       }
       if (!e.opens.length) {

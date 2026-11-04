@@ -20,8 +20,8 @@
 // Flags only open, so the search runs until nothing more opens.
 
 import { Rom, snesToPc } from './rom.ts';
-import { l1Index, l1XY, DIR_FLAGS, DIR_NAMES, NO_EVENT, baseEvent, exitDirections, translevelToLevel, MAX_TRANSLEVEL } from './overworld.ts';
-import { readEvents, eventRunners, exitChanges, eventTitle } from './owevents.ts';
+import { l1Index, l1XY, DIR_FLAGS, DIR_NAMES, NO_EVENT, baseEvent, exitDirections, translevelToLevel, MAX_TRANSLEVEL, initialFlags } from './overworld.ts';
+import { readEvents, eventRunners, exitChanges, eventTitle, type EventChanges, type EventRunner } from './owevents.ts';
 import { hex2, hex3 } from './names.ts';
 import type { Severity } from './problems.ts';
 import { readTeleports, readExitPaths, type OwTile } from './owteleport.ts';
@@ -73,6 +73,7 @@ export interface ReachInput {
   hard: HardPath[];
   levelWarps?: (tl: number) => number[]; // the tiles a level's exits to the overworld teleport to
   noEvent?: (tl: number) => number; // a level running no event: the direction its normal exit opens (-1: it runs one)
+  ends?: (tile: number) => boolean; // stop tiles Mario goes no further from (no walk, star or teleport): the search ends there
 }
 
 // a way Mario takes from a stop tile in a direction: the tiles he walks over, where he stops (-1: stuck), coming in
@@ -178,6 +179,7 @@ export function reach(inp: ReachInput): Reach {
   stand(inp.start);
   while (queue.length) {
     const s = queue.pop()!, tl = inp.tls[s];
+    if (inp.ends?.(s)) continue;
     if (WARP_TILES.includes(lowByte(inp.l1[s]))) for (const to of inp.stars.get(s) ?? []) stand(to);
     if (tl) for (const to of inp.levelWarps?.(tl) ?? []) stand(to);
     for (let d = 0; d < 4; d++) {
@@ -233,6 +235,20 @@ export function reachInput(rom: Rom, l1: ArrayLike<number>, tls: ArrayLike<numbe
     l1, tls, flags, kinds, shapes, start: tileOf(start), stars, exitPaths, hard: hardPaths(rom),
     levelWarps: levelWarps && ((tl) => levelWarps(tl).map(tileOf)), noEvent,
   };
+}
+
+// The input with every event passed but event e (`all`: the input with every event passed): e's layer 1 changes undone
+// (the tiles as on the map before events, `before`: readL1) and the way its levels' exits open closed in the level
+// flags (the direction of each exit running e – runners: eventRunners' entry of e – unless open from the start or
+// another exit of the level opens it too). `changes`: what e changes (owevents.ts eventChanges)
+export function inputWithout(rom: Rom, all: ReachInput, changes: EventChanges, runners: readonly EventRunner[], before: ArrayLike<number>): ReachInput {
+  const l1 = Uint16Array.from(all.l1), flags = Uint8Array.from(all.flags);
+  for (const i of changes.l1) l1[i] = before[i];
+  for (const { tl, exit } of runners) {
+    const dirs = exitDirections(rom, tl), d = dirs[exit];
+    if (!dirs.some((o, x) => x !== exit && o === d)) flags[tl] &= ~(DIR_FLAGS[d] & ~initialFlags(rom, tl));
+  }
+  return { ...all, l1, flags };
 }
 
 // ---- problems ----
