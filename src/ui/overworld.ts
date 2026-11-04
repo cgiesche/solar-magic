@@ -36,7 +36,8 @@ import { LevelNameEditor } from './owlevelname.ts';
 import { levelsWithoutTile, type LevelTileEvent } from '../core/owleveltiles.ts';
 import { eventReveal, eventDestroys, revealRefusal, destroyRefusal, addReveal, removeReveal, addDestroy, removeDestroy, cellText, NO_REVEAL_AT_0 } from '../core/oweventtiles.ts';
 import { SpriteLayer } from './owspriteview.ts';
-import { CellHistoryPopup } from './owcellhistoryview.ts';
+import { CellHistoryPopup, tileWords } from './owcellhistoryview.ts';
+import { exitSentences, teleportExit, type Clause } from '../core/owexitsentence.ts';
 import { levelTeleports, locationUses, type LevelTeleport } from '../core/owlinks.ts';
 import { tileText } from '../core/owteleport.ts';
 import { owActionShort } from '../core/level.ts';
@@ -150,6 +151,7 @@ export class OverworldView {
     runners: Map<number, EventRunner[]>;
   } | null = null;
   private hoverStep: { kind: StepKind; k: number } | null = null;
+  private hoverClause: Clause | null = null; // the "When beaten…" clause hovered (its tiles outlined)
   // a reveal or destroy being added to the event in the timeline: the cell clicked on the map (at -1 until then), for
   // a reveal then the tile it becomes picked in the layer 1 sheet
   private eventPick: { kind: 'reveal' | 'destroy'; at: number } | null = null;
@@ -519,6 +521,7 @@ export class OverworldView {
     const tl = this.tls[i];
     if (!this.isLevelTile(this.levelL1()[i]) || !tl) return;
     this.paintExitResults(ctx, lw, i, tl);
+    this.paintClause(ctx, lw);
     const dirs = exitDirections(this.app.rom, tl);
     const step = [[0, -1], [0, 1], [-1, 0], [1, 0]];
     ctx.font = 'bold 7px monospace';
@@ -931,6 +934,7 @@ export class OverworldView {
     this.stopPlay();
     this.event = e;
     this.hoverStep = null;
+    this.hoverClause = null;
     this.eventPick = null;
     storeEvent(this.app.romName, e);
     this.syncEvent();
@@ -1084,10 +1088,10 @@ export class OverworldView {
       hasDestroyPatch(rom) ? h('button', { title: 'The event destroys a tile (a castle, fortress or switch palace): click it on the map (an event destroys one tile, 0x18 in all)', onclick: () => this.startEventPick('destroy') }, '+ Destroy') : null,
     ];
   }
-  // a reveal or destroy edit of the chosen event, one ROM edit; refused with the reason
-  private tileEdit(what: string, f: () => void): boolean {
+  // a reveal or destroy edit of event e (the chosen one), one ROM edit; refused with the reason
+  private tileEdit(what: string, f: () => void, e = this.event): boolean {
     try {
-      this.app.romEdit(`${eventTitle(this.ev!.runners, this.event)}: ${what}`, f);
+      this.app.romEdit(`${eventTitle(eventRunners(this.app.rom), e)}: ${what}`, f);
       return true;
     } catch (err) {
       toast(`Not changed: ${err instanceof Error ? err.message : err}`, 'error');
@@ -1560,16 +1564,56 @@ export class OverworldView {
     );
   }
 
-  // what the level's exits do on the map (drawn there): the tiles each exit's event changes, its teleports
+  // "When beaten…": a sentence per exit of what passing it does (owexitsentence.ts), in the player's words, the event
+  // number after it. Hovering a clause outlines its tiles on the map, a click shows the map as after the exit's event in
+  // the strip, × on a reveal or destroy takes it away (one ROM edit); an exit whose event changes nothing "opens nothing
+  // yet". Exits to the overworld passing none of the exits (ending the turn) are told below.
   exitResultRows(tl: number): HTMLElement[] {
-    const { changes, teleports } = this.exitResults(tl);
-    if (!changes.length && !teleports.length) return [];
-    const where = (l1: number[], l2: number[]) => [...new Set([...l1.map((k) => (k >= 0x400 ? 1 : 0)), ...l2.map((k) => k >> 12)])].map((r) => (r ? 'submaps' : 'main map')).join(', ');
+    const rom = this.app.rom, { teleports } = this.exitResults(tl), runners = eventRunners(rom), kinds = this.pathKinds();
+    this.hoverClause = null; // (built anew: the clause hovered is gone)
+    const sentences = exitSentences(rom, tl, { level: this.levelWords, tile: (t) => tileWords(kinds, t) }, teleports, kinds ? this.isLevelTile : undefined);
+    if (!sentences.length && !teleports.length) return [];
+    const clause = (c: Clause, e: number) => h('span', {
+      class: 'ow-clause', title: 'Shows the map as after this exit\'s event in the strip',
+      onmouseenter: () => { this.hoverClause = c; this.paint(); },
+      onmouseleave: () => { this.hoverClause = null; this.paint(); },
+      onclick: () => this.setEvent(e),
+    }, c.text, c.remove ? h('button', {
+      class: 'link-btn', title: `The event no longer ${c.remove.kind === 'reveal' ? 'reveals' : 'destroys'} the tile at ${cellText(c.remove.tile)}`,
+      onclick: (ev: MouseEvent) => { ev.stopPropagation(); this.removeEventTile(e, c.remove!); },
+    }, '×') : null);
+    // (an exit to the overworld passing an exit without a sentence, or none of them)
+    const others = teleports.filter((t) => !sentences.some((x) => x.exit === teleportExit(t.action)));
     return [
-      h('div', { class: 'hint' }, 'Passing it (outlined on the map):'),
-      ...changes.map((c) => h('div', { class: 'hint' }, `${EXIT_NAMES[c.exit]}: event ${hex(c.event, 2)} changes ${c.l1.length + c.l2.length ? `${c.l1.length ? `${c.l1.length} layer 1` : ''}${c.l1.length && c.l2.length ? ' and ' : ''}${c.l2.length ? `${c.l2.length} layer 2` : ''} tiles (${where(c.l1, c.l2)})` : 'nothing'}`)),
-      ...teleports.map((t) => h('div', { class: 'hint' }, `Exit to the overworld (entrance ${hex(t.entrance, 3)}, ${owActionShort(t.action)}): teleports to ${tileText(t.to)} (dashed)`)),
+      h('div', { class: 'hint' }, 'When beaten… (outlined on the map, a click shows it in the strip):'),
+      ...sentences.map((x) => h('div', { class: 'ow-sentence' },
+        h('b', null, `${EXIT_NAMES[x.exit]}: `),
+        ...(x.clauses.length ? x.clauses.flatMap((c, k) => (k ? [' · ', clause(c, x.event)] : [clause(c, x.event)]))
+          : [h('span', { class: 'ow-clause', title: 'Its event changes nothing on the map – shows the map as after it in the strip', onclick: () => this.setEvent(x.event) }, 'opens nothing yet')]),
+        h('span', { class: 'hint', title: eventTitle(runners, x.event) }, ` · event ${hex(x.event, 2)}`))),
+      ...others.map((t) => h('div', { class: 'hint' }, `Exit to the overworld (entrance ${hex(t.entrance, 3)}, ${owActionShort(t.action)}): Mario goes to ${tileText(t.to)} (dashed)`)),
     ];
+  }
+  // the reveal or destroy of a "When beaten…" clause taken away from event e, one ROM edit (refused: why)
+  private removeEventTile(e: number, r: NonNullable<Clause['remove']>): void {
+    const rom = this.app.rom;
+    this.hoverClause = null;
+    this.tileEdit(`no longer ${r.kind === 'reveal' ? 'reveals' : 'destroys'} ${cellText(r.tile)}`, () => (r.kind === 'reveal' ? removeReveal(rom, e) : removeDestroy(rom, e, r.tile)), e);
+  }
+  // the cells of the "When beaten…" clause hovered, outlined (on the region shown)
+  private paintClause(ctx: CanvasRenderingContext2D, lw: number): void {
+    const c = this.hoverClause;
+    if (!c) return;
+    ctx.strokeStyle = '#ffd34c';
+    ctx.fillStyle = 'rgba(255,211,76,0.35)';
+    ctx.lineWidth = 1.5 * lw;
+    for (const k of c.l1) {
+      if ((k >= 0x400) !== (this.region === 1)) continue;
+      const p = l1XY(k);
+      ctx.fillRect(p.x * 16, p.y * 16, 16, 16);
+      ctx.strokeRect(p.x * 16, p.y * 16, 16, 16);
+    }
+    for (const k of c.l2) { if (k >> 12 !== this.region) continue; const p = l2XY(k); ctx.fillRect(p.x * 8, p.y * 8, 8, 8); }
   }
 
   // the selected tile: a level tile's settings, and for every tile the events that reveal it

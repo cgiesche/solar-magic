@@ -16,6 +16,11 @@ const REST_MS = 700; // the mouse resting on a cell this long shows its history
 const LEAVE_MS = 300; // the time to move from the cell into the popup
 // a tile's path kind in a word (none for a tile that is no path)
 const KIND_WORDS: Record<PathKind, string> = { walk: 'path', climb: 'climbing path', swim: 'water path', exit: 'exit path', stop: 'stop', level: 'level tile', none: '' };
+// a layer 1 tile in words: its number and path kind ("66 path"; the editor has no names of tiles)
+export function tileWords(kinds: readonly PathKind[] | null, t: number): string {
+  const k = kinds?.[t];
+  return k && KIND_WORDS[k] ? `${l1Hex(t)} ${KIND_WORDS[k]}` : l1Hex(t);
+}
 
 // View → Cell history kept in the browser (on unless switched off)
 const PREF = 'ow-cell-history';
@@ -72,7 +77,7 @@ export class CellHistoryPopup {
   private show(i: number): void {
     if (!this.view.root.isConnected) return; // (the overworld no longer shown)
     const v = this.view, rom = v.app.rom, runners = eventRunners(rom), kinds = v.pathKinds();
-    const tile = (t: number) => { const k = kinds?.[t]; return k && KIND_WORDS[k] ? `${l1Hex(t)} ${KIND_WORDS[k]}` : l1Hex(t); };
+    const tile = (t: number) => tileWords(kinds, t);
     const entries = historyWords(cellHistory(rom, i, kinds ? v.isLevelTile : undefined), tile, (e) => eventWords(runners, e, v.levelWords));
     this.cell = i;
     const build = () => {
