@@ -10,7 +10,7 @@ import { eventReveal } from './oweventtiles.ts';
 import { readEvents } from './owevents.ts';
 import { budgetLevel, budgetText, type Budget } from './owbudget.ts';
 import type { OwMode } from './owlayers.ts';
-import { reach, reachProblems, stuckProblems, WARP_TILES, ANY_WAY_TILE, type Reached, type ReachKind, type ReachProblem, type ReachInput, type CheckSeverity } from './owreach.ts';
+import { reachProblems, stuckProblems, WARP_TILES, ANY_WAY_TILE, type Reached, type ReachKind, type ReachProblem, type CheckSeverity } from './owreach.ts';
 import { hex3 } from './names.ts';
 import type { PathKind } from './owpaths.ts';
 import type { OwRefusalData } from './owrefusal.ts';
@@ -88,15 +88,8 @@ function reachProblem(p: ReachProblem, at: CheckedAt, l1: ArrayLike<number>, sto
   return q;
 }
 
-// the searches at every event progress 0 … OW_EVENTS from their inputs, each searched once when first asked for: what
-// the checks at every progress share (stuckAtEveryProgress, owlook.ts lookProblems)
-export function progressSearches(input: (progress: number) => ReachInput): (progress: number) => CheckedAt {
-  const found: CheckedAt[] = [];
-  return (p) => (found[p] ??= (() => { const inp = input(p); return { inp, r: reach(inp), progress: p }; })());
-}
-
 // The dead ends and exit path tiles leading nowhere at every event progress 0 … OW_EVENTS (`at`:
-// the searches there, progressSearches), each once, found at the first progress it is at: one only a late event
+// the searches there, owprogress.ts progressSearches), each once, found at the first progress it is at: one only a late event
 // brings is listed whatever progress is shown
 export function stuckAtEveryProgress(rom: Rom, at: (progress: number) => CheckedAt, place: (tile: number) => string): WorldProblem[] {
   const l1 = readL1(rom), stop = stopTile(l1, at(0).inp.kinds), out = new Map<string, WorldProblem>();

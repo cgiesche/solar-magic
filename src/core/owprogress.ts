@@ -15,9 +15,14 @@
 
 import { OW_EVENTS, FLAG, type OverworldLoads, l1XY, baseEvent, translevelToLevel, readTranslevels } from './overworld.ts';
 import { layer1AtEveryProgress } from './owcellhistory.ts';
-import type { ProgressMap } from './owexitedges.ts';
 import { eventRunners, submapViews, submapOf, type EventRunner } from './owevents.ts';
 import { ExitGraph } from './exitgraph.ts';
+import { levelTeleports } from './owlinks.ts';
+import { readStart } from './owsprites.ts';
+import { reach, reachInput, type ReachInput } from './owreach.ts';
+import type { PathKind, PathShapes } from './owpaths.ts';
+import type { OwTile } from './owteleport.ts';
+import type { CheckedAt } from './worldcheck.ts';
 import type { LevelUses } from './levelusage.ts';
 import type { LevelEmulator } from './levelemu.ts';
 import type { BlockProber } from './blockprobe.ts';
@@ -54,15 +59,51 @@ export function* progressFlagsJob(loads: OverworldLoads): Job<number[][]> {
   return progressSaves(loads).map((s) => s.levelFlags);
 }
 
+// layer 1 and the translevels (l1Index order) of the map at an event progress, the level flags of the save there
+export interface ProgressMap { l1: Uint16Array; tls: Uint8Array; flags: number[] }
+
 // The maps at every event progress 0 … OW_EVENTS (index: the progress) without emulating them: layer 1 as the events
 // leave it (owcellhistory.ts layer1AtEveryProgress: their layer 1 changes, reveals and destroys in number order, as
 // the game loads a save – the model testowcellhistory checks against the game's at every progress), the translevels
 // of the ROM's table (Lunar Magic's, decompressed by the overworld's load: the same at every progress), the level
-// flags of the saves (`flags`, progressFlagsJob). What the World check searches at every progress; the same as the
-// maps loaded there (owexitedges.ts progressMapsJob) where the game's code is the clean game's (testowlook)
+// flags of the saves (`flags`, progressFlagsJob). What the World check and the exits' arrows search at every progress;
+// the same as the maps the game loads there where its code is the clean game's (testowlook, testworldcheck)
 export function progressMapsFromEvents(rom: Rom, flags: readonly number[][]): ProgressMap[] {
   const tls = readTranslevels(rom);
   return layer1AtEveryProgress(rom).map((l1, p) => ({ l1, tls, flags: flags[p] }));
+}
+
+// the search's input at event progress p from the maps at every progress, as the overworld view searches: with the
+// levels' exits to the overworld teleporting (each level's asked once)
+export function progressInput(rom: Rom, maps: readonly ProgressMap[], kinds: readonly PathKind[], shapes: PathShapes, graph: ExitGraph): (p: number) => ReachInput {
+  const warps = new Map<number, OwTile[]>(), start = readStart(rom, 0);
+  const levelWarps = (tl: number) => warps.get(tl) ?? warps.set(tl, levelTeleports(rom, graph, tl).map((t) => t.to)).get(tl)!;
+  return (p) => reachInput(rom, maps[p].l1, maps[p].tls, maps[p].flags, kinds, shapes, start, levelWarps);
+}
+
+// the searches at every event progress 0 … OW_EVENTS from their inputs, each searched once when first asked for: what
+// the World check (stuckAtEveryProgress, owlook.ts lookProblems) and the exits' edges (owexitedges.ts) share
+export function progressSearches(input: (progress: number) => ReachInput): (progress: number) => CheckedAt {
+  const found: CheckedAt[] = [];
+  return (p) => (found[p] ??= (() => { const inp = input(p); return { inp, r: reach(inp), progress: p }; })());
+}
+
+// the maps at every event progress from the events (progressMapsFromEvents) and the searches over them
+// (progressSearches): what the World check and the exits' arrows share
+export interface ProgressSearch { maps: ProgressMap[]; search: (progress: number) => CheckedAt }
+
+// ProgressSearch from the ROM as it is and the saves' level flags (progressFlagsJob), the path kinds and shapes and
+// the levels' exits, the last one kept while the ROM generation and those (by identity) are the same: the World
+// check and the exits' arrows asking for it after an edit search each progress once
+export function progressSearchKeeper(): (rom: Rom, flags: readonly number[][], kinds: readonly PathKind[], shapes: PathShapes, graph: ExitGraph) => ProgressSearch {
+  let kept: { from: unknown[]; s: ProgressSearch } | null = null;
+  return (rom, flags, kinds, shapes, graph) => {
+    const from = [rom, rom.gen, flags, kinds, shapes, graph];
+    if (kept && kept.from.every((x, k) => x === from[k])) return kept.s;
+    const maps = progressMapsFromEvents(rom, flags);
+    kept = { from, s: { maps, search: progressSearches(progressInput(rom, maps, kinds, shapes, graph)) } };
+    return kept.s;
+  };
 }
 
 // where the switches pressed are learned: the levels' tiles (kept, else loaded on emu) and the tiles' probe

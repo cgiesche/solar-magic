@@ -4,7 +4,7 @@
 // clear them (said as fixed); the same pieces in a later event give A instead of B, Show going to that event. A path
 // tile with its own look (its Map16 tile given a visible one's 8x8s) is never warned about. The maps at every event
 // progress the World check searches (owprogress.ts progressMapsFromEvents: layer 1 through the events, the saves' level
-// flags, #381) are those the game loads at every progress in the clean game (owexitedges.ts progressMapsJob). The
+// flags, #381) are those the game loads at every progress in the clean game (fixture.ts loadedProgressMaps). The
 // searches' time, and how long the saves and maps at every event progress take to be learned again after an edit, are
 // printed.
 // node tools/testowlook.ts
@@ -13,15 +13,14 @@ import { RomEditSession } from '../src/core/romedit.ts';
 import { OverworldEmulator, OverworldLoads, l1XY, l2Index, readL2, readTranslevels, baseEvent, owTileWords, setOwTileWords, translevelToLevel, OW_EVENTS, NO_EVENT, OW_L1_TILES } from '../src/core/overworld.ts';
 import { reach, neighbor } from '../src/core/owreach.ts';
 import { readEvents, writeEvents, applyEvents, eventPieces, pieceCells, isBig, paintEvent, eventPlace, eventRunners, layer1Without, submapViews, submapOf } from '../src/core/owevents.ts';
-import { progressMapsJob, progressInput, type ProgressMap } from '../src/core/owexitedges.ts';
-import { progressFlagsJob, progressMapsFromEvents } from '../src/core/owprogress.ts';
+import { progressFlagsJob, progressMapsFromEvents, progressInput, progressSearches, type ProgressMap } from '../src/core/owprogress.ts';
 import type { Job } from '../src/core/jobrunner.ts';
 import { ExitGraph } from '../src/core/exitgraph.ts';
 import { levelTileTest } from '../src/core/owpaths.ts';
 import { routeTiles, routeKind, writeRoute } from '../src/core/owroute.ts';
 import { l1OwnLooks, lookProblems, hasOwnLook } from '../src/core/owlook.ts';
-import { diffProblems, diffText, progressSearches, type WorldProblem } from '../src/core/worldcheck.ts';
-import { editorImage, pathKinds, pathShapes } from './fixture.ts';
+import { diffProblems, diffText, type WorldProblem } from '../src/core/worldcheck.ts';
+import { editorImage, pathKinds, pathShapes, loadedProgressMaps } from './fixture.ts';
 
 let bad = 0;
 const check = (ok: boolean, what: string) => { console.log((ok ? 'ok   ' : 'FAIL ') + what); if (!ok) bad++; };
@@ -50,7 +49,7 @@ function checkLooks(what: string): Checked {
 // ---- the clean game ----
 const clean = checkLooks('the clean game');
 {
-  const t = performance.now(), loaded = runJob(progressMapsJob(loads));
+  const t = performance.now(), loaded = runJob(loadedProgressMaps(loads));
   const same = (a: ArrayLike<number>, b: ArrayLike<number>) => a.length === b.length && Array.prototype.every.call(a, (v: number, i: number) => v === b[i]);
   const differ = loaded.map((m, p) => p).filter((p) => !same(loaded[p].l1, clean.maps[p].l1) || !same(loaded[p].tls, clean.maps[p].tls) || !same(loaded[p].flags, clean.maps[p].flags));
   check(loaded.length === clean.maps.length && !differ.length,

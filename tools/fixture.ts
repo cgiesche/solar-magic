@@ -11,6 +11,9 @@ import { renderLevel } from '../src/core/render.ts';
 import { levelRows, type Level } from '../src/core/level.ts';
 import type { LevelRender } from '../src/core/levelemu.ts';
 import { pathKindsJob, pathShapesJob, levelTileTest, type PathKind, type PathShapes, type LevelTileTest } from '../src/core/owpaths.ts';
+import { OW_EVENTS, gameL1, type OverworldLoads } from '../src/core/overworld.ts';
+import { progressSaves, type ProgressMap } from '../src/core/owprogress.ts';
+import { RAM } from '../src/core/ram.ts';
 
 // the render query of level lv's load r, its layers' geometry as the editor draws it (App.refresh)
 export function levelQuery(rom: Rom, r: LevelRender, lv: Level): RenderQuery {
@@ -45,6 +48,25 @@ export function pathShapes(rom: Rom): PathShapes {
 }
 // which tiles are level tiles in `rom`, learned as the editor learns them
 export const levelTiles = (rom: Rom): LevelTileTest => levelTileTest(pathKinds(rom));
+
+// The maps the game loads at every event progress 0 … OW_EVENTS (index: the progress), emulated: layer 1 and the
+// translevels of the main map loaded there (layer 1 is the same whichever map is loaded), the level flags of the save
+// there (owprogress.ts progressSaves) – what progressMapsFromEvents builds from the events is checked against. The
+// saves in one step, then a step per progress (each kept by the loads while the ROM bytes it read are unchanged)
+export function* loadedProgressMaps(loads: OverworldLoads): Generator<void, ProgressMap[]> {
+  const saves = progressSaves(loads);
+  yield;
+  const out: ProgressMap[] = [];
+  for (let p = 0; p <= OW_EVENTS; p++) {
+    const m = loads.derive(`progressMap:${p}`, (load) => {
+      const r = load(0, p);
+      return { l1: gameL1(r), tls: r.wram.slice(RAM.owTranslevels, RAM.owTranslevelsEnd) };
+    });
+    out.push({ ...m, flags: saves[p].levelFlags });
+    yield;
+  }
+  return out;
+}
 
 // bytes that differ between two ROM images (missing bytes count as 0), not counting `skip` and the patch
 // registry (SMWA): it is rewritten into the first free space after every change, so it moves around

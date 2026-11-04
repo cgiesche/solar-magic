@@ -2,21 +2,22 @@
 // with every event but E's – or at the event progress after E's event and not at the one before – the first levels
 // on the way only. On the test ROM (the clean game): Yoshi's Island's edges as the game has them, Forest of Illusion's
 // and Chocolate Island's (events out of number order there), a castle opening the level behind it (not the exit
-// before it), an arrow to another submap ending at the link leaving the exit's submap, the maps of progressMapsJob
-// the same as the loads'. With the events still passable without an exit's event (passableEdgesJob, the probe
-// worker's, #380): the Valley of Bowser and Chocolate Island exits Mario reaches back through Star Road get their
-// arrows, the Star World ones a star revealed by another exit makes needless lose theirs, Yoshi's Island's the same.
+// before it), an arrow to another submap ending at the link leaving the exit's submap, the maps built from the events
+// (#384) those the game loads at every progress. With the events still passable without an exit's event
+// (passableEdgesJob, the probe worker's, #380): the Valley of Bowser and Chocolate Island exits Mario reaches back
+// through Star Road get their arrows, the Star World ones a star revealed by another exit makes needless lose theirs,
+// Yoshi's Island's the same.
 import { Rom } from '../src/core/rom.ts';
 import { OverworldEmulator, OverworldLoads, translevelToLevel, l1XY, gameL1, OW_EVENTS, EXIT_NAMES } from '../src/core/overworld.ts';
-import { progressSaves } from '../src/core/owprogress.ts';
+import { progressSaves, progressSearches, progressMapsFromEvents, type ProgressMap } from '../src/core/owprogress.ts';
 import { reachInput } from '../src/core/owreach.ts';
 import { readStart } from '../src/core/owsprites.ts';
-import { submapViews, submapOf } from '../src/core/owevents.ts';
-import { exitEdges, passableEdgesJob, progressMapsJob, type ExitEdge, type ProgressMap } from '../src/core/owexitedges.ts';
+import { submapViews, submapOf, eventRunners } from '../src/core/owevents.ts';
+import { exitEdges, passableEdgesJob, type ExitEdge } from '../src/core/owexitedges.ts';
 import { RAM } from '../src/core/ram.ts';
 import { ExitGraph } from '../src/core/exitgraph.ts';
 import { levelTeleports } from '../src/core/owlinks.ts';
-import { editorImage, pathKinds, pathShapes } from './fixture.ts';
+import { editorImage, pathKinds, pathShapes, loadedProgressMaps } from './fixture.ts';
 
 let bad = 0;
 const check = (ok: boolean, what: string) => { console.log((ok ? 'ok   ' : 'FAIL ') + what); if (!ok) bad++; };
@@ -28,17 +29,22 @@ const rom = new Rom(await editorImage());
 const kinds = pathKinds(rom), shapes = pathShapes(rom);
 const loads = new OverworldLoads(new OverworldEmulator(rom), 4);
 
-// the maps at every progress as the probe worker learns them
-const job = progressMapsJob(loads);
+// the maps the game loads at every progress
+const job = loadedProgressMaps(loads);
 let step = job.next(), steps = 0;
 while (!step.done) { step = job.next(); steps++; }
-const maps: ProgressMap[] = step.value;
+const loaded: ProgressMap[] = step.value;
 const saves = progressSaves(loads);
-check(maps.length === OW_EVENTS + 1 && steps === OW_EVENTS + 2 && [0, 0x20, OW_EVENTS].every((p) => {
+check(loaded.length === OW_EVENTS + 1 && steps === OW_EVENTS + 2 && [0, 0x20, OW_EVENTS].every((p) => {
   const r = loads.get(0, p);
-  return gameL1(r).every((t, i) => t === maps[p].l1[i]) && r.wram.subarray(RAM.owTranslevels, RAM.owTranslevelsEnd).every((t, i) => t === maps[p].tls[i])
-    && saves[p].levelFlags.every((f, i) => f === maps[p].flags[i]);
-}), `the maps at every progress (${maps.length}, a step each): layer 1, translevels and flags as the loads and saves have them`);
+  return gameL1(r).every((t, i) => t === loaded[p].l1[i]) && r.wram.subarray(RAM.owTranslevels, RAM.owTranslevelsEnd).every((t, i) => t === loaded[p].tls[i])
+    && saves[p].levelFlags.every((f, i) => f === loaded[p].flags[i]);
+}), `the maps loaded at every progress (${loaded.length}, a step each): layer 1, translevels and flags as the loads and saves have them`);
+// the maps the arrows search: built from the events (#384), those loaded at every progress
+const maps = progressMapsFromEvents(rom, saves.map((s) => s.levelFlags));
+const equal = (a: ArrayLike<number>, b: ArrayLike<number>) => a.length === b.length && Array.prototype.every.call(a, (v: number, i: number) => v === b[i]);
+const differ = maps.map((_, p) => p).filter((p) => !equal(maps[p].l1, loaded[p].l1) || !equal(maps[p].tls, loaded[p].tls) || !equal(maps[p].flags, loaded[p].flags));
+check(!differ.length, `the maps built from the events are those loaded at all ${maps.length} progresses (differing: ${differ.map((p) => hx(p)).join(' ')})`);
 
 const views = submapViews(loads), sub = (i: number) => submapOf(views, i);
 const start = readStart(rom, 0);
@@ -46,7 +52,7 @@ const start = readStart(rom, 0);
 const graph = new ExitGraph(rom), warps = new Map<number, ReturnType<typeof levelTeleports>>();
 const levelWarps = (tl: number) => (warps.get(tl) ?? warps.set(tl, levelTeleports(rom, graph, tl)).get(tl)!).map((t) => t.to);
 const input = (p: number) => reachInput(rom, maps[p].l1, maps[p].tls, maps[p].flags, kinds, shapes, start, levelWarps);
-const t0 = performance.now(), edges = exitEdges(rom, input, sub);
+const t0 = performance.now(), edges = exitEdges(rom, progressSearches(input), sub);
 console.log(`     ${edges.length} exits in ${Math.round(performance.now() - t0)} ms: ${edges.filter((e) => e.opens.length).length} with arrows (${edges.reduce((n, e) => n + e.opens.length, 0)})`);
 const text = (e: (typeof edges)[number]) => `${lv(e.tl)} ${EXIT_NAMES[e.exit].toLowerCase()} → ${e.opens.map((o) => lv(o.tl)).join(' ') || 'nothing'}`;
 
@@ -110,14 +116,15 @@ check(yi.filter((e) => e.opens.length).length === want.length, `no other exit on
   check(t124.length === 1 && t124[0].exit === 0, `a level's secret exits whose events change and open nothing left out (124: ${t124.map(text).join(', ')})`);
 }
 
-// ---- the events still passable without the exit's event (the probe worker's job, after the maps: they are kept) ----
+// ---- the events still passable without the exit's event (the probe worker's job, after the saves: they are kept) ----
 {
   const job = passableEdgesJob(rom, loads, kinds, shapes), t1 = performance.now();
   let s = job.next(), n = 0;
   for (; !s.done; s = job.next()) n++;
   const passable: ExitEdge[] = s.value, ms = Math.round(performance.now() - t1);
   console.log(`     passable: ${passable.filter((e) => e.opens.length).length} exits with arrows in ${ms} ms (${n} steps)`);
-  check(n >= OW_EVENTS + 2 + edges.length, `a step per progress loaded, then per exit (${n})`);
+  const runs = [...eventRunners(rom)].filter(([e, r]) => e < OW_EVENTS && r.length).length;
+  check(n === 1 + runs, `a step for the saves, then per event a level exit runs (${n} of ${1 + runs})`);
   const same = (a: ExitEdge[], b: ExitEdge[]) => a.length === b.length
     && a.every((e, k) => text(e) === text(b[k]) && e.opens.every((o, j) => o.tile === b[k].opens[j].tile && o.end === b[k].opens[j].end));
   check(same(passable.filter((e) => sub(e.from) === 1), yi), `Yoshi's Island's edges unchanged`);

@@ -76,7 +76,7 @@ import type { OwTriggerSwitches } from '../core/owanimview.ts';
 import type { Rect } from '../core/owevents.ts';
 import type { OwSpriteView } from '../core/owsprites.ts';
 import type { ProgressSave } from '../core/owprogress.ts';
-import type { ExitEdge, ProgressMap } from '../core/owexitedges.ts';
+import type { ExitEdge } from '../core/owexitedges.ts';
 import type { Map16Target } from './gfx/target.ts';
 import type { WsTarget } from './gfxworkspace.ts';
 
@@ -1133,26 +1133,20 @@ export class App {
   overworldAllEvents(done: () => void): OwRender | undefined {
     return this.probes.learn<OwRender>('owma1', { kind: 'owMap', map: 0, progress: OW_EVENTS }, { lane: 'owreach', label: 'Overworld', done });
   }
-  // the overworld's layer 1, translevels and level flags at every event progress (owexitedges.ts: what each level exit
-  // opens), learned in the probe worker in a lane of its own and kept in memory while the ROM bytes it read are
-  // unchanged: undefined while it is emulated, then `done` is called
-  overworldProgressMaps(done: () => void): ProgressMap[] | undefined {
-    return this.probes.learn<ProgressMap[]>('owpm1', { kind: 'owProgressMaps' }, { lane: 'owpm', label: 'Overworld progress', done });
-  }
-  // the level flags of the saves at every event progress (owprogress.ts progressFlagsJob: the World check's maps at
-  // every progress, progressMapsFromEvents), learned in the probe worker with the saves (one emulation learns them all)
-  // and kept in memory while the ROM bytes they read are unchanged: undefined while they are learned, then `done` is
-  // called
+  // the level flags of the saves at every event progress (owprogress.ts progressFlagsJob: the maps at every progress
+  // of the World check and the exits' arrows, progressMapsFromEvents), learned in the probe worker with the saves (one
+  // emulation learns them all) and kept in memory while the ROM bytes they read are unchanged: undefined while they
+  // are learned, then `done` is called
   overworldProgressFlags(done: () => void): number[][] | undefined {
     return this.probes.learn<number[][]>('owpf1', { kind: 'owProgressFlags' }, { lane: 'owps', label: 'Overworld progress', done });
   }
   // per submap per layer 1 tile whether it has a look of its own (owlook.ts l1OwnLooks: the World check's paths without
-  // a look), learned and kept as overworldProgressMaps
+  // a look), learned and kept as overworldProgressFlags
   overworldOwnLooks(done: () => void): Uint8Array[] | undefined {
     return this.probes.learn<Uint8Array[]>('owol1', { kind: 'owOwnLooks' }, { lane: 'owol', label: 'Overworld tile looks', done });
   }
   // the exits' edges with the events still passable without each exit's event (owexitedges.ts passableEdgesJob, the
-  // Levels mode's arrows), from the path kinds and shapes, learned and kept as overworldProgressMaps (seconds: the maps
+  // Levels mode's arrows), from the path kinds and shapes, learned and kept as overworldProgressFlags (seconds: the saves
   // at every progress first)
   overworldExitEdges(kinds: PathKind[], shapes: PathShapes, done: () => void): ExitEdge[] | undefined {
     return this.probes.learn<ExitEdge[]>('owxe1', { kind: 'owExitEdges', kinds, shapes }, { lane: 'owxe', label: 'Exit arrows', input: [kinds, shapes], done });

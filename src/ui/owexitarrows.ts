@@ -3,14 +3,15 @@
 // the submap when the level is on another; an exit opening nothing Mario reaches a short red stub – a grey
 // dotted one when Mario doesn't reach its level even with every event passed (nothing can't be told). Hovering one
 // says what it is in the status bar; the "When beaten…" sentences tell the same levels. Derived once per ROM edit from
-// the maps at every event progress (learned in the probe worker), the path kinds and shapes; nothing is drawn while
+// the searches at every event progress (the view's progressSearch, shared with the World check: the maps built from
+// the events, the saves' level flags learned in the probe worker), the path kinds and shapes; nothing is drawn while
 // those are learned. The rule with the events still passable without an exit's event takes seconds: it runs in the
 // probe worker (passableEdgesJob), the cheap one with every event but the exit's shown until it comes.
 
 import type { OverworldView } from './overworld.ts';
 import { arrow } from './owlinkview.ts';
 import { l1XY, EXIT_NAMES, MAP_NAMES, translevelToLevel } from '../core/overworld.ts';
-import { exitEdges, progressInput, type ExitEdge } from '../core/owexitedges.ts';
+import { exitEdges, type ExitEdge } from '../core/owexitedges.ts';
 import { levelName } from '../core/levelnames.ts';
 import { hex } from '../core/names.ts';
 
@@ -23,8 +24,8 @@ interface Drawn { p: Pt; q: Pt; color: string; dashed: boolean; head: boolean; t
 
 export class ExitArrowLayer {
   show = true; // drawn in the Levels mode
-  // the edges found, for the ROM generation and the maps (by identity: learned again) they were found with
-  private found: { key: string; mapsUsed: unknown; edges: ExitEdge[] } | null = null;
+  // the edges found, for the searches (by identity: the ROM edited or what they need learned again) they were found with
+  private found: { searches: unknown; edges: ExitEdge[] } | null = null;
   // the probe worker's edges (with the events still passable) for the ROM generation (not asked again while it holds)
   private passable: { gen: number; edges: ExitEdge[] } | null = null;
   private asked = -1; // the ROM generation they were asked for at (until something comes: not asked again each paint)
@@ -44,15 +45,14 @@ export class ExitArrowLayer {
   edges(): ExitEdge[] | null {
     const v = this.view, app = v.app, rom = app.rom;
     if (this.passable?.gen === rom.gen) return this.passable.edges;
-    const kinds = v.pathKinds(), shapes = app.pathShapes(this.learned), maps = app.overworldProgressMaps(this.learned);
-    if (!kinds || !shapes || !maps || !v.views) return null;
+    const kinds = v.pathKinds(), shapes = app.pathShapes(this.learned), searches = v.progressSearch(this.learned);
+    if (!kinds || !shapes || !searches || !v.views) return null;
     const passable = this.asked === rom.gen ? undefined : app.overworldExitEdges(kinds, shapes, this.learned);
     if (passable) { this.passable = { gen: rom.gen, edges: passable }; return passable; }
     this.asked = rom.gen;
-    const key = `${rom.gen}`;
-    if (this.found?.key === key && this.found.mapsUsed === maps) return this.found.edges;
-    const edges = exitEdges(rom, progressInput(rom, maps, kinds, shapes, app.entrances.graph()), (i) => v.submapAt(i));
-    this.found = { key, mapsUsed: maps, edges };
+    if (this.found?.searches === searches) return this.found.edges;
+    const edges = exitEdges(rom, searches.search, (i) => v.submapAt(i));
+    this.found = { searches, edges };
     return edges;
   }
 

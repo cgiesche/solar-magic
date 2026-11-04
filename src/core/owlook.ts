@@ -16,7 +16,7 @@ import { readEvents, eventPieces, drawPiece, pieceTiles, l2XY, eventRunners, eve
 import { hex2 } from './names.ts';
 import type { Reached } from './owreach.ts';
 import type { PathKind } from './owpaths.ts';
-import type { ProgressMap } from './owexitedges.ts';
+import type { ProgressMap } from './owprogress.ts';
 import type { Job } from './jobrunner.ts';
 import type { WorldProblem } from './worldcheck.ts';
 
@@ -51,7 +51,7 @@ export interface LookInput {
   ownLooks: readonly Uint8Array[]; // l1OwnLooks
   kinds: readonly PathKind[];
   views: readonly Rect[]; // the submaps' views (submapViews)
-  search: (progress: number) => Reached; // the search at an event progress (from maps; worldcheck.ts progressSearches)
+  search: (progress: number) => Reached; // the search at an event progress (from maps; owprogress.ts progressSearches)
   place: (tile: number) => string;
 }
 

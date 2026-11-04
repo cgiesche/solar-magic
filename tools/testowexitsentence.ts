@@ -10,7 +10,8 @@
 import { Rom } from '../src/core/rom.ts';
 import { l1Index, readTranslevels, OverworldEmulator, OverworldLoads } from '../src/core/overworld.ts';
 import { eventRunners, eventPieces, readEvents, submapViews, submapOf } from '../src/core/owevents.ts';
-import { exitEdges, passableEdgesJob, progressInput, progressMapsJob, type ExitEdge } from '../src/core/owexitedges.ts';
+import { exitEdges, passableEdgesJob, type ExitEdge } from '../src/core/owexitedges.ts';
+import { progressSaves, progressSearches, progressInput, progressMapsFromEvents } from '../src/core/owprogress.ts';
 import { ExitGraph } from '../src/core/exitgraph.ts';
 import { exitSentences, type ExitSentence } from '../src/core/owexitsentence.ts';
 import { addReveal, removeReveal, eventReveal } from '../src/core/oweventtiles.ts';
@@ -24,12 +25,11 @@ const check = (ok: boolean, what: string) => { console.log((ok ? 'ok   ' : 'FAIL
 const hx = (v: number) => v.toString(16).toUpperCase().padStart(2, '0');
 
 const rom = new Rom(await editorImage()), runners = eventRunners(rom), tls = readTranslevels(rom);
-// the exits' edges as the Levels mode finds them (the maps at every progress run to their end as the probe worker does)
-const loads = new OverworldLoads(new OverworldEmulator(rom), 4), job = progressMapsJob(loads);
-let step = job.next();
-while (!step.done) step = job.next();
-const views = submapViews(loads);
-const edges = exitEdges(rom, progressInput(rom, step.value, pathKinds(rom), pathShapes(rom), new ExitGraph(rom)), (i) => submapOf(views, i));
+// the exits' edges as the Levels mode finds them (the maps at every progress built from the events, the saves' level
+// flags as the probe worker learns them)
+const loads = new OverworldLoads(new OverworldEmulator(rom), 4), views = submapViews(loads);
+const maps = progressMapsFromEvents(rom, progressSaves(loads).map((s) => s.levelFlags));
+const edges = exitEdges(rom, progressSearches(progressInput(rom, maps, pathKinds(rom), pathShapes(rom), new ExitGraph(rom))), (i) => submapOf(views, i));
 const words = { level: (tl: number) => levelName(rom, tl), tile: (t: number) => hx(t) };
 const tlOf = (e: number) => runners.get(e)![0].tl;
 const say = (s: ExitSentence[]) => s.map((x) => `${x.exit}: ${x.clauses.map((c) => c.text).join(' · ') || 'opens nothing yet'}`).join(' | ');

@@ -14,18 +14,17 @@
 import { Rom } from '../src/core/rom.ts';
 import { OverworldEmulator, OverworldLoads, gameL1, l1XY, l1Index, readL1, writeL1, readTranslevels, writeTranslevels, freeTranslevel, OW_EVENTS, readDestroyList, writeDestroyList, revealEventCount, NO_EVENT } from '../src/core/overworld.ts';
 import { reach, reachInput, stuckProblems } from '../src/core/owreach.ts';
-import { progressInput, progressMapsJob } from '../src/core/owexitedges.ts';
-import { progressSaves, progressFlagsJob, progressMapsFromEvents } from '../src/core/owprogress.ts';
+import { progressSaves, progressFlagsJob, progressMapsFromEvents, progressInput, progressSearches } from '../src/core/owprogress.ts';
 import { ExitGraph } from '../src/core/exitgraph.ts';
 import type { Job } from '../src/core/jobrunner.ts';
 import { readStart } from '../src/core/owsprites.ts';
 import { RAM } from '../src/core/ram.ts';
-import { worldProblems, progressSearches, stuckAtEveryProgress, applyFix, errorCount, stopTile, diffProblems, diffText, checkAgainst, budgetProblems, budgetPlace, type CheckedAt, type WorldProblem } from '../src/core/worldcheck.ts';
+import { worldProblems, stuckAtEveryProgress, applyFix, errorCount, stopTile, diffProblems, diffText, checkAgainst, budgetProblems, budgetPlace, type CheckedAt, type WorldProblem } from '../src/core/worldcheck.ts';
 import { owBudgets, fullestSubmap } from '../src/core/owbudget.ts';
 import { eventReveal } from '../src/core/oweventtiles.ts';
 import { readEvents, writeEvents } from '../src/core/owevents.ts';
 import { readCustomSprites, writeCustomSprites, OW_CUSTOM_MAX } from '../src/core/owcustom.ts';
-import { editorImage, pathKinds, pathShapes } from './fixture.ts';
+import { editorImage, pathKinds, pathShapes, loadedProgressMaps } from './fixture.ts';
 
 let bad = 0;
 const check = (ok: boolean, what: string) => { console.log((ok ? 'ok   ' : 'FAIL ') + what); if (!ok) bad++; };
@@ -179,7 +178,7 @@ console.log(list(clean.problems));
     const loads = new OverworldLoads(new OverworldEmulator(r), 4);
     const maps = progressMapsFromEvents(r, runJob(progressFlagsJob(loads)));
     // (the maps the game loads at every progress: the same – #381)
-    const loaded = runJob(progressMapsJob(loads)), same = (a: ArrayLike<number>, b: ArrayLike<number>) => Array.prototype.every.call(a, (v: number, i: number) => v === b[i]);
+    const loaded = runJob(loadedProgressMaps(loads)), same = (a: ArrayLike<number>, b: ArrayLike<number>) => Array.prototype.every.call(a, (v: number, i: number) => v === b[i]);
     const differ = loaded.map((_, p) => p).filter((p) => !same(loaded[p].l1, maps[p].l1) || !same(loaded[p].tls, maps[p].tls));
     check(!differ.length, `the maps from the events are those the game loads at every progress (differing: ${differ.map((p) => hx(p)).join(' ')})`);
     const t = performance.now(), search = progressSearches(progressInput(r, maps, kinds, shapes, new ExitGraph(r)));

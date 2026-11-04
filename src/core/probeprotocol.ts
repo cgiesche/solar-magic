@@ -108,7 +108,6 @@ export type LearnJob =
   | { kind: 'owSave'; progress: number }
   | { kind: 'owAnimated'; map: number; progress: number }
   | { kind: 'owL1Without'; event: number }
-  | { kind: 'owProgressMaps' }
   | { kind: 'owProgressFlags' }
   | { kind: 'owOwnLooks' }
   | { kind: 'owExitEdges'; kinds: PathKind[]; shapes: PathShapes }
@@ -172,7 +171,6 @@ export const LEARN_KINDS: { [K in LearnJob['kind']]: { keep: Keep; picture: bool
   owSave: { keep: 'memory', picture: true, boot: false },
   owAnimated: { keep: 'memory', picture: true, boot: false },
   owL1Without: { keep: 'memory', picture: true, boot: false },
-  owProgressMaps: { keep: 'memory', picture: true, boot: false },
   owProgressFlags: { keep: 'memory', picture: true, boot: false },
   owOwnLooks: { keep: 'memory', picture: true, boot: false },
   owExitEdges: { keep: 'memory', picture: true, boot: false },
@@ -199,7 +197,7 @@ export type LearnLane =
   | 'sprites' | 'variants' | 'bytes' | 'spritemem' | 'animated' | 'layer3' | 'l2' | 'lt' | 'uses' | 'arcs' | 'thumbs'
   | 'placement' | 'sizes' | 'prefab-suggest' | 'msgr' | 'level-png' | 'level-images' | 'gamebg' | 'prefab-places'
   | 'breakup' | 'slippery' | 'otab'
-  | 'ow' | 'owpick' | 'owpk1' | 'owsh' | 'owreach' | 'owrw' | 'owlw' | 'owps' | 'owpm' | 'owol' | 'owxe' | 'owv' | 'owt' | 'owgc' | 'ows' | 'owbs' | 'owbt' | 'owl' | 'owan' | `owc${number}`;
+  | 'ow' | 'owpick' | 'owpk1' | 'owsh' | 'owreach' | 'owrw' | 'owlw' | 'owps' | 'owol' | 'owxe' | 'owv' | 'owt' | 'owgc' | 'ows' | 'owbs' | 'owbt' | 'owl' | 'owan' | `owc${number}`;
 
 // what the probe client shows as busy: the probes, the tasks, the learn jobs' lanes
 export type ProbeBusyKey = 'probe' | TaskType | LearnLane;

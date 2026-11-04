@@ -4,20 +4,16 @@
 // gets there without passing another level so opened. Derived from the path searches, never stored. The Levels mode
 // draws them as arrows (ui/owexitarrows.ts).
 //
-// The maps it searches over are the game's at every event progress (layer 1 and the translevels of the map loaded
-// there, the level flags of the save there: progressMapsJob, emulated in the probe worker).
+// It searches the maps at every event progress built from the events (owprogress.ts progressMapsFromEvents: layer 1
+// through the events, the saves' level flags), the searches there shared with the World check (progressSearches).
 
 import type { Rom } from './rom.ts';
-import { OW_EVENTS, DIR_FLAGS, exitDirections, gameL1, readL1, readDestroyList, destroyEffects, destroyedCells, type OverworldLoads } from './overworld.ts';
+import { OW_EVENTS, DIR_FLAGS, exitDirections, readL1, readDestroyList, destroyEffects, destroyedCells, type OverworldLoads } from './overworld.ts';
 import { eventChanges, eventRunners, exitChanges, readEvents, submapViews, submapOf, type EventChanges, type EventRunner, type ExitChanges } from './owevents.ts';
-import { progressSaves } from './owprogress.ts';
-import { inputWithout, reach, reachInput, waysFrom, type Reach, type ReachInput } from './owreach.ts';
-import { levelTeleports } from './owlinks.ts';
-import { readStart } from './owsprites.ts';
+import { progressSaves, progressSearches, progressInput, progressMapsFromEvents } from './owprogress.ts';
+import { inputWithout, reach, waysFrom, type Reach, type Reached, type ReachInput } from './owreach.ts';
 import { ExitGraph } from './exitgraph.ts';
 import type { PathKind, PathShapes } from './owpaths.ts';
-import type { OwTile } from './owteleport.ts';
-import { RAM } from './ram.ts';
 import type { Job } from './jobrunner.ts';
 
 // a level B an exit opens: its translevel, its level tile Mario reaches, where the exit's arrow ends – that tile, or
@@ -34,8 +30,8 @@ export interface ExitEdge { tl: number; exit: number; event: number; from: numbe
 // reached); a level tile: one with a translevel, a level tile on the map searched or one an event destroys
 // (`destroyed`: a castle destroyed is a stop tile, still its level's – a star is no level tile)
 interface Searched { inp: ReachInput; r: Reach; reached: Map<number, number>; isLevel: (tile: number) => boolean; destroyed: ReadonlySet<number> }
-function searched(inp: ReachInput, destroyed: ReadonlySet<number>): Searched {
-  const r = reach(inp), reached = new Map<number, number>();
+function searched(inp: ReachInput, destroyed: ReadonlySet<number>, r: Reach = reach(inp)): Searched {
+  const reached = new Map<number, number>();
   const isLevel = (i: number) => !!inp.tls[i] && (inp.kinds[inp.l1[i]] === 'level' || destroyed.has(i));
   for (const i of [...r.stops].sort((a, b) => a - b)) if (isLevel(i) && !reached.has(inp.tls[i])) reached.set(inp.tls[i], i);
   return { inp, r, reached, isLevel, destroyed };
@@ -50,21 +46,26 @@ function searched(inp: ReachInput, destroyed: ReadonlySet<number>): Searched {
 // with every event but the exit's (its layer 1 changes undone, the way the exit opens closed: cheap, shown until the
 // probe worker's passableEdgesJob comes, which has the events still passable without it – this misses levels Mario
 // reaches backwards with every event passed). Its level not reached, what the exit opens is still told by the rules –
-// where the event's way leads from tiles reached, not from the level. at(p): the search's input at event progress p
-// (0 … OW_EVENTS); submapAt: the submap a layer 1 tile is on (default its region: main map 0, submaps 1).
-export function exitEdges(rom: Rom, at: (progress: number) => ReachInput, submapAt: (tile: number) => number = (i) => i >> 10): ExitEdge[] {
+// where the event's way leads from tiles reached, not from the level. at(p): the search at event progress p
+// (0 … OW_EVENTS; owprogress.ts progressSearches, each searched once); submapAt: the submap a layer 1 tile is on
+// (default its region: main map 0, submaps 1).
+export function exitEdges(rom: Rom, at: (progress: number) => Reached, submapAt: (tile: number) => number = (i) => i >> 10): ExitEdge[] {
   const steps = exitEdgeSteps(rom, at, submapAt, false);
   for (;;) { const s = steps.next(); if (s.done) return s.value; }
 }
 
 // exitEdges a step per exit (a job's); passable: without the exit's event the events still passable (passableWithout)
-function* exitEdgeSteps(rom: Rom, at: (progress: number) => ReachInput, submapAt: (tile: number) => number, passable: boolean): Generator<void, ExitEdge[]> {
+function* exitEdgeSteps(rom: Rom, at: (progress: number) => Reached, submapAt: (tile: number) => number, passable: boolean): Generator<void, ExitEdge[]> {
   const out: ExitEdge[] = [], d = readEvents(rom), runners = eventRunners(rom), changes = new Map<number, ExitChanges[]>(), eventChange = eventChanges(rom, d);
   const before = readL1(rom), effects = destroyEffects(rom), destroyed = new Set<number>();
   for (const x of readDestroyList(rom)) if (x.event < OW_EVENTS) for (const i of destroyedCells(effects, before, x.tile)) destroyed.add(i);
   const progress = new Map<number, Searched>();
-  // the search at event progress p (each once)
-  const search = (p: number) => progress.get(p) ?? progress.set(p, searched(at(p), destroyed)).get(p)!;
+  // the search at event progress p with its level tiles reached (each once)
+  const search = (p: number) => {
+    let s = progress.get(p);
+    if (!s) { const a = at(p); progress.set(p, s = searched(a.inp, destroyed, a.r)); }
+    return s;
+  };
   const all = search(OW_EVENTS);
   const without = passable ? passableWithout(rom, at, runners, eventChange, before) : null;
   const changesNothing = (tl: number, exit: number) => {
@@ -107,10 +108,9 @@ function* exitEdgeSteps(rom: Rom, at: (progress: number) => ReachInput, submapAt
 // Road star another exit reveals too is gone, and the Star World levels behind it seem opened by e); the level flags
 // those before events, and per event passed those its save sets (the ones in the save after it not in the one
 // before) and its exit's way.
-function passableWithout(rom: Rom, at: (progress: number) => ReachInput, runners: Map<number, EventRunner[]>, eventChange: (e: number) => EventChanges,
+function passableWithout(rom: Rom, at: (progress: number) => Reached, runners: Map<number, EventRunner[]>, eventChange: (e: number) => EventChanges,
   before: ArrayLike<number>): (e: number) => ReachInput {
-  const all = at(OW_EVENTS), inputs = new Map<number, ReachInput>();
-  const input = (p: number) => inputs.get(p) ?? inputs.set(p, at(p)).get(p)!;
+  const all = at(OW_EVENTS).inp, input = (p: number) => at(p).inp;
   // per cell the events changing it, in number order; per event its level (exits: the runner whose event it is) and
   // the level flags passing it sets (an earlier event setting one of them too: its exit's way at least)
   const changers = new Map<number, number[]>(), sets: Uint8Array[] = [];
@@ -183,44 +183,12 @@ function arrowEnd(ways: Map<number, Way>, from: number, to: number, submapAt: (t
   return k < 0 ? to : seq[k - 1];
 }
 
-// ---- the maps at every event progress ----
-
-// layer 1 and the translevels (l1Index order) of the map loaded at an event progress, the level flags of the save there
-export interface ProgressMap { l1: Uint16Array; tls: Uint8Array; flags: number[] }
-
-// The map at every event progress 0 … OW_EVENTS (index: the progress), as a job of the result learner (probe worker):
-// the saves (owprogress.ts) in one step, then a step per progress loaded (each kept by the loads while the ROM bytes it
-// read are unchanged; layer 1 is the same whichever map is loaded, so the main map's)
-export function* progressMapsJob(loads: OverworldLoads): Job<ProgressMap[]> {
-  const saves = progressSaves(loads);
-  yield;
-  const out: ProgressMap[] = [];
-  for (let p = 0; p <= OW_EVENTS; p++) {
-    const m = loads.derive(`progressMap:${p}`, (load) => {
-      const r = load(0, p);
-      return { l1: gameL1(r), tls: r.wram.slice(RAM.owTranslevels, RAM.owTranslevelsEnd) };
-    });
-    out.push({ ...m, flags: saves[p].levelFlags });
-    yield;
-  }
-  return out;
-}
-
-// the search's input at event progress p from the maps at every progress, as the overworld view searches: with the
-// levels' exits to the overworld teleporting (each level's asked once)
-export function progressInput(rom: Rom, maps: readonly ProgressMap[], kinds: readonly PathKind[], shapes: PathShapes, graph: ExitGraph): (p: number) => ReachInput {
-  const warps = new Map<number, OwTile[]>(), start = readStart(rom, 0);
-  const levelWarps = (tl: number) => warps.get(tl) ?? warps.set(tl, levelTeleports(rom, graph, tl).map((t) => t.to)).get(tl)!;
-  return (p) => reachInput(rom, maps[p].l1, maps[p].tls, maps[p].flags, kinds, shapes, start, levelWarps);
-}
-
 // The exits' edges with the events still passable without each exit's event (exitEdgeSteps passable), as a job of the
-// result learner (probe worker): the maps at every progress (progressMapsJob, kept by the loads), then a step per exit.
-// kinds, shapes: the path kinds and shapes (sent with the job)
+// result learner (probe worker): the saves' level flags (owprogress.ts progressSaves, kept by the loads), the maps at
+// every progress from the events, then a step per exit. kinds, shapes: the path kinds and shapes (sent with the job)
 export function* passableEdgesJob(rom: Rom, loads: OverworldLoads, kinds: readonly PathKind[], shapes: PathShapes): Job<ExitEdge[]> {
-  const job = progressMapsJob(loads);
-  let step = job.next();
-  for (; !step.done; step = job.next()) yield;
-  const maps = step.value, views = submapViews(loads);
-  return yield* exitEdgeSteps(rom, progressInput(rom, maps, kinds, shapes, new ExitGraph(rom)), (i) => submapOf(views, i), true);
+  const flags = progressSaves(loads).map((s) => s.levelFlags);
+  yield;
+  const search = progressSearches(progressInput(rom, progressMapsFromEvents(rom, flags), kinds, shapes, new ExitGraph(rom))), views = submapViews(loads);
+  return yield* exitEdgeSteps(rom, search, (i) => submapOf(views, i), true);
 }

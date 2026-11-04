@@ -16,10 +16,8 @@ import { refusalWords, refusedToast } from './owrefusal.ts';
 import { l1XY, OW_EVENTS } from '../core/overworld.ts';
 import { tileText } from '../core/owteleport.ts';
 import { hex2 } from '../core/names.ts';
-import { worldProblems, worldChecks, applyFix, errorCount, checkAgainst, diffText, budgetProblems, budgetPlace, progressSearches, stuckAtEveryProgress, isFoundAtEveryProgress, CHECK_GROUPS, type CheckBaseline, type WorldProblem, type CheckSeverity } from '../core/worldcheck.ts';
+import { worldProblems, worldChecks, applyFix, errorCount, checkAgainst, diffText, budgetProblems, budgetPlace, stuckAtEveryProgress, isFoundAtEveryProgress, CHECK_GROUPS, type CheckBaseline, type WorldProblem, type CheckSeverity } from '../core/worldcheck.ts';
 import { lookProblems } from '../core/owlook.ts';
-import { progressInput } from '../core/owexitedges.ts';
-import { progressMapsFromEvents } from '../core/owprogress.ts';
 import { owBudgets, fullestSubmap, type Budget } from '../core/owbudget.ts';
 import { budgetGauge } from './budgetgauge.ts';
 
@@ -80,19 +78,16 @@ export class WorldCheck {
   }
 
   // The problems found at every event progress – dead ends and exit path tiles leading nowhere (stuckAtEveryProgress),
-  // the paths without a look (owlook.ts) –, from the maps at every event progress (owprogress.ts
-  // progressMapsFromEvents: layer 1 through the events, the saves' level flags – not emulated; one search per progress,
-  // shared) and the tiles' looks (learned in the probe worker), the path kinds and shapes and the submaps' views; null
-  // while one of those is learned
+  // the paths without a look (owlook.ts) –, from the searches at every event progress (the view's progressSearch: the
+  // maps built from the events, the saves' level flags – not emulated; one search per progress, shared with the exits'
+  // arrows) and the tiles' looks (learned in the probe worker), the path kinds and the submaps' views; null while one of
+  // those is learned
   private atEveryProgress(place: (tile: number) => string): WorldProblem[] | null {
     const v = this.view, app = v.app, rom = app.rom;
-    const kinds = v.pathKinds(), shapes = app.pathShapes(this.learned), views = v.views;
-    const flags = app.overworldProgressFlags(this.learned), own = app.overworldOwnLooks(this.learned);
-    if (!kinds || !shapes || !views || !flags || !own) return null;
-    const from = [kinds, shapes, views, flags, own];
+    const kinds = v.pathKinds(), views = v.views, searches = v.progressSearch(this.learned), own = app.overworldOwnLooks(this.learned);
+    if (!kinds || !views || !searches || !own) return null;
+    const from = [kinds, views, searches, own], { maps, search } = searches;
     if (this.atEvery?.gen === rom.gen && this.atEvery.from.every((x, k) => x === from[k])) return this.atEvery.problems;
-    const maps = progressMapsFromEvents(rom, flags);
-    const search = progressSearches(progressInput(rom, maps, kinds, shapes, app.entrances.graph()));
     const problems = [...stuckAtEveryProgress(rom, search, place), ...lookProblems({ rom, maps, ownLooks: own, kinds, views, search, place })];
     this.atEvery = { gen: rom.gen, from, problems };
     return problems;
