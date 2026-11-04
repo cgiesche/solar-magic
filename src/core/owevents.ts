@@ -27,10 +27,11 @@ import { missingPatch } from './patches.ts';
 import { OwRefusal } from './owrefusal.ts';
 import {
   OW_EVENTS, OverworldEmulator, type OverworldLoads, gameL1, readL1, readTranslevels, baseEvent, translevelToLevel, l1XY, revealAt, revealEventCount, readDestroyList,
-  destroyEffects, destroyedCells, l1Index,
+  destroyEffects, destroyedCells, l1Index, MAX_TRANSLEVEL,
 } from './overworld.ts';
 import { RAM, getS16 } from './ram.ts';
 import { record, countReads } from './romdeps.ts';
+import { shownSecretExits } from './secretexits.ts';
 import type { Job } from './jobrunner.ts';
 
 const DIVIDERS = 0x04e359, DIVIDER_WORDS = 0x79; // words: the first step of each event, the end
@@ -372,17 +373,40 @@ function isReversed(steps: Piece[], d: EventData, place: EventPlace): boolean {
 // a level exit that runs an event: the translevel, the exit (0 normal, 1–3 the secret exits: the base event + it),
 // a layer 1 tile entering the level (l1Index: the first the translevel table gives it, levelTileLevels)
 export interface EventRunner { tl: number; exit: number; tile: number }
+// The level exits running each event, of the levels with a tile (the one rule every text naming an event by its
+// level exit goes through): every level's normal exit; a secret exit where the ROM shows the level has it
+// (secretexits.ts: a keyhole, a secret goal tape, an overworld exit). A secret exit 1 the ROM doesn't show only where
+// its event is no level's base event and changes something (layer 1 or 2, a reveal or destroy): what else would run
+// it – the clean game's Donut Secret House and Chocolate Island 2 have secret exits nothing in their data shows. So a
+// level without secret exits doesn't name the next level's base event (Yoshi's Island 4's + 1, Iggy's castle's) nor
+// an event that does nothing; an event no exit runs is named by none.
 export function eventRunners(rom: Rom): Map<number, EventRunner[]> {
-  const tls = readTranslevels(rom), out = new Map<number, EventRunner[]>();
+  const tls = readTranslevels(rom), out = new Map<number, EventRunner[]>(), shown = shownSecretExits(rom);
   const tileOf = new Map<number, number>();
   tls.forEach((tl, i) => { if (tl && !tileOf.has(tl)) tileOf.set(tl, i); });
+  const bases = new Set(Array.from({ length: MAX_TRANSLEVEL }, (_, k) => baseEvent(rom, k + 1)));
+  const does = eventDoesSomething(rom);
   for (const [tl, tile] of [...tileOf].sort((a, b) => a[0] - b[0])) {
     const b = baseEvent(rom, tl);
-    for (let exit = 0; exit < 4 && b + exit < OW_EVENTS; exit++) (out.get(b + exit) ?? out.set(b + exit, []).get(b + exit)!).push({ tl, exit, tile });
+    for (let exit = 0; exit < 4 && b + exit < OW_EVENTS; exit++) {
+      if (exit && !shown.get(tl)?.has(exit) && (exit > 1 || bases.has(b + exit) || !does(b + exit))) continue;
+      (out.get(b + exit) ?? out.set(b + exit, []).get(b + exit)!).push({ tl, exit, tile });
+    }
   }
   // the normal exits first
   for (const l of out.values()) l.sort((a, b) => a.exit - b.exit || a.tl - b.tl);
   return out;
+}
+// whether event e changes something: layer 1 or layer 2 tiles, a reveal, a destroy (the events read when first asked;
+// a ROM whose events can't be read: every event)
+function eventDoesSomething(rom: Rom): (e: number) => boolean {
+  let d: EventData | null | undefined;
+  return (e) => {
+    if (d === undefined) try { d = readEvents(rom); } catch { d = null; }
+    if (!d) return true;
+    return eventL1Tiles(d, e).length > 0 || eventPieces(d, e).length > 0 || (e < revealEventCount(rom) && revealAt(rom, e) !== 0)
+      || readDestroyList(rom).some((x) => x.event === e);
+  };
 }
 // What passing translevel tl changes on the overworld, per exit (0 normal, 1–3 the secret exits) whose event is the
 // level's (no other level's normal exit runs it, as eventRunners orders them): the event's changes (eventChanges).

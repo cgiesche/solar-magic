@@ -210,7 +210,7 @@ Whether the overworld can be played through, answered in the player's terms: the
 _Avoid_: problem list, validation (for the panel)
 
 **Event**:
-One of the overworld's 0x78 changes run once when a level is passed (its base event, + 1…3 for its secret exits) or by a teleport or the user's own code: layer 2 steps, layer 1 changes, reveals and destroyed level tiles. Chosen by the level and exit that runs it; its number shown only for those that run otherwise.
+One of the overworld's 0x78 changes run once when a level is passed (its base event, + 1…3 for its secret exits) or by a teleport or the user's own code: layer 2 steps, layer 1 changes, reveals and destroyed level tiles. Chosen by the level and exit that runs it; its number shown only for those that run otherwise. An event is named by a secret exit only where the level can have it: its data or a level played from it shows it (a keyhole, a goal tape with its extra bit, an exit to the overworld passing it by a secret exit; core/secretexits.ts), or – secret exit 1 – the event is no level's base event and changes something (the clean game's Donut Secret House and Chocolate Island 2, whose data shows none) – so a level without secret exits never names the next level's event. (What a secret exit opens, **Exit opens**, is a separate check: one whose event changes and opens nothing counts as one the level hasn't.)
 _Avoid_: path reveal (that is part of one), trigger
 
 **Event step**:

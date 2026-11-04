@@ -16,7 +16,7 @@ import { hasOwnContent } from './level.ts';
 import { hasMessages, clearMessages } from './messages.ts';
 import { levelName, hasLevelName, clearLevelName, levelNameRanges } from './levelnames.ts';
 import { submapPaletteRanges } from './submapgfx.ts';
-import { eventDataRanges } from './owevents.ts';
+import { eventDataRanges, eventRunners } from './owevents.ts';
 import { teleportDataRanges } from './owteleport.ts';
 import { KOOPA_X, KOOPA_Y, KOOPAS } from './owlinks.ts';
 import { START, OW_SPRITES, OW_SPRITE_SLOTS, KOOPA_KID, KOOPA_KIDS, hasOwSpriteSlots, hasKoopaKidTable } from './owsprites.ts';
@@ -769,23 +769,12 @@ export function destroySettings(rom: Rom, l1: ArrayLike<number>, shown: ArrayLik
 }
 
 // the overworld's events by the level exits that run them ("105 YOSHI'S ISLAND 1 – normal exit"), of the levels on
-// the map; an event no normal exit runs by the secret exits that do (the game numbers a level's events one after
-// the other: after one without a secret exit its next event is the next level's)
+// the map (owevents.ts eventRunners): by the normal exits running one, else by the secret exits that do
 export function eventNames(rom: Rom): Map<number, string> {
-  const normal = new Map<number, string[]>(), secret = new Map<number, string[]>();
-  const add = (m: Map<number, string[]>, e: number, n: string) => { if (e < OW_EVENTS) (m.get(e) ?? m.set(e, []).get(e)!).push(n); };
-  const tls = [...new Set(readTranslevels(rom))].filter((t) => t).sort((a, b) => a - b);
-  for (const tl of tls) {
-    const b = baseEvent(rom, tl);
-    if (b >= OW_EVENTS) continue;
-    const name = `${translevelToLevel(tl).toString(16).toUpperCase().padStart(3, '0')} ${levelName(rom, tl)}`;
-    add(normal, b, `${name} – normal exit`);
-    add(secret, b + 1, `${name} – secret exit`);
-  }
   const out = new Map<number, string>();
-  for (let e = 0; e < OW_EVENTS; e++) {
-    const n = normal.get(e) ?? secret.get(e) ?? [];
-    if (n.length) out.set(e, n.join(' · '));
+  for (const [e, rs] of eventRunners(rom)) {
+    const by = rs.some((r) => !r.exit) ? rs.filter((r) => !r.exit) : rs;
+    out.set(e, by.map((r) => `${translevelToLevel(r.tl).toString(16).toUpperCase().padStart(3, '0')} ${levelName(rom, r.tl)} – ${r.exit ? `secret exit${r.exit > 1 ? ` ${r.exit}` : ''}` : 'normal exit'}`).join(' · '));
   }
   return out;
 }
