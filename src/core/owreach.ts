@@ -259,11 +259,21 @@ export type CheckSeverity = Exclude<Severity, 'info'>;
 export interface ReachProblem { key: string; kind: ReachKind; severity: CheckSeverity; text: string; brief: string; title?: string; tile: number; at: 'now' | 'all' }
 export interface Reached { inp: ReachInput; r: Reach }
 
+// The level tiles the clean game leaves unreached, by their level and place: level 019 at main map 03,19 and level 112
+// at submaps 12,07 – no path, star, pipe or exit leads there even with every event passed (found by the search on the
+// clean game: tools/testworldcheck.ts). A fixed list, not a comparison with a clean ROM: a level tile of the same level
+// (whatever its layer 1 tile) at the same place unreached is a warning, not an error; moved elsewhere it is an error.
+const CLEAN_UNREACHED: readonly { cell: number; level: number }[] = [
+  { cell: l1Index(0, 0x03, 0x19), level: 0x019 },
+  { cell: l1Index(1, 0x12, 0x07), level: 0x112 },
+];
+const unreachedInCleanGame = (cell: number, level: number): boolean => CLEAN_UNREACHED.some((u) => u.cell === cell && u.level === level);
+
 // What keeps Mario from tiles: at the event progress shown (now) the ways that end nowhere (a path without a stop tile
 // at its end, an exit path tile no exit path is taken from where Mario comes); with every event passed (all) the
 // level tiles he reaches neither then nor now, and the level exits whose events change layer 1 only where he doesn't
-// get (layer 1 with every event passed). place: a tile's name ("Main map 0C,09"). A tile several ways get stuck on is
-// one problem (the first way named).
+// get (layer 1 with every event passed) – one the clean game leaves unreached there too only a warning (CLEAN_UNREACHED).
+// place: a tile's name ("Main map 0C,09"). A tile several ways get stuck on is one problem (the first way named).
 export function reachProblems(rom: Rom, now: Reached, all: Reached, place: (tile: number) => string): ReachProblem[] {
   const out: ReachProblem[] = [];
   const keys = new Set<string>();
@@ -282,9 +292,11 @@ export function reachProblems(rom: Rom, now: Reached, all: Reached, place: (tile
   const { l1, tls, kinds } = all.inp;
   for (let i = 0; i < l1.length; i++) {
     if (kinds[l1[i]] !== 'level' || !tls[i] || all.r.stops.has(i)) continue;
-    add({ key: `unreached-level:${i}`, kind: 'unreached-level', severity: 'error', tile: i, at: 'all',
-      text: `Level ${hex3(translevelToLevel(tls[i]))} at ${place(i)} can't be reached`, brief: `level ${hex3(translevelToLevel(tls[i]))} at ${place(i)} not reached`,
-      title: 'Not even with every event passed: no path, star, pipe or exit leads Mario there.' });
+    const level = translevelToLevel(tls[i]), asClean = unreachedInCleanGame(i, level);
+    add({ key: `unreached-level:${i}`, kind: 'unreached-level', severity: asClean ? 'warn' : 'error', tile: i, at: 'all',
+      text: asClean ? `Level ${hex3(level)} at ${place(i)} not reached – as in the original game` : `Level ${hex3(level)} at ${place(i)} can't be reached`,
+      brief: `level ${hex3(level)} at ${place(i)} not reached`,
+      title: `Not even with every event passed: no path, star, pipe or exit leads Mario there.${asClean ? '\nA warning: the original game has this level here, unreached too.' : ''}` });
   }
   const d = readEvents(rom), runners = eventRunners(rom);
   const tlsOnMap = [...new Set(Array.from(tls))].filter((tl) => tl).sort((a, b) => a - b);

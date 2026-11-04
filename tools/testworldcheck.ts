@@ -1,6 +1,7 @@
 // The World check (worldcheck.ts): the problems of the overworld in groups, errors and warnings, at the event progress
-// they are found at, with a stable key (kind and place). The clean game: the two level tiles nothing leads to (errors)
-// and the event of one of them (a warning), nothing else, the same keys searched again. A path made to lead nowhere on the test ROM
+// they are found at, with a stable key (kind and place). The clean game: the two level tiles nothing leads to (warnings:
+// the original game's, #379) and the event of one of them (a warning), no error, nothing else; a level tile placed
+// where nothing leads and level 019 moved elsewhere are errors; the same keys searched again. A path made to lead nowhere on the test ROM
 // (a ROM edit): a dead end, its fix "Add a stop tile here" – one layer 1 tile of the map before events – leaves Mario
 // stopping there, the dead end gone, the other problems' keys as before. What an edit changed (diffProblems, diffText):
 // the new dead end and up to three errors named, then "and N more"; its undo and the fix say them fixed; warnings
@@ -8,7 +9,7 @@
 // level tile amber), none an error; the destroy list amber, then full (an error said new); the fullest submap's custom
 // sprites; where Show goes.
 import { Rom } from '../src/core/rom.ts';
-import { OverworldEmulator, OverworldLoads, gameL1, l1XY, readL1, writeL1, OW_EVENTS, readDestroyList, writeDestroyList, revealEventCount, NO_EVENT } from '../src/core/overworld.ts';
+import { OverworldEmulator, OverworldLoads, gameL1, l1XY, l1Index, readL1, writeL1, readTranslevels, writeTranslevels, freeTranslevel, OW_EVENTS, readDestroyList, writeDestroyList, revealEventCount, NO_EVENT } from '../src/core/overworld.ts';
 import { progressSaves } from '../src/core/owprogress.ts';
 import { reach, reachInput } from '../src/core/owreach.ts';
 import { readStart } from '../src/core/owsprites.ts';
@@ -47,12 +48,12 @@ const clean = checkRom(rom);
 console.log(list(clean.problems));
 {
   const ps = clean.problems, levels = ps.filter((p) => p.key.startsWith('unreached-level:'));
-  check(levels.length === 2 && levels.every((p) => p.severity === 'error' && p.group === 'progress' && p.progress === OW_EVENTS)
+  check(levels.length === 2 && levels.every((p) => p.severity === 'warn' && p.group === 'progress' && p.progress === OW_EVENTS && p.text.endsWith('not reached – as in the original game'))
     && levels.map((p) => at(p.tile)).join() === 'main 03,19,submaps 12,07',
-    'the clean game: the two level tiles nothing leads to (019, 112) are errors of Progress, found with every event passed');
+    'the clean game: the two level tiles nothing leads to (019, 112) are warnings of Progress ("as in the original game"), found with every event passed');
   const events = ps.filter((p) => p.key.startsWith('event-reveals-nothing:'));
   check(events.length === 1 && events[0].severity === 'warn' && events[0].group === 'progress', 'the event of level 112 reveals nothing Mario reaches: a warning');
-  check(ps.length === 3 && errorCount(ps) === 2, `nothing else (${ps.length} problems, ${errorCount(ps)} errors)`);
+  check(ps.length === 3 && errorCount(ps) === 0, `nothing else, no error (${ps.length} problems, ${errorCount(ps)} errors)`);
   check(ps.every((p, k) => k === 0 || !(p.severity === 'error' && ps[k - 1].severity === 'warn')), 'errors listed before warnings');
   const again = checkRom(new Rom(rom.data.slice())).problems;
   check(keys(again) === keys(ps), 'searched again: the same keys');
@@ -60,9 +61,42 @@ console.log(list(clean.problems));
   const warn = (n: number): WorldProblem => ({ ...events[0], key: `w${n}` });
   check(diffText({ added: [warn(1), warn(2)], gone: [warn(3)] })?.text === '+2 warnings · −1 warning', 'warnings counted, not named');
   // up to three named in all, the rest of each list counted with it
-  const err = (n: number): WorldProblem => ({ ...ps[0], key: `e${n}`, brief: `e${n}` });
+  const err = (n: number): WorldProblem => ({ ...ps[0], severity: 'error', key: `e${n}`, brief: `e${n}` });
   const mixed = diffText({ added: [err(1), err(2)], gone: [err(3), err(4), err(5)] });
   check(mixed?.text === 'New: e1; e2 · Fixed: e3 and 2 more' && mixed.show?.key === 'e1', `two new, three fixed: "${mixed?.text}", Show the first new`);
+}
+
+// ---- level tiles nothing leads to, not the original game's: errors ----
+{
+  // a cell of the main map with nothing Mario walks on around it (nothing leads there)
+  const l1 = readL1(rom), lonely = Array.from({ length: 0x400 }, (_, i) => i).find((i) => {
+    const { x, y } = l1XY(i);
+    return x > 1 && y > 1 && x < 30 && y < 30 && [-1, 0, 1].every((dy) => [-1, 0, 1].every((dx) => kinds[l1[i + dx + dy * 16]] === 'none' && ((i + dx) >> 4) === (i >> 4)));
+  })!;
+  const at019 = l1Index(0, 0x03, 0x19), levelTile = l1[at019];
+  const unreached = (r: Rom, i: number) => checkRom(r).problems.find((p) => p.key === `unreached-level:${i}`);
+  // a level tile of a level without one placed there
+  {
+    const r = new Rom(rom.data.slice()), m = readL1(r), tls = readTranslevels(r), tl = freeTranslevel(tls);
+    m[lonely] = levelTile;
+    tls[lonely] = tl;
+    writeL1(r, m);
+    writeTranslevels(r, tls);
+    const p = unreached(r, lonely);
+    check(tl > 0 && p?.severity === 'error' && p.text.endsWith('can\'t be reached'), `a level tile placed at ${at(lonely)} where nothing leads: an error (${p?.text})`);
+  }
+  // level 019's tile moved there: still not reached, an error (only the original game's place is a warning)
+  {
+    const r = new Rom(rom.data.slice()), m = readL1(r), tls = readTranslevels(r);
+    m[lonely] = levelTile;
+    tls[lonely] = tls[at019];
+    m[at019] = l1[lonely];
+    tls[at019] = 0;
+    writeL1(r, m);
+    writeTranslevels(r, tls);
+    const ps = checkRom(r).problems, p = ps.find((q) => q.key === `unreached-level:${lonely}`);
+    check(p?.severity === 'error' && p.text.startsWith('Level 019') && !ps.some((q) => q.key === `unreached-level:${at019}`), `level 019 moved to ${at(lonely)}, still not reached: an error (${p?.text})`);
+  }
 }
 
 // ---- a path leading nowhere: a dead end and its fix ----
