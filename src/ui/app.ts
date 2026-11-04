@@ -1139,6 +1139,13 @@ export class App {
   overworldProgressMaps(done: () => void): ProgressMap[] | undefined {
     return this.probes.learn<ProgressMap[]>('owpm1', { kind: 'owProgressMaps' }, { lane: 'owpm', label: 'Overworld progress', done });
   }
+  // the level flags of the saves at every event progress (owprogress.ts progressFlagsJob: the World check's maps at
+  // every progress, progressMapsFromEvents), learned in the probe worker with the saves (one emulation learns them all)
+  // and kept in memory while the ROM bytes they read are unchanged: undefined while they are learned, then `done` is
+  // called
+  overworldProgressFlags(done: () => void): number[][] | undefined {
+    return this.probes.learn<number[][]>('owpf1', { kind: 'owProgressFlags' }, { lane: 'owps', label: 'Overworld progress', done });
+  }
   // per submap per layer 1 tile whether it has a look of its own (owlook.ts l1OwnLooks: the World check's paths without
   // a look), learned and kept as overworldProgressMaps
   overworldOwnLooks(done: () => void): Uint8Array[] | undefined {

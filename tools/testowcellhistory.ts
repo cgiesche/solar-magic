@@ -6,7 +6,7 @@
 import { Rom } from '../src/core/rom.ts';
 import { OverworldEmulator, gameL1, readL1, l1Index, OW_EVENTS } from '../src/core/overworld.ts';
 import { readEvents, eventPieces, pieceTiles } from '../src/core/owevents.ts';
-import { cellHistory, historyWords, layer1AtProgress } from '../src/core/owcellhistory.ts';
+import { cellHistory, historyWords, layer1AtProgress, layer1AtEveryProgress } from '../src/core/owcellhistory.ts';
 import { levelTileTest } from '../src/core/owpaths.ts';
 import { editorImage, pathKinds } from './fixture.ts';
 
@@ -26,6 +26,8 @@ const rom = new Rom(await editorImage()), d = readEvents(rom), isLevel = levelTi
   }
   check(!off.length, `layer 1 through the events as the game loads it, every progress 00–${hx(OW_EVENTS)}${off.length ? `: ${off.slice(0, 6).join('; ')}` : ''}`);
   check(layer1AtProgress(rom, 0, d).every((v, i) => v === readL1(rom)[i]), 'progress 0: the map before events');
+  const every = layer1AtEveryProgress(rom, d);
+  check(every.length === OW_EVENTS + 1 && every.every((l1, n) => layer1AtProgress(rom, n, d).every((v, i) => v === l1[i])), 'layer1AtEveryProgress: layer1AtProgress at every progress, in one walk');
 }
 
 // ---- cells ----

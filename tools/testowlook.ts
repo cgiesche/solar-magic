@@ -2,8 +2,11 @@
 // (A) nor "path without a look" (B) at any event progress. A route drawn into a level's event (the Path tool's
 // writeRoute) over ground: one B per path cell, said as new warnings; map pieces painted under it in the same event
 // clear them (said as fixed); the same pieces in a later event give A instead of B, Show going to that event. A path
-// tile with its own look (its Map16 tile given a visible one's 8x8s) is never warned about. The searches' time, and
-// how long the maps at every event progress take to be emulated again after an edit, are printed.
+// tile with its own look (its Map16 tile given a visible one's 8x8s) is never warned about. The maps at every event
+// progress the World check searches (owprogress.ts progressMapsFromEvents: layer 1 through the events, the saves' level
+// flags, #381) are those the game loads at every progress in the clean game (owexitedges.ts progressMapsJob). The
+// searches' time, and how long the saves and maps at every event progress take to be learned again after an edit, are
+// printed.
 // node tools/testowlook.ts
 import { Rom } from '../src/core/rom.ts';
 import { RomEditSession } from '../src/core/romedit.ts';
@@ -11,6 +14,8 @@ import { OverworldEmulator, OverworldLoads, l1XY, l2Index, readL2, readTransleve
 import { reach, neighbor } from '../src/core/owreach.ts';
 import { readEvents, writeEvents, applyEvents, eventPieces, pieceCells, isBig, paintEvent, eventPlace, eventRunners, layer1Without, submapViews, submapOf } from '../src/core/owevents.ts';
 import { progressMapsJob, progressInput, type ProgressMap } from '../src/core/owexitedges.ts';
+import { progressFlagsJob, progressMapsFromEvents } from '../src/core/owprogress.ts';
+import type { Job } from '../src/core/jobrunner.ts';
 import { ExitGraph } from '../src/core/exitgraph.ts';
 import { levelTileTest } from '../src/core/owpaths.ts';
 import { routeTiles, routeKind, writeRoute } from '../src/core/owroute.ts';
@@ -22,6 +27,7 @@ let bad = 0;
 const check = (ok: boolean, what: string) => { console.log((ok ? 'ok   ' : 'FAIL ') + what); if (!ok) bad++; };
 const hx = (v: number, n = 2) => v.toString(16).toUpperCase().padStart(n, '0');
 const at = (i: number) => { const { x, y } = l1XY(i); return `${i >> 10 ? 'submaps' : 'main'} ${hx(x)},${hx(y)}`; };
+const runJob = <T>(job: Job<T>): T => { let st = job.next(); while (!st.done) st = job.next(); return st.value; };
 const keys = (ps: WorldProblem[], kind: string) => ps.filter((p) => p.key.startsWith(`${kind}:`)).map((p) => +p.key.split(':')[1]).sort((a, b) => a - b).join();
 
 const rom = new Rom(await editorImage()), s = new RomEditSession(rom);
@@ -31,21 +37,25 @@ const loads = new OverworldLoads(new OverworldEmulator(rom), 4);
 interface Checked { maps: ProgressMap[]; views: ReturnType<typeof submapViews>; problems: WorldProblem[] }
 function checkLooks(what: string): Checked {
   let t = performance.now();
-  const job = progressMapsJob(loads);
-  let step = job.next();
-  while (!step.done) step = job.next();
-  const maps = step.value, views = submapViews(loads), own = l1OwnLooks(rom, loads);
-  const emulated = performance.now() - t;
+  const maps = progressMapsFromEvents(rom, runJob(progressFlagsJob(loads))), views = submapViews(loads), own = l1OwnLooks(rom, loads);
+  const learned = performance.now() - t;
   const search = progressSearches(progressInput(rom, maps, kinds, shapes, new ExitGraph(rom)));
   t = performance.now();
   const problems = lookProblems({ rom, maps, ownLooks: own, kinds, views, search, place: at });
-  console.log(`     ${what}: the maps at every progress and the looks in ${Math.round(emulated)} ms, the rules in ${Math.round(performance.now() - t)} ms`);
+  console.log(`     ${what}: the saves and maps at every progress and the looks in ${Math.round(learned)} ms, the rules in ${Math.round(performance.now() - t)} ms`);
   for (const p of problems.slice(0, 4)) console.log(`     ${p.key} @${hx(p.progress)}: ${p.text}`);
   return { maps, views, problems };
 }
 
 // ---- the clean game ----
 const clean = checkLooks('the clean game');
+{
+  const t = performance.now(), loaded = runJob(progressMapsJob(loads));
+  const same = (a: ArrayLike<number>, b: ArrayLike<number>) => a.length === b.length && Array.prototype.every.call(a, (v: number, i: number) => v === b[i]);
+  const differ = loaded.map((m, p) => p).filter((p) => !same(loaded[p].l1, clean.maps[p].l1) || !same(loaded[p].tls, clean.maps[p].tls) || !same(loaded[p].flags, clean.maps[p].flags));
+  check(loaded.length === clean.maps.length && !differ.length,
+    `the maps at every progress: those the game loads (emulated in ${Math.round(performance.now() - t)} ms after the saves) at all ${loaded.length} progresses (differing: ${differ.map((p) => hx(p)).join(' ')})`);
+}
 check(!clean.problems.length, `the clean game: no path warning at any event progress (${clean.problems.length})`);
 const own = l1OwnLooks(rom, loads);
 const lookless = (t: number) => kinds[t] === 'walk' && !own[0][t];

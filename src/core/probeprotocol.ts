@@ -109,6 +109,7 @@ export type LearnJob =
   | { kind: 'owAnimated'; map: number; progress: number }
   | { kind: 'owL1Without'; event: number }
   | { kind: 'owProgressMaps' }
+  | { kind: 'owProgressFlags' }
   | { kind: 'owOwnLooks' }
   | { kind: 'owExitEdges'; kinds: PathKind[]; shapes: PathShapes }
   | { kind: 'msgRoutine' }
@@ -138,7 +139,7 @@ export function learnRetargets(was: LearnJob, now: LearnJob): boolean {
 // result cache. The overworld's jobs run on the overworld's own emulator (layer 1 without an event's changes on a ROM
 // copy's), not on one booted for levels: its boot doesn't count for them (boot false, jobrunner.ts JobSpec); it has no
 // skip mask, so they count the display data, the submaps' views, the save at a progress, layer 1 without an event's
-// changes and the maps at every progress (no pictures) too: marked pictures (ADR 0008). They change with the map
+// changes, the maps at every progress and the saves' level flags there (no pictures) too: marked pictures (ADR 0008). They change with the map
 // painted, the event progress slider goes through many (memory only). A level's game BG (Map16 numbers, no picture) goes to the result cache; the places of
 // a prefab and whether two loads draw the same tiles are asked for once, by a dialog or an action (to the editor only).
 // A sprite set's images are kept as their parts only (whole false, learnParts).
@@ -172,6 +173,7 @@ export const LEARN_KINDS: { [K in LearnJob['kind']]: { keep: Keep; picture: bool
   owAnimated: { keep: 'memory', picture: true, boot: false },
   owL1Without: { keep: 'memory', picture: true, boot: false },
   owProgressMaps: { keep: 'memory', picture: true, boot: false },
+  owProgressFlags: { keep: 'memory', picture: true, boot: false },
   owOwnLooks: { keep: 'memory', picture: true, boot: false },
   owExitEdges: { keep: 'memory', picture: true, boot: false },
   msgRoutine: { keep: true, picture: false },

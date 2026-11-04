@@ -56,6 +56,14 @@ export function layer1AtProgress(rom: Rom, progress: number, d: EventData = read
   return out;
 }
 
+// layer 1 at every event progress 0 … OW_EVENTS (index: the progress), as layer1AtProgress has each, in one walk
+// through the events
+export function layer1AtEveryProgress(rom: Rom, d: EventData = readEvents(rom)): Uint16Array[] {
+  const map = readL1(rom), out = [map.slice()];
+  walkL1(rom, d, map, () => { out.push(map.slice()); });
+  return out;
+}
+
 // cell i's (l1Index) history: its layer 1 tile before events, then each event changing it (layer 1 or the layer 2
 // entries under it); isLevelTile: whether a layer 1 tile enters a level (the path kinds', learned) – none: no level
 // tile placed or removed told

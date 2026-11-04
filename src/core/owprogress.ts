@@ -13,7 +13,9 @@
 // at its progress (and not at a new file's): its level and those its exits lead to (ExitGraph.reachedFrom). No table
 // of palace levels or switch tiles; a switch tile placed where no exit leads counts as not pressed (#257).
 
-import { OW_EVENTS, FLAG, type OverworldLoads, l1XY, baseEvent, translevelToLevel } from './overworld.ts';
+import { OW_EVENTS, FLAG, type OverworldLoads, l1XY, baseEvent, translevelToLevel, readTranslevels } from './overworld.ts';
+import { layer1AtEveryProgress } from './owcellhistory.ts';
+import type { ProgressMap } from './owexitedges.ts';
 import { eventRunners, submapViews, submapOf, type EventRunner } from './owevents.ts';
 import { ExitGraph } from './exitgraph.ts';
 import type { LevelUses } from './levelusage.ts';
@@ -44,6 +46,23 @@ const saveOf = (w: Uint8Array): ProgressSave => ({
 // the ROM edits changed what it read. The switch palaces are a new file's (progressSaveJob adds those pressed)
 export function progressSaves(loads: OverworldLoads): ProgressSave[] {
   return loads.derive('progressSaves', () => learnSaves(loads));
+}
+
+// the level flags of the save at each event progress 0 … OW_EVENTS (progressSaves) as a job of the result learner
+// (probe worker), one step: what the maps at every progress need of the saves (progressMapsFromEvents)
+export function* progressFlagsJob(loads: OverworldLoads): Job<number[][]> {
+  return progressSaves(loads).map((s) => s.levelFlags);
+}
+
+// The maps at every event progress 0 … OW_EVENTS (index: the progress) without emulating them: layer 1 as the events
+// leave it (owcellhistory.ts layer1AtEveryProgress: their layer 1 changes, reveals and destroys in number order, as
+// the game loads a save – the model testowcellhistory checks against the game's at every progress), the translevels
+// of the ROM's table (Lunar Magic's, decompressed by the overworld's load: the same at every progress), the level
+// flags of the saves (`flags`, progressFlagsJob). What the World check searches at every progress; the same as the
+// maps loaded there (owexitedges.ts progressMapsJob) where the game's code is the clean game's (testowlook)
+export function progressMapsFromEvents(rom: Rom, flags: readonly number[][]): ProgressMap[] {
+  const tls = readTranslevels(rom);
+  return layer1AtEveryProgress(rom).map((l1, p) => ({ l1, tls, flags: flags[p] }));
 }
 
 // where the switches pressed are learned: the levels' tiles (kept, else loaded on emu) and the tiles' probe

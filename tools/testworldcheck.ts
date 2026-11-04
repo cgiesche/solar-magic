@@ -12,9 +12,9 @@
 // find the dead ends the World check's search there finds.
 import { Rom } from '../src/core/rom.ts';
 import { OverworldEmulator, OverworldLoads, gameL1, l1XY, l1Index, readL1, writeL1, readTranslevels, writeTranslevels, freeTranslevel, OW_EVENTS, readDestroyList, writeDestroyList, revealEventCount, NO_EVENT } from '../src/core/overworld.ts';
-import { progressSaves } from '../src/core/owprogress.ts';
 import { reach, reachInput, stuckProblems } from '../src/core/owreach.ts';
-import { progressMapsJob, progressInput } from '../src/core/owexitedges.ts';
+import { progressInput, progressMapsJob } from '../src/core/owexitedges.ts';
+import { progressSaves, progressFlagsJob, progressMapsFromEvents } from '../src/core/owprogress.ts';
 import { ExitGraph } from '../src/core/exitgraph.ts';
 import type { Job } from '../src/core/jobrunner.ts';
 import { readStart } from '../src/core/owsprites.ts';
@@ -149,7 +149,11 @@ console.log(list(clean.problems));
   // the problems found at every event progress of a ROM, from the maps at every progress
   const atEvery = (r: Rom) => {
     const loads = new OverworldLoads(new OverworldEmulator(r), 4);
-    const maps = runJob(progressMapsJob(loads));
+    const maps = progressMapsFromEvents(r, runJob(progressFlagsJob(loads)));
+    // (the maps the game loads at every progress: the same – #381)
+    const loaded = runJob(progressMapsJob(loads)), same = (a: ArrayLike<number>, b: ArrayLike<number>) => Array.prototype.every.call(a, (v: number, i: number) => v === b[i]);
+    const differ = loaded.map((_, p) => p).filter((p) => !same(loaded[p].l1, maps[p].l1) || !same(loaded[p].tls, maps[p].tls));
+    check(!differ.length, `the maps from the events are those the game loads at every progress (differing: ${differ.map((p) => hx(p)).join(' ')})`);
     const t = performance.now(), search = progressSearches(progressInput(r, maps, kinds, shapes, new ExitGraph(r)));
     const ps = stuckAtEveryProgress(r, search, at);
     console.log(`     the searches at every progress and their dead ends in ${Math.round(performance.now() - t)} ms`);
