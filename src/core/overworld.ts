@@ -2,7 +2,7 @@
 
 import { Rom, snesToPc } from './rom.ts';
 import { Snes, type SnesState } from './snes.ts';
-import { RomReads, record, countReads, bySince, type Since } from './romdeps.ts';
+import { RomReads, record, countReads, holds, bySince, type Since } from './romdeps.ts';
 import { KeptResults } from './keptresults.ts';
 import { rleDecode, rleEncode } from './rle.ts';
 import { GM, RAM, SPECIAL_FLAG } from './ram.ts';
@@ -22,7 +22,7 @@ import { KOOPA_X, KOOPA_Y, KOOPAS } from './owlinks.ts';
 import { START, OW_SPRITES, OW_SPRITE_SLOTS, KOOPA_KID, KOOPA_KIDS, hasOwSpriteSlots, hasKoopaKidTable } from './owsprites.ts';
 import { customSpriteRanges } from './owcustom.ts';
 import { LF_SAVE_SWITCH } from './owoptions.ts';
-import type { Job } from './jobrunner.ts';
+import { runJob, type Job } from './jobrunner.ts';
 import type { LevelTileTest } from './owpaths.ts';
 
 export const OW_L1 = 0x0cf7df; // 0x800 bytes: 2 maps × 32×32 16x16 tiles (quadrant layout)
@@ -987,6 +987,9 @@ export class OverworldEmulator {
 
 // a kept load: what it shows and the console right after it (saved when first asked for: restore)
 interface KeptLoad { r: OwRender; state: SnesState | null }
+// a result derived a step at a time (OverworldLoads.deriveSteps) not made yet: its steps, what they read as of gen, the
+// console as the last one left it
+interface Deriving extends Since { steps: Generator<void, unknown>; state: SnesState | null }
 // the key of a map at an event progress (a load's, what is derived from one)
 export const loadKey = (map: number, progress: number) => `${map}-${progress}`;
 
@@ -998,6 +1001,7 @@ export class OverworldLoads {
   emu: OverworldEmulator;
   private kept: KeptResults<Since>;
   private derived: KeptResults<Since>; // by key, for one `of` each
+  private deriving = new Map<string, Deriving>(); // by key and `of`
   constructor(emu: OverworldEmulator, max: number) {
     this.emu = emu;
     this.kept = new KeptResults({ validity: bySince(emu.rom), limit: max, inputsPerKey: 1 });
@@ -1019,12 +1023,41 @@ export class OverworldLoads {
   // (one per key) while the ROM edits since changed no byte it read: the loads', the frames it runs on from them
   // and the editor code's; a load not kept yet isn't kept for `load` (the slider's stay)
   derive<T>(key: string, make: (load: (map: number, progress: number) => OwRender) => T, of = ''): T {
-    const d = this.derived.entry<T>(key, of);
-    if (d) { this.count(d.deps.reads); return d.data; }
-    // (the emulated CPU's reads and the editor code's; they count for the recorders running)
-    const { result, reads, gen } = record(this.emu.rom, () => make((map, progress) => this.load(map, progress, false).r), { cpu: this.emu.snes });
-    this.derived.set(key, result, { gen, reads }, of);
-    return result;
+    // (one step)
+    return runJob(this.deriveSteps(key, function* (load) { return make(load); }, of));
+  }
+  // derive's result made a step at a time (`make`'s steps, a step per step of this job): the job's steps between other
+  // jobs on the loads' emulator, the console as a step left it set again for the next (the steps own it while they
+  // run). Kept as derive's; one not made yet is shared by the jobs asking for it (each step goes on where the last one,
+  // whichever job's, stood) and starts over when the ROM edits since changed a byte its steps read. A step's reads count
+  // for the recorders running, the result's all for the job getting it
+  *deriveSteps<T>(key: string, make: (load: (map: number, progress: number) => OwRender) => Generator<void, T>, of = ''): Generator<void, T> {
+    const rom = this.emu.rom, id = `${key}\n${of}`;
+    for (;;) {
+      const d = this.derived.entry<T>(key, of);
+      if (d) { this.count(d.deps.reads); return d.data; }
+      let run = this.deriving.get(id);
+      if (!run || !holds(rom, run)) {
+        run = { steps: make((map, progress) => this.load(map, progress, false).r), reads: new RomReads(rom), gen: rom.gen, state: null };
+        this.deriving.set(id, run);
+      }
+      if (run.state) this.emu.restore(run.state);
+      // (the emulated CPU's reads and the editor code's; they count for the recorders running)
+      let step;
+      try {
+        const steps = run.steps;
+        step = record(rom, () => steps.next(), { cpu: this.emu.snes });
+      } catch (e) { this.deriving.delete(id); throw e; }
+      run.reads.add(step.reads);
+      if (step.result.done) {
+        this.deriving.delete(id);
+        this.derived.set(key, step.result.value, { gen: run.gen, reads: run.reads }, of);
+        this.count(run.reads);
+        return step.result.value as T;
+      }
+      run.state = this.emu.snes.saveState();
+      yield;
+    }
   }
   // reads (of a kept result) count for the recorders running (a derive's, an outer one) as if read now
   private count(reads: RomReads): void {
@@ -1045,9 +1078,10 @@ export class OverworldLoads {
 }
 
 // The map `map` at event progress `progress` as a job of the result learner (probe worker: the overworld view asks for
-// it there), from `loads` (the learner's own, kept between jobs). One step: the loads' emulator is shared by the
-// overworld's jobs (owSpritesJob, submapViewsJob), so none may stop halfway. Its reads go to the job's (the ROM's
-// recorder, OverworldLoads.count). special: after the special world (the graphics workspace's preview of a submap).
+// it there), from `loads` (the learner's own, kept between jobs). One step (a load): the loads' emulator is shared by
+// the overworld's jobs (owSpritesJob, submapViewsJob), so one of more steps sets the console again for each
+// (OverworldLoads.deriveSteps). Its reads go to the job's (the ROM's recorder, OverworldLoads.count). special: after
+// the special world (the graphics workspace's preview of a submap).
 export function* overworldMapJob(loads: OverworldLoads, map: number, progress: number, special = false): Job<OwRender> {
   return loads.get(map, progress, special);
 }

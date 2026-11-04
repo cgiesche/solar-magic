@@ -15,7 +15,7 @@
 
 import { OW_EVENTS, FLAG, type OverworldLoads, l1XY, baseEvent, translevelToLevel, readTranslevels } from './overworld.ts';
 import { layer1AtEveryProgress } from './owcellhistory.ts';
-import { eventRunners, submapViews, submapOf, type EventRunner } from './owevents.ts';
+import { eventRunners, submapViewsJob, submapOf, type EventRunner } from './owevents.ts';
 import { ExitGraph } from './exitgraph.ts';
 import { levelTeleports } from './owlinks.ts';
 import { readStart } from './owsprites.ts';
@@ -28,7 +28,7 @@ import type { LevelEmulator } from './levelemu.ts';
 import type { BlockProber } from './blockprobe.ts';
 import { GM, RAM, PAD, SWITCH_PALACES, get16, set16 } from './ram.ts';
 import type { Rom } from './rom.ts';
-import type { Job } from './jobrunner.ts';
+import { runJob, type Job } from './jobrunner.ts';
 
 export interface ProgressSave {
   levelFlags: number[]; // per translevel ($1EA2, 0x60)
@@ -38,6 +38,7 @@ export interface ProgressSave {
 
 const LEVEL_FLAGS = 0x60;
 const RETURN_FRAMES = 1500; // from leaving a level until the overworld has run its event and Mario stands
+const STEP_FRAMES = 100; // frames run in a step of the saves' job at most (well under 0.25 s)
 
 const hasEvent = (w: Uint8Array, e: number) => (w[RAM.owEvents + (e >> 3)] & (0x80 >> (e & 7))) !== 0;
 const setEvent = (w: Uint8Array, e: number) => { w[RAM.owEvents + (e >> 3)] |= 0x80 >> (e & 7); };
@@ -50,13 +51,20 @@ const saveOf = (w: Uint8Array): ProgressSave => ({
 // The save at each event progress 0 … OW_EVENTS (index: the progress), from the kept loads: emulated again only when
 // the ROM edits changed what it read. The switch palaces are a new file's (progressSaveJob adds those pressed)
 export function progressSaves(loads: OverworldLoads): ProgressSave[] {
-  return loads.derive('progressSaves', () => learnSaves(loads));
+  return runJob(progressSavesJob(loads));
+}
+
+// progressSaves as a job's steps, a step per event the game runs (about 0.1 s each; all at once held the probe worker
+// for 11 s, #385): kept by the loads, the steps not run yet shared by the jobs asking for the saves
+export function progressSavesJob(loads: OverworldLoads): Generator<void, ProgressSave[]> {
+  return loads.deriveSteps('progressSaves', () => learnSaves(loads));
 }
 
 // the level flags of the save at each event progress 0 … OW_EVENTS (progressSaves) as a job of the result learner
-// (probe worker), one step: what the maps at every progress need of the saves (progressMapsFromEvents)
+// (probe worker), a step per event (progressSavesJob): what the maps at every progress need of the saves
+// (progressMapsFromEvents)
 export function* progressFlagsJob(loads: OverworldLoads): Job<number[][]> {
-  return progressSaves(loads).map((s) => s.levelFlags);
+  return (yield* progressSavesJob(loads)).map((s) => s.levelFlags);
 }
 
 // layer 1 and the translevels (l1Index order) of the map at an event progress, the level flags of the save there
@@ -91,11 +99,11 @@ export function progressSearches(input: (progress: number) => ReachInput): (prog
 // where the switches pressed are learned: the levels' tiles (kept, else loaded on emu) and the tiles' probe
 export interface PressSource { uses: LevelUses; emu: LevelEmulator; prober: BlockProber }
 
-// the save at event progress `progress` as a job of the result learner (probe worker): the overworld's part in one
-// step (overworld.ts overworldMapJob: the loads' emulator is shared), then the switches pressed, a step per level
-// loaded. Without `src` the switches stay a new file's
+// the save at event progress `progress` as a job of the result learner (probe worker): the overworld's part a step
+// per event (progressSavesJob), then the switches pressed, a step per level loaded. Without `src` the switches stay a
+// new file's
 export function* progressSaveJob(loads: OverworldLoads, progress: number, src?: PressSource): Job<ProgressSave> {
-  const saves = progressSaves(loads), save = saves[Math.max(0, Math.min(OW_EVENTS, progress))];
+  const saves = yield* progressSavesJob(loads), save = saves[Math.max(0, Math.min(OW_EVENTS, progress))];
   if (!src) return save;
   const passed: number[] = [];
   for (let tl = 0; tl < LEVEL_FLAGS; tl++) if (save.levelFlags[tl] & ~saves[0].levelFlags[tl] & FLAG.passed) passed.push(tl);
@@ -126,13 +134,17 @@ export function* switchesPressedJob(rom: Rom, src: PressSource, tls: number[]): 
   return pressed;
 }
 
-function learnSaves(loads: OverworldLoads): ProgressSave[] {
-  const rom = loads.emu.rom, views = submapViews(loads), runners = eventRunners(rom);
+// the saves' steps (progressSavesJob): the submaps' views, the map loaded, then a step per event left by its level (a
+// long one's frames in steps of STEP_FRAMES); the console the steps' between them (OverworldLoads.deriveSteps sets it
+// again)
+function* learnSaves(loads: OverworldLoads): Generator<void, ProgressSave[]> {
+  const rom = loads.emu.rom, views = yield* submapViewsJob(loads), runners = eventRunners(rom);
   loads.restore(0, 0);
   const s = loads.emu.snes, w = s.wram;
   // where Mario stands on his tile (pixels), what the overworld does while he stands there
   const ox = get16(w, RAM.owPlayerX) - get16(w, RAM.owPlayerTileX) * 16, oy = get16(w, RAM.owPlayerY) - get16(w, RAM.owPlayerTileY) * 16;
   const standing = w[RAM.owProcess];
+  yield; // (the load a step of its own)
   const out: ProgressSave[] = [];
   // Mario on the runner's tile (on its submap), as he stands there when he enters its level
   const onTile = (r: EventRunner) => {
@@ -143,26 +155,29 @@ function learnSaves(loads: OverworldLoads): ProgressSave[] {
     }
     w[RAM.submap] = w[RAM.submap + 1] = sub;
   };
-  // frames until the overworld has run event e and Mario stands (a save prompt answered); whether it got there
-  const back = (e: number) => {
+  // frames until the overworld has run event e and Mario stands (a save prompt answered), a step per STEP_FRAMES
+  // (the pad released between steps: other jobs run on the console); whether it got there
+  function* back(e: number): Generator<void, boolean> {
     for (let f = 0; f < RETURN_FRAMES; f++) {
       if (hasEvent(w, e) && w[RAM.gameMode] === GM.overworld && w[RAM.owProcess] === standing) return true;
       if (w[RAM.gameMode] > GM.overworld) return false; // (a level entered: the game didn't take the exit)
+      if (f && f % STEP_FRAMES === 0) { s.joy1 = 0; yield; }
       s.joy1 = w[RAM.savePrompt] && f % 8 < 2 ? PAD.a : 0;
       s.runFrame();
     }
     return false;
-  };
+  }
   try {
     for (let e = 0; e < OW_EVENTS; e++) {
       out.push(saveOf(w));
       if (hasEvent(w, e)) continue;
       const r = runners.get(e)?.[0];
       const before = r && s.saveState();
-      if (!r || !leave(r, e)) {
+      if (!r || !(yield* leave(r, e))) {
         if (before) s.loadState(before);
         setEvent(w, e);
       }
+      if (r) { s.joy1 = 0; yield; }
     }
     out.push(saveOf(w));
   } finally { s.joy1 = 0; }
@@ -171,11 +186,11 @@ function learnSaves(loads: OverworldLoads): ProgressSave[] {
   // the level left with the runner's exit, as the level leaves it ($13BF its translevel, $1DEA its base event as its
   // load sets them; the overworld's process 0 as from there, the exit in $0DD5, passed: $13CE and $1DE9), the overworld
   // loaded after it
-  function leave(r: EventRunner, e: number): boolean {
+  function* leave(r: EventRunner, e: number): Generator<void, boolean> {
     onTile(r);
     w[RAM.translevel] = r.tl; w[RAM.owEvent] = baseEvent(rom, r.tl); w[RAM.owProcess] = 0;
     w[RAM.levelExit] = r.exit + 1; w[RAM.midwayTouched] = 1; w[RAM.levelBeaten] = 1;
     w[RAM.gameMode] = GM.overworldReturn;
-    return back(e);
+    return yield* back(e);
   }
 }

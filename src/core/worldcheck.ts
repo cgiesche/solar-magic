@@ -7,10 +7,10 @@
 import type { Rom } from './rom.ts';
 import { readL1, writeL1, readDestroyList, revealEventCount, gameL1, l1XY, NO_EVENT, OW_EVENTS, type OverworldLoads } from './overworld.ts';
 import { eventReveal } from './oweventtiles.ts';
-import { readEvents, submapViews, submapOf } from './owevents.ts';
+import { readEvents, submapViewsJob, submapOf } from './owevents.ts';
 import { budgetLevel, budgetText, owBudgets, fullestSubmap, type Budget } from './owbudget.ts';
-import { progressSaves, progressMapsFromEvents, progressInput, progressSearches } from './owprogress.ts';
-import { l1OwnLooks, lookProblems } from './owlook.ts';
+import { progressSavesJob, progressMapsFromEvents, progressInput, progressSearches } from './owprogress.ts';
+import { l1OwnLooksJob, lookProblems } from './owlook.ts';
 import { tileText } from './owteleport.ts';
 import { ExitGraph } from './exitgraph.ts';
 import type { ScreenExit } from './level.ts';
@@ -124,15 +124,17 @@ export function worldChecks(rom: Rom, all: CheckedAt, place: (tile: number) => s
 export interface WorldCheckLearned { checks: WorldProblem[]; budgets: Budget[]; every: WorldProblem[] }
 
 // The World check's part that is the same at every event progress shown, as a job of the result learner (probe worker),
-// so that the editor's main thread only searches at the progress shown: the saves (owprogress.ts progressSaves, kept by
-// the loads); the map with every event passed as emulated (as the overworld view's search has it), the submaps' views
-// and the tiles' own looks; worldChecks and the budgets; then the searches at every progress over the maps built from
+// so that the editor's main thread only searches at the progress shown: the saves (owprogress.ts progressSavesJob, kept
+// by the loads, a step per event); the submaps' views and the tiles' own looks (a step per submap); the map with every
+// event passed as emulated (as the overworld view's search has it); worldChecks and the budgets; then the searches at every progress over the maps built from
 // the events – each a step. kinds, shapes: the path kinds and shapes; open: the open level with its exits as edited (as
 // the editor's exits, ExitGraph) – all sent with the job
 export function* worldCheckJob(rom: Rom, loads: OverworldLoads, kinds: readonly PathKind[], shapes: PathShapes, open?: { number: number; exits: ScreenExit[] }): Job<WorldCheckLearned> {
-  const saves = progressSaves(loads);
+  const saves = yield* progressSavesJob(loads);
   yield;
-  const views = submapViews(loads), every = loads.get(0, OW_EVENTS), ownLooks = l1OwnLooks(rom, loads);
+  const views = yield* submapViewsJob(loads), ownLooks = yield* l1OwnLooksJob(rom, loads);
+  yield;
+  const every = loads.get(0, OW_EVENTS);
   const emulated = [{ l1: gameL1(every).slice(), tls: every.wram.slice(RAM.owTranslevels, RAM.owTranslevelsEnd), flags: saves[OW_EVENTS].levelFlags }];
   yield;
   const graph = new ExitGraph(rom, open), place = (i: number) => tileText({ submap: submapOf(views, i), ...l1XY(i) });

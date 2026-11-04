@@ -9,8 +9,8 @@
 
 import type { Rom } from './rom.ts';
 import { OW_EVENTS, DIR_FLAGS, exitDirections, readL1, readDestroyList, destroyEffects, destroyedCells, type OverworldLoads } from './overworld.ts';
-import { eventChanges, eventRunners, exitChanges, readEvents, submapViews, submapOf, type EventChanges, type EventRunner, type ExitChanges } from './owevents.ts';
-import { progressSaves, progressSearches, progressInput, progressMapsFromEvents } from './owprogress.ts';
+import { eventChanges, eventRunners, exitChanges, readEvents, submapViewsJob, submapOf, type EventChanges, type EventRunner, type ExitChanges } from './owevents.ts';
+import { progressSavesJob, progressSearches, progressInput, progressMapsFromEvents } from './owprogress.ts';
 import { inputWithout, reach, waysFrom, type Reach, type Reached, type ReachInput } from './owreach.ts';
 import { ExitGraph } from './exitgraph.ts';
 import type { PathKind, PathShapes } from './owpaths.ts';
@@ -67,6 +67,7 @@ function* exitEdgeSteps(rom: Rom, at: (progress: number) => Reached, submapAt: (
     return s;
   };
   const all = search(OW_EVENTS);
+  yield; // (the search with every event passed a step, passableWithout's rounds the next)
   const without = passable ? passableWithout(rom, at, runners, eventChange, before) : null;
   const changesNothing = (tl: number, exit: number) => {
     const c = (changes.get(tl) ?? changes.set(tl, exitChanges(rom, tl, d, runners)).get(tl)!).find((x) => x.exit === exit);
@@ -184,11 +185,11 @@ function arrowEnd(ways: Map<number, Way>, from: number, to: number, submapAt: (t
 }
 
 // The exits' edges with the events still passable without each exit's event (exitEdgeSteps passable), as a job of the
-// result learner (probe worker): the saves' level flags (owprogress.ts progressSaves, kept by the loads), the maps at
+// result learner (probe worker): the saves' level flags (owprogress.ts progressSavesJob, kept by the loads), the maps at
 // every progress from the events, then a step per exit. kinds, shapes: the path kinds and shapes (sent with the job)
 export function* passableEdgesJob(rom: Rom, loads: OverworldLoads, kinds: readonly PathKind[], shapes: PathShapes): Job<ExitEdge[]> {
-  const flags = progressSaves(loads).map((s) => s.levelFlags);
+  const flags = (yield* progressSavesJob(loads)).map((s) => s.levelFlags);
   yield;
-  const search = progressSearches(progressInput(rom, progressMapsFromEvents(rom, flags), kinds, shapes, new ExitGraph(rom))), views = submapViews(loads);
+  const search = progressSearches(progressInput(rom, progressMapsFromEvents(rom, flags), kinds, shapes, new ExitGraph(rom))), views = yield* submapViewsJob(loads);
   return yield* exitEdgeSteps(rom, search, (i) => submapOf(views, i), true);
 }

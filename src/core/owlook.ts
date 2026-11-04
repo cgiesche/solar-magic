@@ -17,6 +17,7 @@ import { hex2 } from './names.ts';
 import type { Reached } from './owreach.ts';
 import type { PathKind } from './owpaths.ts';
 import type { ProgressMap } from './owprogress.ts';
+import { runJob } from './jobrunner.ts';
 import type { WorldProblem } from './worldcheck.ts';
 
 const pixels = new Uint8Array(64);
@@ -30,12 +31,19 @@ export function hasOwnLook(r: Pick<OwRender, 'vram' | 'ppuRegs'>, words: readonl
 // Per submap (0 the main map, 1–6) per layer 1 tile 000–1FF: 1 when it has its own look in that submap's graphics
 // (loaded at event progress 0), from the kept loads: found again only when the ROM edits changed what they read
 export function l1OwnLooks(rom: Rom, loads: OverworldLoads): Uint8Array[] {
-  return loads.derive('l1OwnLooks', (load) => {
-    const words = Array.from({ length: OW_L1_TILES }, (_, t) => owTileWords(rom, t));
-    return Array.from({ length: MAP_NAMES.length }, (_, k) => {
+  return runJob(l1OwnLooksJob(rom, loads));
+}
+// l1OwnLooks as a job of the result learner (probe worker), a step per submap loaded (overworld.ts
+// OverworldLoads.deriveSteps)
+export function l1OwnLooksJob(rom: Rom, loads: OverworldLoads): Generator<void, Uint8Array[]> {
+  return loads.deriveSteps('l1OwnLooks', function* (load) {
+    const words = Array.from({ length: OW_L1_TILES }, (_, t) => owTileWords(rom, t)), looks: Uint8Array[] = [];
+    for (let k = 0; k < MAP_NAMES.length; k++) {
+      if (k) yield;
       const r = load(k, 0);
-      return Uint8Array.from(words, (w) => (hasOwnLook(r, w) ? 1 : 0));
-    });
+      looks.push(Uint8Array.from(words, (w) => (hasOwnLook(r, w) ? 1 : 0)));
+    }
+    return looks;
   });
 }
 

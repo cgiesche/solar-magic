@@ -124,7 +124,7 @@ check(yi.filter((e) => e.opens.length).length === want.length, `no other exit on
   const passable: ExitEdge[] = s.value, ms = Math.round(performance.now() - t1);
   console.log(`     passable: ${passable.filter((e) => e.opens.length).length} exits with arrows in ${ms} ms (${n} steps)`);
   const runs = [...eventRunners(rom)].filter(([e, r]) => e < OW_EVENTS && r.length).length;
-  check(n === 1 + runs, `a step for the saves, then per event a level exit runs (${n} of ${1 + runs})`);
+  check(n === 2 + runs, `a step for the saves, one for the search with every event passed, then per event a level exit runs (${n} of ${2 + runs})`);
   const same = (a: ExitEdge[], b: ExitEdge[]) => a.length === b.length
     && a.every((e, k) => text(e) === text(b[k]) && e.opens.every((o, j) => o.tile === b[k].opens[j].tile && o.end === b[k].opens[j].end));
   check(same(passable.filter((e) => sub(e.from) === 1), yi), `Yoshi's Island's edges unchanged`);
