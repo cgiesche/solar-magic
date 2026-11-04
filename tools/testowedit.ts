@@ -182,7 +182,8 @@ const diff = (a: Uint8Array, b: Uint8Array) => { const out: number[] = []; for (
   stroke(rom, 'l1', [l1Cell(i, l1[i])], s);
   loaded = 0;
   const v2 = submapViews(loads);
-  check(v2 !== v && loaded === 6 && text(v2) === direct(), `painting layer 1: loaded again (${loaded} loads), the same views`);
+  // (the views leave out the tilemaps they read, #386)
+  check(v2 === v && loaded === 0 && text(v2) === direct(), `painting layer 1: the kept views (${loaded} loads), as the loads give them`);
 }
 
 // layer 2 moved to free space: the loads record its new place by byte (no title screen reached again in between), an

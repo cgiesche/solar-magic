@@ -1,9 +1,9 @@
 // Overworld data (vanilla formats) and emulation-based loading of OW graphics.
 
-import { Rom, snesToPc } from './rom.ts';
+import { Rom, snesToPc, type RomRange } from './rom.ts';
 import { Snes, type SnesState } from './snes.ts';
-import { RomReads, record, countReads, holds, bySince, type Since } from './romdeps.ts';
-import { KeptResults } from './keptresults.ts';
+import { RomReads, RomFingerprint, record, countReads, holds, unrecorded, type RomDeps } from './romdeps.ts';
+import { KeptResults, type Validity } from './keptresults.ts';
 import { rleDecode, rleEncode } from './rle.ts';
 import { GM, RAM, SPECIAL_FLAG } from './ram.ts';
 import { decodeTile } from './gfx.ts';
@@ -787,27 +787,36 @@ export function eventNames(rom: Rom): Map<number, string> {
 // Learned results that load the overworld without depending on what is painted there leave them out (owpaths.ts).
 export function overworldDataRanges(rom: Rom): [number, number][] {
   const at = (snes: number, len: number): [number, number] => [snesToPc(snes), snesToPc(snes) + len];
-  const p = l2Pointers(rom), d = rom.data, scratch = new Uint16Array(0x2000);
   const out = [
-    at(OW_L1, 0x800),
+    ...owTilemapRanges(rom),
     at(owTileAddr(rom, 0), (hasOwMap16Ext(rom) ? OW_L1_TILES : GAME_OW_TILES) * 8),
     ...OW_MAP16_HOOKS.map(([a, n]) => at(a, n)),
-    at(p.tiles, rleDecode(d, snesToPc(p.tiles), scratch, 0, 0x2000)),
-    at(p.attrs, rleDecode(d, snesToPc(p.attrs), scratch, 8, 0x2000)),
     at(L2_TILE_PTR, 2), at(L2_BANK, 1), at(L2_ATTR_PTR, 2),
     at(EXIT_DIRS, MAX_TRANSLEVEL + 1),
   ];
   out.push(...levelNameRanges(rom), ...submapPaletteRanges(rom));
-  for (const [ptr, bank] of [[TL_PTR, TL_BANK], [L1_HI_PTR, L1_HI_BANK]]) {
-    const b = packedBlock(rom, ptr, bank);
-    if (b) out.push(at(b.snes, b.size), at(ptr, 2), at(bank, 1));
-  }
+  const tl = packedBlock(rom, TL_PTR, TL_BANK);
+  if (tl) out.push(at(tl.snes, tl.size), at(TL_PTR, 2), at(TL_BANK, 1));
+  if (packedBlock(rom, L1_HI_PTR, L1_HI_BANK)) out.push(at(L1_HI_PTR, 2), at(L1_HI_BANK, 1)); // (the block: a tilemap's)
   if (hasLevelFlagsPatch(rom)) out.push(at(LEVEL_FLAGS, MAX_TRANSLEVEL + 1));
   out.push(at(revealTable(rom), revealEventCount(rom) * 2), at(REVEAL_FROM, REVEALS), at(REVEAL_TO, REVEALS), ...eventDataRanges(rom));
   if (hasDestroyPatch(rom)) out.push(at(rom.r24(DESTROY_EV_OP), DESTROYS), at(rom.r24(DESTROY_LOC_OP), DESTROYS * 2));
   out.push(...teleportDataRanges(rom), at(KOOPA_X, KOOPAS * 2), at(KOOPA_Y, KOOPAS * 2));
   out.push(at(START, 0x16), ...(hasOwSpriteSlots(rom) ? [at(OW_SPRITES, OW_SPRITE_SLOTS * 5)] : []), ...(hasKoopaKidTable(rom) ? Object.values(KOOPA_KID).map((t) => at(t, KOOPA_KIDS)) : []));
   out.push(...customSpriteRanges(rom), ...owExanimDataRanges(rom));
+  return out;
+}
+
+// The layer 1 and layer 2 tilemaps' bytes (PC offsets): the low bytes, the high bytes' block, the two layer 2 streams
+// – not their pointers. What the submaps' views and the tiles' own looks are derived from reads them (the overworld's
+// load decompresses them) without depending on them (OverworldLoads.deriveSteps leaveOut), as ADR 0008 leaves out the
+// display data. Byte pages (overworldDataRanges): their reads are recorded by byte.
+export function owTilemapRanges(rom: Rom): RomRange[] {
+  const at = (snes: number, len: number): RomRange => [snesToPc(snes), snesToPc(snes) + len];
+  const p = l2Pointers(rom), d = rom.data, scratch = new Uint16Array(0x2000);
+  const out = [at(OW_L1, 0x800), at(p.tiles, rleDecode(d, snesToPc(p.tiles), scratch, 0, 0x2000)), at(p.attrs, rleDecode(d, snesToPc(p.attrs), scratch, 8, 0x2000))];
+  const hi = packedBlock(rom, L1_HI_PTR, L1_HI_BANK);
+  if (hi) out.push(at(hi.snes, hi.size));
   return out;
 }
 
@@ -987,25 +996,38 @@ export class OverworldEmulator {
 
 // a kept load: what it shows and the console right after it (saved when first asked for: restore)
 interface KeptLoad { r: OwRender; state: SnesState | null }
+// what a kept load or derived result read: its bytes' fingerprint (whether it holds), and as recorded (counted for the
+// recorders running when it is used)
+interface ReadDeps { deps: RomDeps; reads: RomReads }
 // a result derived a step at a time (OverworldLoads.deriveSteps) not made yet: its steps, what they read as of gen, the
 // console as the last one left it
-interface Deriving extends Since { steps: Generator<void, unknown>; state: SnesState | null }
+interface Deriving { steps: Generator<void, unknown>; gen: number; reads: RomReads; state: SnesState | null }
 // the key of a map at an event progress (a load's, what is derived from one)
 export const loadKey = (map: number, progress: number) => `${map}-${progress}`;
+// results a load's key keeps (of the ROM states they were made on: an undo, a redo); fewer than a derived result's, a
+// load and the console after it are about 400 KB
+export const LOAD_CONTENTS = 2;
+export const DERIVED_CONTENTS = 3; // the same for a derived result's key and input (the saves at every progress: ~12 s)
 
 // emulated overworlds by map and event progress, the latest used `max` (a slider moved through every progress): each
-// kept while the ROM edits since its load changed no byte the load read (painting the map or its events loads it
-// again, a tile name or a level's graphics don't), as App.refresh keeps the level render; and what is derived from
-// them (derive), kept while none of the loads it used would load again and the frames run on from them read the same
+// kept while the bytes the load read are as they were (painting the map or its events loads it again, a tile name or a
+// level's graphics don't), as App.refresh keeps the level render; and what is derived from them (derive), kept while
+// none of the loads it used would load again and the frames run on from them read the same. Kept by content
+// (against the ROM's fingerprint, KeptResults contents): a key keeps its results of the latest few ROM states, so an
+// undo or a redo finds them (#386)
 export class OverworldLoads {
   emu: OverworldEmulator;
-  private kept: KeptResults<Since>;
-  private derived: KeptResults<Since>; // by key, for one `of` each
+  private fp: RomFingerprint;
+  private kept: KeptResults<ReadDeps>;
+  private derived: KeptResults<ReadDeps>; // by key, for one `of` each
   private deriving = new Map<string, Deriving>(); // by key and `of`
-  constructor(emu: OverworldEmulator, max: number) {
+  // (fp: the emulator's ROM's, shared with another owner: the probe worker's result cache)
+  constructor(emu: OverworldEmulator, max: number, fp = new RomFingerprint(emu.rom)) {
     this.emu = emu;
-    this.kept = new KeptResults({ validity: bySince(emu.rom), limit: max, inputsPerKey: 1 });
-    this.derived = new KeptResults({ validity: bySince(emu.rom), inputsPerKey: 1 });
+    this.fp = fp;
+    const validity: Validity<ReadDeps> = { stamp: () => { fp.sync(); return fp.gen; }, holds: (d) => fp.valid(d.deps) };
+    this.kept = new KeptResults({ validity, limit: max, inputsPerKey: 1, contents: LOAD_CONTENTS });
+    this.derived = new KeptResults({ validity, inputsPerKey: 1, contents: DERIVED_CONTENTS });
   }
   // (special: after the special world, OverworldEmulator.load)
   get(map: number, progress: number, special = false): OwRender {
@@ -1020,8 +1042,8 @@ export class OverworldLoads {
     k.state = emu.stateAfter(k.r) ?? emu.stateAfter(emu.loadRecorded(map, progress, special).result)!;
   }
   // `make`'s result from the loads it asks for (`load`, or restore to run the game on), kept under `key` for `of`
-  // (one per key) while the ROM edits since changed no byte it read: the loads', the frames it runs on from them
-  // and the editor code's; a load not kept yet isn't kept for `load` (the slider's stay)
+  // (one per key) while the bytes it read are as they were: the loads', the frames it runs on from them and the editor code's; a
+  // load not kept yet isn't kept for `load` (the slider's stay)
   derive<T>(key: string, make: (load: (map: number, progress: number) => OwRender) => T, of = ''): T {
     // (one step)
     return runJob(this.deriveSteps(key, function* (load) { return make(load); }, of));
@@ -1030,8 +1052,10 @@ export class OverworldLoads {
   // jobs on the loads' emulator, the console as a step left it set again for the next (the steps own it while they
   // run). Kept as derive's; one not made yet is shared by the jobs asking for it (each step goes on where the last one,
   // whichever job's, stood) and starts over when the ROM edits since changed a byte its steps read. A step's reads count
-  // for the recorders running, the result's all for the job getting it
-  *deriveSteps<T>(key: string, make: (load: (map: number, progress: number) => OwRender) => Generator<void, T>, of = ''): Generator<void, T> {
+  // for the recorders running, the result's all for the job getting it. leaveOut: bytes the result reads but doesn't
+  // depend on (owTilemapRanges), left out of what it read once made (an edit of them while it is made starts it over);
+  // its steps' reads then count only with the result's
+  *deriveSteps<T>(key: string, make: (load: (map: number, progress: number) => OwRender) => Generator<void, T>, of = '', leaveOut?: (rom: Rom) => RomRange[]): Generator<void, T> {
     const rom = this.emu.rom, id = `${key}\n${of}`;
     for (;;) {
       const d = this.derived.entry<T>(key, of);
@@ -1046,12 +1070,13 @@ export class OverworldLoads {
       let step;
       try {
         const steps = run.steps;
-        step = record(rom, () => steps.next(), { cpu: this.emu.snes });
+        step = record(rom, () => steps.next(), { cpu: this.emu.snes, counted: !leaveOut });
       } catch (e) { this.deriving.delete(id); throw e; }
       run.reads.add(step.reads);
       if (step.result.done) {
         this.deriving.delete(id);
-        this.derived.set(key, step.result.value, { gen: run.gen, reads: run.reads }, of);
+        if (leaveOut) run.reads.leaveOut(unrecorded(rom, () => leaveOut(rom)));
+        this.derived.set(key, step.result.value, this.readDeps(run.reads), of);
         this.count(run.reads);
         return step.result.value as T;
       }
@@ -1059,6 +1084,8 @@ export class OverworldLoads {
       yield;
     }
   }
+  // (fingerprinted on the current ROM: a run's steps each began on it, holds above)
+  private readDeps(reads: RomReads): ReadDeps { return { deps: this.fp.deps(reads), reads }; }
   // reads (of a kept result) count for the recorders running (a derive's, an outer one) as if read now
   private count(reads: RomReads): void {
     countReads(this.emu.rom, this.emu.snes, reads);
@@ -1068,8 +1095,8 @@ export class OverworldLoads {
     const key = `${loadKey(map, progress)}${special ? ':special' : ''}`;
     let k = this.kept.entry<KeptLoad>(key);
     if (!k) {
-      const gen = this.emu.rom.gen, { result, reads } = this.emu.loadRecorded(map, progress, special);
-      k = { data: { r: result, state: null }, deps: { gen, reads } };
+      const { result, reads } = this.emu.loadRecorded(map, progress, special);
+      k = { data: { r: result, state: null }, deps: this.readDeps(reads) };
       if (keep) this.kept.set(key, k.data, k.deps);
     }
     this.count(k.deps.reads);

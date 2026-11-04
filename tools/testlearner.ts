@@ -12,7 +12,7 @@ import { LevelEmulator } from '../src/core/levelemu.ts';
 import { ResultCache, RomFingerprint } from '../src/core/romdeps.ts';
 import { INPUTS_PER_KEY } from '../src/core/keptresults.ts';
 import { ResultLearner } from '../src/core/learner.ts';
-import { memoryResults, JobRunner, type Job, type Keep } from '../src/core/jobrunner.ts';
+import { memoryResults, MEMORY_CONTENTS, JobRunner, type Job, type Keep } from '../src/core/jobrunner.ts';
 import { inputHash, levelInput } from '../src/core/inputs.ts';
 import { gfxSkipMask } from '../src/core/gfxpages.ts';
 import { LevelUses, usedLevels } from '../src/core/levelusage.ts';
@@ -219,6 +219,24 @@ for (const keep of [true, 'memory'] as const) {
   for (let i = 0; i < 10; i++) one.set('k', i, deps, `${i}`);
   check(one.get('k', '9') === 9 && one.get('k', `${9 - INPUTS_PER_KEY + 1}`) !== undefined && one.get('k', `${9 - INPUTS_PER_KEY}`) === undefined,
     `a key keeps its latest used ${INPUTS_PER_KEY} inputs`);
+  // the results of an input on the latest MEMORY_CONTENTS ROM states (#386): an undo and a redo find theirs
+  {
+    const was = rom.r8(spare), at = (v: number) => { rom.w8(spare, v); return fp.deps(main.tracked(() => rom.r8(spare)).reads); };
+    const states = memoryResults(fp, 256);
+    states.set('u', 'A', at(was ^ 1), 'i');
+    states.set('u', 'B0', at(was ^ 2), 'i');
+    states.set('u', 'B', at(was ^ 2), 'i'); // (the same ROM state again: replaces B0, A stays)
+    for (let k = 1; k < INPUTS_PER_KEY; k++) states.set('u', `other${k}`, deps, `${k}`);
+    const a = (at(was ^ 1), states.get('u', 'i')), b = (at(was ^ 2), states.get('u', 'i'));
+    const none = (at(was ^ 3), states.get('u', 'i'));
+    states.set('u', 'C', fp.deps(main.tracked(() => rom.r8(spare)).reads), 'i');
+    const pushed = (at(was ^ 1), states.get('u', 'i')), kept = (at(was ^ 2), states.get('u', 'i'));
+    rom.w8(spare, was); // (the other inputs' results: made on it)
+    let others = 0;
+    for (let k = 1; k < INPUTS_PER_KEY; k++) if (states.get('u', `${k}`) === `other${k}`) others++;
+    check(MEMORY_CONTENTS === 2 && a === 'A' && b === 'B' && none === undefined, 'a result per ROM state of an input (set again on one: replaced): undone and redone, each found; none on a third');
+    check(pushed === undefined && kept === 'B' && others === INPUTS_PER_KEY - 1, `a third state's result pushes out the oldest; the key keeps its ${INPUTS_PER_KEY} inputs`);
+  }
   const round = memoryResults(fp, 16);
   round.startRound();
   for (let i = 0; i < 1000; i++) round.set(`r${i}`, i, deps, undefined);

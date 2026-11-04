@@ -195,6 +195,11 @@ export class RomReads {
     return false;
   }
 
+  // the bytes read in these ranges are left out (recorded by byte in byte pages; a page read whole stays read)
+  leaveOut(ranges: RomRange[]): void {
+    for (const b of this.bytes) if (ranges.some(([start, end]) => b >= start && b < end)) this.bytes.delete(b);
+  }
+
   add(r: RomReads): void {
     const n = Math.min(this.pages.length, r.pages.length);
     for (let p = 0; p < n; p++) this.pages[p] |= r.pages[p];

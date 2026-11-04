@@ -27,7 +27,7 @@ import { missingPatch } from './patches.ts';
 import { OwRefusal } from './owrefusal.ts';
 import {
   OW_EVENTS, OverworldEmulator, type OverworldLoads, gameL1, readL1, readTranslevels, baseEvent, translevelToLevel, l1XY, revealAt, revealEventCount, readDestroyList,
-  destroyEffects, destroyedCells, l1Index, MAX_TRANSLEVEL,
+  destroyEffects, destroyedCells, l1Index, MAX_TRANSLEVEL, owTilemapRanges,
 } from './overworld.ts';
 import { RAM, getS16 } from './ram.ts';
 import { record, countReads } from './romdeps.ts';
@@ -487,7 +487,7 @@ export function submapViewsJob(loads: OverworldLoads): Generator<void, Rect[]> {
       views.push({ x: Math.round(getS16(w, RAM.layer2X) / 8), y: Math.round(getS16(w, RAM.layer2Y) / 8), w: 32, h: 28 });
     }
     return views;
-  });
+  }, '', owTilemapRanges);
 }
 // the submap a layer 1 tile is on: 0 on the main map, else the one whose view's center is nearest (as LevelEmulator's)
 export function submapOf(views: readonly Rect[], tile: number): number {

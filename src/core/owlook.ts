@@ -11,7 +11,7 @@
 // look is not given: the game's looks can't be learned from the maps (the research in #366).
 
 import type { Rom } from './rom.ts';
-import { OW_EVENTS, OW_L1_TILES, MAP_NAMES, l1Index, l1XY, l2Index, owTileWords, readL2, owTileIndexes, type OverworldLoads, type OwRender } from './overworld.ts';
+import { OW_EVENTS, OW_L1_TILES, MAP_NAMES, l1Index, l1XY, l2Index, owTileWords, readL2, owTileIndexes, owTilemapRanges, type OverworldLoads, type OwRender } from './overworld.ts';
 import { readEvents, eventPieces, drawPiece, pieceTiles, l2XY, eventRunners, eventTitle, submapOf, type Rect } from './owevents.ts';
 import { hex2 } from './names.ts';
 import type { Reached } from './owreach.ts';
@@ -44,7 +44,7 @@ export function l1OwnLooksJob(rom: Rom, loads: OverworldLoads): Generator<void, 
       looks.push(Uint8Array.from(words, (w) => (hasOwnLook(r, w) ? 1 : 0)));
     }
     return looks;
-  });
+  }, '', owTilemapRanges);
 }
 
 // what the rules look at

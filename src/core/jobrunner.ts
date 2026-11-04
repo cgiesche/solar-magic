@@ -16,6 +16,7 @@ import { gfxSkipMask, gfxDisplaySkipMask } from './gfxpages.ts';
 import { TILESETS, tilesetPointers, pointersKey } from './tilesets.ts';
 
 export const MEMORY = 256; // keys whose results are kept in memory only (keep: 'memory'), the latest used
+export const MEMORY_CONTENTS = 2; // their results per input: of the latest ROM states (an undo, a redo, #386)
 
 // a job: a step per next(), the result as its return value (undefined: none, nothing kept); a yielded string is its
 // label from then on. It doesn't write the ROM: a write to a byte it read starts it over (also one written back)
@@ -228,6 +229,7 @@ export class JobRunner {
 }
 
 // results kept in memory only (keep: 'memory'), the latest used keys (MEMORY); checked against the ROM like the result
-// cache's, a key keeping the results of its latest used INPUTS_PER_KEY inputs as there
+// cache's, a key keeping the results of its latest used INPUTS_PER_KEY inputs as there, each on the latest
+// MEMORY_CONTENTS ROM states it was made on (an undo finds the result before the edit, the client asks no job)
 export type MemoryResults = KeptResults<RomDeps>;
-export const memoryResults = (fp: RomFingerprint, limit = MEMORY): MemoryResults => new KeptResults({ validity: byFingerprint(fp), limit });
+export const memoryResults = (fp: RomFingerprint, limit = MEMORY): MemoryResults => new KeptResults({ validity: byFingerprint(fp), limit, contents: MEMORY_CONTENTS });

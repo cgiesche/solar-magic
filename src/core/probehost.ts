@@ -78,7 +78,7 @@ function* found<T>(job: Generator<void, T | null>): Job<T | undefined> { return 
 interface LearnState {
   prober: BlockProber; uses: LevelUses; groups: SpriteGroupResults; suggest: KeptSuggestions; sizes: { key: string; probe: SizeProbe } | null; ow: OverworldLoads | null; l1Copy: EventL1Copy | null; rom: Rom;
 }
-const owLoads = (state: LearnState) => (state.ow ??= new OverworldLoads(new OverworldEmulator(state.rom), OW_LOADS_KEPT));
+const owLoads = (state: LearnState) => (state.ow ??= new OverworldLoads(new OverworldEmulator(state.rom), OW_LOADS_KEPT, state.prober.results.fp));
 
 // a learn job's job; show takes what it shows while it runs (null: it started, also over); latest: the job of the latest
 // request it answers (learnRetargets: the levels' uses take up its list as they run)
