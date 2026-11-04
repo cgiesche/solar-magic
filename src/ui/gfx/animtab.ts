@@ -34,6 +34,7 @@ import { remapSlot } from '../../core/remap.ts';
 import { remapEditor } from '../remaplist.ts';
 import type { LevelRender } from '../../core/levelemu.ts';
 import type { Rom } from '../../core/rom.ts';
+import { owCharBase } from '../../core/overworld.ts';
 import {
   triggersFor, maxFrames, triggerRam, triggerProblems, customInit, setCustomInit, isManual, isCustom, isOneShot, playsOnce, slotName, PRECISION, OW_EVENTS, type CustomInit, type SlotRef,
 } from '../../core/extrigger.ts';
@@ -1174,8 +1175,8 @@ export class AnimTab implements WsPanel {
     // the submap's map: the 8x8 tile shown there (layer 1's, else layer 2's), as a VRAM tile from its layer's graphics
     const q = this.ws.preview.owTileAt(px, py), r = this.ws.preview.submapShown();
     if (!q || !r) return;
-    const base = ((q.layer === 1 ? r.ppuRegs[0x0b] : r.ppuRegs[0x0b] >> 4) & 0x0f) << 12; // its VRAM word address
-    this.setTargetWord(base + (q.word & 0x3ff) * 16);
+    // (its VRAM word address, wrapping around as the PPU reads it)
+    this.setTargetWord((owCharBase(r, q.layer) / 2 + (q.word & 0x3ff) * 16) & 0x7fff);
   }
 
   // advances every preview to the frame of the current tick

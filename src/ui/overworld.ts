@@ -12,7 +12,7 @@ import {
   resetTranslevel, baseEvent, setBaseEvent, eventNames, exitDirections, setExitDirection, DIR_ARROWS, DIR_NAMES, EXIT_NAMES, NO_EVENT,
   initialFlags, setInitialFlags, FLAG, DIR_FLAGS, OW_EVENTS, revealEvents, revealedTile, revealEventCount,
   readRevealList, writeRevealList, destroyEffects, destroySettingAt, readDestroyList, hasDestroyPatch, levelTilesOf, OW_L1_TILES,
-  eventBits, drawOwMap, drawL1Tile, owShownAt, owMapAt, owShownCopies,
+  eventBits, drawOwMap, drawL1Tile, owTileCaches, owShownAt, owMapAt, owShownCopies,
 } from '../core/overworld.ts';
 import { isBlank, readMessage } from '../core/messages.ts';
 import { messageRoutineNote, messageRoutineUnknown, MESSAGE_ROUTINE_CHECKING } from '../core/messagedraw.ts';
@@ -1614,7 +1614,7 @@ export class OverworldView {
     const r = this.render(), c = h('canvas', { width: 16, height: 16, class: 'ow-tile' }), ctx = c.getContext('2d')!;
     const id = ctx.createImageData(16, 16), px = new Uint32Array(id.data.buffer);
     px.fill(0xff181818);
-    if (r) this.drawL1Tile(px, new TileCache(r.vram, r.cgram, 0), t, 0, 0, 16, 16);
+    if (r) this.drawL1Tile(px, owTileCaches(r).l1, t, 0, 0, 16, 16);
     ctx.putImageData(id, 0, 0);
     return c;
   }
@@ -1920,7 +1920,7 @@ export class OverworldView {
   l1Palette(): HTMLElement {
     const r = this.render();
     if (!r) return h('div', { class: 'hint' }, 'Loading the overworld…');
-    const tc = new TileCache(r.vram, r.cgram, 0), kinds = this.pathKinds(), shapes = this.pathShapes();
+    const tc = owTileCaches(r).l1, kinds = this.pathKinds(), shapes = this.pathShapes();
     const empty = emptyL1Tiles(this.app.rom), free = freeL1Tiles(empty, kinds);
     const tiles = (list: number[], w: number, W: number, H: number) => {
       const c = document.createElement('canvas');
@@ -1978,7 +1978,7 @@ export class OverworldView {
   l2Palette(): HTMLElement {
     const r = this.render();
     if (!r) return h('div', { class: 'hint' }, 'Loading the overworld…');
-    const tc = new TileCache(r.vram, r.cgram, 0);
+    const tc = owTileCaches(r).l2;
     const entries = (list: number[], w: number, W: number, H: number) => {
       const c = document.createElement('canvas');
       c.width = W; c.height = H;
@@ -2216,9 +2216,9 @@ function storeDim(on: boolean): void {
 
 // a map region's layers drawn apart: layer 1 transparent where it has no pixel, layer 2 black there (the back area)
 function putLayers(l1c: HTMLCanvasElement, l2c: HTMLCanvasElement, rom: Rom, r: OwRender, region: number, l1: Uint16Array, l2: Uint16Array): void {
-  const tc = new TileCache(r.vram, r.cgram, 0);
-  putImage(l1c, drawOwMap(rom, r, region, l1, undefined, tc), 512, 0);
-  putImage(l2c, drawOwMap(rom, r, region, undefined, l2, tc));
+  const tcs = owTileCaches(r);
+  putImage(l1c, drawOwMap(rom, r, region, l1, undefined, tcs), 512, 0);
+  putImage(l2c, drawOwMap(rom, r, region, undefined, l2, tcs));
 }
 // the map from its layers: black, layer 2, layer 1 over it, each at its strength (0: left out)
 function composeLayers(out: HTMLCanvasElement, l1c: HTMLCanvasElement, l2c: HTMLCanvasElement, s: { l1: number; l2: number }): void {

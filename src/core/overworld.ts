@@ -7,7 +7,7 @@ import { KeptResults } from './keptresults.ts';
 import { rleDecode, rleEncode } from './rle.ts';
 import { GM, RAM, SPECIAL_FLAG } from './ram.ts';
 import { decodeTile } from './gfx.ts';
-import { TileCache, blit8 } from './render.ts';
+import { TileCache, blit8, charBase } from './render.ts';
 import { assemble } from './asar.ts';
 import { missingPatch } from './patches.ts';
 import { lz2Compress, lz2Decompress } from './lz2.ts';
@@ -836,16 +836,23 @@ export function gameL2(r: OwRender): Uint16Array {
   const at = (r.ppuRegs[0x08] & 0xfc) << 9;
   return Uint16Array.from({ length: 0x1000 }, (_, k) => r.vram[at + k * 2] | (r.vram[at + k * 2 + 1] << 8));
 }
+// where a load's layer 1 (BG1) or layer 2 (BG2) 8x8 tiles start in VRAM (bytes): BG12NBA ($210B) as the overworld's
+// load sets it – 0 in the game, Journey to Kaizo's $77 puts both at $E000 (8x8 tiles past the end wrap around to 0)
+export const owCharBase = (r: Pick<OwRender, 'ppuRegs'>, layer: 1 | 2): number => charBase(r, layer === 2);
+// a load's 8x8 tiles of layer 1 and of layer 2, each from its character base
+export interface OwTileCaches { l1: TileCache; l2: TileCache }
+export const owTileCaches = (r: OwRender): OwTileCaches =>
+  ({ l1: new TileCache(r.vram, r.cgram, owCharBase(r, 1)), l2: new TileCache(r.vram, r.cgram, owCharBase(r, 2)) });
 // the 512x512 image of a map region (0 the main map, 1 the submaps) drawn with a load's graphics: layer 2 (`l2`), then
 // layer 1 (`l1`, null: the state after the events in `r`) with its Map16 tiles from the ROM; undefined leaves a layer out
-// (tc: the load's 8x8 tiles, passed to share them between the layers drawn apart)
-export function drawOwMap(rom: RomRead, r: OwRender, region: number, l1: Uint16Array | null | undefined, l2: Uint16Array | undefined, tc = new TileCache(r.vram, r.cgram, 0)): Uint32Array {
+// (tcs: the load's 8x8 tiles, passed to share them between the layers drawn apart)
+export function drawOwMap(rom: RomRead, r: OwRender, region: number, l1: Uint16Array | null | undefined, l2: Uint16Array | undefined, tcs = owTileCaches(r)): Uint32Array {
   const W = 512;
   const img = new Uint32Array(W * W);
-  if (l2) for (let y = 0; y < 64; y++) for (let x = 0; x < 64; x++) blit8(img, W, W, tc.get(l2[l2Index(region, x, y)]), x * 8, y * 8);
+  if (l2) for (let y = 0; y < 64; y++) for (let x = 0; x < 64; x++) blit8(img, W, W, tcs.l2.get(l2[l2Index(region, x, y)]), x * 8, y * 8);
   if (l1 !== undefined) {
     const src = l1 ?? gameL1(r);
-    for (let y = 0; y < 32; y++) for (let x = 0; x < 32; x++) drawL1Tile(rom, img, tc, src[l1Index(region, x, y)], x * 16, y * 16);
+    for (let y = 0; y < 32; y++) for (let x = 0; x < 32; x++) drawL1Tile(rom, img, tcs.l1, src[l1Index(region, x, y)], x * 16, y * 16);
   }
   return img;
 }
@@ -863,11 +870,16 @@ function tilemapWord(r: OwRender, reg: number, x: number, y: number): number {
   const a = ((r.ppuRegs[reg] & 0xfc) << 9) + (((y >> 5) * 2 + (x >> 5)) * 0x400 + (y & 31) * 32 + (x & 31)) * 2;
   return r.vram[a] | (r.vram[a + 1] << 8);
 }
-// the color index of pixel (x, y) of tilemap word `w`'s 8x8 tile (4bpp in VRAM from 0, as drawOwMap draws it; flips
-// applied)
+// the 64 color indexes of layer `layer`'s 8x8 tile of word `w` (4bpp from the layer's character base, as drawOwMap
+// draws it; no flips) into `out`
+export function owTileIndexes(r: Pick<OwRender, 'vram' | 'ppuRegs'>, layer: 1 | 2, w: number, out: Uint8Array): Uint8Array {
+  decodeTile(r.vram, (owCharBase(r, layer) + (w & 0x3ff) * 32) & 0xffff, 4, out);
+  return out;
+}
+// the color index of pixel (x, y) of layer `layer`'s tilemap word `w`'s 8x8 tile (flips applied)
 const pixelBuf = new Uint8Array(64);
-function tilePixel(r: OwRender, w: number, x: number, y: number): number {
-  decodeTile(r.vram, (w & 0x3ff) * 32, 4, pixelBuf);
+function tilePixel(r: OwRender, layer: 1 | 2, w: number, x: number, y: number): number {
+  owTileIndexes(r, layer, w, pixelBuf);
   return pixelBuf[((w & 0x8000) ? 7 - y : y) * 8 + ((w & 0x4000) ? 7 - x : x)];
 }
 // The 8x8 tile shown at pixel (x, y) of the loaded region's 512x512 map (r: its load), from the BG1 and BG2 tilemaps
@@ -877,7 +889,7 @@ export function owTileAt(r: OwRender, x: number, y: number): { word: number; lay
   if (x < 0 || y < 0 || x >= 512 || y >= 512) return null;
   for (const [layer, reg] of [[1, 0x07], [2, 0x08]] as const) {
     const word = tilemapWord(r, reg, x >> 3, y >> 3);
-    if (tilePixel(r, word, x & 7, y & 7)) return { word, layer };
+    if (tilePixel(r, layer, word, x & 7, y & 7)) return { word, layer };
   }
   return null;
 }

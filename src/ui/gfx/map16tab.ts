@@ -756,7 +756,9 @@ export class Map16Tab implements WsPanel {
     const w = this.wordAt(k), num8 = w & 0x3ff;
     const slot = slotOfTile(this.t.vram(), num8);
     const where = this.selW * this.selH > 1 ? `${this.num(this.selection()[tile])} ` : '';
-    const from = slot ? ` from ${slot.name} (${gfxName(slot.file)})` : '';
+    // (a number past the slots – Journey to Kaizo's overworld uses 200–2FF – is drawn from VRAM where the game has it,
+    // but the sheet has no row for it)
+    const from = slot ? ` from ${slot.name} (${gfxName(slot.file)})` : ` (in none of the ${this.t.where}'s graphics slots: not in the sheet)`;
     this.qInfo.textContent = `${this.hoverQ !== null ? 'Under the mouse' : 'Quarter'}: ${where}${QUARTER_NAMES[q]}, 8x8 tile ${hex(num8, 3)}${from}, palette ${(w >> 10) & 7}`;
   }
 

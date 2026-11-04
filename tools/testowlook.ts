@@ -50,7 +50,7 @@ check(!clean.problems.length, `the clean game: no path warning at any event prog
 const own = l1OwnLooks(rom, loads);
 const lookless = (t: number) => kinds[t] === 'walk' && !own[0][t];
 check(own.every((o) => o.some((v) => v) && o.some((v, t) => !v && kinds[t] === 'walk')), 'every submap has tiles with a look of their own and walk tiles without one');
-check(!hasOwnLook(loads.get(0, 0).vram, owTileWords(rom, 0)), 'tile 000 has no look of its own');
+check(!hasOwnLook(loads.get(0, 0), owTileWords(rom, 0)), 'tile 000 has no look of its own');
 
 // ---- a route in a level's event ----
 // a level tile Mario reaches after its event and one he doesn't, on the main map or Yoshi's Island, the shortest way

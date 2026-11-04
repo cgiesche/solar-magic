@@ -11,8 +11,7 @@
 // look is not given: the game's looks can't be learned from the maps (the research in #366).
 
 import type { Rom } from './rom.ts';
-import { OW_EVENTS, OW_L1_TILES, MAP_NAMES, l1Index, l1XY, l2Index, owTileWords, readL2, type OverworldLoads } from './overworld.ts';
-import { decodeTile } from './gfx.ts';
+import { OW_EVENTS, OW_L1_TILES, MAP_NAMES, l1Index, l1XY, l2Index, owTileWords, readL2, owTileIndexes, type OverworldLoads, type OwRender } from './overworld.ts';
 import { readEvents, eventPieces, drawPiece, pieceTiles, l2XY, eventRunners, eventTitle, submapOf, type Rect } from './owevents.ts';
 import { hex2 } from './names.ts';
 import { reach, type ReachInput } from './owreach.ts';
@@ -26,13 +25,10 @@ export const isPathLook = (p: WorldProblem): boolean => p.key.startsWith('path-l
 
 const pixels = new Uint8Array(64);
 
-// Whether a layer 1 tile has its own look: one of its 8x8s (Map16 words `words`) has a pixel in the loaded graphics
-// (`vram`). The one place the BG1 character base is assumed: 0, as the overworld's drawing has it (drawOwMap; #373).
-export function hasOwnLook(vram: Uint8Array, words: readonly number[]): boolean {
-  return words.some((w) => {
-    decodeTile(vram, (w & 0x3ff) * 32, 4, pixels);
-    return pixels.some((p) => p !== 0);
-  });
+// Whether a layer 1 tile has its own look: one of its 8x8s (Map16 words `words`) has a pixel in a load's graphics (from
+// its BG1 character base, as drawOwMap draws it)
+export function hasOwnLook(r: Pick<OwRender, 'vram' | 'ppuRegs'>, words: readonly number[]): boolean {
+  return words.some((w) => owTileIndexes(r, 1, w, pixels).some((p) => p !== 0));
 }
 
 // Per submap (0 the main map, 1–6) per layer 1 tile 000–1FF: 1 when it has its own look in that submap's graphics
@@ -41,8 +37,8 @@ export function l1OwnLooks(rom: Rom, loads: OverworldLoads): Uint8Array[] {
   return loads.derive('l1OwnLooks', (load) => {
     const words = Array.from({ length: OW_L1_TILES }, (_, t) => owTileWords(rom, t));
     return Array.from({ length: MAP_NAMES.length }, (_, k) => {
-      const vram = load(k, 0).vram;
-      return Uint8Array.from(words, (w) => (hasOwnLook(vram, w) ? 1 : 0));
+      const r = load(k, 0);
+      return Uint8Array.from(words, (w) => (hasOwnLook(r, w) ? 1 : 0));
     });
   });
 }

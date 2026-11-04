@@ -379,8 +379,9 @@ export function stepChanges(r: LevelRender, vram: Uint8Array, cgram: Uint8Array)
   };
 }
 
-// where the 8x8 tiles of FG (layer 1) or BG (layer 2) Map16 tiles are in VRAM
-export function charBase(r: LevelRender, bg: boolean): number {
+// where the 8x8 tiles of FG (layer 1) or BG (layer 2) Map16 tiles are in VRAM (BG12NBA, $210B; a level's or a submap's
+// load)
+export function charBase(r: Pick<LevelRender, 'ppuRegs'>, bg: boolean): number {
   const p = r.ppuRegs[0x0b];
   return (bg ? p >> 4 : p & 0x0f) << 13;
 }
