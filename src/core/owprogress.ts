@@ -60,9 +60,9 @@ export function progressSavesJob(loads: OverworldLoads): Generator<void, Progres
   return loads.deriveSteps('progressSaves', () => learnSaves(loads));
 }
 
-// the level flags of the save at each event progress 0 … OW_EVENTS (progressSaves) as a job of the result learner
-// (probe worker), a step per event (progressSavesJob): what the maps at every progress need of the saves
-// (progressMapsFromEvents)
+// the level flags of the save at each event progress 0 … OW_EVENTS (progressSaves), a step per event
+// (progressSavesJob): what the maps at every progress need of the saves (progressMapsFromEvents; the worker's jobs
+// take them inside theirs, the tests on their own)
 export function* progressFlagsJob(loads: OverworldLoads): Job<number[][]> {
   return (yield* progressSavesJob(loads)).map((s) => s.levelFlags);
 }

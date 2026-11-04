@@ -5,7 +5,8 @@
 // says what it is in the status bar; the "When beaten…" sentences tell the same levels. Learned in the probe worker
 // once per ROM edit (passableEdgesJob: the searches at every event progress over the maps built from the events and
 // the saves' level flags, the rule with the events still passable without an exit's event), from the path kinds and
-// shapes; nothing is drawn while those are learned.
+// shapes; nothing is drawn while those are first learned. After an edit the arrows learned before stay drawn, dimmed, until
+// the new ones come (#388); the "When beaten…" sentences tell no levels meanwhile, marked as being learned.
 
 import type { OverworldView } from './overworld.ts';
 import { arrow } from './owlinkview.ts';
@@ -23,8 +24,8 @@ interface Drawn { p: Pt; q: Pt; color: string; dashed: boolean; head: boolean; t
 
 export class ExitArrowLayer {
   show = true; // drawn in the Levels mode
-  // the probe worker's edges for the ROM generation (not asked again while it holds)
-  private passable: { gen: number; edges: ExitEdge[] } | null = null;
+  // the probe worker's edges for the ROM generation (not asked again while it holds; of an older one: drawn dimmed)
+  private passable: { rom: object; gen: number; edges: ExitEdge[] } | null = null;
   private asked = -1; // the ROM generation they were asked for at (until something comes: not asked again each paint)
   constructor(private view: OverworldView) {}
 
@@ -43,18 +44,26 @@ export class ExitArrowLayer {
     if (this.passable?.gen === rom.gen) return this.passable.edges;
     const kinds = v.pathKinds(), shapes = app.pathShapes(this.learned);
     if (!kinds || !shapes || this.asked === rom.gen) return null;
-    const passable = app.overworldExitEdges(kinds, shapes, this.learned);
-    if (passable) { this.passable = { gen: rom.gen, edges: passable }; return passable; }
+    // (dropped: the overworld left, asked again when shown)
+    const passable = app.overworldExitEdges(kinds, shapes, this.learned, () => { this.asked = -1; });
+    if (passable) { this.passable = { rom, gen: rom.gen, edges: passable }; return passable; }
     this.asked = rom.gen;
     return null;
   }
 
+  // the edges drawn: the ROM's as it is, else while they are learned those learned before an edit (stale: dimmed)
+  private drawn(): { edges: ExitEdge[]; stale: boolean } | null {
+    const edges = this.edges(), p = this.passable;
+    if (edges) return { edges, stale: false };
+    return p && p.rom === this.view.app.rom ? { edges: p.edges, stale: true } : null;
+  }
+
   // the lines of the region shown: arrows, stubs (fanned out by exit), an arrow to the other region as a short one
-  // labelled with the level
-  private lines(): Drawn[] {
-    const edges = this.edges();
-    if (!edges) return [];
-    const rom = this.view.app.rom, region = this.view.region, out: Drawn[] = [];
+  // labelled with the level; stale: the edges learned before an edit
+  private lines(): { lines: Drawn[]; stale: boolean } {
+    const d = this.drawn();
+    if (!d) return { lines: [], stale: false };
+    const { edges, stale } = d, rom = this.view.app.rom, region = this.view.region, out: Drawn[] = [];
     const levelText = (tl: number) => `${levelName(rom, tl)} (${hex(translevelToLevel(tl), 3)})`;
     const stub = (from: number, k: number): Pt => { const p = center(from), a = -Math.PI / 4 + (k - 1.5) * 0.45; return { x: p.x + Math.cos(a) * 14, y: p.y + Math.sin(a) * 14 }; };
     for (const e of edges) {
@@ -76,7 +85,8 @@ export class ExitArrowLayer {
         else out.push({ p, q: stub(e.from, e.exit), color, dashed, head: true, text });
       }
     }
-    return out;
+    if (stale) for (const l of out) l.text += ' (before the last edit: being learned again)';
+    return { lines: out, stale };
   }
 
   // the line under the map pixel m (within 3 pixels; the nearest), null none
@@ -97,7 +107,9 @@ export class ExitArrowLayer {
   // the lines of the region shown, the one under the mouse highlighted (arrows as the links', stubs without a head)
   paint(ctx: CanvasRenderingContext2D, lw: number): void {
     if (!this.show) return;
-    const lines = this.lines(), hot = this.hovered(lines, this.view.mouse);
+    const { lines, stale } = this.lines(), hot = this.hovered(lines, this.view.mouse);
+    ctx.save();
+    if (stale) ctx.globalAlpha = 0.4;
     for (const l of lines) {
       if (l.head) { arrow(ctx, lw, l.p, l.q, l.color, false, l === hot, l.dashed); continue; }
       for (const [c, w] of [['rgba(0,0,0,0.75)', l === hot ? 5 : 3.5], [l === hot ? '#fff' : l.color, l === hot ? 2.5 : 1.5]] as [string, number][]) {
@@ -110,10 +122,11 @@ export class ExitArrowLayer {
       }
       ctx.setLineDash([]);
     }
+    ctx.restore();
   }
 
   // what the status bar says of the line under the mouse ('' none)
   status(): string {
-    return this.show ? this.hovered(this.lines(), this.view.mouse)?.text ?? '' : '';
+    return this.show ? this.hovered(this.lines().lines, this.view.mouse)?.text ?? '' : '';
   }
 }

@@ -45,7 +45,7 @@ import { submapViewsJob, layer1WithoutJob, EventL1Copy } from './owevents.ts';
 import { owSpritesJob, owCustomJob, owLooksJob } from './owsprites.ts';
 import { owTriggerJob, owGameColorsJob } from './owanimview.ts';
 import { owScreenJob } from './owlayer3.ts';
-import { progressSaveJob, progressFlagsJob } from './owprogress.ts';
+import { progressSaveJob } from './owprogress.ts';
 import { messageRoutineJob } from './messagedraw.ts';
 import { gameBgJob } from './tilemove.ts';
 import { prefabPlacesJob } from './prefabplaces.ts';
@@ -126,7 +126,6 @@ function learnJob(j: LearnJob, state: LearnState, show: (items: unknown[] | null
     case 'owAnimated': return () => owAnimatedJob(owLoads(state), j.map, j.progress);
     case 'owSave': return (emu) => progressSaveJob(owLoads(state), j.progress, { uses: state.uses, emu, prober: state.prober });
     case 'owL1Without': return () => layer1WithoutJob(state.l1Copy ??= new EventL1Copy(), state.rom, j.event);
-    case 'owProgressFlags': return () => progressFlagsJob(owLoads(state));
     case 'owExitEdges': return () => passableEdgesJob(state.rom, owLoads(state), j.kinds, j.shapes);
     case 'owWorldCheck': return () => worldCheckJob(state.rom, owLoads(state), j.kinds, j.shapes, j.open);
     case 'msgRoutine': return (emu) => messageRoutineJob(state.rom, emu);

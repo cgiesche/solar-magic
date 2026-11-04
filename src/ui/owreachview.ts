@@ -2,7 +2,8 @@
 // progress dimmed (a view setting); the search's problems – dead ends, level tiles nothing leads to, events revealing
 // nothing he reaches – are listed by the World check (worldcheck.ts). Searched again when the ROM, the event progress
 // or what it is searched over (path kinds and shapes, the maps at the progress and with every event passed, the saves there)
-// changes; nothing is shown while one of those is learned.
+// changes; nothing is shown while one of those is learned. The search with every event passed is the same at every
+// progress: kept while the ROM and what it searches are, so a step through the strip searches once (#388).
 
 import type { OverworldView } from './overworld.ts';
 import { gameL1, l1XY, OW_EVENTS, type OwRender } from '../core/overworld.ts';
@@ -17,7 +18,11 @@ export class ReachLayer {
   view: OverworldView;
   show = false; // the tiles Mario doesn't reach dimmed
   private found: { key: string; now: Reached; all: Reached } | null = null;
-  // by ROM generation and progress: null while it is learned, undefined when it could not be (not asked again)
+  // the search with every event passed and what it searched (the ROM and its generation, the map, the save, kinds,
+  // shapes, the levels' exits)
+  private every: { from: unknown[]; all: Reached } | null = null;
+  // by ROM generation and progress: null while it is learned, undefined when it could not be (not asked again); a
+  // request dropped (another progress shown, the overworld left) is forgotten, asked again when needed
   private saves = new Map<string, ProgressSave | null | undefined>();
   constructor(view: OverworldView) {
     this.view = view;
@@ -33,10 +38,15 @@ export class ReachLayer {
   private save(progress: number): ProgressSave | null {
     const key = `${this.view.app.rom.gen}:${progress}`;
     if (this.saves.has(key)) return this.saves.get(key) ?? null;
-    const s = this.view.app.progressSave(progress);
+    const s = this.view.app.progressSave(progress, progress === OW_EVENTS ? 'every' : 'shown');
     if (!(s instanceof Promise)) { this.saves.set(key, s); return s; }
     this.saves.set(key, null);
-    void s.then((v) => { this.saves.set(key, v); if (v) this.learned(); });
+    void s.then((v) => {
+      // (dropped: asked again if it is still needed, e.g. the strip back at it)
+      if (v === null) { if (this.saves.get(key) === null) { this.saves.delete(key); this.learned(); } return; }
+      this.saves.set(key, v);
+      if (v) this.learned();
+    });
     return null;
   }
 
@@ -59,7 +69,9 @@ export class ReachLayer {
       const inp = reachInput(rom, gameL1(r), r.wram.subarray(RAM.owTranslevels, RAM.owTranslevelsEnd), s.levelFlags, kinds, shapes, start, levelWarps);
       return { inp, r: reach(inp) };
     };
-    this.found = { key, now: search(shown, saveNow), all: search(every, saveAll) };
+    const from = [rom, rom.gen, every, saveAll, kinds, shapes, graph];
+    if (!this.every || this.every.from.some((x, k) => x !== from[k])) this.every = { from, all: search(every, saveAll) };
+    this.found = { key, now: search(shown, saveNow), all: this.every.all };
     return this.found;
   }
 

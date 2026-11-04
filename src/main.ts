@@ -315,7 +315,7 @@ function buildUi(app: App): { start: (at: NavLoc | null) => Promise<void> } {
     const from = workspace;
     workspace = w;
     split.use(w);
-    if (from === 'ow') app.refresh();
+    if (from === 'ow') { app.overworldLeft(); app.refresh(); }
     if (w === 'ow') {
       if (app.dirty) app.saveLevel(true);
       showOverworld();

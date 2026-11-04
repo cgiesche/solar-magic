@@ -52,7 +52,7 @@ import { MARIO_W, MARIO_H, type CameraBands } from '../core/camerabands.ts';
 import { tideLines, type TideLines, type Layer3Kind } from '../core/layer3.ts';
 import { type Layer2Motions } from '../core/l2scroll.ts';
 import { variantOf, blockKey, collisionKey, type BlockProbe, type CollisionProbe, type RunStates, type SwitchState, SWITCH_STATES, SWITCH_TRIGGER } from '../core/blockprobe.ts';
-import type { ProbeReply, ProbeBusyKey, LearnLane } from '../core/probeprotocol.ts';
+import { SAVE_LANES, OW_LEFT_LANES, type ProbeReply, type ProbeBusyKey, type LearnLane, type SaveAsker } from '../core/probeprotocol.ts';
 import { spriteJobs, spriteInput, layer3Spec, type SpriteInput } from '../core/learnspecs.ts';
 import { ProbeClient, FAILED } from '../core/probeclient.ts';
 import { messageRoutineInput, UNKNOWN_ROUTINE, type MessageRoutine } from '../core/messagedraw.ts';
@@ -1134,25 +1134,27 @@ export class App {
   overworldAllEvents(done: () => void): OwRender | undefined {
     return this.probes.learn<OwRender>('owma1', { kind: 'owMap', map: 0, progress: OW_EVENTS }, { lane: 'owreach', label: 'Overworld', done });
   }
-  // the level flags of the saves at every event progress (owprogress.ts progressFlagsJob: the maps at every progress
-  // of the World check and the exits' arrows, progressMapsFromEvents), learned in the probe worker with the saves (one
-  // emulation learns them all) and kept in memory while the ROM bytes they read are unchanged: undefined while they
-  // are learned, then `done` is called
-  overworldProgressFlags(done: () => void): number[][] | undefined {
-    return this.probes.learn<number[][]>('owpf1', { kind: 'owProgressFlags' }, { lane: 'owps', label: 'Overworld progress', done });
-  }
   // the World check's part the same at every event progress shown (worldcheck.ts worldCheckJob: the problems with
   // every event passed, the budgets, those found at every event progress), from the path kinds and shapes and the open
-  // level's exits as edited, learned and kept as overworldProgressFlags (seconds: the saves at every progress first)
+  // level's exits as edited, learned in the probe worker and kept in memory while the ROM bytes it read are unchanged
+  // (seconds: the saves at every progress first)
   overworldWorldCheck(kinds: PathKind[], shapes: PathShapes, done: () => void): WorldCheckLearned | undefined {
     const open = { number: this.level.number, exits: this.level.exits };
     return this.probes.learn<WorldCheckLearned>('owwc1', { kind: 'owWorldCheck', kinds, shapes, open }, { lane: 'owwc', label: 'World check', input: [kinds, shapes, open], done });
   }
   // the exits' edges with the events still passable without each exit's event (owexitedges.ts passableEdgesJob, the
-  // Levels mode's arrows), from the path kinds and shapes, learned and kept as overworldProgressFlags (seconds: the saves
-  // at every progress first)
-  overworldExitEdges(kinds: PathKind[], shapes: PathShapes, done: () => void): ExitEdge[] | undefined {
-    return this.probes.learn<ExitEdge[]>('owxe1', { kind: 'owExitEdges', kinds, shapes }, { lane: 'owxe', label: 'Exit arrows', input: [kinds, shapes], done });
+  // Levels mode's arrows), from the path kinds and shapes, learned in the probe worker and kept in memory while the ROM
+  // bytes they read are unchanged (seconds: the saves at every progress first); dropped: the request was dropped (the
+  // overworld left, overworldLeft)
+  overworldExitEdges(kinds: PathKind[], shapes: PathShapes, done: () => void, dropped?: () => void): ExitEdge[] | undefined {
+    return this.probes.learn<ExitEdge[]>('owxe1', { kind: 'owExitEdges', kinds, shapes }, { lane: 'owxe', label: 'Exit arrows', input: [kinds, shapes], done, dropped });
+  }
+  // The overworld workspace was left: the overworld view's jobs of seconds (the save at the progress shown and with
+  // every event passed, the World check, the exits' arrows) are not wanted any more, so that the level editor's jobs
+  // don't wait behind them (#388, OW_LEFT_LANES). Asked for again when the view shows; the saves' steps learned so far
+  // are kept in the worker (OverworldLoads.deriveSteps). A test play's save goes on.
+  overworldLeft(): void {
+    for (const lane of OW_LEFT_LANES) this.probes.unlearn(lane);
   }
   // which overworld tiles are level tiles (owpaths.ts levelTileTest), from the path tiles: null while they are learned
   levelTileTest(done: () => void): LevelTileTest | null {
@@ -1237,12 +1239,16 @@ export class App {
 
   // the save at an event progress (owprogress.ts progressSaves: the level flags, switch palaces and events triggered
   // the game has then), learned in the probe worker and kept in memory while the ROM bytes it read are unchanged:
-  // known, else what gives it once learned (undefined: it could not be). Requests don't replace each other: one
-  // emulation learns every progress, and each test play started waits for its own
-  progressSave(progress: number): ProgressSave | Promise<ProgressSave | undefined> {
-    let learned!: (v?: ProgressSave) => void;
-    const later = new Promise<ProgressSave | undefined>((ok) => { learned = ok; });
-    return this.probes.learn<ProgressSave>('owps1', { kind: 'owSave', progress }, { lane: 'owps', input: { progress }, label: 'Overworld progress', done: learned, failed: () => learned() }) ?? later;
+  // known, else what gives it once learned (undefined: it could not be; null: the request was dropped). One emulation
+  // learns every progress, shared by the lanes (OverworldLoads.deriveSteps), each asker in its own (SAVE_LANES: a test
+  // play waits for its own, the strip's progress shown replaces the one asked before it, #388). The overworld left, the
+  // strip's are dropped (overworldLeft)
+  progressSave(progress: number, asker: SaveAsker = 'test'): ProgressSave | Promise<ProgressSave | null | undefined> {
+    let learned!: (v: ProgressSave | null | undefined) => void;
+    const later = new Promise<ProgressSave | null | undefined>((ok) => { learned = ok; });
+    return this.probes.learn<ProgressSave>('owps1', { kind: 'owSave', progress }, {
+      ...SAVE_LANES[asker], input: { progress }, label: 'Overworld progress', done: learned, failed: () => learned(undefined), dropped: () => learned(null),
+    }) ?? later;
   }
   // the 8x8 tiles (layer 1 tile numbers) and colors the game keeps rewriting on submap `map` at event progress
   // `progress` (owanimated.ts), learned in the probe worker and kept in memory while the ROM bytes it read are
