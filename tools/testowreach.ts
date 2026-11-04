@@ -118,15 +118,15 @@ function play(r: Rom, inp: ReachInput, i: number, d: number): number {
   const r3 = reach({ ...none, l1: l1b, flags }), w3 = r3.walks.get(yi1 * 4 + d);
   check(none.tls[yi1] === 0x29 && !!w3?.stuck && w3.stuck.why === 'end', `a path tile next to 105 going ${DIR_NAMES[d]}: a dead end (${w3?.stuck?.why})`);
   const p = reachProblems(rom, { inp: { ...none, l1: l1b, flags }, r: r3 }, { inp: all, r: reach(all) }, at);
-  check(p.some((q) => q.key === `ow-dead:${yi1 * 4 + d}` && q.severity === 'error'), `reported: ${p.filter((q) => q.severity === 'error').map((q) => q.text).join('; ')}`);
+  check(p.some((q) => q.key === `dead-end:${l1Index(yi1 >> 10, x + DX[d], y + DY[d])}` && q.severity === 'error'), `reported: ${p.filter((q) => q.severity === 'error').map((q) => q.text).join('; ')}`);
 }
 
 // ---- the problems of the clean game ----
 {
   const p = reachProblems(rom, { inp: none, r: reach(none) }, { inp: all, r: reach(all) }, at);
   console.log(p.map((q) => `     ${q.severity} ${q.text}`).join('\n'));
-  const events = p.filter((q) => q.key.startsWith('ow-event'));
-  check(p.filter((q) => q.key.startsWith('ow-level')).length === 2 && !p.some((q) => q.severity === 'error') && events.length === 1 && events[0].text.startsWith('Level 112'),
+  const events = p.filter((q) => q.kind === 'event-reveals-nothing');
+  check(p.filter((q) => q.kind === 'unreached-level').length === 2 && !p.some((q) => q.kind === 'dead-end' || q.kind === 'exit-nowhere') && events.length === 1 && events[0].text.startsWith('Level 112'),
     `the clean game: the two level tiles nothing leads to, the event of one of them, no dead end (${p.length} problems)`);
   // layer 1 at an event progress is the same whichever map is loaded (the search takes it from any)
   check([0, 0x20].every((n) => gameL1(loads.get(0, n)).every((t, i) => t === gameL1(loads.get(1, n))[i])), 'layer 1 the same with the main map or a submap loaded');

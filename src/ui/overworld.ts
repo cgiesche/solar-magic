@@ -56,6 +56,7 @@ import { musicPlayer, submapMusicLabel } from './musicplayer.ts';
 import type { Rom } from '../core/rom.ts';
 import { ReachLayer } from './owreachview.ts';
 import { ExitArrowLayer } from './owexitarrows.ts';
+import { WorldCheck } from './worldcheck.ts';
 import { layerStrengths, isLayerMode, type OwMode } from '../core/owlayers.ts';
 import { OW_OPTIONS, owOption, owOptionValue, setOwOption, revealSpeed, setRevealSpeed, revealStepFrames, MAX_REVEAL_SPEED, DEFAULT_REVEAL_SPEED, submapLightning, setSubmapLightning, LIGHTNING_TITLE, lightningEditLabel } from '../core/owoptions.ts';
 
@@ -141,7 +142,8 @@ export class OverworldView {
   levelTiles = new LevelTileLayer(this); // the level tiles as objects (the levels mode)
   nameEditor = new LevelNameEditor(this); // the selected level tile's name, edited in place (the levels mode)
   pathTool = new PathTool(this); // the layer 1 mode's Path tool: routes dragged, their tiles chosen
-  reach = new ReachLayer(this); // path validation: the tiles Mario doesn't reach dimmed, the problems of the paths
+  reach = new ReachLayer(this); // path validation: the tiles Mario doesn't reach dimmed
+  check = new WorldCheck(this); // the World check: the status bar button, the panel of problems
   exits = new ExitArrowLayer(this); // the Levels mode's arrows from each level tile to the levels its exits open
   cellHistory = new CellHistoryPopup(this); // a cell's history over the game, the mouse resting on it
   // the event the map is shown and painted as after (both layers; the playthrough strip under the map), -1: the map before events
@@ -220,8 +222,8 @@ export class OverworldView {
     this.canvas = h('canvas', { class: 'level-canvas' });
     this.sizer = h('div', { class: 'level-sizer' });
     this.scroller = h('div', { class: 'level-scroller', tabIndex: 0 }, this.canvas, this.sizer);
-    this.status = h('div', { class: 'statusbar' }, this.statusText, this.statusStats, this.reach.button);
-    this.side = h('div', { class: 'ow-side' }, this.palPanel, this.props);
+    this.status = h('div', { class: 'statusbar' }, this.statusText, this.statusStats, this.check.button);
+    this.side = h('div', { class: 'ow-side' }, this.check.root, this.palPanel, this.props);
     this.bar = h('div', { class: 'ctxbar' });
     this.left = h('div', { class: 'left' }, h('div', { class: 'panel levels' },
       h('div', { class: 'panel-title' }, 'Level tiles', this.tlCount), this.tlList));
@@ -262,8 +264,9 @@ export class OverworldView {
       if (this.brushDrag.painting) { this.brushDrag.drop(); this.stroke = null; }
       this.sync();
     });
-    // any ROM edit: the map's load asked for again if it no longer holds (drawn when it comes)
-    app.on('rom-change', () => { if (this.root.isConnected) this.render(); });
+    // any ROM edit: the map's load asked for again if it no longer holds (drawn when it comes); the World check checks
+    // again (also after an edit the view's watch doesn't follow)
+    app.on('rom-change', () => { if (this.root.isConnected) { this.render(); this.check.update(); } });
     // whether the game draws the editor's messages came (the level tile's message boxes)
     app.on('message-routine', () => { if (this.root.isConnected) this.sync(); });
   }
@@ -356,7 +359,7 @@ export class OverworldView {
     putLayers(this.l1Canvas, this.l2Canvas, this.app.rom, r, this.region, this.shown.l1, this.shown.l2);
     this.composeMap();
     this.paint();
-    this.reach.button.update();
+    this.check.update();
   }
 
   // the map image from its layers, each at the strength the mode, Q and the view switches give it (layerStrengths)
@@ -522,7 +525,7 @@ export class OverworldView {
   // the kinds of the layer 1 tiles, as the game sees them (null while they are learned)
   private kinds: { gen: number; kinds: PathKind[] } | null = null;
   // (the level tiles come with them: their labels, the list, the selected tile's settings)
-  private kindsLearned = () => { if (!this.root.isConnected) return; this.paint(); this.updateStatus(); this.buildSide(); this.buildLeft(); this.reach.button.update(); };
+  private kindsLearned = () => { if (!this.root.isConnected) return; this.paint(); this.updateStatus(); this.buildSide(); this.buildLeft(); this.check.update(); };
   pathKinds(): PathKind[] | null {
     const gen = this.app.rom.gen;
     if (this.kinds?.gen !== gen) {

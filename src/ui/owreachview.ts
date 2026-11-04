@@ -1,15 +1,14 @@
 // Path validation on the overworld's map (owreach.ts): the path and level tiles Mario doesn't reach at the event
-// progress dimmed (a view setting), and the problems – dead ends, level tiles nothing leads to, events revealing
-// nothing he reaches – in a list in the status bar. Searched again when the ROM, the event progress or what it is
-// searched over (path kinds and shapes, the maps at the progress and with every event passed, the saves there)
+// progress dimmed (a view setting); the search's problems – dead ends, level tiles nothing leads to, events revealing
+// nothing he reaches – are listed by the World check (worldcheck.ts). Searched again when the ROM, the event progress
+// or what it is searched over (path kinds and shapes, the maps at the progress and with every event passed, the saves there)
 // changes; nothing is shown while one of those is learned.
 
 import type { OverworldView } from './overworld.ts';
-import { problemListButton } from './problems.ts';
 import { gameL1, l1XY, OW_EVENTS, type OwRender } from '../core/overworld.ts';
-import { reach, reachInput, reachProblems, type Reached, type ReachProblem } from '../core/owreach.ts';
+import { reach, reachInput, type Reached } from '../core/owreach.ts';
 import { levelTeleports } from '../core/owlinks.ts';
-import { tileText, type OwTile } from '../core/owteleport.ts';
+import type { OwTile } from '../core/owteleport.ts';
 import { readStart } from '../core/owsprites.ts';
 import type { ProgressSave } from '../core/owprogress.ts';
 import { RAM } from '../core/ram.ts';
@@ -17,21 +16,16 @@ import { RAM } from '../core/ram.ts';
 export class ReachLayer {
   view: OverworldView;
   show = false; // the tiles Mario doesn't reach dimmed
-  button: ReturnType<typeof problemListButton<ReachProblem>>;
-  private found: { key: string; now: Reached; all: Reached; problems: ReachProblem[] } | null = null;
+  private found: { key: string; now: Reached; all: Reached } | null = null;
   // by ROM generation and progress: null while it is learned, undefined when it could not be (not asked again)
   private saves = new Map<string, ProgressSave | null | undefined>();
   constructor(view: OverworldView) {
     this.view = view;
-    this.button = problemListButton<ReachProblem>({
-      title: 'Problems of the overworld\'s paths', heading: 'Problems of the paths', collect: () => this.state()?.problems ?? [],
-      canOpen: () => true, open: (p) => this.view.showTile(p.tile),
-    });
   }
   // something the search needs came
   private learned = () => {
     if (!this.view.root.isConnected) return;
-    this.button.update();
+    this.view.check.update();
     if (this.show) this.view.paint();
   };
 
@@ -46,9 +40,9 @@ export class ReachLayer {
     return null;
   }
 
-  // the search at the event progress shown and with every event passed, with its problems; null while something it
-  // needs is learned
-  state(): { now: Reached; all: Reached; problems: ReachProblem[] } | null {
+  // the search at the event progress shown and with every event passed (the same object while nothing changed); null
+  // while something it needs is learned
+  state(): { now: Reached; all: Reached } | null {
     const v = this.view, app = v.app, rom = app.rom;
     const key = `${rom.gen}:${v.progress}`;
     if (this.found?.key === key) return this.found;
@@ -65,9 +59,7 @@ export class ReachLayer {
       const inp = reachInput(rom, gameL1(r), r.wram.subarray(RAM.owTranslevels, RAM.owTranslevelsEnd), s.levelFlags, kinds, shapes, start, levelWarps);
       return { inp, r: reach(inp) };
     };
-    const now = search(shown, saveNow), all = search(every, saveAll);
-    const place = (i: number) => tileText({ submap: v.submapAt(i), ...l1XY(i) });
-    this.found = { key, now, all, problems: reachProblems(rom, now, all, place) };
+    this.found = { key, now: search(shown, saveNow), all: search(every, saveAll) };
     return this.found;
   }
 
