@@ -8,8 +8,8 @@
 // node tools/testoweventtiles.ts
 import { Rom } from '../src/core/rom.ts';
 import { RomEditSession } from '../src/core/romedit.ts';
-import { readL1, writeL1, readTranslevels, l1Index, l1XY, revealAt, revealedTile, readDestroyList, destroyEvent, DESTROYS, NO_EVENT } from '../src/core/overworld.ts';
-import { eventReveal, eventDestroys, revealRefusal, destroyRefusal, addReveal, removeReveal, addDestroy, removeDestroy, revealSource } from '../src/core/oweventtiles.ts';
+import { readL1, writeL1, readTranslevels, l1Index, l1XY, revealAt, revealedTile, readDestroyList, destroyEvent, baseEvent, setBaseEvent, DESTROYS, NO_EVENT } from '../src/core/overworld.ts';
+import { eventReveal, eventDestroys, revealRefusal, destroyRefusal, addReveal, removeReveal, addDestroy, removeDestroy, revealSource, crumbles, crumbleRefusal, setCrumbles, destroyTarget } from '../src/core/oweventtiles.ts';
 import { moveLevelTile, placeLevelTile } from '../src/core/owleveltiles.ts';
 import { levelTileTest } from '../src/core/owpaths.ts';
 import { refusalOf } from '../src/core/owrefusal.ts';
@@ -138,6 +138,40 @@ const IGGY = 6, YI4 = 5, YI2 = 3, top = l1Index(1, 9, 1), castle = l1Index(1, 9,
   const plain = l1Index(1, 9, 6), r2 = new Rom(image.slice()), d0 = readDestroyList(r2);
   moveLevelTile(r2, plain, l1Index(1, 10, 6));
   check(JSON.stringify(readDestroyList(r2)) === JSON.stringify(d0), 'a level tile no event destroys moved: the destroys stay');
+}
+
+// ---- "Crumbles when beaten" (#368): Iggy's castle off and on again, each one ROM edit; refused where the game can't ----
+{
+  const { rom, s } = fresh();
+  const before = rom.data.slice(), tl = readTranslevels(rom)[castle];
+  check(baseEvent(rom, tl) === IGGY && crumbles(rom, castle, tl) && crumbleRefusal(rom, castle, tl) === null, 'Iggy\'s castle crumbles when beaten (its event destroys its top)');
+  const plain = readL1(rom).findIndex((t, i) => isLevel(t) && destroyTarget(rom, i) < 0);
+  check(destroyTarget(rom, castle) === top && plain >= 0, `the checkbox: on a castle's level tile (its top), not on a plain level tile (${plain.toString(16)})`);
+  s.edit('off', () => setCrumbles(rom, castle, tl, false), { key: null });
+  check(!crumbles(rom, castle, tl) && !eventDestroys(rom, IGGY).length && s.history.undoStack.length === 1, 'off: no destroy in its event, one ROM edit');
+  s.edit('on', () => setCrumbles(rom, castle, tl, true), { key: null });
+  check(crumbles(rom, castle, tl) && same(rom.data, before) && s.history.undoStack.length === 2, 'on again: one ROM edit, the ROM as before');
+  s.undo(); s.undo();
+  check(same(rom.data, before), 'undone: as before');
+  // refused: a plain level tile, a level without a base event, its event destroying another tile, the list full, past the events
+  const json = (r: unknown) => JSON.stringify(r);
+  check(crumbleRefusal(rom, plain, readTranslevels(rom)[plain])?.kind === 'destroyNothing', 'a plain level tile: the game destroys none');
+  const r1 = new Rom(image.slice());
+  setBaseEvent(r1, tl, NO_EVENT);
+  check(json(crumbleRefusal(r1, castle, tl)) === json({ kind: 'crumbleNoEvent', tl }) && !crumbles(r1, castle, tl), 'no base event: refused');
+  const r2 = new Rom(image.slice());
+  setCrumbles(r2, castle, tl, false);
+  // (a fortress tile 58 at 04,04 of the main map)
+  const m2 = readL1(r2); m2[l1Index(0, 4, 4)] = 0x58; writeL1(r2, m2);
+  addDestroy(r2, IGGY, l1Index(0, 4, 4));
+  check(json(crumbleRefusal(r2, castle, tl)) === json({ kind: 'destroyTaken', event: IGGY, cell: l1Index(0, 4, 4) }), 'its event destroying another tile: refused');
+  const r3 = new Rom(image.slice());
+  setCrumbles(r3, castle, tl, false);
+  for (let ev = 0x50; readDestroyList(r3).some((d) => d.event === NO_EVENT); ev++) addDestroy(r3, ev, castle);
+  check(crumbleRefusal(r3, castle, tl)?.kind === 'destroysFull' && refusalOf((() => { try { setCrumbles(r3, castle, tl, true); } catch (e) { return e; } })())?.kind === 'destroysFull', 'the destroy list full: refused');
+  const r4 = new Rom(image.slice());
+  setBaseEvent(r4, tl, 0x80);
+  check(crumbleRefusal(r4, castle, tl)?.kind === 'destroyPastEvents', 'a base event past the last event: refused');
 }
 
 if (bad) { console.log(`${bad} failed`); process.exit(1); }

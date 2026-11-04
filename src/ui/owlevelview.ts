@@ -7,8 +7,8 @@
 
 import type { OverworldView, PickCheck } from './overworld.ts';
 import type { Rom } from '../core/rom.ts';
-import { h, toast, modal } from './dom.ts';
-import { refusedToast } from './owrefusal.ts';
+import { h, toast, modal, checkbox } from './dom.ts';
+import { refusedToast, refusalText } from './owrefusal.ts';
 import { contextMenu } from './menu.ts';
 import { levelPicker } from './levelpicker.ts';
 import {
@@ -22,7 +22,7 @@ import { hasMessages } from '../core/messages.ts';
 import { levelName, hasLevelName } from '../core/levelnames.ts';
 import { mainTranslevel } from '../core/level.ts';
 import { l1Hex } from '../core/owl1sheet.ts';
-import { cellText } from '../core/oweventtiles.ts';
+import { cellText, crumbles, crumbleRefusal, setCrumbles, destroyTarget } from '../core/oweventtiles.ts';
 import { hex } from '../core/names.ts';
 
 // the level picker's note for a level no tile enters: what a tile choosing it gets (translevelUse)
@@ -224,6 +224,22 @@ export class LevelTileLayer {
   // the look of the level tile at i changed (its translevel kept)
   setLook(i: number, look: number): void {
     this.edit(`${this.label(i)}: look ${l1Hex(look)}`, () => placeLevelTile(this.rom, i, look, this.view.tls[i], this.event()), i);
+  }
+
+  // "Crumbles when beaten" for the level tile at i entering tl (#368): shown where the game destroys it (a castle by its
+  // top, a fortress, a switch palace); on: a destroy of it in the level's normal exit's event, off: none – one ROM edit
+  // each. Disabled with the reason where the game can't
+  crumbleRow(i: number, tl: number): HTMLElement[] {
+    const v = this.view, rom = this.rom, shown = v.shown.l1, at = destroyTarget(rom, i, shown);
+    if (at < 0) return [];
+    const on = crumbles(rom, i, tl, shown), why = on ? null : crumbleRefusal(rom, i, tl, shown);
+    const c = checkbox('Crumbles when beaten', `Passing the level's normal exit destroys this tile${at !== i ? ' (the castle collapses: its top is destroyed)' : ''} – a destroy in its event`, on, (to) => {
+      try { v.app.romEdit(`${this.label(i)}: ${to ? 'crumbles' : 'no longer crumbles'} when beaten`, () => setCrumbles(rom, i, tl, to, shown)); } catch (e) { refusedToast(rom, e); v.buildProps(); }
+    });
+    if (!why) return [c];
+    c.querySelector('input')!.disabled = true;
+    c.title = refusalText(rom, why);
+    return [c, h('div', { class: 'hint' }, refusalText(rom, why))];
   }
 
   // ---- drawing ----

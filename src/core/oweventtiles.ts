@@ -7,7 +7,7 @@
 import type { Rom } from './rom.ts';
 import {
   readL1, writeL1, l1XY, revealAt, setRevealAt, revealEventCount, revealedTile, readRevealList, readDestroyList, writeDestroyList,
-  destroySettingAt, destroySettings, DESTROYS, NO_EVENT, OW_EVENTS, OW_MAIN_TILES,
+  destroySettingAt, destroySettings, baseEvent, DESTROYS, NO_EVENT, OW_EVENTS, OW_MAIN_TILES,
 } from './overworld.ts';
 import { OwRefusal, type OwRefusalData } from './owrefusal.ts';
 import { hex } from './names.ts';
@@ -103,4 +103,31 @@ export function addDestroy(rom: Rom, e: number, i: number, shown?: ArrayLike<num
 // event e no longer destroys cell i
 export function removeDestroy(rom: Rom, e: number, i: number): void {
   writeDestroyList(rom, readDestroyList(rom).map((d) => (d.event === e && d.tile === i ? { event: NO_EVENT, tile: 0 } : d)));
+}
+
+// ---- "Crumbles when beaten" (the Levels mode, #368) ----
+// A level tile the game destroys – a castle by its top (the tile above, destroyTarget), a fortress or switch palace
+// itself – crumbles when its level's normal exit is passed: a destroy of that cell in the level's base event. tl: the
+// translevel the level tile at i enters; shown: the map as the game shows it (destroyTarget).
+// whether it does (false without a base event)
+export function crumbles(rom: Rom, i: number, tl: number, shown?: ArrayLike<number>): boolean {
+  const e = baseEvent(rom, tl), at = destroyTarget(rom, i, shown);
+  return e !== NO_EVENT && at >= 0 && eventDestroys(rom, e).includes(at);
+}
+// why it can't be made to crumble (null: it can, or it does): a tile the game doesn't destroy, a level whose normal
+// exit runs no event, the event past the last one, its destroy taken or the destroy list full (the destroy patch is
+// in every ROM the editor opens, ADR 0004)
+export function crumbleRefusal(rom: Rom, i: number, tl: number, shown?: ArrayLike<number>): OwRefusalData | null {
+  if (destroyTarget(rom, i, shown) < 0) return { kind: 'destroyNothing', tile: readL1(rom)[i] };
+  const e = baseEvent(rom, tl);
+  if (e === NO_EVENT) return { kind: 'crumbleNoEvent', tl };
+  return crumbles(rom, i, tl, shown) ? null : destroyRefusal(rom, e);
+}
+// on: the destroy added (throws the refusal); off: removed
+export function setCrumbles(rom: Rom, i: number, tl: number, on: boolean, shown?: ArrayLike<number>): void {
+  if (on === crumbles(rom, i, tl, shown)) return;
+  if (!on) { removeDestroy(rom, baseEvent(rom, tl), destroyTarget(rom, i, shown)); return; }
+  const why = crumbleRefusal(rom, i, tl, shown);
+  if (why) throw new OwRefusal(why);
+  addDestroy(rom, baseEvent(rom, tl), i, shown);
 }

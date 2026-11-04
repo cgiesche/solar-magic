@@ -235,7 +235,7 @@ A layer 1 tile that changes into another when an event passes over it (Lunar Mag
 What the overworld does when a level's exit is first passed, after the exit's event: it walks the path from the level tile in the direction the exit enables to the next level tile and enables there the direction leading back. The game skips it for some translevels (in the clean game Yoshi's House and the switch palaces): their exits still run their event and enable their direction, but the level tile the path leads to gets no way back. Which ones is learned by emulation, not from the game's list.
 
 **Destroyed level tile**:
-A layer 1 tile an event destroys when it passes (a castle, fortress or switch palace collapsing; a castle's top and the tile below it). One tile per event, 0x18 in all; set on the tile it destroys (a castle's: its top), edited with the event (its timeline), the tile's properties naming the events. Moves with its level tile (a castle moved moves whole). What destroying a tile does is the game's code's.
+A layer 1 tile an event destroys when it passes (a castle, fortress or switch palace collapsing; a castle's top and the tile below it). One tile per event, 0x18 in all; set on the tile it destroys (a castle's: its top), edited with the event (its timeline), the tile's properties naming the events; for a level tile also by "Crumbles when beaten" in its properties in the Levels mode (a destroy in its level's normal exit's event, refused with the reason where the game can't). Moves with its level tile (a castle moved moves whole). What destroying a tile does is the game's code's.
 _Avoid_: collapse (that is the animation), destruction event
 
 **Layer 1 change**:

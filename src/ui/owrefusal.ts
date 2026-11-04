@@ -63,6 +63,8 @@ export function refusalWords(rom: Rom, r: OwRefusalData): RefusalWords {
     case 'linkNoStart': return w('No link starts here', 'Mario doesn\'t stop on this tile: a star or pipe is a tile he stops on, a path to another submap an exit path tile',
       'Start the link on a star, pipe or exit path tile.');
     case 'l1TilePast': return w('This tile can\'t be edited', 'it is past the tiles the overworld has');
+    case 'crumbleNoEvent': return w('The level tile can\'t crumble when beaten', `the normal exit of ${levelTitle(rom, r.tl)} changes nothing on the map`,
+      'Give the level a base event first.');
     case 'linkToItself': return w('The link isn\'t made', 'it would lead to the tile it starts at', 'Drag to another tile.');
     case 'teleportsFull': return w('This star or pipe can\'t be linked',
       `the game has room for ${r.max} star and pipe links, and all are taken`, 'Remove a star or pipe link you don\'t need first.');

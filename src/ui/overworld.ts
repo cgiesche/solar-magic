@@ -1654,6 +1654,7 @@ export class OverworldView {
       this.levelTiles.lookPicker(this.levelL1()[i], (t) => this.levelTiles.setLook(i, t)),
     ];
     if (!tl) return h('div', { class: 'ow-info' }, ...head, h('div', { class: 'hint warn-text' }, '⚠ This level tile enters no level.'));
+    head.push(...this.levelTiles.crumbleRow(i, tl));
     const lvl = translevelToLevel(tl);
     const ev = baseEvent(rom, tl), msgs = [1, 2].filter((n) => !isBlank(readMessage(rom, tl, n)));
     // (a package drawing the message boxes: the editor's messages are not what players see; checked meanwhile)
