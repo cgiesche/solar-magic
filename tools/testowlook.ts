@@ -102,7 +102,7 @@ if (found) {
   const { e, route } = found, cells = route.slice(1, -1), want = cells.slice().sort((a, b) => a - b).join();
   const solved = routeTiles(route, { l1: clean.maps[e + 1].l1, kinds, shapes, prefer: routeKind(route, clean.maps[e + 1].l1, kinds) });
   check(!solved.refusal && cells.every((_, k) => lookless(solved.tiles[k + 1]!)), `its tiles walk tiles without a look of their own: ${solved.tiles.map((t) => (t === null ? '–' : hx(t))).join(' ')}`);
-  s.edit('Path', () => writeRoute(rom, route, solved.tiles, { event: e, after: clean.maps[e + 1].l1.slice(), without: layer1Without(rom, e), isLevelTile: isLevel }), { key: null });
+  s.edit('Path', () => writeRoute(rom, route, solved, { event: e, after: clean.maps[e + 1].l1.slice(), without: layer1Without(rom, e), isLevelTile: isLevel }), { key: null });
   const drawn = checkLooks('the route drawn');
   const b = drawn.problems.filter((p) => p.key.startsWith('path-no-look:'));
   check(keys(drawn.problems, 'path-no-look') === want && b.length === drawn.problems.length,

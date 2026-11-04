@@ -13,19 +13,29 @@
 // takes him to another submap). A stop tile goes where the route ends on no stop or level tile, and where it runs
 // into a path already there (the cell's tile leads on to a cell off the route Mario walks onto): the junction, as in
 // the game. A path tile the route runs along is replaced, kept where it fits.
+//
+// A stop tile put gets a translevel no tile holds: standing on a stop, Mario walks off only in
+// the directions its translevel's flags ($1EA2) open, and coming onto it opens only the way back – a stop with
+// translevel 0 shares the flags of every such tile, so at a junction he could not walk on. Its initial flags (Lunar
+// Magic's table, every new game) open the ways the stop has: the route's and those of the path it runs into.
 
 import { DX, DY, PATH_TILES_END, reverse, shapeVector, type PathKind, type PathShapes } from './owpaths.ts';
 import { neighbor } from './owreach.ts';
 import { tileWays, SHAPED_KINDS, type PathWay } from './owpathshape.ts';
-import { stopTile, type LevelTileEvent } from './owleveltiles.ts';
+import { stopTile, levelsWithoutTile, type LevelTileEvent } from './owleveltiles.ts';
 import type { Rom } from './rom.ts';
-import type { OwRefusalData } from './owrefusal.ts';
-import { readL1, writeL1, readTranslevels, setExitDirection } from './overworld.ts';
+import { OwRefusal, type OwRefusalData } from './owrefusal.ts';
+import {
+  readL1, writeL1, readTranslevels, writeTranslevels, setExitDirection, setInitialFlags, translevelUse, freeTranslevel, resetTranslevel,
+  DIR_FLAGS, MAX_TRANSLEVEL,
+} from './overworld.ts';
 import { readEvents, writeEvents, paintEventL1, eventRunners } from './owevents.ts';
 
 // What the solver needs: layer 1 as it is (l1Index order: the route's cells, the paths it may run into), the path
 // kinds and shapes, the kind of path to use where a tile of it fits (the kind at the route's start), the stop tile to
-// put (default: owleveltiles.ts stopTile) and route cells (indices into the route) to make stop tiles anyway.
+// put (default: owleveltiles.ts stopTile), route cells (indices into the route) to make stop tiles anyway, and the
+// translevels as in the ROM (tls: a stop tile put on a cell without one takes a free one – refused where none is
+// left; without them not checked).
 export interface RouteInput {
   l1: ArrayLike<number>;
   kinds: readonly PathKind[];
@@ -33,6 +43,7 @@ export interface RouteInput {
   prefer: PathKind;
   stop?: number;
   stops?: ReadonlySet<number>;
+  tls?: ArrayLike<number>;
 }
 
 // The first cell no tile fits: its index in the route and its layer 1 cell, why (as data, worded by ui/owrefusal.ts),
@@ -40,9 +51,13 @@ export interface RouteInput {
 // tile there (stop), or the route turning another way there (turns: the directions some tile leads him on in).
 export interface RouteRefusal { at: number; cell: number; why: OwRefusalData; stop: boolean; turns: number[] }
 
+// A stop tile the route puts: its first index in the route, its cell, the directions Mario walks off it in (the
+// route's, the ways of the path tile there before – the path the route runs into).
+export interface RouteStop { at: number; cell: number; dirs: number[] }
+
 // Per route cell the tile to write (null: left alone – a level, stop or exit tile, or a cell of the route after a
-// refusal), and the refusal (null: every cell fits).
-export interface RouteTiles { tiles: (number | null)[]; refusal: RouteRefusal | null }
+// refusal), the stop tiles put (none on a refusal), and the refusal (null: every cell fits).
+export interface RouteTiles { tiles: (number | null)[]; stops: RouteStop[]; refusal: RouteRefusal | null }
 
 // what a cell of the route is: left alone (Mario stops or exits there), a stop tile to put, a path tile to find
 type Role = 'keep' | 'stop' | 'path';
@@ -68,8 +83,8 @@ function solve(route: readonly number[], inp: RouteInput, askAlternatives: boole
   const { l1, kinds } = inp;
   const tiles: (number | null)[] = route.map(() => null);
   const refuse = (at: number, why: OwRefusalData, alt: { stop?: boolean; turns?: number[] } = {}): RouteTiles =>
-    ({ tiles, refusal: { at, cell: route[at], why, stop: alt.stop ?? false, turns: alt.turns ?? [] } });
-  if (!route.length) return { tiles, refusal: null };
+    ({ tiles, stops: [], refusal: { at, cell: route[at], why, stop: alt.stop ?? false, turns: alt.turns ?? [] } });
+  if (!route.length) return { tiles, stops: [], refusal: null };
 
   // the route: each cell next to the one before on the same map
   const dirs: number[] = [];
@@ -112,7 +127,33 @@ function solve(route: readonly number[], inp: RouteInput, askAlternatives: boole
     }
     from = k;
   }
-  return { tiles, refusal: null };
+  const stops = routeStops(sv);
+  // (a translevel for each stop tile on a cell without one)
+  if (inp.tls) {
+    const need = stops.filter((s) => !inp.tls![s.cell]), free = levelsWithoutTile(inp.tls).length;
+    if (need.length > free) {
+      tiles.fill(null, need[free].at);
+      return refuse(need[free].at, { kind: 'routeNoTranslevel', max: MAX_TRANSLEVEL });
+    }
+  }
+  return { tiles, stops, refusal: null };
+}
+
+// the stop tiles the route puts, each cell once: the directions to the cells before and after it on the route, and
+// those the path tile there leads in (to a cell on the map)
+function routeStops(sv: Solving): RouteStop[] {
+  const { route, roles, dirs, inp } = sv, out: RouteStop[] = [];
+  route.forEach((c, k) => {
+    if (roles[k] !== 'stop') return;
+    const t = inp.l1[c], ds = new Set<number>();
+    if (k > 0) ds.add(reverse(dirs[k - 1]));
+    if (k < route.length - 1) ds.add(dirs[k]);
+    for (const w of tileWays(t, inp.kinds[t], inp.shapes)) for (const d of [reverse(w.dir), w.out]) if (neighbor(c, d) >= 0) ds.add(d);
+    const had = out.find((s) => s.cell === c);
+    if (had) had.dirs = [...new Set([...had.dirs, ...ds])].sort();
+    else out.push({ at: k, cell: c, dirs: [...ds].sort() });
+  });
+  return out;
 }
 
 // whether the route running through cell c (from cell `prev` to cell `next`) runs into a path there: the tile on it
@@ -223,8 +264,13 @@ export function routeExits(rom: Rom, route: readonly number[], ev: LevelTileEven
 
 // The route's tiles (routeTiles' tiles: null left alone) written: into the map before events, or with an event (ev) as
 // layer 1 changes of it (owevents.ts paintEventL1, as layer 1 painted into the event), and the exits routeExits gives
-// set. Layer 2 is not touched. What it set.
-export function writeRoute(rom: Rom, route: readonly number[], tiles: readonly (number | null)[], ev: LevelTileEvent | null): RouteExit[] {
+// set. Each stop tile put on a cell without a translevel gets a free one (the one bringing least along, freeTranslevel
+// by translevelUse; one for every event progress, the table being per cell): its settings reset (no name shown on the
+// stop, no event – resetTranslevel), its initial flags the stop's directions (stopFlags). Throws (nothing written)
+// where no translevel is left for one. Layer 2 is not touched. The exits it set, the translevels the stops took.
+export function writeRoute(rom: Rom, route: readonly number[], solved: Pick<RouteTiles, 'tiles' | 'stops'>, ev: LevelTileEvent | null): { exits: RouteExit[]; taken: number[] } {
+  const { tiles } = solved, tls = readTranslevels(rom), need = solved.stops.filter((s) => !tls[s.cell]);
+  if (need.length > levelsWithoutTile(tls).length) throw new OwRefusal({ kind: 'routeNoTranslevel', max: MAX_TRANSLEVEL });
   const cells = route.flatMap((c, k) => (tiles[k] === null ? [] : [[c, tiles[k]!] as const]));
   if (ev) {
     const after = Uint16Array.from(ev.after);
@@ -235,7 +281,17 @@ export function writeRoute(rom: Rom, route: readonly number[], tiles: readonly (
     for (const [c, t] of cells) l1[c] = t;
     writeL1(rom, l1);
   }
+  const taken = need.map((s) => {
+    const tl = freeTranslevel(tls, (n) => translevelUse(rom, n));
+    tls[s.cell] = tl;
+    resetTranslevel(rom, tl);
+    setInitialFlags(rom, tl, stopFlags(s));
+    return tl;
+  });
+  if (taken.length) writeTranslevels(rom, tls);
   const exits = routeExits(rom, route, ev);
   for (const x of exits) setExitDirection(rom, x.tl, x.exit, x.dir);
-  return exits;
+  return { exits, taken };
 }
+// the level flags ($1EA2) opening a stop's directions
+export const stopFlags = (s: RouteStop): number => s.dirs.reduce((f, d) => f | DIR_FLAGS[d], 0);

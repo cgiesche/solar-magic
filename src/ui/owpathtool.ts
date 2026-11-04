@@ -2,7 +2,9 @@
 // before; dragged back over the route it shortens), the route shows the tiles the editor chooses for it
 // (owroute.ts routeTiles) – a cell no tile fits in red, why in the status bar. Released, the tiles are written as one
 // ROM edit into the progress chosen ("Map after": the event's layer 1 changes, else the map before events), as a
-// stroke, and a level tile at an end whose exit runs the event gets that exit's direction (owroute.ts writeRoute).
+// stroke, and a level tile at an end whose exit runs the event gets that exit's direction (owroute.ts writeRoute). A
+// stop tile it puts takes a level without level tile (its translevel: the ways Mario walks off it), refused where none
+// is left.
 // Layer 2 is not touched.
 
 import type { OverworldView } from './overworld.ts';
@@ -78,13 +80,15 @@ export class PathTool {
     // (nothing to write: the tiles there already, the exits' directions set)
     const turned = routeExits(rom, r, ev).filter((x) => exitDirections(rom, x.tl)[x.exit] !== x.dir);
     if (!turned.length && solved.tiles.every((t, k) => t === null || t === this.view.levelL1()[r[k]])) return;
+    let taken: number[] = [];
     try {
-      this.view.app.romEdit(e >= 0 ? `Path (after event ${hex(e, 2)})` : 'Path', () => writeRoute(rom, r, solved.tiles, ev));
+      this.view.app.romEdit(e >= 0 ? `Path (after event ${hex(e, 2)})` : 'Path', () => { taken = writeRoute(rom, r, solved, ev).taken; });
     } catch (err) {
       refusedToast(this.view.app.rom, err, 'Route not drawn: ');
       this.view.sync();
       return;
     }
+    if (taken.length) toast(`The route's ${taken.length > 1 ? `${taken.length} stop tiles take levels` : 'stop tile takes level'} ${taken.map((tl) => hex(translevelToLevel(tl), 3)).join(', ')} (without level tile before): Mario walks off a stop in the ways its level opens.`);
     for (const exit of turned) toast(`Level ${hex(translevelToLevel(exit.tl), 3)}: ${EXIT_NAMES[exit.exit].toLowerCase()} now opens ${DIR_NAMES[exit.dir]} (the route)`);
   }
   // Esc: the route dropped; false: none
@@ -98,7 +102,7 @@ export class PathTool {
   // the route's tiles as the editor chooses them, on layer 1 as shown (after the event chosen)
   private solve(r: readonly number[]): RouteTiles {
     const v = this.view, kinds = v.pathKinds()!, l1 = v.levelL1();
-    return routeTiles(r, { l1, kinds, shapes: v.pathShapes()!, prefer: routeKind(r, l1, kinds) });
+    return routeTiles(r, { l1, kinds, shapes: v.pathShapes()!, prefer: routeKind(r, l1, kinds), tls: v.tls });
   }
   private shown(): void {
     this.view.paint();
@@ -109,8 +113,8 @@ export class PathTool {
   private refusalText(s: RouteTiles): string {
     const f = s.refusal!, { x, y } = l1XY(f.cell);
     const alt = [f.stop && 'a stop tile there would work', f.turns.length && `a turn ${f.turns.map((d) => DIR_NAMES[d]).join(' or ')} would`].filter(Boolean);
-    const why = refusalWords(this.view.app.rom, f.why).reason;
-    return `${hex(x, 2)},${hex(y, 2)}: ${why.charAt(0).toUpperCase() + why.slice(1)}${alt.length ? ` (${alt.join(', ')})` : ''}`;
+    const { reason: why, instead } = refusalWords(this.view.app.rom, f.why);
+    return `${hex(x, 2)},${hex(y, 2)}: ${why.charAt(0).toUpperCase() + why.slice(1)}${alt.length ? ` (${alt.join(', ')})` : ''}${instead ? ` – ${instead}` : ''}`;
   }
 
   // the status bar while a route is drawn (null: none)

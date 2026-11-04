@@ -45,6 +45,7 @@ const samples: { [K in OwRefusalKind]: Extract<OwRefusalData, { kind: K }> } = {
   routeExitInside: { kind: 'routeExitInside' },
   routeCrosses: { kind: 'routeCrosses' },
   routeNoTile: { kind: 'routeNoTile', dir: 0, out: 2, where: 'pathBefore' },
+  routeNoTranslevel: { kind: 'routeNoTranslevel', max: 0x5f },
   pieceSame: { kind: 'pieceSame' },
   pieceNoneInside: { kind: 'pieceNoneInside' },
   pieceNotFound: { kind: 'pieceNotFound', selection: true },

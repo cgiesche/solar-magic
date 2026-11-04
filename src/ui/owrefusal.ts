@@ -91,6 +91,9 @@ export function refusalWords(rom: Rom, r: OwRefusalData): RefusalWords {
     case 'routeGap': return w('The route breaks here', 'this cell is not next to the one before', 'Drag from cell to cell.');
     case 'routeExitInside': return w('The route can\'t go on here', 'an exit tile takes Mario to another submap, so the route can only end there');
     case 'routeCrosses': return w('The route can\'t go on here', 'it crosses itself');
+    case 'routeNoTranslevel': return w('No stop tile can go here',
+      `the game lets Mario walk off a stop by the ways a level of its own opens, and all ${r.max} levels already have a tile on the overworld`,
+      'Remove a level tile you don\'t need, or let the route end on a level or stop tile already there.');
     case 'routeNoTile': { const t = routeNoTileText(r); return w('No path tile fits here', t.charAt(0).toLowerCase() + t.slice(1)); }
     case 'pieceSame': return w('Not replaced', 'the new piece is the one to replace', 'Pick another piece to put in its place.');
     case 'pieceNoneInside': return w('Not replaced', 'no piece lies wholly inside the selection', 'Select a larger area.');
