@@ -746,11 +746,18 @@ export function destroyedAt(effects: DestroyChange[][], l1: ArrayLike<number>, i
 // may see it when an event runs – on the map before events (l1), revealed, as shown (at the event progress) – and
 // that tile's value
 export function destroySettingAt(rom: Rom, l1: ArrayLike<number>, shown: ArrayLike<number>, i: number): { at: number; tile: number | undefined } {
+  return destroySettings(rom, l1, shown)(i);
+}
+// destroySettingAt for many cells: the ROM read once
+export function destroySettings(rom: Rom, l1: ArrayLike<number>, shown: ArrayLike<number>): (i: number) => { at: number; tile: number | undefined } {
   const effects = destroyEffects(rom), revealed = Array.from(l1, (t) => { const r = revealedTile(rom, t); return r >= 0 ? r : t; });
   const maps = [l1, revealed, shown];
-  let at = destroyEvent(rom, i) !== NO_EVENT ? i : -1;
-  for (const m of maps) if (at < 0) at = destroyedAt(effects, m, i);
-  return { at, tile: at < 0 ? undefined : maps.map((m) => m[at]).find((v) => effects[v].length) };
+  const set = new Set(readDestroyList(rom).filter((d) => d.event !== NO_EVENT).map((d) => d.tile));
+  return (i) => {
+    let at = set.has(i) ? i : -1;
+    for (const m of maps) if (at < 0) at = destroyedAt(effects, m, i);
+    return { at, tile: at < 0 ? undefined : maps.map((m) => m[at]).find((v) => effects[v].length) };
+  };
 }
 
 // the overworld's events by the level exits that run them ("105 YOSHI'S ISLAND 1 – normal exit"), of the levels on

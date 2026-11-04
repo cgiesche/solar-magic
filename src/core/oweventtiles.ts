@@ -7,7 +7,7 @@
 import type { Rom } from './rom.ts';
 import {
   readL1, writeL1, l1XY, revealAt, setRevealAt, revealEventCount, revealedTile, readRevealList, readDestroyList, writeDestroyList,
-  destroySettingAt, DESTROYS, NO_EVENT, OW_EVENTS, OW_MAIN_TILES,
+  destroySettingAt, destroySettings, DESTROYS, NO_EVENT, OW_EVENTS, OW_MAIN_TILES,
 } from './overworld.ts';
 import { l1Hex } from './owl1sheet.ts';
 import { hex } from './names.ts';
@@ -41,12 +41,17 @@ export function revealSource(rom: Rom, t: number, into: number): number {
   }
   return -1;
 }
+// "+ Reveal"'s pick (#348): why event e can't reveal each cell clicked (null: it can – a cell whose tile the reveal list
+// doesn't turn into the tile picked gets one that it does, addReveal)
+export function revealPickCheck(rom: Rom, e: number): (i: number) => string | null {
+  const why = revealRefusal(rom, e);
+  return (i) => why ?? (i ? null : NO_REVEAL_AT_0);
+}
 // event e reveals cell i (l1Index), which becomes tile `into` (by default what its tile becomes): a cell whose tile
 // doesn't become it gets the tile that does (revealSource) on the map before events. Throws the reason when refused.
 export function addReveal(rom: Rom, e: number, i: number, into?: number): void {
-  const why = revealRefusal(rom, e);
+  const why = revealPickCheck(rom, e)(i);
   if (why) throw new Error(why);
-  if (!i) throw new Error(NO_REVEAL_AT_0);
   const l1 = readL1(rom), t = l1[i], to = into ?? revealedTile(rom, t);
   if (to < 0) throw new Error(`Tile ${l1Hex(t)} is not in the reveal list: revealing it changes nothing – pick the tile it becomes.`);
   const from = revealSource(rom, t, to);
@@ -79,12 +84,20 @@ export function destroyTarget(rom: Rom, i: number, shown?: ArrayLike<number>): n
   const l1 = readL1(rom);
   return destroySettingAt(rom, l1, shown ?? l1, i).at;
 }
+const notDestroyed = (t: number) => `The game destroys no tile ${l1Hex(t)}: destroying it would change nothing (castles, fortresses and switch palaces collapse).`;
+// "+ Destroy"'s pick (#348): why event e can't destroy each cell clicked (null: it can) – a cell destroyTarget
+// resolves; the ROM read once
+export function destroyPickCheck(rom: Rom, e: number, shown?: ArrayLike<number>): (i: number) => string | null {
+  const why = destroyRefusal(rom, e);
+  if (why) return () => why;
+  const l1 = readL1(rom), target = destroySettings(rom, l1, shown ?? l1);
+  return (i) => (target(i).at < 0 ? notDestroyed(l1[i]) : null);
+}
 // event e destroys the tile clicked at cell i (set where destroyTarget says). Throws the reason when refused.
 export function addDestroy(rom: Rom, e: number, i: number, shown?: ArrayLike<number>): void {
-  const why = destroyRefusal(rom, e);
+  const why = destroyPickCheck(rom, e, shown)(i);
   if (why) throw new Error(why);
   const at = destroyTarget(rom, i, shown);
-  if (at < 0) throw new Error(`The game destroys no tile ${l1Hex(readL1(rom)[i])}: destroying it would change nothing (castles, fortresses and switch palaces collapse).`);
   const l = readDestroyList(rom);
   l[l.findIndex((d) => d.event === NO_EVENT)] = { event: e, tile: at };
   writeDestroyList(rom, l);

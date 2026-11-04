@@ -6,12 +6,12 @@
 // Koopa Kid's place moves it; a tile on the other map region is linked by choosing it after the source ("…to a tile
 // on another map"); Delete removes the selected link. Each change is one ROM edit (owlinks.ts).
 
-import type { OverworldView } from './overworld.ts';
+import type { OverworldView, PickCheck } from './overworld.ts';
 import { l1Hex } from '../core/owl1sheet.ts';
 import { h, toast, checkbox, select, emptyState } from './dom.ts';
 import {
   readLinks, makeLink, removeLink, setBothWays, moveLocation, locationUses, pathSide, koopaTeleport, setKoopaTeleport, opposite,
-  KOOPAS, KOOPA_TILE, koopaOfTile, type OwLink, type LinkEnd, type LinkKind,
+  KOOPAS, KOOPA_TILE, koopaOfTile, koopaPlaceRefusal, linkCheck, locationMoveRefusal, type OwLink, type LinkEnd, type LinkKind,
 } from '../core/owlinks.ts';
 import { readTeleports, tileText, sameTile, type OwTile } from '../core/owteleport.ts';
 import { l1Index, l1XY, DIR_NAMES, DIR_ARROWS } from '../core/overworld.ts';
@@ -156,6 +156,42 @@ export class LinkLayer {
     label(ctx, `${both ? '↔' : out ? '→' : '←'} ${tileText(there)}`, q.x + 2, q.y - 2, color);
   }
 
+  // the pick pending (#348): the tiles the link dragged (or chosen to lead to a tile on another map) can lead to, where
+  // its moved end or a Koopa Kid's place can go (null: none, or a drag from a tile that links nothing)
+  pickCheck(): PickCheck | null {
+    const d = this.drag, p = this.pending, rom = this.rom, dep = this.view.shown.l1;
+    if (d && d.to === d.from) return null;
+    const move = d ? d.move : p && 'move' in p ? p.move : null;
+    const key = (what: object) => JSON.stringify({ ...what, both: this.both });
+    if (move) {
+      const s = move.sel;
+      if (s.kind === 'link') {
+        const l = s.link, end = this.endOf(l.kind);
+        return { key: key({ move: l.entries, target: move.target }), dep, make: () => {
+          const c = linkCheck(rom, l.kind, l.both, l);
+          return (i) => (move.target ? c(l.a, end(this.tile(i))) : c(end(this.tile(i)), l.b));
+        } };
+      }
+      if (s.kind === 'location') return { key: key({ location: s.i }), dep, make: () => { const why = locationMoveRefusal(rom, s.i); return () => why; } };
+      if (s.kind !== 'koopa') return null;
+      const from = this.koopaTiles(s.k)[0];
+      if (from === undefined) return null;
+      return { key: key({ koopa: s.k, from }), dep, make: () => (i) => koopaPlaceRefusal(this.tile(from), this.tile(i)) };
+    }
+    const from = d ? d.from : p && 'from' in p ? this.index(p.from) : -1;
+    if (from < 0) return null;
+    const src = this.source(from), a = this.tile(from);
+    if (src.kind === 'koopa') return { key: key({ koopaFrom: from }), dep, make: () => (i) => koopaPlaceRefusal(a, this.tile(i)) };
+    const kind = src.kind;
+    if (!kind) return null;
+    const end = this.endOf(kind);
+    return { key: key({ from, kind }), dep, make: () => { const c = linkCheck(rom, kind, this.both); return (i) => c(end(a), end(this.tile(i))); } };
+  }
+  // a tile's end of a link of `kind` (an exit path tile's: with the side its path goes on)
+  private endOf(kind: LinkKind): (t: OwTile) => LinkEnd {
+    return (t) => (kind === 'exit' ? this.exitEnd(t) : t);
+  }
+
   // ---- interaction (cells of layer 1) ----
   down(x: number, y: number): void {
     if (x < 0 || y < 0 || x >= 32 || y >= 32) return;
@@ -238,14 +274,15 @@ export class LinkLayer {
     const src = this.source(this.index(a));
     if (!src.kind) throw new Error(src.why);
     if (src.kind === 'koopa') { this.setKoopa(this.koopaAt(this.index(a)), a, b); return; }
-    const kind = src.kind, ea: LinkEnd = kind === 'exit' ? this.exitEnd(a) : a, eb: LinkEnd = kind === 'exit' ? this.exitEnd(b) : b;
+    const kind = src.kind, end = this.endOf(kind), ea = end(a), eb = end(b);
     let made: OwLink | null = null;
     this.edit(`Overworld link ${tileText(a)} ${this.both ? '↔' : '→'} ${tileText(b)}`, () => { made = makeLink(this.rom, kind, ea, eb, this.both); });
     if (made) this.sel = { kind: 'link', link: made };
   }
   // Koopa Kid k (of tile `from`) puts Mario at `to`: a place of the submap of its tile
   private setKoopa(k: number, from: OwTile, to: OwTile): void {
-    if (to.submap !== from.submap) throw new Error(`a Koopa Kid's place is on the submap of its tile (${tileText(from)})`);
+    const why = koopaPlaceRefusal(from, to);
+    if (why) throw new Error(why);
     this.edit(`Koopa Kid ${k + 1}: place`, () => setKoopaTeleport(this.rom, k, to));
     this.sel = { kind: 'koopa', k };
   }
@@ -260,7 +297,7 @@ export class LinkLayer {
       return;
     }
     if (s.kind !== 'link') return;
-    const l = s.link, end: LinkEnd = l.kind === 'exit' ? this.exitEnd(to) : to;
+    const l = s.link, end = this.endOf(l.kind)(to);
     const a = m.target ? l.a : end, b = m.target ? end : l.b;
     let made: OwLink | null = null;
     this.edit(`Overworld link ${tileText(a)} ${l.both ? '↔' : '→'} ${tileText(b)}`, () => {

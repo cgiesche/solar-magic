@@ -83,8 +83,7 @@ function editMaps(rom: Rom, f: (l1: Uint16Array, tls: Uint8Array) => void): void
 // is its level). Reveals stay with the cells (they belong to the path).
 export function moveLevelTile(rom: Rom, from: number, to: number, ev: LevelTileEvent | null = null): void {
   if (ev) {
-    const tls = readTranslevels(rom), a = ev.after[from], b = ev.after[to];
-    editInEvent(rom, ev, [[to, a, tls[from]], [from, b, ev.isLevelTile(b) ? tls[to] : 0]]);
+    editInEvent(rom, ev, moveCells(readTranslevels(rom), ev, from, to));
     return;
   }
   const l1 = readL1(rom), tls = readTranslevels(rom), list = hasDestroyPatch(rom) ? readDestroyList(rom) : [];
@@ -134,7 +133,39 @@ export function placeLevelTile(rom: Rom, i: number, look: number, tl: number, ev
   else editMaps(rom, (l1, tls) => { l1[i] = look; tls[i] = tl; });
 }
 
+// ---- where a level tile can go (#348: the cells hatched while one is dragged or placed) ----
+// why the level tile at `from` can't be moved to each cell (null: it can) – in an event a cell entering another level
+// on another map; the ROM read once
+export function moveLevelTileCheck(rom: Rom, from: number, ev: LevelTileEvent | null): (to: number) => string | null {
+  return cellsCheck(rom, ev, (tls, ev, to) => (to === from ? [] : moveCells(tls, ev, from, to)));
+}
+// why a level tile of look `look` entering translevel tl can't be placed at each cell (null: it can), as moveLevelTileCheck
+export function placeLevelTileCheck(rom: Rom, look: number, tl: number, ev: LevelTileEvent | null): (i: number) => string | null {
+  return cellsCheck(rom, ev, (_, __, i) => [[i, look, tl]]);
+}
+// why the cells an edit at cell i sets as after the event can't be (eventCellsRefusal); before events nothing is refused
+function cellsCheck(rom: Rom, ev: LevelTileEvent | null, cells: (tls: Uint8Array, ev: LevelTileEvent, i: number) => [number, number, number][]): (i: number) => string | null {
+  if (!ev) return () => null;
+  const tls = readTranslevels(rom), held = heldElsewhere(rom, ev);
+  return (i) => eventCellsRefusal(ev, held, tls, cells(tls, ev, i));
+}
+
 // ---- in an event ----
+// the cells a level tile moved from `from` to `to` sets as after the event ([cell, tile, translevel])
+function moveCells(tls: ArrayLike<number>, ev: LevelTileEvent, from: number, to: number): [number, number, number][] {
+  const a = ev.after[from], b = ev.after[to];
+  return [[to, a, tls[from]], [from, b, ev.isLevelTile(b) ? tls[to] : 0]];
+}
+// why cells set as after the event can't be (null: they can): a level tile on a cell entering another level on
+// another map (held: heldElsewhere; tls: the translevels as in the ROM)
+function eventCellsRefusal(ev: LevelTileEvent, held: (i: number) => boolean, tls: ArrayLike<number>, cells: [number, number, number][]): string | null {
+  for (const [i, tile, tl] of cells) {
+    if (!ev.isLevelTile(tile) || !held(i) || !tls[i] || tls[i] === tl) continue;
+    const { x, y } = l1XY(i);
+    return `tile ${hex(x, 2)},${hex(y, 2)} enters level ${hex(translevelToLevel(tls[i]), 3)} before the event or by another one – a tile enters one level at every event progress`;
+  }
+  return null;
+}
 // the event the edits go into: layer 1 as after it (`after`, as the game shows it) and as after it without its layer 1
 // changes (`without`, owevents.ts layer1Without), which tiles are level tiles
 export interface LevelTileEvent { event: number; after: ArrayLike<number>; without: ArrayLike<number>; isLevelTile: LevelTileTest }
@@ -143,14 +174,12 @@ export interface LevelTileEvent { event: number; after: ArrayLike<number>; witho
 // layer 1 changes of the event, the translevel table with them. Throws (nothing written) where a cell would enter
 // another level than it does on another map (heldElsewhere)
 function editInEvent(rom: Rom, ev: LevelTileEvent, cells: [number, number, number][]): void {
-  const after = Uint16Array.from(ev.after), tls = readTranslevels(rom), was = tls.slice(), held = heldElsewhere(rom, ev);
+  const after = Uint16Array.from(ev.after), tls = readTranslevels(rom), held = heldElsewhere(rom, ev);
+  const why = eventCellsRefusal(ev, held, tls, cells);
+  if (why) throw new Error(why);
   for (const [i, tile, tl] of cells) {
     after[i] = tile;
     if (!ev.isLevelTile(tile)) { if (!held(i)) tls[i] = 0; continue; }
-    if (held(i) && was[i] && was[i] !== tl) {
-      const { x, y } = l1XY(i);
-      throw new Error(`tile ${hex(x, 2)},${hex(y, 2)} enters level ${hex(translevelToLevel(was[i]), 3)} before the event or by another one – a tile enters one level at every event progress`);
-    }
     tls[i] = tl;
   }
   writeEvents(rom, paintEventL1(readEvents(rom), ev.event, after, ev.without, new Set(cells.map(([i]) => i))));

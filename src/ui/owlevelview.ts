@@ -5,7 +5,7 @@
 // the map before events – with event X chosen in the strip a layer 1 change of that event (the level tiles as after it) –
 // (owleveltiles.ts), made once the path kinds, the submaps' views and an event's maps are known.
 
-import type { OverworldView } from './overworld.ts';
+import type { OverworldView, PickCheck } from './overworld.ts';
 import type { Rom } from '../core/rom.ts';
 import { h, toast, modal } from './dom.ts';
 import { contextMenu } from './menu.ts';
@@ -14,7 +14,8 @@ import {
   l1Index, l1XY, translevelToLevel, freeTranslevel, translevelUse, enterableLevels, levelTilesOf, baseEvent, readTranslevels, NO_EVENT,
 } from '../core/overworld.ts';
 import {
-  levelTileLooks, invisibleLevelTile, defaultLook, stopTile, moveLevelTile, removeLevelTile, placeLevelTile, levelsWithoutTile, type LevelTileEvent,
+  levelTileLooks, invisibleLevelTile, defaultLook, stopTile, moveLevelTile, removeLevelTile, placeLevelTile, levelsWithoutTile, moveLevelTileCheck, placeLevelTileCheck,
+  type LevelTileEvent,
 } from '../core/owleveltiles.ts';
 import { hasMessages } from '../core/messages.ts';
 import { levelName, hasLevelName } from '../core/levelnames.ts';
@@ -92,6 +93,16 @@ export class LevelTileLayer {
   // (the level tiles as after the event chosen)
   private isLevelAt(i: number): boolean { return this.view.isLevelTile(this.view.levelL1()[i]); }
   private inside(x: number, y: number): boolean { return x >= 0 && y >= 0 && x < 32 && y < 32; }
+
+  // the pick pending (#348): where the level tile dragged can go, or the level dragged from the list be placed (as after
+  // the event chosen; null: none, or the level tiles can't be changed now)
+  pickCheck(): PickCheck | null {
+    if (this.blocked()) return null;
+    const rom = this.rom, ev = this.event(), e = this.view.event, d = this.drag, tl = this.dragged;
+    if (d) return { key: `move:${d.from}:${e}`, dep: ev?.after, make: () => moveLevelTileCheck(rom, d.from, ev) };
+    if (tl) { const look = this.defaultLook(); return { key: `place:${tl}:${look}:${e}`, dep: ev?.after, make: () => placeLevelTileCheck(rom, look, tl, ev) }; }
+    return null;
+  }
 
   // ---- the mouse ----
   // a click on cell (x, y): a level tile selected and picked up, else nothing selected

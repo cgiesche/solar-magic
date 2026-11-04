@@ -34,7 +34,9 @@ import { LinkLayer } from './owlinkview.ts';
 import { LevelTileLayer, tilePlace } from './owlevelview.ts';
 import { LevelNameEditor } from './owlevelname.ts';
 import { levelsWithoutTile, type LevelTileEvent } from '../core/owleveltiles.ts';
-import { eventReveal, eventDestroys, revealRefusal, destroyRefusal, addReveal, removeReveal, addDestroy, removeDestroy, cellText, NO_REVEAL_AT_0 } from '../core/oweventtiles.ts';
+import {
+  eventReveal, eventDestroys, revealRefusal, destroyRefusal, addReveal, removeReveal, addDestroy, removeDestroy, cellText, revealPickCheck, destroyPickCheck,
+} from '../core/oweventtiles.ts';
 import { SpriteLayer } from './owspriteview.ts';
 import { CellHistoryPopup, tileWords } from './owcellhistoryview.ts';
 import { exitSentences, teleportExit, type Clause } from '../core/owexitsentence.ts';
@@ -63,7 +65,9 @@ type Brush = { kind: Layer; w: number; h: number; entries: number[] };
 // the layer 1 brush to begin with: tile 000
 const FIRST_L1_TILE = 0x00;
 
-// a layer 1 tile's number: 2 digits on page 0, 3 on page 1 (82, 1A5)
+// a pick's checks (#348): its key and what they read besides the ROM (dep, by identity: the same pick, the same checks),
+// the check of a cell (l1Index) made when needed
+export type PickCheck = { key: string; dep?: unknown; make: () => (i: number) => string | null };
 
 // what the timeline shows: an animated step, a silent one, the layer 1 changes, the tile revealed, a tile destroyed
 type StepKind = 'step' | 'silent' | 'l1' | 'reveal' | 'destroy';
@@ -238,7 +242,8 @@ export class OverworldView {
       if (!this.levelTiles.dragged || this.mode !== 'levels') return;
       e.preventDefault();
       const c = this.cell(e, 16);
-      if (this.hover?.x !== c.x || this.hover?.y !== c.y) { this.hover = c; this.paint(); }
+      this.mouse = this.point(e);
+      if (this.hover?.x !== c.x || this.hover?.y !== c.y) { this.hover = c; this.updateStatus(); this.paint(); }
     });
     this.scroller.addEventListener('drop', (e) => { if (!this.levelTiles.dragged) return; e.preventDefault(); const c = this.cell(e, 16); this.levelTiles.drop(c.x, c.y); });
     this.scroller.addEventListener('mouseleave', () => { this.cellHistory.hover(-1, 0, 0, false); this.mouse = null; if (!this.brushDrag.active) { this.hover = null; this.updateStatus(); this.paint(); } });
@@ -438,6 +443,7 @@ export class OverworldView {
     if (this.mode === 'links' || this.showLinks) this.links.paint(ctx, lw);
     if (this.mode !== 'links' && this.mode !== 'sprites') this.paintSelected(lw);
     this.nameEditor.paint(ctx, lw);
+    this.hatchRefused(ctx, lw);
     this.paintStep(lw);
     const s = this.cellSize;
     if (this.mode === 'sprites') {
@@ -460,6 +466,47 @@ export class OverworldView {
       if (this.replacing && this.hover && !pick) drawBrushFrame(ctx, 'hover', [(this.hover.x & ~1) * s, (this.hover.y & ~1) * s, 2 * s, 2 * s], lw);
       else if (r) drawBrushFrame(ctx, pick ? 'pick' : 'hover', [r.x * s, r.y * s, r.w * s, r.h * s], lw);
     }
+  }
+
+  // ---- a pick pending (#348) ----
+  // While a cell is to be picked – the tile a reveal or destroy is added to, where a level tile is dragged or a level
+  // dropped, a link's target – the cells it would refuse are hatched, the reason shown over them; a click there is
+  // refused as before. Each pick's checks (core: revealPickCheck, destroyPickCheck, moveLevelTileCheck,
+  // placeLevelTileCheck, linkTargetCheck) run once per cell of the map shown, kept while the pick and the ROM stay.
+  private pickMemo: { key: string; dep: unknown; gen: number; region: number; why: (string | null)[] } | null = null;
+  private pickCheck(): PickCheck | null {
+    const rom = this.app.rom, pick = this.eventPick, e = this.event;
+    if (pick && pick.at < 0) return pick.kind === 'reveal' ? { key: `reveal:${e}`, make: () => revealPickCheck(rom, e) }
+      : { key: `destroy:${e}`, dep: this.shown.l1, make: () => destroyPickCheck(rom, e, this.shown.l1) };
+    if (this.mode === 'levels' || this.levelTiles.dragged) return this.levelTiles.pickCheck();
+    if (this.mode === 'links') return this.links.pickCheck();
+    return null;
+  }
+  // why each cell of the map shown (l1Index − region × 0x400) can't be picked (null: it can); null: no pick pending
+  pickRefusals(): (string | null)[] | null {
+    const p = this.pickCheck();
+    if (!p) return null;
+    const gen = this.app.rom.gen, m = this.pickMemo, region = this.region;
+    if (m && m.key === p.key && m.dep === p.dep && m.gen === gen && m.region === region) return m.why;
+    const check = p.make(), base = region * 0x400;
+    const why = Array.from({ length: 0x400 }, (_, k) => check(base + k));
+    this.pickMemo = { key: p.key, dep: p.dep, gen, region, why };
+    return why;
+  }
+  // why the cell under the mouse can't be picked (null: it can, or no pick pending)
+  // (a level tile dragged off the map lands on the edge: that cell's)
+  private pickRefusalAtMouse(): string | null {
+    const m = this.mouse, clamp = (v: number) => Math.max(0, Math.min(31, Math.floor(v / 16)));
+    if (!m || (!this.levelTiles.drag && (m.x < 0 || m.y < 0 || m.x >= 512 || m.y >= 512))) return null;
+    const why = this.pickRefusals();
+    return why ? why[l1Index(0, clamp(m.x), clamp(m.y))] : null;
+  }
+  private hatchRefused(ctx: CanvasRenderingContext2D, lw: number): void {
+    const why = this.pickRefusals();
+    if (!why) return;
+    const at: { x: number; y: number }[] = [];
+    why.forEach((w, k) => { if (w) { const p = l1XY(k); at.push({ x: p.x * 16, y: p.y * 16 }); } });
+    hatchCells(ctx, at, 16, lw);
   }
 
   // the level tiles of layer 1 `levels` on the map shown lightly hatched
@@ -865,6 +912,14 @@ export class OverworldView {
     const b = this.brush;
     this.scroller.title = ''; // the kind of the path tile under the mouse
     this.statusStats.textContent = b.kind === this.mode ? `Brush ${b.w}×${b.h}` : '';
+    // (a pick pending: a cell it would refuse says why)
+    const refused = this.pickRefusalAtMouse();
+    this.scroller.style.cursor = refused ? 'not-allowed' : '';
+    if (refused) {
+      this.scroller.title = refused;
+      this.statusText.textContent = `Can't pick this tile: ${refused}`;
+      return;
+    }
     if (this.eventPick) {
       this.statusText.textContent = this.eventPick.at < 0 ? `Click the tile the event ${this.eventPick.kind === 'reveal' ? 'reveals' : 'destroys'} · Esc cancels`
         : 'Click the tile it becomes in the layer 1 sheet · Esc cancels';
@@ -1118,6 +1173,7 @@ export class OverworldView {
     this.eventPick = { kind, at: -1 };
     this.buildTimeline();
     this.updateStatus();
+    this.paint();
   }
   // Esc: no reveal or destroy added; false: none being added
   cancelEventPick(): boolean {
@@ -1126,6 +1182,7 @@ export class OverworldView {
     this.buildTimeline();
     this.updateStatus();
     this.buildSide();
+    this.paint();
     return true;
   }
   // the tile clicked on the map while a reveal or destroy is added (x, y: layer 1 cell); a destroy is set where the
@@ -1135,17 +1192,20 @@ export class OverworldView {
     if (x < 0 || y < 0 || x >= 32 || y >= 32) return;
     const i = l1Index(this.region, x, y);
     if (pick.kind === 'reveal') {
-      if (!i) { toast(NO_REVEAL_AT_0, 'error'); return; }
+      const why = this.pickRefusals()?.[i - this.region * 0x400];
+      if (why) { toast(`Not added: ${why}`, 'error'); return; }
       this.eventPick = { kind: 'reveal', at: i };
       if (this.mode !== 'l1') this.bar.querySelector<HTMLButtonElement>('.btn-group button.ow-l1')?.click(); else this.buildSide();
       this.buildTimeline();
       this.updateStatus();
+      this.paint();
       return;
     }
     this.eventPick = null;
     this.tileEdit(`destroys ${cellText(i)}`, () => addDestroy(rom, this.event, i, this.shown.l1));
     this.buildTimeline();
     this.updateStatus();
+    this.paint();
   }
   // the tile the revealed one becomes, picked in the layer 1 sheet (or as the reveal list has it)
   private pickReveal(into: number): void {
