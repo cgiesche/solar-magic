@@ -9,6 +9,8 @@ import { readL1, writeL1 } from './overworld.ts';
 import { reachProblems, WARP_TILES, ANY_WAY_TILE, type Reached, type ReachKind, type CheckSeverity } from './owreach.ts';
 import { hex3 } from './names.ts';
 import type { PathKind } from './owpaths.ts';
+import type { ExitGraph } from './exitgraph.ts';
+import { checkContext, eventsNeverRun, stranded, untiledLevelsEntered, eventOrderProblems } from './owchecks.ts';
 
 export type CheckGroup = 'paths' | 'progress' | 'links' | 'look' | 'budget';
 // the groups in the panel's order (an empty one is not shown)
@@ -46,8 +48,9 @@ const GROUP_OF: Record<ReachKind, CheckGroup> = {
 };
 
 // The World check's problems: those of the paths at the event progress shown (`now`) and with every event passed
-// (`all`), errors first, then by group. place: a tile's name ("Main map 0C,09")
-export function worldProblems(rom: Rom, now: CheckedAt, all: CheckedAt, place: (tile: number) => string): WorldProblem[] {
+// (`all`), with the problems of worldChecks (`checks`, found with every event passed: kept while the ROM is the same),
+// errors first, then by group. place: a tile's name ("Main map 0C,09")
+export function worldProblems(rom: Rom, now: CheckedAt, all: CheckedAt, place: (tile: number) => string, checks: readonly WorldProblem[] = []): WorldProblem[] {
   const l1 = readL1(rom), kinds = now.inp.kinds, stop = stopTile(l1, kinds);
   const out = reachProblems(rom, now, all, place).map((p): WorldProblem => {
     const progress = p.at === 'now' ? now.progress : all.progress;
@@ -64,8 +67,16 @@ export function worldProblems(rom: Rom, now: CheckedAt, all: CheckedAt, place: (
     }
     return q;
   });
+  out.push(...checks);
   const order = (p: WorldProblem) => (p.severity === 'error' ? 0 : 10) + CHECK_GROUPS.findIndex((g) => g.id === p.group);
   return out.sort((a, b) => order(a) - order(b));
+}
+
+// The checks of owchecks.ts with every event passed (`all`), the levels' exits in `graph`: events never run, links
+// stranding Mario, levels without level tile an exit leads into, events out of play order
+export function worldChecks(rom: Rom, all: CheckedAt, place: (tile: number) => string, graph: ExitGraph): WorldProblem[] {
+  const c = checkContext(rom, all, place);
+  return [...eventsNeverRun(c), ...stranded(c), ...untiledLevelsEntered(c, graph), ...eventOrderProblems(c)];
 }
 
 // (the star and pipe tiles stop Mario too, but look like a way on; tile 82 is a stop tile he walks off any way)

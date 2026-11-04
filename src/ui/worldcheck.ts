@@ -9,7 +9,7 @@ import { h, toast, emptyState } from './dom.ts';
 import { l1XY, OW_EVENTS } from '../core/overworld.ts';
 import { tileText } from '../core/owteleport.ts';
 import { hex2 } from '../core/names.ts';
-import { worldProblems, applyFix, errorCount, checkAgainst, diffText, CHECK_GROUPS, type CheckBaseline, type WorldProblem, type CheckSeverity } from '../core/worldcheck.ts';
+import { worldProblems, worldChecks, applyFix, errorCount, checkAgainst, diffText, CHECK_GROUPS, type CheckBaseline, type WorldProblem, type CheckSeverity } from '../core/worldcheck.ts';
 
 const ICON: Record<CheckSeverity, string> = { error: '⛔', warn: '⚠' };
 const SECTIONS: { severity: CheckSeverity; name: string; title: string }[] = [
@@ -23,6 +23,7 @@ export class WorldCheck {
   readonly root = h('div', { class: 'panel world-check', hidden: true });
   // (the tiles' places named once the submaps' views are known: searched again then)
   private found: { from: object; views: boolean; problems: WorldProblem[] } | null = null;
+  private checks: { key: string; problems: WorldProblem[] } | null = null;
   // the problems last checked: what an edit changed is said against them
   private baseline: CheckBaseline | null = null;
 
@@ -43,8 +44,11 @@ export class WorldCheck {
     if (!st) return null;
     const views = !!v.views;
     if (this.found?.from === st && this.found.views === views) return this.found.problems;
-    const place = (i: number) => tileText({ submap: v.submapAt(i), ...l1XY(i) });
-    const problems = worldProblems(v.app.rom, { ...st.now, progress: v.progress }, { ...st.all, progress: OW_EVENTS }, place);
+    const place = (i: number) => tileText({ submap: v.submapAt(i), ...l1XY(i) }), rom = v.app.rom, all = { ...st.all, progress: OW_EVENTS };
+    // (the checks with every event passed: the same at every event progress, searched again after a ROM edit)
+    const key = `${rom.gen}:${views}`;
+    if (this.checks?.key !== key) this.checks = { key, problems: worldChecks(rom, all, place, v.app.entrances.graph()) };
+    const problems = worldProblems(rom, { ...st.now, progress: v.progress }, all, place, this.checks.problems);
     this.found = { from: st, views, problems };
     return problems;
   }
@@ -69,7 +73,7 @@ export class WorldCheck {
     this.baseline = baseline;
     const said = change && diffText(change);
     if (!said) return;
-    const show = said.show;
+    const show = said.show && said.show.tile >= 0 ? said.show : null;
     toast(`World check: ${said.text}`, show ? 'error' : 'info', show ? { label: 'Show', run: () => this.show(show) } : undefined);
   }
   // the problems checked from now on are the baseline (the overworld shown again: edits made elsewhere not said)
@@ -104,7 +108,7 @@ export class WorldCheck {
     return h('div', { class: `problem problem-${p.severity}`, title: `${p.title ? `${p.title}\n` : ''}Found on the map ${map}${p.noFix ? `\nNo fix: ${p.noFix}` : ''}` },
       h('span', { class: 'problem-icon' }, ICON[p.severity]),
       h('span', { class: 'wc-text' }, p.text),
-      h('button', { class: 'problem-fix', title: `Show the tile, on the map ${map}`, onclick: () => this.show(p) }, 'Show'),
+      h('button', { class: 'problem-fix', disabled: p.tile < 0, title: p.tile < 0 ? 'Not on the map' : `Show the tile, on the map ${map}`, onclick: () => this.show(p) }, 'Show'),
       p.fix ? h('button', { class: 'problem-fix', title: p.fix.title, onclick: () => this.fix(p) }, p.fix.label) : null);
   }
 

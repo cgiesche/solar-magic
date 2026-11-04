@@ -384,21 +384,29 @@ export function eventRunners(rom: Rom): Map<number, EventRunner[]> {
   return out;
 }
 // What passing translevel tl changes on the overworld, per exit (0 normal, 1–3 the secret exits) whose event is the
-// level's (no other level's normal exit runs it, as eventRunners orders them): the event, the layer 1 tiles (l1Index)
-// it writes, reveals and destroys (with those destroying the tile on the map before events changes), the layer 2
-// tilemap entries (readL2 indexes) its steps write.
-export interface ExitChanges { exit: number; event: number; l1: number[]; l2: number[] }
+// level's (no other level's normal exit runs it, as eventRunners orders them): the event's changes (eventChanges).
+export interface ExitChanges extends EventChanges { exit: number }
 export function exitChanges(rom: Rom, tl: number, d: EventData = readEvents(rom), runners = eventRunners(rom)): ExitChanges[] {
-  const b = baseEvent(rom, tl), destroys = readDestroyList(rom), effects = destroyEffects(rom), map = readL1(rom), out: ExitChanges[] = [];
+  const b = baseEvent(rom, tl), changes = eventChanges(rom, d), out: ExitChanges[] = [];
   for (let exit = 0; exit < 4 && b + exit < OW_EVENTS; exit++) {
     const e = b + exit, r = runners.get(e)?.[0];
     if (r?.tl !== tl || r.exit !== exit) continue;
-    const reveal = e < revealEventCount(rom) ? revealAt(rom, e) : 0;
-    const destroyed = destroys.filter((x) => x.event === e).flatMap((x) => [x.tile, ...destroyChanges(effects, map, x.tile).map((c) => c.cell)]);
-    const l1 = new Set([...eventL1Tiles(d, e), ...(reveal ? [reveal] : []), ...destroyed]);
-    out.push({ exit, event: e, l1: [...l1], l2: [...new Set(eventPieces(d, e).flatMap((p) => pieceTiles(d, p)))] });
+    out.push({ exit, ...changes(e) });
   }
   return out;
+}
+// What event e changes on the overworld: the layer 1 tiles (l1Index) it writes, reveals and destroys (with those
+// destroying the tile on the map before events changes), the layer 2 tilemap entries (readL2 indexes) its steps write.
+// (the ROM's tables read once: ask it for several events)
+export interface EventChanges { event: number; l1: number[]; l2: number[] }
+export function eventChanges(rom: Rom, d: EventData = readEvents(rom)): (e: number) => EventChanges {
+  const destroys = readDestroyList(rom), effects = destroyEffects(rom), map = readL1(rom), reveals = revealEventCount(rom);
+  return (e) => {
+    const reveal = e < reveals ? revealAt(rom, e) : 0;
+    const destroyed = destroys.filter((x) => x.event === e).flatMap((x) => [x.tile, ...destroyChanges(effects, map, x.tile).map((c) => c.cell)]);
+    const l1 = new Set([...eventL1Tiles(d, e), ...(reveal ? [reveal] : []), ...destroyed]);
+    return { event: e, l1: [...l1], l2: [...new Set(eventPieces(d, e).flatMap((p) => pieceTiles(d, p)))] };
+  };
 }
 const EXIT_SHORT = ['normal exit', 'secret exit 1', 'secret exit 2', 'secret exit 3'];
 const hex3 = (n: number) => n.toString(16).toUpperCase().padStart(3, '0');
