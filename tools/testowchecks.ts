@@ -2,8 +2,8 @@
 // level tile an exit leads into, events drawn by a loaded save in another order than in play. The clean game: only
 // the cases the game itself has (listed here); each check provoked by a ROM edit on the test ROM.
 import { Rom } from '../src/core/rom.ts';
-import { OverworldEmulator, OverworldLoads, gameL1, l1XY, l1Index, OW_EVENTS, readL1, readTranslevels, writeTranslevels } from '../src/core/overworld.ts';
-import { readEvents, writeEvents } from '../src/core/owevents.ts';
+import { OverworldEmulator, OverworldLoads, gameL1, l1XY, l1Index, OW_EVENTS, readL1, readTranslevels, writeTranslevels, baseEvent } from '../src/core/overworld.ts';
+import { readEvents, writeEvents, eventRunners } from '../src/core/owevents.ts';
 import { readTeleport, writeTeleport, readExitPaths, writeExitPath } from '../src/core/owteleport.ts';
 import { progressSaves } from '../src/core/owprogress.ts';
 import { reach, reachInput } from '../src/core/owreach.ts';
@@ -64,6 +64,19 @@ const [late, early] = clean.needed.flatMap((as, b) => as.filter((a) => a < b).ma
   console.log(list(p));
   check(!!n && n.severity === 'warn' && n.group === 'progress' && n.progress === e + 1 && n.tile === cell && p.length === 1,
     `event ${hx(e)} changing ${at(cell)}: never run, a warning of Progress (${n?.text})`);
+}
+{
+  // a level's base event + 2 where the level has no secret exit 2 (eventRunners, #383) and no level's exit runs it,
+  // given a layer 1 change: never run (no longer counted as run by the base event + 0…3 of every level)
+  const runners = eventRunners(rom), tls = [...new Set(readTranslevels(rom))].filter((tl) => tl).sort((a, b) => a - b);
+  const tl = tls.find((tl) => baseEvent(rom, tl) + 2 < OW_EVENTS && !runners.has(baseEvent(rom, tl) + 2))!;
+  const r = copy(), d = readEvents(r), cell = l1Index(1, 0, 0), e = baseEvent(rom, tl) + 2;
+  d.silent[e].push({ layer: 1, tile: emptyTiles(r, cell)[0], loc: cell });
+  writeEvents(r, d);
+  const p = checks(r).never, n = has(p, `event-never-run:${e}`);
+  console.log(list(p));
+  check(!!n && n.severity === 'warn' && n.progress === e + 1 && n.tile === cell && p.length === 1,
+    `event ${hx(e)} (translevel ${hx(tl)}'s base event + 2, no secret exit 2) changing ${at(cell)}: never run (${n?.text})`);
 }
 
 // ---- a star stranding Mario ----

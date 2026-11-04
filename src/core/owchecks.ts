@@ -3,8 +3,8 @@
 // ran in play. Each a plain function of the ROM and the searches of owreach.ts with every event passed.
 
 import type { Rom } from './rom.ts';
-import { OW_EVENTS, MAX_TRANSLEVEL, baseEvent, translevelToLevel, readL1, readTranslevels, l1Index } from './overworld.ts';
-import { readEvents, eventChanges, eventRunners, eventPieces, drawPiece, l2XY, type EventData, type EventChanges } from './owevents.ts';
+import { OW_EVENTS, MAX_TRANSLEVEL, translevelToLevel, readL1, readTranslevels, l1Index } from './overworld.ts';
+import { readEvents, eventChanges, eventRunners, eventPieces, drawPiece, l2XY, type EventData, type EventChanges, type EventRunner } from './owevents.ts';
 import { reach, inputWithout, WARP_TILES, type Reach } from './owreach.ts';
 import { readSecondaryEntrance, mainTranslevel, OW_NORMAL, OW_SECRET } from './level.ts';
 import type { ExitGraph } from './exitgraph.ts';
@@ -25,25 +25,21 @@ export interface CheckContext {
   place: (tile: number) => string;
   events: EventData;
   changes: EventChanges[]; // per event
+  runners: Map<number, EventRunner[]>; // the level exits running each event (eventRunners)
 }
 export function checkContext(rom: Rom, all: CheckedAt, place: (tile: number) => string): CheckContext {
   const events = readEvents(rom);
   const of = eventChanges(rom, events);
-  return { rom, all, place, events, changes: Array.from({ length: OW_EVENTS }, (_, e) => of(e)) };
+  return { rom, all, place, events, changes: Array.from({ length: OW_EVENTS }, (_, e) => of(e)), runners: eventRunners(rom) };
 }
 
 // ---- events never run ----
 
-// The events that change the map (layer 1 or 2) but that no level exit runs – the base event + 0…3 of a translevel
-// with a level tile on the map with every event passed – and no entrance to the overworld with its own event
+// The events that change the map (layer 1 or 2) but that no level exit runs – owevents.ts eventRunners: a level's
+// normal exit, a secret exit only where the level can have it – and no entrance to the overworld with its own event
 // (normal exit: the event, secret exit: + 1)
 export function eventsNeverRun(c: CheckContext): WorldProblem[] {
-  const { rom, all: { inp } } = c, run = new Set<number>();
-  for (let i = 0; i < inp.l1.length; i++) {
-    const tl = inp.tls[i];
-    if (!tl || inp.kinds[inp.l1[i]] !== 'level') continue;
-    for (let x = 0; x < 4; x++) run.add(baseEvent(rom, tl) + x);
-  }
+  const { rom } = c, run = new Set(c.runners.keys());
   for (let i = 0; i < SECONDARY_ENTRANCES; i++) {
     const o = readSecondaryEntrance(rom, i).overworld;
     if (o?.ownEvent && (o.action === OW_NORMAL || o.action === OW_SECRET)) run.add(o.event + (o.action === OW_SECRET ? 1 : 0));
@@ -54,7 +50,7 @@ export function eventsNeverRun(c: CheckContext): WorldProblem[] {
     if (tile < 0) continue;
     out.push({ key: `event-never-run:${e}`, group: 'progress', severity: 'warn', tile, progress: e + 1,
       text: `Event ${hex2(e)} changes the map, but no level exit or teleport runs it`, brief: `event ${hex2(e)} never run`,
-      title: 'No level with a level tile runs it (its base event + 0–3), nor an exit to the overworld with its own event. The hack\'s own code may run it.' });
+      title: 'No level with a level tile runs it (its base event, or + 1–3 for a secret exit it has), nor an exit to the overworld with its own event. The hack\'s own code may run it.' });
   }
   return out;
 }
@@ -116,7 +112,7 @@ export function untiledLevelsEntered(c: CheckContext, graph: ExitGraph): WorldPr
 // not without B – without its layer 1 changes (the map before events there) and the way its level's exit opens (the
 // level flags' direction, unless open from the start or another exit of the level opens it too)
 export function eventsNeeded(c: CheckContext): number[][] {
-  const { rom, all: { inp, r } } = c, before = readL1(rom), runners = eventRunners(rom);
+  const { rom, all: { inp, r }, runners } = c, before = readL1(rom);
   const tileOf = (e: number) => runners.get(e)?.[0]?.tile ?? -1;
   return Array.from({ length: OW_EVENTS }, (_, b) => {
     const ch = c.changes[b], by = runners.get(b) ?? [];
