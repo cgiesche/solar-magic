@@ -35,6 +35,7 @@ const samples: { [K in OwRefusalKind]: Extract<OwRefusalData, { kind: K }> } = {
   exitPathsFull: { kind: 'exitPathsFull', max: 0x80 },
   koopaPlaceSubmap: { kind: 'koopaPlaceSubmap', from: { submap: 1, x: 3, y: 4 } },
   locationsFull: { kind: 'locationsFull', max: 0x100 },
+  noFreeL1Tile: { kind: 'noFreeL1Tile', tiles: 0x200 },
   eventStorageFull: { kind: 'eventStorageFull', max: 0x3600, need: 0x3602 },
   levelTileHeld: { kind: 'levelTileHeld', cell: l1Index(0, 4, 4), tl: 0x29 },
   submapsLoading: { kind: 'submapsLoading' },

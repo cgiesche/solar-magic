@@ -11,6 +11,7 @@ import { l1Hex } from '../core/owl1sheet.ts';
 import { h, toast, checkbox, select, emptyState } from './dom.ts';
 import { refusedToast, refusalWords } from './owrefusal.ts';
 import { OwRefusal, type OwRefusalData } from '../core/owrefusal.ts';
+import { linkTableFix } from './owfixes.ts';
 import {
   readLinks, makeLink, removeLink, setBothWays, moveLocation, locationUses, pathSide, koopaTeleport, setKoopaTeleport, opposite,
   KOOPAS, KOOPA_TILE, koopaOfTile, koopaPlaceRefusal, linkCheck, locationMoveRefusal, type OwLink, type LinkEnd, type LinkKind,
@@ -229,10 +230,10 @@ export class LinkLayer {
     this.apply(() => (d.move ? this.moveTo(d.move, this.tile(d.to)) : this.make(this.tile(d.from), this.tile(d.to))));
   }
   private apply(f: () => void): void {
-    try { f(); } catch (e) { refusedToast(this.rom, e, 'Overworld link not changed: '); }
-    this.view.paint();
-    this.view.buildProps();
-    this.view.updateStatus();
+    // (a link table full: the unused entries freed and the change made in one ROM edit)
+    const app = this.view.app, done = () => { this.view.paint(); this.view.buildProps(); this.view.updateStatus(); };
+    try { f(); } catch (e) { refusedToast(this.rom, e, 'Overworld link not changed: ', (r) => linkTableFix(app, r, f, done)); }
+    done();
   }
   // the next click on a map chooses the tile: of a link from `from`, or where `move` goes
   private finishPending(t: OwTile): void {

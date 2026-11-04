@@ -18,7 +18,7 @@ export const SHEET_COLS = 16;
 export const PAGE_TILES = 0x100;
 
 // the tiles some map has: layer 1 as in the ROM, the tiles events put there (their layer 1 tiles, the reveal list's)
-function tilesOnMaps(rom: Rom): Set<number> {
+export function tilesOnMaps(rom: Rom): Set<number> {
   const out = new Set<number>(readL1(rom));
   for (const s of readEvents(rom).silent.flat()) if (s.layer === 1) out.add(s.tile);
   // (a tile on a map revealed: the tile it becomes)

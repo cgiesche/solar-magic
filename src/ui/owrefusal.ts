@@ -71,6 +71,8 @@ export function refusalWords(rom: Rom, r: OwRefusalData): RefusalWords {
       `the game has room for ${r.max} places stars, pipes and exits take Mario to, and all are taken`, 'Pick a tile a star, pipe or other exit already leads to, or remove a star or pipe link first.');
     case 'exitPathsFull': return w('This path between submaps can\'t be linked',
       `the game has room for ${r.max} paths between submaps, and all are taken`, 'Remove a path between submaps you don\'t need first.');
+    case 'noFreeL1Tile': return w('No new layer 1 tile can be made', 'every tile of the overworld already has a look of its own, is on a map or does something where Mario walks',
+      'Change a tile no map uses in the Map16 tab instead.');
     case 'eventStorageFull': return w('The event\'s changes to the map can\'t be written',
       'the game keeps the tiles all events change in one store, and it is full',
       'Let this or other events change fewer tiles of layer 2.');

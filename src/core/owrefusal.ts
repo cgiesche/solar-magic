@@ -26,6 +26,8 @@ export type OwRefusalData =
   | { kind: 'exitPathsFull'; max: number } // every exit path entry used
   | { kind: 'koopaPlaceSubmap'; from: { submap: number; x: number; y: number } } // a Koopa Kid's place off the submap of its tile
   | { kind: 'locationsFull'; max: number } // an exit to the overworld teleported to a tile no star/pipe entry has: none free
+  // ---- layer 1 tiles (owl1sheet.ts) ----
+  | { kind: 'noFreeL1Tile'; tiles: number } // no tile of `tiles` (001…) is a copy of 000 on no map
   // ---- event steps (owevents.ts) and level tiles (owleveltiles.ts) ----
   | { kind: 'eventStorageFull'; max: number; need?: number } // the places the events' tiles are kept in
   | { kind: 'levelTileHeld'; cell: number; tl: number } // cell enters translevel tl on another map
@@ -89,6 +91,7 @@ export function refusalDetails(r: OwRefusalData): string {
     case 'koopaPlaceSubmap': return `A Koopa Kid's place is on the submap of its tile (submap ${r.from.submap}, ${hex(r.from.x, 2)},${hex(r.from.y, 2)}).`;
     case 'locationsFull': return `All ${r.max} locations (star/pipe table entries) are used.`;
     case 'exitPathsFull': return `All ${r.max} entries of the exit path table are used.`;
+    case 'noFreeL1Tile': return `No layer 1 tile 001–${hex(r.tiles - 1, 3)} is free: drawn and acting as tile 000, and on no map.`;
     case 'eventStorageFull': return r.need ? `The event tiles need ${r.need} of ${r.max} storage places.` : `All ${r.max} places of the event storage are used.`;
     case 'levelTileHeld': return `Tile ${cellText(r.cell)} enters level ${hex(translevelToLevel(r.tl), 3)} before the event or by another one (translevel table: one level per tile).`;
     case 'submapsLoading': return 'The submaps\' views are not known yet.';

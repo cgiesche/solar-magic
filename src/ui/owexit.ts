@@ -5,6 +5,7 @@
 import type { App } from './app.ts';
 import { h, modal, select, checkbox, toast, putImage } from './dom.ts';
 import { refusedToast } from './owrefusal.ts';
+import { linkTableFix } from './owfixes.ts';
 import { hex2, hex3 } from '../core/names.ts';
 import { OW_ACTIONS, owActionName, type OverworldExit } from '../core/level.ts';
 import { MAP_NAMES, OW_EVENTS, eventNames, readL1, readL2, readTranslevels, translevelToLevel, l1Index, drawOwMap, owMapAt, owShownCopies } from '../core/overworld.ts';
@@ -46,7 +47,7 @@ export function overworldFields(app: App, idx: number, o: OverworldExit, set: Ed
 
 // entrance idx teleports to `tile` (one ROM edit)
 function teleportTo(app: App, idx: number, tile: OwTile): void {
-  try { app.entrances.teleport(idx, tile); } catch (err) { refusedToast(app.rom, err, ''); }
+  try { app.entrances.teleport(idx, tile); } catch (err) { refusedToast(app.rom, err, '', (r) => linkTableFix(app, r, () => app.entrances.teleport(idx, tile))); }
 }
 
 // a tile of an overworld map, clicked; the tiles teleports lead to are marked with their location index, `cur`

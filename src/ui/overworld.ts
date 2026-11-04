@@ -38,8 +38,10 @@ import { levelsWithoutTile, type LevelTileEvent } from '../core/owleveltiles.ts'
 import {
   eventReveal, eventDestroys, revealRefusal, destroyRefusal, addReveal, removeReveal, addDestroy, removeDestroy, cellText, revealPickCheck, destroyPickCheck,
 } from '../core/oweventtiles.ts';
-import { refusalToast, refusedToast, refusalWords, refusalText } from './owrefusal.ts';
+import { refusalToast, refusedToast, refusalWords, refusalText, type RefusalFix } from './owrefusal.ts';
+import { editFix } from './owfixes.ts';
 import type { OwRefusalData } from '../core/owrefusal.ts';
+import { revealPairFor, addRevealPair, newL1Tile, tileCopiesOf000, takeTileCopy } from '../core/owfixes.ts';
 import { SpriteLayer } from './owspriteview.ts';
 import { CellHistoryPopup, tileWords } from './owcellhistoryview.ts';
 import { exitSentences, teleportExit, type Clause } from '../core/owexitsentence.ts';
@@ -1168,13 +1170,15 @@ export class OverworldView {
       budgetGauge(this.budget('destroys')),
     ];
   }
-  // a reveal or destroy edit of event e (the chosen one), one ROM edit; refused with the reason
-  private tileEdit(what: string, f: () => void, e = this.event): boolean {
+  // a reveal or destroy edit of event e (the chosen one), one ROM edit; refused with the reason (and the way out `fix`
+  // gives)
+  private tileEdit(what: string, f: () => void, e = this.event, fix?: (r: OwRefusalData, label: string) => RefusalFix | undefined): boolean {
+    const label = `${eventTitle(eventRunners(this.app.rom), e)}: ${what}`;
     try {
-      this.app.romEdit(`${eventTitle(eventRunners(this.app.rom), e)}: ${what}`, f);
+      this.app.romEdit(label, f);
       return true;
     } catch (err) {
-      refusedToast(this.app.rom, err);
+      refusedToast(this.app.rom, err, 'Not changed: ', fix && ((r) => fix(r, label)));
       return false;
     }
   }
@@ -1226,7 +1230,15 @@ export class OverworldView {
     if (at < 0) return;
     this.eventPick = null;
     const t = this.l1[at];
-    if (this.tileEdit(`reveals ${cellText(at)}`, () => addReveal(this.app.rom, this.event, at, into)) && readL1(this.app.rom)[at] !== t)
+    // (no pair of the reveal list gives the tile: one added, then the reveal)
+    const rom = this.app.rom, e = this.event, refresh = () => { this.buildTimeline(); this.updateStatus(); this.buildSide(); };
+    const pairFix = (r: OwRefusalData, label: string) => {
+      const k = r.kind === 'revealNoSource' ? revealPairFor(rom, t, into) : -1;
+      return k < 0 ? undefined : editFix(this.app, label,
+        `Adds "tile ${l1Hex(t)} becomes ${l1Hex(into)}" to the reveal list, in a pair that never applies (its tile on no map or a later pair's: pair ${k + 1}), then the reveal – one undo step`,
+        () => addRevealPair(rom, t, into), () => addReveal(rom, e, at, into), refresh);
+    };
+    if (this.tileEdit(`reveals ${cellText(at)}`, () => addReveal(rom, e, at, into), e, pairFix) && readL1(rom)[at] !== t)
       toast(`Tile ${l1Hex(t)} at ${cellText(at)} does not become ${l1Hex(into)}: it is now tile ${l1Hex(readL1(this.app.rom)[at])} on the map before events, which the reveal list turns into it.`);
     this.buildTimeline();
     this.updateStatus();
@@ -1727,6 +1739,17 @@ export class OverworldView {
       ...this.revealSettings(i), ...this.destroySettings(i));
     return info;
   }
+  // "New tile…": the first free layer 1 tile in the Map16 tab; none: refused – a copy of tile 000 on a map taken
+  // (its places get 000 itself) where there is one
+  private newTile(): void {
+    const rom = this.app.rom, kinds = this.pathKinds(), open = (t: number) => this.app.editTile(t, 'ow', { submap: this.map, progress: this.progress });
+    if (!kinds) return;
+    try { open(newL1Tile(rom, kinds)); } catch (e) {
+      refusedToast(rom, e, 'Not opened: ', () => { const c = tileCopiesOf000(rom, kinds)[0]; return c === undefined ? undefined : editFix(this.app, `Take tile ${l1Hex(c)}`,
+        `Tile ${l1Hex(c)} looks and acts like tile ${l1Hex(0)}: its places on the maps get ${l1Hex(0)} itself (nothing changes in the game), and ${l1Hex(c)} is free for a new look`,
+        () => takeTileCopy(rom, c), undefined, () => open(c)); });
+    }
+  }
   // the Map16 tab on layer 1 tile i's tile (as in the ROM), drawn as on this map at the event progress
   private editTile(i: number): void {
     const t = this.l1[i];
@@ -1944,6 +1967,8 @@ export class OverworldView {
     return h('div', null,
       h('div', { class: 'row budget-row' }, h('span', { class: 'hint' }, `${one ? `Tile ${l1Hex(b.entries[0])}` : b.kind === 'l1' ? `Block ${b.w}×${b.h}` : ''} · Levels: mode 3`),
         budgetGauge(this.budget('l1Tiles'))),
+      // (no free tile on either page: the button says why, with the way out)
+      kinds && p0.firstFree < 0 && p1.firstFree < 0 ? h('div', { class: 'row' }, h('button', { title: 'No layer 1 tile is free for a new look: says why, with a way out where there is one', onclick: () => this.newTile() }, 'New tile…')) : null,
       ...page(p0),
       h('div', { class: 'hint ow-page' }, 'Page 1 (100–1FF): acts like 00–FF where Mario walks'),
       ...page(p1));

@@ -266,7 +266,7 @@ The overworld of another ROM the editor made (or the clean game) replacing this 
 _Avoid_: overworld transfer, overworld export
 
 **Refusal**:
-An overworld edit the game's limits or rules don't allow, told before or instead of writing anything: the core returns it as data (its kind and the numbers involved, core/owrefusal.ts), the editor words it (ui/owrefusal.ts) as the consequence in the player's terms (an event named by the level exit running it), the reason without table names, and a way out – a fix button where one exists, else what to do instead. The technical line (event, table, number) is folded out under "Details".
+An overworld edit the game's limits or rules don't allow, told before or instead of writing anything: the core returns it as data (its kind and the numbers involved, core/owrefusal.ts), the editor words it (ui/owrefusal.ts) as the consequence in the player's terms (an event named by the level exit running it), the reason without table names, and a way out – a fix button where one exists (core/owfixes.ts: a change added to the reveal list in a pair that never applies, the link table entries nothing uses freed (a later entry has their tile, a location no exit teleports to), a copy of tile 000 on a map taken; made with the refused edit as one ROM edit where it is one, its hover saying what it writes, the toast after it what was written), else what to do instead. The technical line (event, table, number) is folded out under "Details".
 _Avoid_: error (for these), limit message
 
 ### The game
