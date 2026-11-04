@@ -2,14 +2,15 @@
 // the patched clean game writes the same name for every translevel as the clean game (the overworld's code run for
 // each, emulated); its routine is Lunar Magic's byte for byte (from ROMs Lunar Magic saved), the table 0x60 × 19 bytes
 // in a RATS block; a changed name is one ROM edit and the game shows it on the overworld's border (emulated load);
-// the text follows Lunar Magic's table with its MultiChar tiles and `\XX`.
+// the text follows Lunar Magic's table with its MultiChar tiles and `\XX`. Typed in place on the overworld (#369): as its
+// tiles, characters the font lacks and a 20th tile refused, the keys moving the caret; the name typed one ROM edit.
 // node tools/testlevelnames.ts
 import { Rom, snesToPc } from '../src/core/rom.ts';
 import { RomEditSession } from '../src/core/romedit.ts';
 import { OverworldEmulator, overworldDataRanges } from '../src/core/overworld.ts';
 import {
-  levelNamePatch, levelNameTiles, setLevelNameTiles, levelName, shownNameStripe, decodeName, encodeName,
-  NAME_LEN, NAME_TRANSLEVELS, NAME_SPACE, NAME_VRAM,
+  levelNamePatch, levelNameTiles, setLevelNameTiles, levelName, shownNameStripe, decodeName, encodeName, trimName, typeNameChar, nameKey,
+  type NameCaret, NAME_LEN, NAME_TRANSLEVELS, NAME_SPACE, NAME_VRAM,
 } from '../src/core/levelnames.ts';
 import { cleanImage, editorImage } from './fixture.ts';
 
@@ -114,6 +115,30 @@ const rom = new Rom(image.slice());
   check(now.join() === [...name, ...Array(NAME_LEN - name.length).fill(NAME_SPACE)].join(), `the game shows the new name on the border (${now.map(hx).join(' ')})`);
   s.undo();
   check(border().join() === shown.join(), 'undone: the old name again');
+}
+
+// ---- typed in place (#369): as tiles, the font's characters only ----
+{
+  const r = new Rom(image.slice()), s = new RomEditSession(r);
+  const tl = Array.from({ length: NAME_TRANSLEVELS }, (_, t) => t).find((t) => t && levelName(r, t) !== '(no name)')!;
+  const was = levelNameTiles(r, tl), start: NameCaret = { tiles: trimName(was), at: trimName(was).length };
+  check(start.tiles.length < NAME_LEN && start.tiles[start.tiles.length - 1] !== NAME_SPACE && decodeName(start.tiles) === decodeName(was), `the name of translevel ${hx(tl)} typed into without its trailing spaces ("${decodeName(was)}")`);
+  let n: NameCaret = start;
+  const type = (text: string) => { const why: string[] = []; for (const ch of text) { const t = typeNameChar(n, ch); if (typeof t === 'string') why.push(t); else n = t; } return why; };
+  n = nameKey(n, 'Home')!;
+  check(!type('A1 ').length && decodeName(n.tiles).startsWith('A1 ') && n.at === 3, 'characters typed at the caret (Home: the start), each its tile');
+  const refused = type('é~');
+  check(refused.length === 2 && refused[0] === 'The font has no “é”' && decodeName(n.tiles).startsWith('A1 ') && n.at === 3, `characters the font lacks refused, nothing put in: ${refused.join('; ')}`);
+  check(typeof typeNameChar(n, '\\') === 'string', 'a backslash too (tiles by number are typed in the properties)');
+  n = nameKey(n, 'Backspace')!; n = nameKey(n, 'ArrowLeft')!; n = nameKey(n, 'Delete')!;
+  check(decodeName(n.tiles).startsWith('A' + decodeName(start.tiles).slice(0, 1)) && n.at === 1, `Backspace, ←, Delete (“${decodeName(n.tiles)}”)`);
+  check(nameKey(n, 'End')!.at === n.tiles.length && nameKey({ tiles: n.tiles, at: 0 }, 'Backspace')!.tiles === n.tiles && nameKey(n, 'x') === null, 'End; Backspace at the start: nothing; other keys not handled');
+  const full: NameCaret = { tiles: Array(NAME_LEN).fill(0), at: 5 };
+  check(typeNameChar(full, 'B') === `The name is full (${NAME_LEN} tiles)`, 'a 20th tile refused');
+  s.edit('Level name', () => setLevelNameTiles(r, tl, n.tiles));
+  check(s.history.undoStack.length === 1 && trimName(levelNameTiles(r, tl)).join() === n.tiles.join(), `the name typed: one ROM edit ("${levelName(r, tl)}")`);
+  s.undo();
+  check(levelNameTiles(r, tl).join() === was.join(), 'undone: the name as before');
 }
 
 console.log(bad ? `\n${bad} FAILED` : '\nall ok');

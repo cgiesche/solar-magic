@@ -32,6 +32,7 @@ import { skipsRevealWalk } from '../core/revealwalk.ts';
 import type { OwSpriteView } from '../core/owsprites.ts';
 import { LinkLayer } from './owlinkview.ts';
 import { LevelTileLayer, tilePlace } from './owlevelview.ts';
+import { LevelNameEditor } from './owlevelname.ts';
 import { levelsWithoutTile, type LevelTileEvent } from '../core/owleveltiles.ts';
 import { eventReveal, eventDestroys, revealRefusal, destroyRefusal, addReveal, removeReveal, addDestroy, removeDestroy, cellText, NO_REVEAL_AT_0 } from '../core/oweventtiles.ts';
 import { SpriteLayer } from './owspriteview.ts';
@@ -128,6 +129,7 @@ export class OverworldView {
   showSprites = false; // the sprites also while painting (always in the sprites mode)
   sprites = new SpriteLayer(this);
   levelTiles = new LevelTileLayer(this); // the level tiles as objects (the levels mode)
+  nameEditor = new LevelNameEditor(this); // the selected level tile's name, edited in place (the levels mode)
   reach = new ReachLayer(this); // path validation: the tiles Mario doesn't reach dimmed, the problems of the paths
   // the event the map is shown and painted as after (both layers; "Map after" in the bar), -1: the map before events
   // (kept per ROM in the browser, not in the ROM)
@@ -378,6 +380,7 @@ export class OverworldView {
     ctx.imageSmoothingEnabled = false;
     ctx.setTransform(z, 0, 0, z, -Math.round(this.scroller.scrollLeft * dpr), -Math.round(this.scroller.scrollTop * dpr));
     const lw = 1 / z;
+    this.nameEditor.place();
     // (the map's pixels where owShownAt shows them: the submaps' region moved, wrapping)
     for (const o of owShownCopies(this.region)) {
       ctx.save();
@@ -419,6 +422,7 @@ export class OverworldView {
     if (this.mode === 'sprites' || this.showSprites) this.sprites.paint(ctx, lw);
     if (this.mode === 'links' || this.showLinks) this.links.paint(ctx, lw);
     if (this.mode !== 'links' && this.mode !== 'sprites') this.paintSelected(lw);
+    this.nameEditor.paint(ctx, lw);
     this.paintStep(lw);
     const s = this.cellSize;
     if (this.mode === 'sprites') {
@@ -610,6 +614,7 @@ export class OverworldView {
     if (this.mode === 'links') { if (e.button === 0) this.links.down(c.x, c.y); return; }
     if (this.mode === 'sprites') { if (e.button === 0) { const p = this.point(e); this.sprites.down(p.x, p.y); } return; }
     if (this.mode === 'levels') {
+      if (e.button === 0 && this.nameEditor.down(this.point(e))) return;
       if (e.button === 0) this.levelTiles.down(c.x, c.y);
       else if (e.button === 2) this.levelTiles.menu(e.clientX, e.clientY, c.x, c.y);
       return;
@@ -806,6 +811,7 @@ export class OverworldView {
 
   // selects a layer 1 tile (a level tile in the list, any tile by Alt/Ctrl+click; l1Index); center: scroll the map to it
   selectTile(i: number, center: boolean): void {
+    if (i !== this.selected) this.nameEditor.close(true);
     this.selected = i;
     if (center && i >= 0) {
       const t = l1XY(i), { x, y } = owShownAt(this.region, t.x * 16 + 8, t.y * 16 + 8);
@@ -1185,6 +1191,7 @@ export class OverworldView {
 
   setMap(n: number): void {
     if (n === this.map) return;
+    this.nameEditor.close(true);
     this.map = n;
     this.selected = -1;
     this.l2Sel = null;
@@ -1199,6 +1206,7 @@ export class OverworldView {
   // ---------------- context bar (map, layer, view, zoom) ----------------
   setMode(m: OwMode): void {
     if (this.mode === m) return;
+    this.nameEditor.close(true);
     this.mode = m;
     this.levelTiles.cancel();
     if (m !== 'l1' && (this.eventPick?.at ?? -1) >= 0) this.cancelEventPick(); // (the tile a reveal becomes is picked in the layer 1 sheet)
@@ -1270,6 +1278,7 @@ export class OverworldView {
     // (Esc with any modifier: a stroke is never left running)
     if (k === 'escape' && this.brushDrag.cancel()) { this.paint(); return true; }
     if (k === 'escape' && this.levelTiles.cancel()) return true;
+    if (k === 'escape' && this.nameEditor.cancel()) return true;
     if (k === 'escape' && this.cancelEventPick()) return true;
     if (k === 'escape' && this.cancelReplace()) return true;
     if (e.ctrlKey || e.metaKey || e.altKey) return false;
@@ -1895,6 +1904,7 @@ export class OverworldView {
     this.buildLeft();
     this.redrawMap();
     this.updateStatus();
+    this.nameEditor.refresh();
   }
 
   show(): void {

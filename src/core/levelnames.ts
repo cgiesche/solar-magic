@@ -142,6 +142,37 @@ export function encodeName(text: string, multi = true): EncodedName {
   return { tiles, missing, shown };
 }
 
+// ---- a name typed in place (the overworld's Levels mode, #369): as its tiles, drawn in the map's font ----
+// a name being typed: its tiles (trailing spaces left out) and the caret, before tile `at`
+export interface NameCaret { tiles: number[]; at: number }
+// a name's tiles without the trailing spaces (what is typed into)
+export function trimName(tiles: number[]): number[] {
+  let n = tiles.length;
+  while (n && tiles[n - 1] === NAME_SPACE) n--;
+  return tiles.slice(0, n);
+}
+// a character typed at the caret: its tile put in; why it is refused (a string): the font has no tile for it (a tile
+// by number is typed in the properties' name field, `\XX`), the name has its 19 tiles
+export function typeNameChar(n: NameCaret, ch: string): NameCaret | string {
+  const t = CHAR_TILE.get(ch);
+  if (t === undefined) return `The font has no “${ch}”`;
+  if (n.tiles.length >= NAME_LEN) return `The name is full (${NAME_LEN} tiles)`;
+  return { tiles: [...n.tiles.slice(0, n.at), t, ...n.tiles.slice(n.at)], at: n.at + 1 };
+}
+// Backspace, Delete, ←, →, Home, End at the caret (null: not one of them)
+export function nameKey(n: NameCaret, key: string): NameCaret | null {
+  const { tiles, at } = n;
+  switch (key) {
+    case 'Backspace': return at ? { tiles: [...tiles.slice(0, at - 1), ...tiles.slice(at)], at: at - 1 } : n;
+    case 'Delete': return { tiles: [...tiles.slice(0, at), ...tiles.slice(at + 1)], at };
+    case 'ArrowLeft': return { tiles, at: Math.max(0, at - 1) };
+    case 'ArrowRight': return { tiles, at: Math.min(tiles.length, at + 1) };
+    case 'Home': return { tiles, at: 0 };
+    case 'End': return { tiles, at: tiles.length };
+  }
+  return null;
+}
+
 // ---- the game's names ----
 // the stripe the overworld's code writes for translevel tl's name (as where Mario stands on its tile, $049549 up to
 // $049553 run with A = tl): its 4-byte header, the tiles with their attribute, the end mark $FF

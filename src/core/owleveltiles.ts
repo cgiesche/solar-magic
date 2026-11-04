@@ -14,9 +14,9 @@
 import type { Rom } from './rom.ts';
 import {
   readL1, writeL1, readTranslevels, writeTranslevels, owTileWords, l1Index, l1XY, hasDestroyPatch, readDestroyList, writeDestroyList, destroySettingAt,
-  revealedTile, translevelToLevel, MAX_TRANSLEVEL, OW_L1_TILES, NO_EVENT,
+  revealedTile, translevelToLevel, MAX_TRANSLEVEL, OW_L1_TILES, NO_EVENT, MAP_NAMES,
 } from './overworld.ts';
-import { readEvents, writeEvents, paintEventL1 } from './owevents.ts';
+import { readEvents, writeEvents, paintEventL1, submapOf, type Rect } from './owevents.ts';
 import type { PathKind, LevelTileTest } from './owpaths.ts';
 import { hex } from './names.ts';
 
@@ -56,6 +56,16 @@ export function stopTile(kinds: readonly PathKind[]): number {
 export function levelsWithoutTile(tls: ArrayLike<number>): number[] {
   const held = new Set(Array.from(tls));
   return Array.from({ length: MAX_TRANSLEVEL }, (_, k) => k + 1).filter((tl) => !held.has(tl));
+}
+
+// "Also used by the tile on Vanilla Dome": the other level tiles entering a level (l1Index), by the map each is on
+// (views: the submaps' views), "" when none
+export function alsoUsedBy(others: number[], views: Rect[]): string {
+  if (!others.length) return '';
+  const n = new Map<number, number>();
+  for (const k of others) { const m = submapOf(views, k); n.set(m, (n.get(m) ?? 0) + 1); }
+  const on = [...n].sort((a, b) => a[0] - b[0]).map(([m, c]) => `${c === 1 ? 'the tile' : `the ${c} tiles`} on ${m ? MAP_NAMES[m] : 'the main map'}`);
+  return `Also used by ${on.length > 1 ? `${on.slice(0, -1).join(', ')} and ${on[on.length - 1]}` : on[0]}`;
 }
 
 // layer 1 and the translevels as in the ROM, changed by `f` and written back

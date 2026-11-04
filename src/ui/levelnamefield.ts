@@ -24,7 +24,7 @@ function setMultiChar(on: boolean): void {
 }
 
 // the layer 3 font of the map shown: tile t as the game writes a name's tile
-function font(r: OwRender): (t: number) => Uint32Array {
+export function nameFont(r: OwRender): (t: number) => Uint32Array {
   const tc = new TileCache(r.vram, r.cgram, (r.ppuRegs[0x0c] & 0x0f) << 13);
   return (t) => tc.get((NAME_ATTR << 8) | t, 2);
 }
@@ -35,7 +35,7 @@ function drawBorder(c: HTMLCanvasElement, r: OwRender | null, shown: number[]): 
   const ctx = c.getContext('2d')!, img = ctx.createImageData(W, H), px = new Uint32Array(img.data.buffer).fill(0xff000000);
   if (r) {
     const tc = new TileCache(r.vram, r.cgram, (r.ppuRegs[0x0c] & 0x0f) << 13), map = (r.ppuRegs[0x09] & 0xfc) << 9;
-    const at = NAME_VRAM * 2 - map, row = (at >> 6) - FIRST_ROW, col = (at >> 1) & 31, g = font(r);
+    const at = NAME_VRAM * 2 - map, row = (at >> 6) - FIRST_ROW, col = (at >> 1) & 31, g = nameFont(r);
     for (let y = 0; y < ROWS; y++) for (let x = 0; x < COLS; x++) {
       const a = map + ((FIRST_ROW + y) * COLS + x) * 2;
       blit8(px, W, H, tc.get(r.vram[a] | (r.vram[a + 1] << 8), 2), x * 8, y * 8);
@@ -119,7 +119,7 @@ export function levelNameField(app: App, tl: number, r: OwRender | null): HTMLEl
 function fontPicker(r: OwRender, pick: (t: number) => void): HTMLCanvasElement {
   const c = h('canvas', { width: 16 * 8, height: (FONT_TILES / 16) * 8, class: 'msg-font' });
   const ctx = c.getContext('2d')!, img = ctx.createImageData(c.width, c.height), px = new Uint32Array(img.data.buffer).fill(0xff000000);
-  const g = font(r);
+  const g = nameFont(r);
   for (let k = 0; k < FONT_TILES; k++) blit8(px, c.width, c.height, g(k), (k & 15) * 8, (k >> 4) * 8);
   ctx.putImageData(img, 0, 0);
   const tileAt = (e: MouseEvent) => {
