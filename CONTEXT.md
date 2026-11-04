@@ -230,7 +230,7 @@ What each event changes on a layer 1 cell over the game, in number order (core/o
 _Avoid_: tile history (a tile number moves between cells; the history is of the place)
 
 **When beaten…**:
-The Levels mode's sentence per exit of a level telling what passing it does, in the player's words (core/owexitsentence.ts): the level it opens (the level tile its event reveals – until the levels an event opens are derived from the paths), the level crumbling (its destroy), another tile revealed, the rest of the map its event changes, where an exit to the overworld takes Mario; "opens nothing yet" when its event changes nothing. Shown, not edited – except that a reveal or destroy can be taken away there.
+The Levels mode's sentence per exit of a level telling what passing it does, in the player's words (core/owexitsentence.ts): the levels it opens (its exit edges, as its arrows: none told while they are learned), the level crumbling (its destroy), another tile revealed, the rest of the map its event changes, where an exit to the overworld takes Mario; "opens nothing yet" when its event changes nothing. Shown, not edited – except that a reveal or destroy can be taken away there.
 
 **Reveal**:
 A layer 1 tile that changes into another when an event passes over it (Lunar Magic's reveal list: which tile becomes which). An event reveals at most one tile, a tile can be revealed by several events; any layer 1 tile. Edited with the event (its timeline under the playthrough strip: the tile clicked on the map, then what it becomes picked in the layer 1 sheet – the cell gets the tile the reveal list turns into it); the tile's properties name the events. Stays with its cell when a level tile moves.

@@ -2,8 +2,9 @@
 // arrow to each level its exits open – solid for the normal exit, dashed for a secret one, ending at the link leaving
 // the submap when the level is on another; an exit opening nothing Mario reaches a short red stub – a grey
 // dotted one when Mario doesn't reach its level even with every event passed (nothing can't be told). Hovering one
-// says what it is in the status bar. Derived once per ROM edit from the maps at every event progress (learned in the
-// probe worker), the path kinds and shapes; nothing is drawn while those are learned.
+// says what it is in the status bar; the "When beaten…" sentences tell the same levels. Derived once per ROM edit from
+// the maps at every event progress (learned in the probe worker), the path kinds and shapes; nothing is drawn while
+// those are learned.
 
 import type { OverworldView } from './overworld.ts';
 import { arrow } from './owlinkview.ts';
@@ -25,14 +26,15 @@ export class ExitArrowLayer {
   private found: { key: string; mapsUsed: unknown; edges: ExitEdge[] } | null = null;
   constructor(private view: OverworldView) {}
 
-  // something the edges need came
+  // something the edges need came (the arrows and the "When beaten…" sentences show them)
   private learned = () => {
-    if (!this.view.root.isConnected) return;
-    if (this.show && this.view.mode === 'levels') this.view.paint();
+    if (!this.view.root.isConnected || this.view.mode !== 'levels') return;
+    if (this.show) this.view.paint();
+    if (this.edges()) this.view.buildSide(); // (the sentences tell them once they are found)
   };
 
-  // the edges of the ROM as it is, null while something they need is learned
-  private edges(): ExitEdge[] | null {
+  // the edges of the ROM as it is, null while something they need is learned (also the "When beaten…" sentences')
+  edges(): ExitEdge[] | null {
     const v = this.view, app = v.app, rom = app.rom;
     const kinds = v.pathKinds(), shapes = app.pathShapes(this.learned), maps = app.overworldProgressMaps(this.learned);
     if (!kinds || !shapes || !maps || !v.views) return null;

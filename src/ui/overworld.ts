@@ -1678,14 +1678,14 @@ export class OverworldView {
     );
   }
 
-  // "When beaten…": a sentence per exit of what passing it does (owexitsentence.ts), in the player's words, the event
-  // number after it. Hovering a clause outlines its tiles on the map, a click shows the map as after the exit's event in
-  // the strip, × on a reveal or destroy takes it away (one ROM edit); an exit whose event changes nothing "opens nothing
-  // yet". Exits to the overworld passing none of the exits (ending the turn) are told below.
+  // "When beaten…": a sentence per exit of what passing it does (owexitsentence.ts; the levels it opens as its arrows,
+  // none told while they are learned: said so), in the player's words, the event number after it. Hovering a clause
+  // outlines its tiles on the map, a click shows the map as after the exit's event in the strip, × on a reveal or
+  // destroy takes it away (one ROM edit); an exit whose event changes nothing "opens nothing yet". Exits to the overworld passing none of the exits (ending the turn) are told below.
   exitResultRows(tl: number): HTMLElement[] {
-    const rom = this.app.rom, { teleports } = this.exitResults(tl), runners = eventRunners(rom), kinds = this.pathKinds();
+    const rom = this.app.rom, { teleports } = this.exitResults(tl), runners = eventRunners(rom), kinds = this.pathKinds(), edges = this.exits.edges();
     this.hoverClause = null; // (built anew: the clause hovered is gone)
-    const sentences = exitSentences(rom, tl, { level: this.levelWords, tile: (t) => tileWords(kinds, t) }, teleports, kinds ? this.isLevelTile : undefined);
+    const sentences = exitSentences(rom, tl, { level: this.levelWords, tile: (t) => tileWords(kinds, t) }, teleports, edges);
     if (!sentences.length && !teleports.length) return [];
     const clause = (c: Clause, e: number) => h('span', {
       class: 'ow-clause', title: 'Shows the map as after this exit\'s event in the strip',
@@ -1700,6 +1700,7 @@ export class OverworldView {
     const others = teleports.filter((t) => !sentences.some((x) => x.exit === teleportExit(t.action)));
     return [
       h('div', { class: 'hint' }, 'When beaten… (outlined on the map, a click shows it in the strip):'),
+      ...(edges ? [] : [h('div', { class: 'hint' }, 'The levels the exits open: being learned …')]),
       ...sentences.map((x) => h('div', { class: 'ow-sentence' },
         h('b', null, `${EXIT_NAMES[x.exit]}: `),
         ...(x.clauses.length ? x.clauses.flatMap((c, k) => (k ? [' · ', clause(c, x.event)] : [clause(c, x.event)]))
