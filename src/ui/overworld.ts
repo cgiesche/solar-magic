@@ -4,7 +4,7 @@ import type { App } from './app.ts';
 import type { Watch } from '../core/romwatch.ts';
 import { StateMemo } from '../core/romdeps.ts';
 import { syncBowsieMaxTile } from '../core/bowsie.ts';
-import { h, toast, select, checkbox, hexInput, attachPanZoom, zoomControl, pixelZoomSteps, snapZoom, attachRectPick, emptyState, putImage, type CellRect } from './dom.ts';
+import { h, toast, choose, select, checkbox, hexInput, attachPanZoom, zoomControl, pixelZoomSteps, snapZoom, attachRectPick, emptyState, putImage, type CellRect } from './dom.ts';
 import { BrushDrag, drawBrushFrame, paintButton } from './brushsurface.ts';
 import {
   type OwRender, gameL1, readL1, readL2, l1Index, l1XY, l2Index, readTranslevels, writeTranslevels, readMaps,
@@ -27,7 +27,7 @@ import { isPathKind, type PathKind, type PathShapes } from '../core/owpaths.ts';
 import { pathWays, pathTileText, type PathWay } from '../core/owpathshape.ts';
 import { emptyL1Tiles, freeL1Tiles, sheetPages, l1TileLines, l1Hex, l1BrushEntries, NO_TILE, SHEET_COLS, type SheetPage } from '../core/owl1sheet.ts';
 import { findL2Brush, l2BrushPalettes, l2SharedBits, l2SheetEntry, L2_SHEET_COLS, L2_SHEET_ROWS, L2_FLIP_X, L2_FLIP_Y, L2_PRIORITY, type SheetMark } from '../core/owl2sheet.ts';
-import { mapPieces, PIECE_COLS } from '../core/owl2pieces.ts';
+import { mapPieces, piecesAt, replacePiece, samePiece, gridInside, l2Block, PIECE_COLS } from '../core/owl2pieces.ts';
 import { skipsRevealWalk } from '../core/revealwalk.ts';
 import type { OwSpriteView } from '../core/owsprites.ts';
 import { LinkLayer } from './owlinkview.ts';
@@ -147,6 +147,11 @@ export class OverworldView {
   // a reveal or destroy being added to the event in the timeline: the cell clicked on the map (at -1 until then), for
   // a reveal then the tile it becomes picked in the layer 1 sheet
   private eventPick: { kind: 'reveal' | 'destroy'; at: number } | null = null;
+  // the layer 2 selection: the rectangle last picked from layer 2 (larger than a piece), where "Replace piece…" replaces
+  // the pieces wholly inside it (null: the submap's view)
+  private l2Sel: CellRect | null = null;
+  // "Replace piece…" (#370) under way: the piece to replace being picked (from: null), then the new one
+  private replacing: { from: number[] | null } | null = null;
   private playing: { start: number; before: HTMLCanvasElement; stepMs: number; fade: boolean } | null = null;
   private timeline = h('div', { class: 'ow-timeline' });
   showGrid = false;
@@ -429,7 +434,11 @@ export class OverworldView {
     } else {
       // the cells being picked, else the area the brush would paint
       const pick = this.brushDrag.pickFrame(), r = pick ? this.clampRect(pick) : this.hover && this.brushDrag.hoverFrame(this.hover);
-      if (r) drawBrushFrame(ctx, pick ? 'pick' : 'hover', [r.x * s, r.y * s, r.w * s, r.h * s], lw);
+      const sel = !pick ? this.l2Sel : null; // (the layer 2 selection: where "Replace piece…" replaces)
+      if (sel) drawBrushFrame(ctx, 'selection', [sel.x * s, sel.y * s, sel.w * s, sel.h * s], lw);
+      // (a piece being picked for "Replace piece…": the grid cell under the mouse)
+      if (this.replacing && this.hover && !pick) drawBrushFrame(ctx, 'hover', [(this.hover.x & ~1) * s, (this.hover.y & ~1) * s, 2 * s, 2 * s], lw);
+      else if (r) drawBrushFrame(ctx, pick ? 'pick' : 'hover', [r.x * s, r.y * s, r.w * s, r.h * s], lw);
     }
   }
 
@@ -591,6 +600,11 @@ export class OverworldView {
     // a reveal or destroy being added: the tile clicked
     if (this.eventPick && this.eventPick.at < 0 && e.button === 0) { const p = this.cell(e, 16); this.pickEventCell(p.x, p.y); return; }
     const c = this.cell(e);
+    // "Replace piece…": the piece clicked on the map (the 16-pixel grid's cell under the mouse)
+    if (this.replacing && e.button === 0) {
+      if (c.x >= 0 && c.y >= 0 && c.x < this.cells.w && c.y < this.cells.h) this.pickReplace(l2Block(this.paintedL2(), this.region, c.x & ~1, c.y & ~1));
+      return;
+    }
     // (links and moved starts are written with the submap of their tiles: not before the submaps' views are known)
     if ((this.mode === 'links' || this.mode === 'sprites') && !this.views) return;
     if (this.mode === 'links') { if (e.button === 0) this.links.down(c.x, c.y); return; }
@@ -605,8 +619,7 @@ export class OverworldView {
       if (this.mode === 'l1' && !this.pathKinds()) { toast('The path tiles are still being learned – layer 1 can be painted in a moment.'); return; }
       if (this.mode === 'l1' && this.ev?.without === null) { toast('Layer 1 can\'t be painted on this event: the map without its layer 1 changes could not be emulated.', 'error'); return; }
       if (this.mode === 'l1' && this.ev && !this.evL1Ready()) { toast('The map after the event is still being emulated – layer 1 can be painted in a moment.'); return; }
-      this.stroke = new OverworldStroke(this.app.rom, this.mode, this, this.isLevelTile,
-        this.ev && { event: this.event, after: this.ev.after, l1: this.ev.l1, game: this.ev.game, without: this.ev.without, place: () => this.place(this.event) });
+      this.stroke = this.newStroke(this.mode);
       this.brushDrag.startPaint(c);
       return;
     }
@@ -659,18 +672,80 @@ export class OverworldView {
     return { x: Math.min(x0, n.w - 1), y: Math.min(y0, n.h - 1), w: Math.max(1, x1 - x0 + 1), h: Math.max(1, y1 - y0 + 1) };
   }
 
+  // a stroke on layer `layer` begun: into the map before events, or as after the event of "Map after"
+  private newStroke(layer: 'l1' | 'l2'): OverworldStroke {
+    return new OverworldStroke(this.app.rom, layer, this, this.isLevelTile,
+      this.ev && { event: this.event, after: this.ev.after, l1: this.ev.l1, game: this.ev.game, without: this.ev.without, place: () => this.place(this.event) });
+  }
+
+  // the layer 2 a stroke paints: as after the event of "Map after", or the map before events
+  private paintedL2(): Uint16Array {
+    return this.ev ? this.ev.after : this.l2;
+  }
+
+  // "Replace piece…" (#370): the piece to replace picked, then the new one (on the map or in "Pieces on this map")
+  private startReplace(): void {
+    this.replacing = { from: null };
+    this.buildSide();
+    this.updateStatus();
+  }
+  // Esc or the button again: nothing replaced; false: none under way
+  private cancelReplace(): boolean {
+    if (!this.replacing) return false;
+    this.replacing = null;
+    this.buildSide();
+    this.updateStatus();
+    this.paint();
+    return true;
+  }
+  private pickReplace(p: number[]): void {
+    const r = this.replacing;
+    if (!r) return;
+    if (!r.from) r.from = p.slice();
+    else { this.replacing = null; void this.replacePieces(r.from, p); }
+    this.buildSide();
+    this.updateStatus();
+    this.paint();
+  }
+  // every piece `from` on its grid wholly inside the layer 2 selection (none: the submap's whole view, after a
+  // confirmation naming the count) becomes `to` (core/owl2pieces.ts replacePiece): one stroke, one ROM edit; in an
+  // event painted as the map after it
+  private async replacePieces(from: number[], to: number[]): Promise<void> {
+    if (samePiece(from, to)) { toast('Not replaced: the new piece is the one to replace', 'error'); return; }
+    const views = this.views;
+    if (!views) { toast('The submaps are still being loaded, try again'); return; }
+    const sel = this.l2Sel, inside = sel && gridInside(sel);
+    if (sel && !inside) { toast('Not replaced: no piece lies wholly inside the selection', 'error'); return; }
+    const area = () => inside ?? views[this.map];
+    const n = piecesAt(this.paintedL2(), this.region, area(), from).length;
+    if (!n) { toast(`Not replaced: the piece is not ${sel ? 'in the selection' : 'on this map'}`, 'error'); return; }
+    if (!sel) {
+      const map = this.map, ev = this.event;
+      const ok = await choose('Replace piece', `Replace ${n === 1 ? 'the 1 piece' : `all ${n} pieces`} of this kind on the whole map${this.ev ? ` (as after event ${hex(this.event, 2)})` : ''} with the new one? (undoable; to replace only in a part of the map, select a rectangle on it first)`,
+        [{ label: `Replace ${n}`, primary: true }, { label: 'Cancel' }]);
+      if (ok !== 0 || map !== this.map || ev !== this.event || this.brushDrag.painting) return;
+    }
+    const stroke = this.stroke = this.newStroke('l2');
+    const done = replacePiece(this.paintedL2(), this.region, area(), from, to, (x, y, v) => stroke.paint(this.region, x, y, v));
+    if (!done) { this.stroke = null; stroke.cancel(); return; }
+    if (this.endStroke(this.ev ? `${eventTitle(eventRunners(this.app.rom), this.event)}: replace layer 2 piece` : 'Replace layer 2 piece'))
+      toast(`Replaced ${done} piece${done === 1 ? '' : 's'}`);
+  }
+
   // a stroke is one ROM edit, written when it ends (owstroke.ts)
-  endStroke(): void {
+  endStroke(label?: string): boolean {
     const stroke = this.stroke;
     this.stroke = null;
-    if (!stroke) return;
+    if (!stroke) return false;
     const end = stroke.end();
-    if (!end.write) return;
+    if (!end.write) return false;
     try {
-      this.app.romEdit(end.label, end.write);
+      this.app.romEdit(label ?? end.label, end.write);
+      return true;
     } catch (e) {
       toast(`Not painted: ${e instanceof Error ? e.message : e}`, 'error');
       this.sync();
+      return false;
     }
   }
 
@@ -705,7 +780,11 @@ export class OverworldView {
       entries = left;
     }
     this.brush = { kind: this.mode === 'l2' ? 'l2' : 'l1', w: r.w, h: r.h, entries };
-    if (this.mode === 'l2') { const p = l2BrushPalettes(entries); if (p.length === 1) this.l2Pal = p[0]; } // (the sheet in the brush's palette)
+    if (this.mode === 'l2') {
+      const p = l2BrushPalettes(entries);
+      if (p.length === 1) this.l2Pal = p[0]; // (the sheet in the brush's palette)
+      this.l2Sel = r.w * r.h > 4 ? { ...r } : null; // (a click, a piece picked as the brush: no selection)
+    }
     this.revealMark = true;
     this.buildSide();
     this.paint();
@@ -750,6 +829,10 @@ export class OverworldView {
     if (this.eventPick) {
       this.statusText.textContent = this.eventPick.at < 0 ? `Click the tile the event ${this.eventPick.kind === 'reveal' ? 'reveals' : 'destroys'} · Esc cancels`
         : 'Click the tile it becomes in the layer 1 sheet · Esc cancels';
+      return;
+    }
+    if (this.replacing) {
+      this.statusText.textContent = `${this.replacing.from ? 'Click the new piece' : 'Click the piece to replace'} on the map or in “Pieces on this map” · Esc cancels`;
       return;
     }
     if (this.mode === 'sprites' && !c) {
@@ -1104,6 +1187,8 @@ export class OverworldView {
     if (n === this.map) return;
     this.map = n;
     this.selected = -1;
+    this.l2Sel = null;
+    this.replacing = null;
     this.redrawMap();
     this.buildBar();
     this.buildSide();
@@ -1117,6 +1202,7 @@ export class OverworldView {
     this.mode = m;
     this.levelTiles.cancel();
     if (m !== 'l1' && (this.eventPick?.at ?? -1) >= 0) this.cancelEventPick(); // (the tile a reveal becomes is picked in the layer 1 sheet)
+    if (m !== 'l2') { this.replacing = null; this.l2Sel = null; }
     this.buildLeft(); // (levels without a level tile are dragged onto the map in the levels mode)
     if (isLayerMode(m) && this.brush.kind !== m) this.brush = { kind: m, w: 1, h: 1, entries: [m === 'l1' ? FIRST_L1_TILE : 0] };
     this.buildBar();
@@ -1185,6 +1271,7 @@ export class OverworldView {
     if (k === 'escape' && this.brushDrag.cancel()) { this.paint(); return true; }
     if (k === 'escape' && this.levelTiles.cancel()) return true;
     if (k === 'escape' && this.cancelEventPick()) return true;
+    if (k === 'escape' && this.cancelReplace()) return true;
     if (e.ctrlKey || e.metaKey || e.altKey) return false;
     if (k === 'escape' && this.mode === 'sprites' && this.sprites.unpick()) return true;
     if (k === 'escape' && this.mode === 'links' && this.links.cancelPending()) return true;
@@ -1697,6 +1784,7 @@ export class OverworldView {
       h('div', { class: 'row' }, flip(L2_FLIP_X, 'X-Flip'), flip(L2_FLIP_Y, 'Y-Flip'), flip(L2_PRIORITY, 'Priority')),
       h('div', { class: 'hint mono' }, brushInfo),
       h('div', { class: 'hint ow-page' }, 'Pieces on this map (16×16, the most used first)'),
+      this.replaceRow(),
       this.piecesSheet(entries),
       h('div', { class: 'row ow-fold' }, h('span', { class: 'hint' }, '8×8 tiles'),
         h('button', { onclick: () => { this.l2TilesOpen = !this.l2TilesOpen; this.buildSide(); } }, this.l2TilesOpen ? 'Fold' : 'Show')),
@@ -1705,6 +1793,18 @@ export class OverworldView {
         pal()] : []));
   }
 
+  // "Replace piece…" and where it replaces: the selection (the rectangle last picked from the map, × drops it) or the
+  // whole map; while under way which piece is picked next
+  private replaceRow(): HTMLElement {
+    const sel = this.l2Sel, r = this.replacing;
+    return h('div', { class: 'row' },
+      h('button', {
+        class: r ? 'active' : '', onclick: () => { if (!this.cancelReplace()) this.startReplace(); },
+        title: 'Every piece of one kind (on its 16-pixel grid) in the selection becomes another one: click the piece to replace, then the new one – on the map or below. Without a selection: the whole map, after a confirmation. One undo step; with "Map after: event X" painted into the event',
+      }, 'Replace piece…'),
+      h('span', { class: 'hint' }, r ? (r.from ? 'now the new piece' : 'click the piece to replace') : sel ? `in the selection ${sel.w}×${sel.h}` : 'on the whole map'),
+      ...(sel && !r ? [h('button', { title: 'Drop the selection: replace on the whole map', onclick: () => { this.l2Sel = null; this.buildSide(); this.paint(); } }, '×')] : []));
+  }
   private l2TilesOpen = true; // the 8x8 sheet below the pieces shown (folded: the pieces alone)
   // "Pieces on this map" (#337, core/owl2pieces.ts): the 2x2 entry blocks on the 16-pixel grid of the submap's view (the
   // main map whole) in the map before events, each once, the most used first, PIECE_COLS a row; a click takes one as the
@@ -1723,7 +1823,10 @@ export class OverworldView {
     ctx.drawImage(sheet, 0, 0);
     const b = this.brush;
     const at = b.kind === 'l2' && b.w === 2 && b.h === 2 ? pieces.findIndex((p) => p.entries.every((v, j) => v === b.entries[j])) : -1;
-    if (at >= 0) outlineCells(ctx, { x: at % PIECE_COLS, y: Math.floor(at / PIECE_COLS), w: 1, h: 1 }, 16);
+    if (at >= 0) outlineCells(ctx, pieceBox(at), 16);
+    // (the piece to replace, picked: dashed)
+    const from = this.replacing?.from, fi = from ? pieces.findIndex((p) => samePiece(p.entries, from)) : -1;
+    if (fi >= 0) { ctx.setLineDash([3, 2]); outlineCells(ctx, pieceBox(fi), 16); ctx.setLineDash([]); }
     const cellAt = (e: MouseEvent) => {
       const rc = c.getBoundingClientRect();
       const x = Math.floor((e.clientX - rc.left) / (rc.width / PIECE_COLS)), y = Math.floor((e.clientY - rc.top) / (rc.height / rows));
@@ -1735,6 +1838,7 @@ export class OverworldView {
       const { p } = cellAt(e);
       if (!p) return;
       hidePickerPreview(c);
+      if (this.replacing) { this.pickReplace(p.entries); return; }
       this.brush = { kind: 'l2', w: 2, h: 2, entries: p.entries.slice() };
       this.buildSide();
     });
@@ -1855,6 +1959,8 @@ const KIND_BORDER = Object.fromEntries(Object.entries(KIND_RGB).map(([k, [c]]) =
 // the background of transparent pixels in the paint sheet: a checkerboard of 4x4 pixel squares (layer 2 shows there)
 const checker = (x: number, y: number): number => (((x >> 2) ^ (y >> 2)) & 1 ? 0xff2a2a2a : 0xff1c1c1c);
 // the brush's rectangle r (cells of `cell` pixels) outlined in a sheet, an eighth of a cell wide
+// piece k's cell in the "Pieces on this map" sheet
+const pieceBox = (k: number) => ({ x: k % PIECE_COLS, y: Math.floor(k / PIECE_COLS), w: 1, h: 1 });
 function outlineCells(ctx: CanvasRenderingContext2D, r: { x: number; y: number; w: number; h: number }, cell: number): void {
   ctx.strokeStyle = '#4cc2ff'; ctx.lineWidth = cell / 8;
   ctx.strokeRect(r.x * cell + ctx.lineWidth / 2, r.y * cell + ctx.lineWidth / 2, r.w * cell - ctx.lineWidth, r.h * cell - ctx.lineWidth);

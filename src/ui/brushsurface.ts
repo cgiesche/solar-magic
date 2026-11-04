@@ -11,6 +11,7 @@
 import type { CellRect } from './dom.ts';
 
 const HOVER_STROKE = 'rgba(255,255,0,0.9)', PICK_STROKE = '#4cc2ff', PICK_FILL = 'rgba(76,194,255,0.15)';
+// (a selection kept on the picture, as the overworld's layer 2 one "Replace piece…" works in: the pick's colour, dashed)
 export const PAINT_HINT = 'Click/drag picks up tiles · Right click/Shift+click paints';
 export const PAINT_TITLE = 'Right click/Shift+click paints';
 
@@ -97,10 +98,12 @@ export class BrushDrag {
 }
 
 // a frame drawn: the box [x, y, w, h] in the context's units, lw: one screen pixel in them
-export function drawBrushFrame(ctx: CanvasRenderingContext2D, kind: 'pick' | 'hover', box: [number, number, number, number], lw: number): void {
+export function drawBrushFrame(ctx: CanvasRenderingContext2D, kind: 'pick' | 'hover' | 'selection', box: [number, number, number, number], lw: number): void {
   ctx.lineWidth = lw;
-  if (kind === 'pick') { ctx.fillStyle = PICK_FILL; ctx.fillRect(...box); ctx.strokeStyle = PICK_STROKE; } else ctx.strokeStyle = HOVER_STROKE;
+  if (kind === 'pick') { ctx.fillStyle = PICK_FILL; ctx.fillRect(...box); ctx.strokeStyle = PICK_STROKE; } else ctx.strokeStyle = kind === 'selection' ? PICK_STROKE : HOVER_STROKE;
+  if (kind === 'selection') ctx.setLineDash([4 * lw, 3 * lw]);
   ctx.strokeRect(...box);
+  ctx.setLineDash([]);
 }
 
 export interface BrushSurfaceOptions {

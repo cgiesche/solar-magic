@@ -1,14 +1,15 @@
 // The overworld layer 2 "pieces on this map" (core/owl2pieces.ts, #337): the 2x2 entry blocks on the 16-pixel grid of
 // a submap's view (the main map whole), from the map before events, each once with its palettes and flips, the most
-// used first.
+// used first. "Replace piece" (#370, replacePiece): every occurrence of a piece on its grid in a rectangle (or a submap's
+// whole view) becomes another one, through a stroke: one ROM edit, in an event painted as the map after it.
 // node tools/testowl2pieces.ts
 import { Rom } from '../src/core/rom.ts';
-import { OverworldEmulator, OverworldLoads, readL2, readMaps, l2Index } from '../src/core/overworld.ts';
-import { OverworldStroke } from '../src/core/owstroke.ts';
+import { OverworldEmulator, OverworldLoads, readL2, readMaps, l2Index, baseEvent } from '../src/core/overworld.ts';
+import { OverworldStroke, type OwEventMaps } from '../src/core/owstroke.ts';
 import { RomEditSession } from '../src/core/romedit.ts';
 import { BrushDrag } from '../src/ui/brushsurface.ts';
-import { submapViews } from '../src/core/owevents.ts';
-import { mapPieces, l2Block } from '../src/core/owl2pieces.ts';
+import { submapViews, readEvents, applyEvents, eventRunners, eventPlace, l2XY } from '../src/core/owevents.ts';
+import { mapPieces, l2Block, piecesAt, replacePiece, gridInside } from '../src/core/owl2pieces.ts';
 import { editorImage } from './fixture.ts';
 
 let bad = 0;
@@ -69,6 +70,57 @@ check(at(40, 20) === piece.entries.join() && at(42, 20) === piece.entries.join()
 check(s.history.undoStack.length === 1, `one stroke one ROM edit (${s.history.undoStack.length})`);
 const counted = mapPieces(after, 0, { x: 0, y: 0, w: 64, h: 64 }).find((p) => p.entries.join() === piece.entries.join())!.count;
 check(counted >= before + 1, `the pieces from the ROM after the edit count it again (${before} → ${counted})`);
+
+// ---- Replace piece (#370) ----
+{
+  const rom = new Rom(await editorImage()), s = new RomEditSession(rom), l2r = readL2(rom), whole = { x: 0, y: 0, w: 64, h: 64 };
+  const pieces = mapPieces(l2r, 0, whole), water = pieces[0], other = pieces[1];
+  const count = (m: ArrayLike<number>, p: number[]) => mapPieces(m, 0, whole).find((q) => q.entries.join() === p.join())?.count ?? 0;
+  const sel = { x: 3, y: 2, w: 20, h: 13 }, area = gridInside(sel)!; // (odd corners: the grid cells wholly inside, x 4–20, y 2–12)
+  check(area.x === 4 && area.y === 2 && area.w === 18 && area.h === 12, `a selection's pieces: those wholly inside it (${JSON.stringify(area)})`);
+  check(gridInside({ x: 3, y: 3, w: 2, h: 2 }) === null && gridInside({ x: 2, y: 2, w: 2, h: 2 })?.w === 2, 'a selection holding no whole piece: none');
+  const inside = piecesAt(l2r, 0, area, water.entries);
+  check(inside.length > 10 && inside.length < water.count && inside.every((c) => c.x >= 4 && c.x + 2 <= 23 && c.y >= 2 && c.y + 2 <= 15 && !(c.x & 1) && !(c.y & 1)),
+    `water in the rectangle: ${inside.length} of ${water.count}, on its 2-cell grid, wholly inside`);
+  const maps = readMaps(rom), st = new OverworldStroke(rom, 'l2', maps, () => false);
+  const n = replacePiece(maps.l2, 0, area, water.entries, other.entries, (x, y, v) => st.paint(0, x, y, v));
+  const end = st.end();
+  s.edit(end.label, end.write!, { key: null });
+  const after = readL2(rom);
+  check(n === inside.length, `the number replaced: ${n}`);
+  check(count(after, water.entries) === water.count - n && count(after, other.entries) === other.count + n, `the water's count down by ${n} (${water.count} → ${count(after, water.entries)}), the new piece's up by it`);
+  check(inside.every((c) => l2Block(after, 0, c.x, c.y).join() === other.entries.join()), 'each replaced one is the new piece, entries with its palettes and flips');
+  const changed = [...after.keys()].filter((i) => after[i] !== l2r[i]);
+  const cellsOf = new Set(inside.map((c) => `${c.x >> 1},${c.y >> 1}`));
+  check(changed.every((i) => { const c = l2XY(i); return c.r === 0 && cellsOf.has(`${c.x >> 1},${c.y >> 1}`); }), `only the replaced pieces' entries changed (${changed.length})`);
+  check(piecesAt(after, 0, whole, water.entries).length === water.count - n, 'water outside the rectangle left as it was');
+  check(s.history.undoStack.length === 1, `one ROM edit (${s.history.undoStack.length})`);
+  s.undo();
+  check(count(readL2(rom), water.entries) === water.count, 'undo: the water back');
+  check(replacePiece(after, 0, area, other.entries, other.entries, () => { throw new Error('put'); }) === 0, 'a piece replaced by itself: nothing put');
+  // without a selection: the submap's whole view, the number replaced the count the pieces sheet shows (the confirmation's)
+  const views2 = submapViews(new OverworldLoads(new OverworldEmulator(new Rom(await editorImage())), 2));
+  const yiAll = mapPieces(readL2(rom), 1, views2[1]), grass = yiAll[1];
+  const m2 = readMaps(rom), st2 = new OverworldStroke(rom, 'l2', m2, () => false);
+  const n2 = replacePiece(m2.l2, 1, views2[1], grass.entries, yiAll[0].entries, (x, y, v) => st2.paint(1, x, y, v));
+  st2.end().write!();
+  check(n2 === grass.count && !mapPieces(readL2(rom), 1, views2[1]).some((p) => p.entries.join() === grass.entries.join()), `Yoshi's Island's whole view: all ${grass.count} grass pieces replaced`);
+  // in an event: painted as the map after it (its steps), the map before it as it was
+  const r3 = new Rom(await editorImage()), s3 = new RomEditSession(r3), e = baseEvent(r3, 0x29), d = readEvents(r3), base = readL2(r3);
+  const pl = eventPlace(eventRunners(r3), views2, e, 0);
+  const em: OwEventMaps = { event: e, after: applyEvents(base, d, 0, e + 1), l1: null, game: null, without: undefined, place: () => pl };
+  const beforeEv = applyEvents(base, d, 0, e), mainArea = { x: 0, y: 0, w: 8, h: 8 };
+  const wEv = piecesAt(em.after, 0, mainArea, water.entries).length;
+  const st3 = new OverworldStroke(r3, 'l2', readMaps(r3), () => false, em);
+  const n3 = replacePiece(em.after, 0, mainArea, water.entries, other.entries, (x, y, v) => st3.paint(0, x, y, v));
+  const e3 = st3.end();
+  s3.edit(e3.label, e3.write!, { key: null });
+  const d3 = readEvents(r3), b3 = readL2(r3);
+  check(n3 === wEv && n3 > 0 && piecesAt(applyEvents(b3, d3, 0, e + 1), 0, mainArea, other.entries).length >= n3, `in event ${e.toString(16)}: ${n3} pieces replaced in the map after it`);
+  check(piecesAt(applyEvents(b3, d3, 0, e), 0, mainArea, water.entries).length === piecesAt(beforeEv, 0, mainArea, water.entries).length && b3.every((v, i) => v === base[i]),
+    'the map before the event and before events as they were');
+  check(s3.history.undoStack.length === 1, 'one ROM edit');
+}
 
 if (bad) { console.log(`${bad} failed`); process.exit(1); }
 console.log('all ok');

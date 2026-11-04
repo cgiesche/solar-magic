@@ -19,6 +19,7 @@ ui/brushsurface.ts holds the convention: BrushDrag is the drag without the DOM (
 - **The graphics tab's pixel pane** draws with the foreground color on the left and the background color on the right, as pixel editors do; Alt picks a color.
 - **Objects and sprites in the level** are selected, moved and box-selected with the left button; the right inserts the chosen item. They are items, not cells of a brush.
 - **Tile sheets** (pickers) only pick (dom.ts attachRectPick); Ctrl+click goes to a tile's definition. The overworld's "Pieces on this map" (layer 2's map pieces) picks one piece per click, no rectangle: its pieces are not neighbours.
+- **Picks for an action under way** take one cell instead of picking into the brush: the overworld's "+ Reveal"/"+ Destroy" (the tile) and layer 2's "Replace piece…" (the piece on the 16-pixel grid under the click, on the map or in "Pieces on this map"); Esc cancels. The rectangle last picked from layer 2 (larger than a piece) stays as the layer 2 selection, dashed, where "Replace piece…" works.
 
 ## Considered options
 

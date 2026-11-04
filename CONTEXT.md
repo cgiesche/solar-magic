@@ -178,7 +178,7 @@ A layer 1 tile drawn as tile 000, on no map (nor put there by an event) and doin
 _Avoid_: empty tile (an empty tile may still be an invisible path or level tile)
 
 **Map piece** (overworld layer 2):
-A 16x16 block of layer 2 – 2x2 tilemap entries, each with its palette and flips – on the 16-pixel grid of a submap's view: what the map is made of (water, grass, shores, hills). The layer 2 paint panel's "Pieces on this map" lists those of the map before events, each once, the most used first; one is a 2x2 brush.
+A 16x16 block of layer 2 – 2x2 tilemap entries, each with its palette and flips – on the 16-pixel grid of a submap's view: what the map is made of (water, grass, shores, hills). The layer 2 paint panel's "Pieces on this map" lists those of the map before events, each once, the most used first; one is a 2x2 brush. "Replace piece…" turns every occurrence of one piece on the grid into another – wholly inside the **layer 2 selection** (the rectangle last picked from layer 2 when larger than a piece, dashed on the map; not the level editor's selection of objects) or, without one, in the submap's whole view after a confirmation naming the count; one stroke, one ROM edit (in an event: the map after it).
 _Avoid_: Map16 tile (layer 1's), event step (an event's 6x6 or 2x2 change)
 
 **Path shape**:
