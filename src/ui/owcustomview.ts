@@ -7,6 +7,7 @@
 import type { OverworldView } from './overworld.ts';
 import { h, select, hexInput, toast } from './dom.ts';
 import { thumbCanvas } from './thumbs.ts';
+import { budgetRow } from './budgetgauge.ts';
 import type { OwSpriteView } from '../core/owsprites.ts';
 import { l1Index, MAP_NAMES } from '../core/overworld.ts';
 import { hex } from '../core/names.ts';
@@ -157,7 +158,7 @@ export class CustomSpriteLayer {
     if (!inst.length) {
       out.push(h('div', { class: 'hint' }, 'None installed – overworld sprites in BOWSIE\'s format come as packages (ROM → Packages …). Placed, they are kept in Lunar Magic\'s custom overworld sprite table.'));
     } else {
-      out.push(h('div', { class: 'hint' }, 'Pick one, then click on the map to place it (again to stop).'),
+      out.push(budgetRow('Pick one, then click on the map to place it (again to stop).', this.view.budget('customSprites')),
         h('div', { class: 'ow-cpal' }, inst.map((i, k) => h('button', { class: 'ow-cpal-item' + (this.picked === i.num ? ' active' : ''), title: `${hex(i.num, 2)} ${i.name}${i.description ? '\n' + i.description : ''}`, onclick: () => this.pick(i.num) },
           looks[k] ?? h('span', { class: 'ow-cpal-none' }, hex(i.num, 2)), h('span', null, `${hex(i.num, 2)} ${i.name}`)))));
     }

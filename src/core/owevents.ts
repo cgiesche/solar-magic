@@ -171,6 +171,8 @@ function usedStorage(d: EventData, skip: number): Uint8Array {
   d.steps.forEach((s, e) => { if (e !== skip) for (const p of eventPieces(d, e)) used.fill(1, p.at, p.at + (isBig(d, p.at) ? PIECE6 : PIECE2)); });
   return used;
 }
+// the storage places the events' pieces use (of STORAGE_MAX)
+export const storagePlacesUsed = (d: EventData): number => usedStorage(d, -1).reduce((n, v) => n + v, 0);
 
 // The changes of `after` (the map as it is to look after event e) to the map before it (events 0 … e-1 in number
 // order), as pieces: 6x6 where one covers at least a third changed tiles and no tile another event writes, else

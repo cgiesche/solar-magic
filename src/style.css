@@ -367,6 +367,14 @@ canvas.sheet-fill { width: 100%; height: auto; image-rendering: auto; }
 .ow-pal, .ow-pal8 { image-rendering: pixelated; cursor: crosshair; display: block; }
 .ow-fold { align-items: center; gap: 8px; margin: 4px 0; }
 .ow-page { margin-top: 8px; }
+/* a ROM limit's gauge beside its action (budgetgauge.ts): neutral below 80 %, amber from 80 %, red when full */
+.budget { --gauge: var(--accent2); display: inline-flex; align-items: center; gap: 4px; font-size: 11px; color: var(--muted); white-space: nowrap; cursor: help; vertical-align: middle; }
+.budget-row { justify-content: space-between; }
+.budget-amber { --gauge: #e0b050; }
+.budget-full { --gauge: var(--danger); }
+.budget-amber .budget-left, .budget-full .budget-left { color: var(--gauge); }
+.budget-bar { width: 32px; height: 6px; background: var(--panel2); border: 1px solid var(--border); border-radius: 2px; overflow: hidden; }
+.budget-fill { display: block; height: 100%; background: var(--gauge); }
 .ow-pick-body { display: flex; flex-direction: column; gap: 6px; }
 .ow-pick { width: 512px; max-width: 100%; aspect-ratio: 1; image-rendering: pixelated; cursor: crosshair; border: 1px solid var(--border); }
 .ow-reveals { margin-top: 8px; }

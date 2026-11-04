@@ -10,7 +10,7 @@ import {
   type OwRender, gameL1, readL1, readL2, l1Index, l1XY, l2Index, readTranslevels, writeTranslevels, readMaps,
   sharedTranslevels, translevelToLevel, MAP_NAMES,
   resetTranslevel, baseEvent, setBaseEvent, eventNames, exitDirections, setExitDirection, DIR_ARROWS, DIR_NAMES, EXIT_NAMES, NO_EVENT,
-  initialFlags, setInitialFlags, FLAG, DIR_FLAGS, OW_EVENTS, revealEvents, revealedTile,
+  initialFlags, setInitialFlags, FLAG, DIR_FLAGS, OW_EVENTS, revealEvents, revealedTile, revealEventCount,
   readRevealList, writeRevealList, destroyEffects, destroySettingAt, readDestroyList, hasDestroyPatch, levelTilesOf, OW_L1_TILES,
   eventBits, drawOwMap, drawL1Tile, owShownAt, owMapAt, owShownCopies,
 } from '../core/overworld.ts';
@@ -38,6 +38,8 @@ import { eventReveal, eventDestroys, revealRefusal, destroyRefusal, addReveal, r
 import { SpriteLayer } from './owspriteview.ts';
 import { CellHistoryPopup, tileWords } from './owcellhistoryview.ts';
 import { exitSentences, teleportExit, type Clause } from '../core/owexitsentence.ts';
+import { owBudgets, type Budget, type BudgetKey } from '../core/owbudget.ts';
+import { budgetGauge, budgetBlocked, budgetRow } from './budgetgauge.ts';
 import { levelTeleports, locationUses, type LevelTeleport } from '../core/owlinks.ts';
 import { tileText } from '../core/owteleport.ts';
 import { owActionShort } from '../core/level.ts';
@@ -497,6 +499,13 @@ export class OverworldView {
   private revealWalksLearned = () => { if (this.root.isConnected) this.buildSide(); };
   // whether layer 1 tile t is a level tile (owpaths.ts levelTileTest; none while the path tiles are learned)
   isLevelTile = (t: number): boolean => this.pathKinds()?.[t] === 'level';
+  // a ROM limit's budget (owbudget.ts; per submap: the one shown), for the gauge beside the action it stops
+  // (kept per ROM state, submap and whether the path kinds are known; what they read counted for the view's watch)
+  private budgetMemo = new StateMemo<Budget[]>();
+  budget(key: BudgetKey): Budget | undefined {
+    const kinds = this.pathKinds();
+    return this.budgetMemo.get(this.app.rom, `${this.map}:${kinds ? 1 : 0}`, () => owBudgets(this.app.rom, this.map, kinds)).find((b) => b.key === key);
+  }
 
   // the path tiles of the map shown, a mark per kind (as Lunar Magic's "Layer 1 Mario Paths"): walk green, climb
   // green with rungs, swim blue, exit red, stop a cross; the tile's shape as lines (once the shapes are learned)
@@ -1045,6 +1054,7 @@ export class OverworldView {
       h('div', { class: 'ow-timeline-head' },
         h('b', null, eventTitle(ev.runners, e)), h('span', { class: 'hint' }, ` · event ${hex(e, 2)} · the map as after it – the editor finds its steps`),
         h('span', { class: 'grow' }),
+        budgetGauge(this.budget('eventStorage'), 'Tile storage'),
         h('button', { title: 'Show the steps as the game does (path fade)', disabled: !steps.length, onclick: () => this.play() }, '▶ Play'),
         h('button', { title: 'The steps in the opposite order (from the other end of the path)', disabled: steps.length < 2,
           onclick: () => this.editSteps('steps reversed', steps.map((_, i) => steps.length - 1 - i)) }, '⇄ Reverse'),
@@ -1085,7 +1095,9 @@ export class OverworldView {
       ...destroys.map((i, k) => entry('destroy', k, i, `Destroys tile ${l1Hex(this.l1[i])} at ${cellText(i)}`,
         'A tile the event destroys (a castle, fortress or switch palace collapsing) when it passes', 'destroys', () => removeDestroy(rom, e, i))),
       h('button', { title: 'The event reveals a tile: click it on the map, then pick what it becomes in the layer 1 sheet (an event reveals one tile)', onclick: () => this.startEventPick('reveal') }, '+ Reveal'),
+      e < revealEventCount(rom) ? budgetGauge(this.budget('revealPairs')) : budgetBlocked('reveals none', revealRefusal(rom, e) ?? ''),
       hasDestroyPatch(rom) ? h('button', { title: 'The event destroys a tile (a castle, fortress or switch palace): click it on the map (an event destroys one tile, 0x18 in all)', onclick: () => this.startEventPick('destroy') }, '+ Destroy') : null,
+      budgetGauge(this.budget('destroys')),
     ];
   }
   // a reveal or destroy edit of event e (the chosen one), one ROM edit; refused with the reason
@@ -1479,6 +1491,7 @@ export class OverworldView {
   // what the levels mode does
   private levelsHelp(): HTMLElement {
     return h('div', { class: 'ow-info' },
+      budgetRow('Levels with a level tile', this.budget('translevels')),
       h('div', { class: 'hint' }, 'Level tiles as objects on layer 1 – the only place they are changed –, each change one ROM edit of the map before events, or with an event chosen in the strip under the map a layer 1 change of the event (the tile changed from the event on):'),
       h('div', { class: 'hint' }, 'Drag a level tile to move it: it swaps with the tile there (a path stays whole), its level and settings go with it.'),
       h('div', { class: 'hint' }, 'Delete: the stop tile 81 in its place – the level keeps its settings and is listed under "Without level tile".'),
@@ -1493,7 +1506,9 @@ export class OverworldView {
     return h('div', { class: 'ow-info' },
       row('#c58cff', 'Star / pipe'), row('#ff6b6b', 'Exit path to another submap'),
       row('#4cc2ff', 'Location an exit to the overworld teleports to', true), row('#ffa94c', 'Where a Koopa Kid puts Mario', true),
-      h('div', { class: 'hint' }, 'One head: one-way, two heads: both ways.'));
+      h('div', { class: 'hint' }, 'One head: one-way, two heads: both ways.'),
+      budgetRow('Star / pipe entries', this.budget('stars')),
+      budgetRow('Exit path entries', this.budget('exitPaths')));
   }
 
   // a layer 1 tile drawn (16x16) for the lists
@@ -1841,7 +1856,8 @@ export class OverworldView {
     };
     const [p0, p1] = sheetPages(empty, free, this.openPage1);
     return h('div', null,
-      h('div', { class: 'hint' }, `${one ? `Tile ${l1Hex(b.entries[0])}` : b.kind === 'l1' ? `Block ${b.w}×${b.h}` : ''} · Levels: mode 3`),
+      h('div', { class: 'row budget-row' }, h('span', { class: 'hint' }, `${one ? `Tile ${l1Hex(b.entries[0])}` : b.kind === 'l1' ? `Block ${b.w}×${b.h}` : ''} · Levels: mode 3`),
+        budgetGauge(this.budget('l1Tiles'))),
       ...page(p0),
       h('div', { class: 'hint ow-page' }, 'Page 1 (100–1FF): acts like 00–FF where Mario walks'),
       ...page(p1));
