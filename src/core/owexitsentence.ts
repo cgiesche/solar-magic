@@ -26,9 +26,9 @@ export interface SentenceWords { level: (tl: number) => string; tile: (t: number
 // turn ended, Lunar Magic's other actions: told apart)
 export const teleportExit = (a: number): number => (a === OW_NORMAL ? 0 : a === OW_SECRET ? 1 : -1);
 
-// the sentences of translevel tl's exits whose event is the level's (as exitChanges has them, in exit order: an exit
-// whose event another level's exit runs first is not the level's – a level without a secret exit has the next level's
-// event there – and gets none);
+// the sentences of translevel tl's exits whose event is the level's (as exitChanges has them, in exit order: a secret
+// exit the level can't have – owevents.ts eventRunners – and an exit whose event another level's exit runs first are
+// not the level's and get none);
 // teleports: the level's exits to the overworld (owlinks.ts levelTeleports); edges: the exits' edges (owexitedges.ts
 // exitEdges, learned; none or null: no level told as opened – a revealed level tile is told as the tile revealed). The level
 // tile the event reveals of a level the exit opens is that level's clause, its × taking the reveal away.

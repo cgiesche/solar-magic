@@ -42,8 +42,8 @@ function searched(inp: ReachInput, destroyed: ReadonlySet<number>): Searched {
 }
 
 // The edges of every level exit running an event whose level is the first to run it (owevents.ts eventRunners: the
-// event is that exit's, as exitChanges has it), in event order; a secret exit whose event changes nothing on the map
-// and opens nothing is left out (every level gets events for three secret exits: one the level likely hasn't).
+// event is that exit's, as exitChanges has it – a secret exit only where the level can have it), in event order; a
+// secret exit whose event changes nothing on the map and opens nothing is left out (one the level likely hasn't).
 // A level is opened by either rule: reached with every event passed and not without the exit's event – what the exit
 // is needed for, whatever order the events pass in –, or reached at the progress after the event and not at the one
 // before (events in number order) – of those the first on the way (nextLevels). "Without the exit's event": here
@@ -97,16 +97,16 @@ function* exitEdgeSteps(rom: Rom, at: (progress: number) => ReachInput, submapAt
 }
 
 // The search's input with the events still passable without event e, per e: start with no event passed, add every
-// event whose level is reached (the level whose base event it is, else the first running it: a level without secret
-// exits has the next levels' events as its secret exits'), repeat until the set stops growing – never adding e. The
-// events no level exit runs (a teleport's, the hack's own code's) count as passed from the start: no exit needs them,
-// and Mario can't pass them by reaching a level. The rounds are those without any event left out until e would be
-// added: each e starts from the last round before that (the set only grows). The map with a set of events passed: a
-// cell some event changes has its tile after the last of them passed (at the progress after it, events in number
-// order), the map before events' when none is – so a tile two events change stays as long as one of them is passed
-// (with every event but e's, e's tiles are undone: a Star Road star another exit reveals too is gone, and the Star
-// World levels behind it seem opened by e); the level flags those before events, and per event passed those its save
-// sets (the ones in the save after it not in the one before) and its exit's way.
+// event whose level is reached (the level whose normal exit runs it, else the first of its runners: eventRunners),
+// repeat until the set stops growing – never adding e. The events no level exit runs (a teleport's, the hack's own
+// code's) count as passed from the start: no exit needs them, and Mario can't pass them by reaching a level. The
+// rounds are those without any event left out until e would be added: each e starts from the last round before that
+// (the set only grows). The map with a set of events passed: a cell some event changes has its tile after the last
+// of them passed (at the progress after it, events in number order), the map before events' when none is – so a tile
+// two events change stays as long as one of them is passed (with every event but e's, e's tiles are undone: a Star
+// Road star another exit reveals too is gone, and the Star World levels behind it seem opened by e); the level flags
+// those before events, and per event passed those its save sets (the ones in the save after it not in the one
+// before) and its exit's way.
 function passableWithout(rom: Rom, at: (progress: number) => ReachInput, runners: Map<number, EventRunner[]>, eventChange: (e: number) => EventChanges,
   before: ArrayLike<number>): (e: number) => ReachInput {
   const all = at(OW_EVENTS), inputs = new Map<number, ReachInput>();
