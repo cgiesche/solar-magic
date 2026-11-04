@@ -26,7 +26,7 @@ import { rleEncode } from './rle.ts';
 import { missingPatch } from './patches.ts';
 import {
   OW_EVENTS, OverworldEmulator, type OverworldLoads, gameL1, readL1, readTranslevels, baseEvent, translevelToLevel, l1XY, revealAt, revealEventCount, readDestroyList,
-  destroyEffects, l1Index,
+  destroyEffects, destroyChanges, l1Index,
 } from './overworld.ts';
 import { RAM, getS16 } from './ram.ts';
 import { record, countReads } from './romdeps.ts';
@@ -392,10 +392,7 @@ export function exitChanges(rom: Rom, tl: number, d: EventData = readEvents(rom)
     const e = b + exit, r = runners.get(e)?.[0];
     if (r?.tl !== tl || r.exit !== exit) continue;
     const reveal = e < revealEventCount(rom) ? revealAt(rom, e) : 0;
-    const destroyed = destroys.filter((x) => x.event === e).flatMap((x) => {
-      const { x: tx, y: ty } = l1XY(x.tile), base = x.tile & 0x400;
-      return [x.tile, ...effects[map[x.tile]].map((c) => base + l1Index(0, tx + c.dx, ty + c.dy))];
-    });
+    const destroyed = destroys.filter((x) => x.event === e).flatMap((x) => [x.tile, ...destroyChanges(effects, map, x.tile).map((c) => c.cell)]);
     const l1 = new Set([...eventL1Tiles(d, e), ...(reveal ? [reveal] : []), ...destroyed]);
     out.push({ exit, event: e, l1: [...l1], l2: [...new Set(eventPieces(d, e).flatMap((p) => pieceTiles(d, p)))] });
   }

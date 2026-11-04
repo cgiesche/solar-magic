@@ -36,6 +36,7 @@ import { LevelNameEditor } from './owlevelname.ts';
 import { levelsWithoutTile, type LevelTileEvent } from '../core/owleveltiles.ts';
 import { eventReveal, eventDestroys, revealRefusal, destroyRefusal, addReveal, removeReveal, addDestroy, removeDestroy, cellText, NO_REVEAL_AT_0 } from '../core/oweventtiles.ts';
 import { SpriteLayer } from './owspriteview.ts';
+import { CellHistoryPopup } from './owcellhistoryview.ts';
 import { levelTeleports, locationUses, type LevelTeleport } from '../core/owlinks.ts';
 import { tileText } from '../core/owteleport.ts';
 import { owActionShort } from '../core/level.ts';
@@ -133,6 +134,7 @@ export class OverworldView {
   nameEditor = new LevelNameEditor(this); // the selected level tile's name, edited in place (the levels mode)
   reach = new ReachLayer(this); // path validation: the tiles Mario doesn't reach dimmed, the problems of the paths
   exits = new ExitArrowLayer(this); // the Levels mode's arrows from each level tile to the levels its exits open
+  cellHistory = new CellHistoryPopup(this); // a cell's history over the game, the mouse resting on it
   // the event the map is shown and painted as after (both layers; the playthrough strip under the map), -1: the map before events
   // (kept per ROM in the browser, not in the ROM)
   event = -1;
@@ -214,7 +216,7 @@ export class OverworldView {
     this.left = h('div', { class: 'left' }, h('div', { class: 'panel levels' },
       h('div', { class: 'panel-title' }, 'Level tiles', this.tlCount), this.tlList));
     this.root = h('div', { class: 'center' }, h('div', { class: 'level-view' }, this.scroller, this.eventsBadge), this.strip, this.timeline, this.status);
-    this.scroller.addEventListener('scroll', () => this.paint());
+    this.scroller.addEventListener('scroll', () => { this.cellHistory.close(); this.paint(); });
     new ResizeObserver(() => this.stripToChosen()).observe(this.stripList);
     // next frame: layout() resizes the canvas inside the observed scroller (no ResizeObserver loop error); the zoom
     // follows a screen of another scale (the browser's zoom changed: the scroller has other CSS pixels)
@@ -235,7 +237,7 @@ export class OverworldView {
       if (this.hover?.x !== c.x || this.hover?.y !== c.y) { this.hover = c; this.paint(); }
     });
     this.scroller.addEventListener('drop', (e) => { if (!this.levelTiles.dragged) return; e.preventDefault(); const c = this.cell(e, 16); this.levelTiles.drop(c.x, c.y); });
-    this.scroller.addEventListener('mouseleave', () => { this.mouse = null; if (!this.brushDrag.active) { this.hover = null; this.updateStatus(); this.paint(); } });
+    this.scroller.addEventListener('mouseleave', () => { this.cellHistory.hover(-1, 0, 0, false); this.mouse = null; if (!this.brushDrag.active) { this.hover = null; this.updateStatus(); this.paint(); } });
     window.addEventListener('mousemove', (e) => this.onMove(e));
     window.addEventListener('mouseup', (e) => this.onUp(e));
     // Q released (or the window left, its keyup never comes): the layer not painted shown again
@@ -256,6 +258,7 @@ export class OverworldView {
   }
 
   setZoom(z: number, ax = this.scroller.clientWidth / 2, ay = this.scroller.clientHeight / 2): void {
+    this.cellHistory.close();
     z = snapZoom(z, pixelZoomSteps());
     const lx = (this.scroller.scrollLeft + ax) / this.zoom, ly = (this.scroller.scrollTop + ay) / this.zoom;
     this.zoom = z;
@@ -658,9 +661,13 @@ export class OverworldView {
 
   onMove(e: MouseEvent): void {
     const inside = e.target === this.scroller || e.target === this.canvas;
-    if (inside) this.mouse = this.point(e);
+    if (inside) {
+      this.mouse = this.point(e);
+      const c = this.cell(e, 16), on = c.x >= 0 && c.y >= 0 && c.x < 32 && c.y < 32;
+      this.cellHistory.hover(on ? l1Index(this.region, c.x, c.y) : -1, e.clientX, e.clientY, e.buttons !== 0 || this.dragging() || !!this.sprites.drag);
+    }
     if (this.sprites.drag) { const p = this.point(e); this.sprites.move(p.x, p.y, e.shiftKey); return; }
-    if (!inside && !this.brushDrag.active && !this.links.drag && !this.levelTiles.drag) return;
+    if (!inside && !this.dragging()) return;
     const c = this.cell(e);
     if (this.hover && this.hover.x === c.x && this.hover.y === c.y) return;
     this.hover = c;
@@ -670,6 +677,11 @@ export class OverworldView {
     if (this.mode === 'levels') { this.paint(); return; }
     this.brushDrag.move(c);
     this.paint();
+  }
+
+  // a stroke, a pick, a link or a level tile being dragged (followed off the map too)
+  private dragging(): boolean {
+    return this.brushDrag.active || !!this.links.drag || !!this.levelTiles.drag;
   }
 
   onUp(e: MouseEvent): void {
@@ -1221,6 +1233,7 @@ export class OverworldView {
   setMap(n: number): void {
     if (n === this.map) return;
     this.nameEditor.close(true);
+    this.cellHistory.close();
     this.map = n;
     this.selected = -1;
     this.l2Sel = null;
@@ -1236,6 +1249,7 @@ export class OverworldView {
   setMode(m: OwMode): void {
     if (this.mode === m) return;
     this.nameEditor.close(true);
+    this.cellHistory.close();
     this.mode = m;
     this.levelTiles.cancel();
     if (m !== 'l1' && (this.eventPick?.at ?? -1) >= 0) this.cancelEventPick(); // (the tile a reveal becomes is picked in the layer 1 sheet)
@@ -1288,6 +1302,8 @@ export class OverworldView {
           'The overworld\'s sprites as the game shows them at the event progress (always shown in the Sprites mode)'),
         view('Sprite shadows', () => this.sprites.showShadows, (v) => (this.sprites.showShadows = v), 'A shadow on the ground under each sprite'),
         view('Sprite height marks', () => this.sprites.showHeights, (v) => (this.sprites.showHeights = v), 'A line from a flying sprite\'s position up to it'),
+        { label: 'Cell history', title: 'The mouse resting on a cell for a moment shows what each event changes there over the game; a click on an entry shows the map as after it in the strip',
+          checked: () => this.cellHistory.on, onToggle: (v: boolean) => this.cellHistory.setOn(v) },
         view('Overworld links', () => this.showLinks, (v) => (this.showLinks = v),
           'Stars, pipes and exit paths leading elsewhere as arrows (always shown in the Overworld links mode), the locations exits to the overworld teleport to and the Koopa Kids\' places dashed'),
       ] }),

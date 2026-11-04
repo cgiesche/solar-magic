@@ -720,6 +720,15 @@ export function destroyEffects(rom: Rom): DestroyChange[][] {
   effectsMemo.set(rom, { gen: rom.gen, effects });
   return effects;
 }
+// the cells (l1Index) destroying tile j changes and the tiles they get (l1: the tiles, j's what is destroyed; cells
+// off its map left out)
+export function destroyChanges(effects: DestroyChange[][], l1: ArrayLike<number>, j: number): { cell: number; tile: number }[] {
+  const { x, y } = l1XY(j), base = j & 0x400;
+  return effects[l1[j]].flatMap((c) => {
+    const cx = x + c.dx, cy = y + c.dy;
+    return cx >= 0 && cy >= 0 && cx < 32 && cy < 32 ? [{ cell: base + l1Index(0, cx, cy), tile: c.tile }] : [];
+  });
+}
 // the layer 1 tile whose destroy changes tile i (l1: the tiles; i itself first, else a neighbour), -1 none
 export function destroyedAt(effects: DestroyChange[][], l1: ArrayLike<number>, i: number): number {
   if (effects[l1[i]].length) return i;

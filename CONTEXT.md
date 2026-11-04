@@ -209,6 +209,10 @@ _Avoid_: events passed, after all events
 The overworld editor's control choosing the event progress, under the map (ADR 0013): "Before events", then every event in number order labelled by the level exit running it, the chosen one's timeline below it and "▶ Test play from here" beside it. Play order is reached by renumbering the events, not by another order of the strip.
 _Avoid_: Map after (the select it replaced)
 
+**Cell history**:
+What each event changes on a layer 1 cell over the game, in number order (core/owcellhistory.ts): its layer 1 tile (by the event's layer 1 changes, a reveal, a destroy), a level tile placed or removed there, the layer 2 entries under it. Layer 1 through the events as the game loads a save: per event its layer 1 changes, then its reveal, then its destroys. Shown when the mouse rests on a cell of the overworld map; an entry jumps to its event in the playthrough strip. A cell here is a layer 1 place (16x16) of an overworld map, not a level's quarter.
+_Avoid_: tile history (a tile number moves between cells; the history is of the place)
+
 **Reveal**:
 A layer 1 tile that changes into another when an event passes over it (Lunar Magic's reveal list: which tile becomes which). An event reveals at most one tile, a tile can be revealed by several events; any layer 1 tile. Edited with the event (its timeline under the playthrough strip: the tile clicked on the map, then what it becomes picked in the layer 1 sheet – the cell gets the tile the reveal list turns into it); the tile's properties name the events. Stays with its cell when a level tile moves.
 
