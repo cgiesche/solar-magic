@@ -21,6 +21,37 @@ const ALONG = [4, 8, 12]; // where along a side he may step on (not at a corner)
 // tile's vector for another direction moves him somewhere he never comes from).
 export function pathWays(t: number, kind: PathKind | undefined, shapes: PathShapes | null): PathWay[] {
   if (!shapes || !kind || !SHAPED_KINDS.includes(kind)) return [];
+  const all = waysOver(t, shapes);
+  const ways: PathWay[] = [], taken = (dir: number) => ways.some((w) => w.dir === dir);
+  for (let dir = 0; dir < 4; dir++) {
+    if (taken(dir)) continue;
+    let best: PathWay | null = null, bestScore = Infinity;
+    for (const w of all) {
+      if (w.dir !== dir || taken(reverse(w.out))) continue;
+      // (the line's middle nearest the tile's; at a tie the point nearest the side's middle)
+      const along = DX[dir] ? w.from[1] : w.from[0];
+      const score = Math.abs((w.from[0] + w.to[0]) / 2 - 8) + Math.abs((w.from[1] + w.to[1]) / 2 - 8) + Math.abs(along - 8) / 100;
+      if (score < bestScore) { bestScore = score; best = w; }
+    }
+    if (best) ways.push(best, back(best));
+  }
+  return ways;
+}
+
+// Every way over tile t, from any of the points along a side he may step on at – not only the most centred line
+// pathWays shows: a stair leaves him higher or lower, and the tile after takes him on from there (the route solver,
+// owroute.ts). Each way's way back is in the list too.
+export function tileWays(t: number, kind: PathKind | undefined, shapes: PathShapes | null): PathWay[] {
+  if (!shapes || !kind || !SHAPED_KINDS.includes(kind)) return [];
+  const out: PathWay[] = [], key = (w: PathWay) => `${w.dir} ${w.from}`;
+  for (const w of waysOver(t, shapes)) for (const v of [w, back(w)]) if (!out.some((o) => key(o) === key(v))) out.push(v);
+  return out;
+}
+
+const back = (w: PathWay): PathWay => ({ dir: reverse(w.out), out: reverse(w.dir), from: w.to, to: w.from });
+
+// the ways over tile t whose way back leads back (by direction, then the point along the side, ALONG order)
+function waysOver(t: number, shapes: PathShapes): PathWay[] {
   // stepping on at (x, y) in direction dir: where the vector moves him and the direction he goes on in (null: not to
   // another side of the tile)
   const step = (x: number, y: number, dir: number): { to: [number, number]; out: number } | null => {
@@ -32,21 +63,16 @@ export function pathWays(t: number, kind: PathKind | undefined, shapes: PathShap
     if (DX[dir] ? tx === x : ty === y) return null;
     return { to: [tx, ty], out: turnedAt(tx, ty, vx, vy, dir) };
   };
-  const ways: PathWay[] = [], taken = (dir: number) => ways.some((w) => w.dir === dir);
+  const ways: PathWay[] = [];
   for (let dir = 0; dir < 4; dir++) {
-    if (taken(dir)) continue;
-    let best: PathWay | null = null, bestScore = Infinity;
     for (const along of ALONG) {
       // (on the side behind him: moving right at x 0)
       const x = DX[dir] ? 8 - DX[dir] * 8 : along, y = DY[dir] ? 8 - DY[dir] * 8 : along, there = step(x, y, dir);
-      if (!there || taken(reverse(there.out))) continue;
-      const back = step(there.to[0], there.to[1], reverse(there.out));
-      if (!back || back.to[0] !== x || back.to[1] !== y || back.out !== reverse(dir)) continue;
-      // (the line's middle nearest the tile's; at a tie the point nearest the side's middle)
-      const score = Math.abs((x + there.to[0]) / 2 - 8) + Math.abs((y + there.to[1]) / 2 - 8) + Math.abs(along - 8) / 100;
-      if (score < bestScore) { bestScore = score; best = { dir, out: there.out, from: [x, y], to: there.to }; }
+      if (!there) continue;
+      const b = step(there.to[0], there.to[1], reverse(there.out));
+      if (!b || b.to[0] !== x || b.to[1] !== y || b.out !== reverse(dir)) continue;
+      ways.push({ dir, out: there.out, from: [x, y], to: there.to });
     }
-    if (best) ways.push(best, { dir: reverse(best.out), out: reverse(dir), from: best.to, to: best.from });
   }
   return ways;
 }
@@ -54,7 +80,9 @@ export function pathWays(t: number, kind: PathKind | undefined, shapes: PathShap
 // the ways in words: "from below to the right, from the right down" (the side he steps on from, the direction he
 // goes on in)
 const FROM_SIDE = ['from below', 'from above', 'from the right', 'from the left'], GOES_ON = ['up', 'down', 'to the left', 'to the right'];
-export const pathWaysText = (ways: readonly PathWay[]): string => ways.map((w) => `${FROM_SIDE[w.dir]} ${GOES_ON[w.out]}`).join(', ');
+// one way in words: "from below to the right" (stepping on in direction dir, going on in direction out)
+export const wayText = (dir: number, out: number): string => `${FROM_SIDE[dir]} ${GOES_ON[out]}`;
+export const pathWaysText = (ways: readonly PathWay[]): string => ways.map((w) => wayText(w.dir, w.out)).join(', ');
 export const SHAPES_LEARNING = 'its shape is being learned…';
 // what a path tile (owpaths.ts isPathKind) is called with its shape: "Path: walk · from below to the right, …"
 // (shapes: null while they are learned)

@@ -172,6 +172,12 @@ function* probeShapes(emu: LevelEmulator, end: () => void): Generator<string | v
   } finally { end(); }
 }
 
+// a tile's vector stepping onto it in direction dir (v: PathShapes' first or walk), where none is known `len` pixels
+// on (half a tile for a first step, a tile walking on)
+export function shapeVector(v: readonly number[], t: number, dir: number, len: number): [number, number] {
+  const k = (t * 4 + dir) * 2;
+  return v[k] === NO_SHAPE || v[k] === undefined ? [DX[dir] * len, DY[dir] * len] : [v[k], v[k + 1]];
+}
 // the direction opposite to dir (DIR_NAMES order: up, down, left, right)
 export const reverse = (dir: number): number => dir ^ 1;
 // the direction a vector points: along x where `alongX`, else along y (DIR_NAMES order)

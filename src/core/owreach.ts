@@ -25,10 +25,10 @@ import { readEvents, eventRunners, exitChanges, eventTitle } from './owevents.ts
 import { hex2, hex3 } from './names.ts';
 import type { Severity } from './problems.ts';
 import { readTeleports, readExitPaths, type OwTile } from './owteleport.ts';
-import { DX, DY, NO_SHAPE, PATH_TILES_END, dirOf, reverse, turnedAt, type PathKind, type PathShapes } from './owpaths.ts';
+import { DX, DY, PATH_TILES_END, dirOf, reverse, shapeVector, turnedAt, type PathKind, type PathShapes } from './owpaths.ts';
 
 // the tile next to layer 1 tile i in direction dir on its map, -1 off the map
-function neighbor(i: number, dir: number): number {
+export function neighbor(i: number, dir: number): number {
   const { x, y } = l1XY(i), nx = x + DX[dir], ny = y + DY[dir];
   return nx < 0 || ny < 0 || nx > 31 || ny > 31 ? -1 : l1Index(i >> 10, nx, ny);
 }
@@ -99,13 +99,8 @@ export function walkFrom(inp: ReachInput, from: number, d: number): Walk | null 
   const walkable = (i: number) => i >= 0 && kinds[l1[i]] !== 'none';
   const first = next(from, d);
   if (!walkable(first)) return hardWalk(inp, from, d);
-  // a tile's vector (half a tile, a tile on where none is known)
-  const vector = (v: number[], t: number, dir: number, len: number): [number, number] => {
-    const k = (t * 4 + dir) * 2;
-    return v[k] === NO_SHAPE || v[k] === undefined ? [DX[dir] * len, DY[dir] * len] : [v[k], v[k + 1]];
-  };
   // Mario's pixel position (on his tile at +8, +8) after his first step
-  const { x: sx, y: sy } = l1XY(from), [fx, fy] = vector(shapes.first, l1[first], d, 8);
+  const { x: sx, y: sy } = l1XY(from), [fx, fy] = shapeVector(shapes.first, l1[first], d, 8);
   let px = sx * 16 + 8 + fx, py = sy * 16 + 8 + fy;
   const path: number[] = [];
   let cur = from, dir = d, n = first;
@@ -126,7 +121,7 @@ export function walkFrom(inp: ReachInput, from: number, d: number): Walk | null 
       path.push(cur);
     } else {
       // moved by the tile's vector (the sum's low 2 bits cleared), turned by where it ends
-      const [vx, vy] = vector(shapes.walk, l1[n], dir, 16);
+      const [vx, vy] = shapeVector(shapes.walk, l1[n], dir, 16);
       px = (px + vx) & ~3; py = (py + vy) & ~3;
       dir = turnedAt(px, py, vx, vy, dir);
       cur = n;

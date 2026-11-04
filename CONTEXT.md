@@ -189,6 +189,10 @@ _Avoid_: Map16 tile (layer 1's), event step (an event's 6x6 or 2x2 change)
 How a path tile moves Mario: by a vector from where he is, by the tile and the way he steps onto it, turning him where it ends (a bend, a junction taken one way). Learned by emulation (owpaths.ts), as the path tiles' kinds. Shown as the tile's **ways**: a line through its mark from the side he steps on to where it moves him (overlay and layer 1 sheet), and in words ("from below to the right, from the right down") in the popup and status bar; a way counts where the way back leads to where he stepped on.
 _Avoid_: tile direction, path direction
 
+**Route**:
+A way for Mario given as cells next to each other on one map, for which the editor chooses the path tiles (core/owroute.ts): per cell a tile whose way leads from the cell before to the one after and back – starting where the tile before leaves him (after a stair higher or lower), the first where his first step off the stop tile leaves him, the last ending where his first step back off the stop after it does –, of the kind at the route's start where one fits, else another, a tile already there kept where it fits. Level, stop and exit tiles on it are left alone; a stop tile goes where it ends on nothing and where it runs into a path (a junction, as in the game). A cell no tile fits is refused with why, and whether a stop tile there or another turn would work. Only tiles with learned shapes are used.
+_Avoid_: path (that is the tiles), line
+
 **Reached tile**:
 A layer 1 tile Mario can get to at an event progress, from his start position: along the paths as the game moves him (path shapes), through stars, pipes, exit paths and the game's hardcoded paths, with the level flags of a save at the progress (the directions open) and the ways back that arriving opens (owreach.ts, path validation). Not reached: dimmed on the map ("Unreached tiles"); a way that ends without a stop tile is a **dead end**.
 _Avoid_: accessible, unlocked (for a tile)
