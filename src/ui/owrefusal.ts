@@ -33,6 +33,10 @@ export function eventPhrase(rom: Rom, e: number): string {
   const r = eventRunners(rom).get(e)?.[0];
   return r ? `the ${EXIT_WORDS[r.exit]} of ${levelTitle(rom, r.tl)}` : 'this event';
 }
+// a level tile another event destroys (#378): "Already crumbles when the normal exit of Iggy's Castle is beaten"
+export function crumblesByOtherText(rom: Rom, e: number): string {
+  return eventRunners(rom).get(e)?.length ? `Already crumbles when ${eventPhrase(rom, e)} is beaten` : 'Already crumbles when another event runs';
+}
 const cap = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
 
 export function refusalWords(rom: Rom, r: OwRefusalData): RefusalWords {
@@ -65,6 +69,8 @@ export function refusalWords(rom: Rom, r: OwRefusalData): RefusalWords {
     case 'l1TilePast': return w('This tile can\'t be edited', 'it is past the tiles the overworld has');
     case 'crumbleNoEvent': return w('The level tile can\'t crumble when beaten', `the normal exit of ${levelTitle(rom, r.tl)} changes nothing on the map`,
       'Give the level a base event first.');
+    case 'crumblesByOther': return w(crumblesByOtherText(rom, r.event),
+      'the game destroys a tile once, and another event already destroys this one', 'Change it at that level.');
     case 'linkToItself': return w('The link isn\'t made', 'it would lead to the tile it starts at', 'Drag to another tile.');
     case 'teleportsFull': return w('This star or pipe can\'t be linked',
       `the game has room for ${r.max} star and pipe links, and all are taken`, 'Remove a star or pipe link you don\'t need first.');

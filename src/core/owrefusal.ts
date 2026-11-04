@@ -19,6 +19,7 @@ export type OwRefusalData =
   | { kind: 'destroysFull'; event: number; max: number } // the destroy list's max entries all used
   | { kind: 'destroyNothing'; tile: number } // the game destroys no tile `tile`
   | { kind: 'crumbleNoEvent'; tl: number } // translevel tl's normal exit runs no event
+  | { kind: 'crumblesByOther'; event: number; cell: number } // another event than the level's base event destroys cell
   // ---- links (owlinks.ts) ----
   | { kind: 'linkToItself' }
   | { kind: 'l1TilePast'; tile: number; tiles: number } // a layer 1 tile past the overworld's (000…tiles-1)
@@ -88,6 +89,7 @@ export function refusalDetails(r: OwRefusalData): string {
     case 'l1TilePast': return `Tile ${tileHex(r.tile)} is past the overworld's layer 1 tiles (000–${hex(r.tiles - 1, 3)}).`;
     case 'linkNoStart': return `Tile ${tileHex(r.tile)} (${r.path}): a star or pipe is a tile Mario stops on, an exit path an exit path tile.`;
     case 'crumbleNoEvent': return `Translevel ${hex(r.tl, 2)} has no base event (FF).`;
+    case 'crumblesByOther': return `Event ${hex(r.event, 2)} already destroys the tile at ${cellText(r.cell)}.`;
     case 'linkToItself': return 'The link\'s start and target are the same tile.';
     case 'teleportsFull': return `All ${r.max} entries of the star/pipe table are used.`;
     case 'koopaPlaceSubmap': return `A Koopa Kid's place is on the submap of its tile (submap ${r.from.submap}, ${hex(r.from.x, 2)},${hex(r.from.y, 2)}).`;

@@ -29,6 +29,7 @@ const samples: { [K in OwRefusalKind]: Extract<OwRefusalData, { kind: K }> } = {
   destroysFull: { kind: 'destroysFull', event: 0x13, max: 0x18 },
   destroyNothing: { kind: 'destroyNothing', tile: 0x5c },
   crumbleNoEvent: { kind: 'crumbleNoEvent', tl: 0x29 },
+  crumblesByOther: { kind: 'crumblesByOther', event: 3, cell: l1Index(1, 9, 1) },
   linkToItself: { kind: 'linkToItself' },
   l1TilePast: { kind: 'l1TilePast', tile: 0x200, tiles: 0x200 },
   linkNoStart: { kind: 'linkNoStart', tile: 0x5c, path: 'walk' },

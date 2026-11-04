@@ -114,16 +114,33 @@ export function crumbles(rom: Rom, i: number, tl: number, shown?: ArrayLike<numb
   const e = baseEvent(rom, tl), at = destroyTarget(rom, i, shown);
   return e !== NO_EVENT && at >= 0 && eventDestroys(rom, e).includes(at);
 }
-// why it can't be made to crumble (null: it can, or it does): a tile the game doesn't destroy, a level whose normal
-// exit runs no event, the event past the last one, its destroy taken or the destroy list full (the destroy patch is
-// in every ROM the editor opens, ADR 0004)
+// the event other than the level's base event that destroys it (#378: it crumbles when the level exit running that
+// event is passed; the checkbox never writes a second destroy of the cell), -1 none
+export function crumbledBy(rom: Rom, i: number, tl: number, shown?: ArrayLike<number>): number {
+  const e = baseEvent(rom, tl), at = destroyTarget(rom, i, shown);
+  if (at < 0) return -1;
+  return readDestroyList(rom).find((d) => d.event !== NO_EVENT && d.event !== e && d.tile === at)?.event ?? -1;
+}
+// why it can't be made to crumble (null: it can, or it does): a tile the game doesn't destroy, another event already
+// destroying it (no second destroy of the cell), a level whose normal exit runs no event, the event past the last one,
+// its destroy taken or the destroy list full (the destroy patch is in every ROM the editor opens, ADR 0004)
 export function crumbleRefusal(rom: Rom, i: number, tl: number, shown?: ArrayLike<number>): OwRefusalData | null {
-  if (destroyTarget(rom, i, shown) < 0) return { kind: 'destroyNothing', tile: readL1(rom)[i] };
+  const at = destroyTarget(rom, i, shown);
+  if (at < 0) return { kind: 'destroyNothing', tile: readL1(rom)[i] };
+  if (crumbles(rom, i, tl, shown)) return null;
+  const other = crumbledBy(rom, i, tl, shown);
+  if (other >= 0) return { kind: 'crumblesByOther', event: other, cell: at };
   const e = baseEvent(rom, tl);
   if (e === NO_EVENT) return { kind: 'crumbleNoEvent', tl };
-  return crumbles(rom, i, tl, shown) ? null : destroyRefusal(rom, e);
+  return destroyRefusal(rom, e);
 }
-// on: the destroy added (throws the refusal); off: removed
+// the checkbox: on where it crumbles, by its level's event or another (#378); disabled with why where it can't be
+// changed (another event destroying it: on, why names that event)
+export function crumbleState(rom: Rom, i: number, tl: number, shown?: ArrayLike<number>): { on: boolean; why: OwRefusalData | null } {
+  const why = crumbleRefusal(rom, i, tl, shown);
+  return { on: why?.kind === 'crumblesByOther' || crumbles(rom, i, tl, shown), why };
+}
+// on: the destroy added (throws the refusal); off: its level's destroy removed (another event's stays)
 export function setCrumbles(rom: Rom, i: number, tl: number, on: boolean, shown?: ArrayLike<number>): void {
   if (on === crumbles(rom, i, tl, shown)) return;
   if (!on) { removeDestroy(rom, baseEvent(rom, tl), destroyTarget(rom, i, shown)); return; }

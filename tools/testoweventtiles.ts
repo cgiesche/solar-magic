@@ -4,12 +4,15 @@
 // the reason, so is a destroy of a tile the game doesn't destroy (a castle's level tile clicked: set on its top); a
 // reveal picked to become another tile changes the cell to the tile the reveal list turns into it. A castle moved in
 // the Levels mode (moveLevelTile) moves whole with its destroy, a reveal on its old cell stays; a level tile where its
-// top would go keeps the top in place.
+// top would go keeps the top in place. "Crumbles when beaten" (#368) on a tile another event destroys: on, disabled,
+// that event's level exit named, ticking refused (#378).
 // node tools/testoweventtiles.ts
 import { Rom } from '../src/core/rom.ts';
 import { RomEditSession } from '../src/core/romedit.ts';
 import { readL1, writeL1, readTranslevels, l1Index, l1XY, revealAt, revealedTile, readDestroyList, destroyEvent, baseEvent, setBaseEvent, DESTROYS, NO_EVENT } from '../src/core/overworld.ts';
-import { eventReveal, eventDestroys, revealRefusal, destroyRefusal, addReveal, removeReveal, addDestroy, removeDestroy, revealSource, crumbles, crumbleRefusal, setCrumbles, destroyTarget } from '../src/core/oweventtiles.ts';
+import { eventReveal, eventDestroys, revealRefusal, destroyRefusal, addReveal, removeReveal, addDestroy, removeDestroy, revealSource, crumbles, crumbleRefusal, crumbleState, setCrumbles, destroyTarget } from '../src/core/oweventtiles.ts';
+import { refusalText, crumblesByOtherText } from '../src/ui/owrefusal.ts';
+import { eventRunners } from '../src/core/owevents.ts';
 import { moveLevelTile, placeLevelTile } from '../src/core/owleveltiles.ts';
 import { levelTileTest } from '../src/core/owpaths.ts';
 import { refusalOf } from '../src/core/owrefusal.ts';
@@ -157,6 +160,7 @@ const IGGY = 6, YI4 = 5, YI2 = 3, top = l1Index(1, 9, 1), castle = l1Index(1, 9,
   const json = (r: unknown) => JSON.stringify(r);
   check(crumbleRefusal(rom, plain, readTranslevels(rom)[plain])?.kind === 'destroyNothing', 'a plain level tile: the game destroys none');
   const r1 = new Rom(image.slice());
+  removeDestroy(r1, IGGY, top); // (its event 06 still run: by Yoshi's Island 4's secret exit)
   setBaseEvent(r1, tl, NO_EVENT);
   check(json(crumbleRefusal(r1, castle, tl)) === json({ kind: 'crumbleNoEvent', tl }) && !crumbles(r1, castle, tl), 'no base event: refused');
   const r2 = new Rom(image.slice());
@@ -167,11 +171,45 @@ const IGGY = 6, YI4 = 5, YI2 = 3, top = l1Index(1, 9, 1), castle = l1Index(1, 9,
   check(json(crumbleRefusal(r2, castle, tl)) === json({ kind: 'destroyTaken', event: IGGY, cell: l1Index(0, 4, 4) }), 'its event destroying another tile: refused');
   const r3 = new Rom(image.slice());
   setCrumbles(r3, castle, tl, false);
-  for (let ev = 0x50; readDestroyList(r3).some((d) => d.event === NO_EVENT); ev++) addDestroy(r3, ev, castle);
+  const m3 = readL1(r3); m3[l1Index(0, 4, 4)] = 0x58; writeL1(r3, m3); // (a fortress: the list filled with another cell)
+  for (let ev = 0x50; readDestroyList(r3).some((d) => d.event === NO_EVENT); ev++) addDestroy(r3, ev, l1Index(0, 4, 4));
   check(crumbleRefusal(r3, castle, tl)?.kind === 'destroysFull' && refusalOf((() => { try { setCrumbles(r3, castle, tl, true); } catch (e) { return e; } })())?.kind === 'destroysFull', 'the destroy list full: refused');
   const r4 = new Rom(image.slice());
+  removeDestroy(r4, IGGY, top);
   setBaseEvent(r4, tl, 0x80);
   check(crumbleRefusal(r4, castle, tl)?.kind === 'destroyPastEvents', 'a base event past the last event: refused');
+}
+
+// ---- #378: Iggy's castle destroyed by another level's event: the checkbox on and disabled, that level's exit named;
+// ticking it refused with that reason, no second destroy of the cell; unticking changes nothing ----
+{
+  const rom = new Rom(image.slice()), tl = readTranslevels(rom)[castle];
+  removeDestroy(rom, IGGY, top);
+  addDestroy(rom, YI2, castle);
+  const list = json(readDestroyList(rom)), by = { kind: 'crumblesByOther', event: YI2, cell: top };
+  const st = crumbleState(rom, castle, tl);
+  check(!crumbles(rom, castle, tl) && st.on && json(st.why) === json(by), `on, disabled: ${json(st)}`);
+  const words = refusalText(rom, st.why!);
+  check(crumblesByOtherText(rom, YI2) === 'Already crumbles when the normal exit of Yoshi\'s Island 2 is beaten' && words.startsWith(crumblesByOtherText(rom, YI2)),
+    `the reason names that level's exit: "${words}"`);
+  check(throws(() => setCrumbles(rom, castle, tl, true)) === json(by) && json(readDestroyList(rom)) === list, 'ticking it: refused with that reason, the destroys unchanged');
+  setCrumbles(rom, castle, tl, false);
+  check(json(readDestroyList(rom)) === list, 'unticking it: the other level\'s destroy stays');
+  // without a base event of its own: on as well
+  setBaseEvent(rom, tl, NO_EVENT);
+  check(json(crumbleState(rom, castle, tl)) === json({ on: true, why: by }), 'no base event of its own: on, the other level named');
+  // both destroying it: on, its own (can be unticked)
+  const r2 = new Rom(image.slice());
+  addDestroy(r2, YI2, castle);
+  check(json(crumbleState(r2, castle, tl)) === json({ on: true, why: null }), 'its own event and another destroying it: on, editable');
+  // an event no level exit runs destroying it: on, disabled as well – no second destroy of the cell
+  const r3 = new Rom(image.slice()), runners = eventRunners(r3);
+  let dead = 0x77; while (runners.has(dead)) dead--;
+  removeDestroy(r3, IGGY, top);
+  addDestroy(r3, dead, castle);
+  const l3 = json(readDestroyList(r3)), by3 = { kind: 'crumblesByOther', event: dead, cell: top };
+  check(json(crumbleState(r3, castle, tl)) === json({ on: true, why: by3 }) && throws(() => setCrumbles(r3, castle, tl, true)) === json(by3) && json(readDestroyList(r3)) === l3,
+    `event ${hx(dead)} no exit runs destroying it: on, ticking refused, "${refusalText(r3, by3 as never)}"`);
 }
 
 if (bad) { console.log(`${bad} failed`); process.exit(1); }
