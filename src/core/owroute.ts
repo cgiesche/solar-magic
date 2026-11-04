@@ -17,7 +17,10 @@
 import { DX, DY, PATH_TILES_END, reverse, shapeVector, type PathKind, type PathShapes } from './owpaths.ts';
 import { neighbor } from './owreach.ts';
 import { tileWays, wayText, SHAPED_KINDS, type PathWay } from './owpathshape.ts';
-import { stopTile } from './owleveltiles.ts';
+import { stopTile, type LevelTileEvent } from './owleveltiles.ts';
+import type { Rom } from './rom.ts';
+import { readL1, writeL1, readTranslevels, setExitDirection } from './overworld.ts';
+import { readEvents, writeEvents, paintEventL1, eventRunners } from './owevents.ts';
 
 // What the solver needs: layer 1 as it is (l1Index order: the route's cells, the paths it may run into), the path
 // kinds and shapes, the kind of path to use where a tile of it fits (the kind at the route's start), the stop tile to
@@ -42,6 +45,14 @@ export interface RouteTiles { tiles: (number | null)[]; refusal: RouteRefusal | 
 // what a cell of the route is: left alone (Mario stops or exits there), a stop tile to put, a path tile to find
 type Role = 'keep' | 'stop' | 'path';
 
+// the kind of path a route prefers: the kind at its start – of the first path tile on it, else walking
+export function routeKind(route: readonly number[], l1: ArrayLike<number>, kinds: readonly PathKind[]): PathKind {
+  return route.map((c) => kinds[l1[c]]).find((k) => SHAPED_KINDS.includes(k)) ?? 'walk';
+}
+
+// the direction from cell a to cell b next to it (undefined: not next to it)
+const dirTo = (a: number, b: number): number | undefined => [0, 1, 2, 3].find((d) => neighbor(a, d) === b);
+
 export function routeTiles(route: readonly number[], inp: RouteInput): RouteTiles {
   return solve(route, inp, true);
 }
@@ -61,7 +72,7 @@ function solve(route: readonly number[], inp: RouteInput, askAlternatives: boole
   // the route: each cell next to the one before on the same map
   const dirs: number[] = [];
   for (let k = 1; k < route.length; k++) {
-    const d = [0, 1, 2, 3].find((d) => neighbor(route[k - 1], d) === route[k]);
+    const d = dirTo(route[k - 1], route[k]);
     if (d === undefined) return refuse(k, 'Not next to the cell before');
     dirs.push(d);
   }
@@ -189,4 +200,43 @@ function candidates(inp: RouteInput, map: number): Candidate[] {
   const rank = new Map([...tiles].sort((x, y) => (uses.get(y) ?? 0) - (uses.get(x) ?? 0) || x - y).map((t, k) => [t, k]));
   return tiles.map((t) => ({ tile: t, ways: tileWays(t, inp.kinds[t], inp.shapes), cost: (inp.kinds[t] === inp.prefer ? 0 : 0x10000) + 1 + rank.get(t)! }))
     .filter((c) => c.ways.length);
+}
+
+// ---- written ----
+
+// a level's exit a route sets the direction of: the translevel, the exit (0 normal, 1–3 secret), the direction
+export interface RouteExit { tl: number; exit: number; dir: number }
+
+// The exits a route sets in event ev.event: a level tile at its start or end whose exit runs the event gets that exit's
+// direction the way the route leaves the tile – so the game's reveal walk takes the route when the exit is passed. On
+// the map before events (ev null) none.
+export function routeExits(rom: Rom, route: readonly number[], ev: LevelTileEvent | null): RouteExit[] {
+  if (!ev || route.length < 2) return [];
+  const tls = readTranslevels(rom), runners = eventRunners(rom).get(ev.event) ?? [], out: RouteExit[] = [];
+  const ends: [number, number][] = [[route[0], route[1]], [route[route.length - 1], route[route.length - 2]]];
+  for (const [c, n] of ends) {
+    const tl = tls[c], dir = dirTo(c, n);
+    if (!tl || dir === undefined || !ev.isLevelTile(ev.after[c])) continue;
+    for (const r of runners) if (r.tl === tl && !out.some((o) => o.tl === tl && o.exit === r.exit)) out.push({ tl, exit: r.exit, dir });
+  }
+  return out;
+}
+
+// The route's tiles (routeTiles' tiles: null left alone) written: into the map before events, or with an event (ev) as
+// layer 1 changes of it (owevents.ts paintEventL1, as layer 1 painted into the event), and the exits routeExits gives
+// set. Layer 2 is not touched. What it set.
+export function writeRoute(rom: Rom, route: readonly number[], tiles: readonly (number | null)[], ev: LevelTileEvent | null): RouteExit[] {
+  const cells = route.flatMap((c, k) => (tiles[k] === null ? [] : [[c, tiles[k]!] as const]));
+  if (ev) {
+    const after = Uint16Array.from(ev.after);
+    for (const [c, t] of cells) after[c] = t;
+    writeEvents(rom, paintEventL1(readEvents(rom), ev.event, after, ev.without, new Set(cells.map(([c]) => c))));
+  } else {
+    const l1 = readL1(rom);
+    for (const [c, t] of cells) l1[c] = t;
+    writeL1(rom, l1);
+  }
+  const exits = routeExits(rom, route, ev);
+  for (const x of exits) setExitDirection(rom, x.tl, x.exit, x.dir);
+  return exits;
 }

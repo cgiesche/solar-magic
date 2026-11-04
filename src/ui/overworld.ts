@@ -23,6 +23,7 @@ import {
   eventL1Tiles, exitChanges, type EventData, type EventRunner, type Rect, type ExitChanges, type StripEntry,
 } from '../core/owevents.ts';
 import { OverworldStroke, shownMaps } from '../core/owstroke.ts';
+import { PathTool } from './owpathtool.ts';
 import { isPathKind, type PathKind, type PathShapes } from '../core/owpaths.ts';
 import { pathWays, pathTileText, type PathWay } from '../core/owpathshape.ts';
 import { emptyL1Tiles, freeL1Tiles, sheetPages, l1TileLines, l1Hex, l1BrushEntries, NO_TILE, SHEET_COLS, type SheetPage } from '../core/owl1sheet.ts';
@@ -139,6 +140,7 @@ export class OverworldView {
   sprites = new SpriteLayer(this);
   levelTiles = new LevelTileLayer(this); // the level tiles as objects (the levels mode)
   nameEditor = new LevelNameEditor(this); // the selected level tile's name, edited in place (the levels mode)
+  pathTool = new PathTool(this); // the layer 1 mode's Path tool: routes dragged, their tiles chosen
   reach = new ReachLayer(this); // path validation: the tiles Mario doesn't reach dimmed, the problems of the paths
   exits = new ExitArrowLayer(this); // the Levels mode's arrows from each level tile to the levels its exits open
   cellHistory = new CellHistoryPopup(this); // a cell's history over the game, the mouse resting on it
@@ -464,7 +466,8 @@ export class OverworldView {
       if (sel) drawBrushFrame(ctx, 'selection', [sel.x * s, sel.y * s, sel.w * s, sel.h * s], lw);
       // (a piece being picked for "Replace piece…": the grid cell under the mouse)
       if (this.replacing && this.hover && !pick) drawBrushFrame(ctx, 'hover', [(this.hover.x & ~1) * s, (this.hover.y & ~1) * s, 2 * s, 2 * s], lw);
-      else if (r) drawBrushFrame(ctx, pick ? 'pick' : 'hover', [r.x * s, r.y * s, r.w * s, r.h * s], lw);
+      else if (r && (pick || !(this.mode === 'l1' && this.pathTool.on))) drawBrushFrame(ctx, pick ? 'pick' : 'hover', [r.x * s, r.y * s, r.w * s, r.h * s], lw);
+      if (this.mode === 'l1') this.pathTool.paint(ctx, lw);
     }
   }
 
@@ -690,6 +693,7 @@ export class OverworldView {
       else if (e.button === 2) this.levelTiles.menu(e.clientX, e.clientY, c.x, c.y);
       return;
     }
+    if (this.mode === 'l1' && this.pathTool.on && e.button === 0 && !e.shiftKey && !e.altKey && !e.ctrlKey) { this.pathTool.down(c.x, c.y); return; }
     if (paintButton(e)) {
       // (a stroke leaves level tiles alone: not before the level tiles are known)
       if (this.mode === 'l1' && !this.pathKinds()) { toast('The path tiles are still being learned – layer 1 can be painted in a moment.'); return; }
@@ -734,19 +738,21 @@ export class OverworldView {
     this.updateStatus();
     if (this.links.drag) { this.links.move(c.x, c.y); return; }
     if (this.mode === 'levels') { this.paint(); return; }
+    if (this.pathTool.drawing) { this.pathTool.move(c.x, c.y); return; }
     this.brushDrag.move(c);
     this.paint();
   }
 
   // a stroke, a pick, a link or a level tile being dragged (followed off the map too)
   private dragging(): boolean {
-    return this.brushDrag.active || !!this.links.drag || !!this.levelTiles.drag;
+    return this.brushDrag.active || !!this.links.drag || !!this.levelTiles.drag || this.pathTool.drawing;
   }
 
   onUp(e: MouseEvent): void {
     if (this.links.drag) { this.links.up(); return; }
     if (this.sprites.drag) { const p = this.point(e); this.sprites.up(p.x, p.y); return; }
     if (this.levelTiles.drag) { this.levelTiles.up(); return; }
+    if (this.pathTool.drawing) { this.pathTool.up(); return; }
     this.brushDrag.up();
   }
 
@@ -929,6 +935,8 @@ export class OverworldView {
       this.statusText.textContent = `${this.replacing.from ? 'Click the new piece' : 'Click the piece to replace'} on the map or in “Pieces on this map” · Esc cancels`;
       return;
     }
+    const route = this.mode === 'l1' ? this.pathTool.status() : null;
+    if (route && (this.pathTool.drawing || !c)) { this.statusText.textContent = route; return; }
     if (this.mode === 'sprites' && !c) {
       this.statusText.textContent = 'Click: select a sprite, a start position (M, L) or a Koopa Kid\'s place (K1–K3) · Drag moves it (8 pixels, 1 with Shift) · Delete empties a sprite slot';
       return;
@@ -1328,6 +1336,7 @@ export class OverworldView {
     this.cellHistory.close();
     this.mode = m;
     this.levelTiles.cancel();
+    this.pathTool.cancel();
     if (m !== 'l1' && (this.eventPick?.at ?? -1) >= 0) this.cancelEventPick(); // (the tile a reveal becomes is picked in the layer 1 sheet)
     if (m !== 'l2') { this.replacing = null; this.l2Sel = null; }
     this.buildLeft(); // (levels without a level tile are dragged onto the map in the levels mode)
@@ -1336,6 +1345,14 @@ export class OverworldView {
     this.buildSide();
     this.updateStatus();
     this.composeMap();
+    this.paint();
+  }
+  // the layer 1 mode's Path tool chosen or not (P)
+  private setPathTool(on: boolean): void {
+    this.pathTool.cancel();
+    this.pathTool.on = on;
+    this.buildBar();
+    this.updateStatus();
     this.paint();
   }
   // a click on level tile i in the layer 1 mode: the Levels mode with it selected (said how to go back)
@@ -1358,6 +1375,8 @@ export class OverworldView {
         h('button', { class: this.mode === 'levels' ? 'active' : '', title: 'Levels (3): the level tiles as objects – click selects, drag moves (swaps with the tile there), Delete leaves a stop tile, right click places a level', onclick: () => this.setMode('levels') }, 'Levels'),
         h('button', { class: this.mode === 'links' ? 'active' : '', title: 'Overworld links (4): stars, pipes and exit paths leading elsewhere, drawn as arrows; drag from a tile to where it leads', onclick: () => this.setMode('links') }, 'Overworld links'),
         h('button', { class: this.mode === 'sprites' ? 'active' : '', title: 'Sprites (5): the overworld\'s sprites as the game shows them at the event progress, the start positions and the Koopa Kids\' places; drag to move', onclick: () => this.setMode('sprites') }, 'Sprites')),
+      ...(this.mode === 'l1' ? [h('button', { class: this.pathTool.on ? 'active' : '', onclick: () => this.setPathTool(!this.pathTool.on),
+        title: 'Path tool (P): press on a cell and drag Mario\'s route – the editor chooses the path tiles (a cell none fits in red, why in the status bar); released, they go into the map shown ("Map after": the event\'s layer 1 changes), and a level tile at an end gets the direction of its exit running the event' }, 'Path tool')] : []),
       h('button', { title: `${MAP_NAMES[this.map]}'s border (layer 3, fixed on the screen) in the Game workspace`, onclick: () => this.onEditBorder(this.map) }, 'Edit border…'),
       h('span', { class: 'sep' }),
       menuButton({ label: 'View', items: [
@@ -1401,12 +1420,14 @@ export class OverworldView {
     if (k === 'escape' && this.brushDrag.cancel()) { this.paint(); return true; }
     if (k === 'escape' && this.levelTiles.cancel()) return true;
     if (k === 'escape' && this.nameEditor.cancel()) return true;
+    if (k === 'escape' && this.pathTool.cancel()) return true;
     if (k === 'escape' && this.cancelEventPick()) return true;
     if (k === 'escape' && this.cancelReplace()) return true;
     if (e.ctrlKey || e.metaKey || e.altKey) return false;
     if (k === 'escape' && this.mode === 'sprites' && this.sprites.unpick()) return true;
     if (k === 'escape' && this.mode === 'links' && this.links.cancelPending()) return true;
     if (k === 'escape' && this.event >= 0) { this.setEvent(-1); return true; }
+    if (k === 'p' && this.mode === 'l1') { this.setPathTool(!this.pathTool.on); return true; }
     if (k === 'g') { this.showGrid = !this.showGrid; this.paint(); return true; }
     if (k === 'q' && isLayerMode(this.mode)) { this.setSolo(true); return true; }
     if (k === 'm' && this.selected >= 0 && (isLayerMode(this.mode) || this.mode === 'levels')) { this.editTile(this.selected); return true; }
@@ -2096,7 +2117,7 @@ export class OverworldView {
 // (each kind's colour, r,g,b: the mark's fill with its alpha, the sheet's border opaque; a level tile has no mark)
 const KIND_RGB: Partial<Record<PathKind, [string, number]>> = { walk: ['90,230,100', 0.7], climb: ['90,230,100', 0.7], swim: ['60,140,255', 0.75], exit: ['235,60,60', 0.8], stop: ['255,255,255', 1], level: ['255,210,60', 1] };
 const PATH_FILL = Object.fromEntries(Object.entries(KIND_RGB).map(([k, [c, a]]) => [k, `rgba(${c},${a})`])) as Partial<Record<PathKind, string>>;
-function drawPathMark(ctx: CanvasRenderingContext2D, k: PathKind, px: number, py: number, lw: number, ways: readonly PathWay[]): void {
+export function drawPathMark(ctx: CanvasRenderingContext2D, k: PathKind, px: number, py: number, lw: number, ways: readonly PathWay[]): void {
   if (k === 'stop') {
     for (const [c, w] of [['rgba(0,0,0,0.8)', 4], ['#fff', 2]] as [string, number][]) {
       ctx.strokeStyle = c;
