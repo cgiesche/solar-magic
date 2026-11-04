@@ -44,6 +44,7 @@ export interface WorldProblem {
   fix?: WorldFix;
   noFix?: OwRefusalData; // why a problem a fix exists for has none here (owrefusal.ts)
   budget?: Budget; // a budget amber or full (tile -1: Show goes to where the limit applies, budgetPlace)
+  show?: { event: number; mode: OwMode }; // where Show goes instead of the progress found at: an event in a mode
 }
 
 // a search of owreach.ts at an event progress

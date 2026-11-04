@@ -9,7 +9,12 @@ import type { Rom } from './rom.ts';
 import { OW_EVENTS, gameL1, type OverworldLoads } from './overworld.ts';
 import { eventRunners, exitChanges, readEvents, type ExitChanges } from './owevents.ts';
 import { progressSaves } from './owprogress.ts';
-import { reach, waysFrom, type Reach, type ReachInput } from './owreach.ts';
+import { reach, reachInput, waysFrom, type Reach, type ReachInput } from './owreach.ts';
+import { levelTeleports } from './owlinks.ts';
+import { readStart } from './owsprites.ts';
+import type { ExitGraph } from './exitgraph.ts';
+import type { PathKind, PathShapes } from './owpaths.ts';
+import type { OwTile } from './owteleport.ts';
 import { RAM } from './ram.ts';
 import type { Job } from './jobrunner.ts';
 
@@ -117,4 +122,12 @@ export function* progressMapsJob(loads: OverworldLoads): Job<ProgressMap[]> {
     yield;
   }
   return out;
+}
+
+// the search's input at event progress p from the maps at every progress, as the overworld view searches: with the
+// levels' exits to the overworld teleporting (each level's asked once)
+export function progressInput(rom: Rom, maps: readonly ProgressMap[], kinds: readonly PathKind[], shapes: PathShapes, graph: ExitGraph): (p: number) => ReachInput {
+  const warps = new Map<number, OwTile[]>(), start = readStart(rom, 0);
+  const levelWarps = (tl: number) => warps.get(tl) ?? warps.set(tl, levelTeleports(rom, graph, tl).map((t) => t.to)).get(tl)!;
+  return (p) => reachInput(rom, maps[p].l1, maps[p].tls, maps[p].flags, kinds, shapes, start, levelWarps);
 }

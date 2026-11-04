@@ -1139,6 +1139,11 @@ export class App {
   overworldProgressMaps(done: () => void): ProgressMap[] | undefined {
     return this.probes.learn<ProgressMap[]>('owpm1', { kind: 'owProgressMaps' }, { lane: 'owpm', label: 'Overworld progress', done });
   }
+  // per submap per layer 1 tile whether it has a look of its own (owlook.ts l1OwnLooks: the World check's paths without
+  // a look), learned and kept as overworldProgressMaps
+  overworldOwnLooks(done: () => void): Uint8Array[] | undefined {
+    return this.probes.learn<Uint8Array[]>('owol1', { kind: 'owOwnLooks' }, { lane: 'owol', label: 'Overworld tile looks', done });
+  }
   // which overworld tiles are level tiles (owpaths.ts levelTileTest), from the path tiles: null while they are learned
   levelTileTest(done: () => void): LevelTileTest | null {
     const kinds = this.pathKinds(done);

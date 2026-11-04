@@ -8,13 +8,9 @@
 import type { OverworldView } from './overworld.ts';
 import { arrow } from './owlinkview.ts';
 import { l1XY, EXIT_NAMES, MAP_NAMES, translevelToLevel } from '../core/overworld.ts';
-import { exitEdges, type ExitEdge } from '../core/owexitedges.ts';
-import { reachInput } from '../core/owreach.ts';
-import { levelTeleports } from '../core/owlinks.ts';
-import { readStart } from '../core/owsprites.ts';
+import { exitEdges, progressInput, type ExitEdge } from '../core/owexitedges.ts';
 import { levelName } from '../core/levelnames.ts';
 import { hex } from '../core/names.ts';
-import type { OwTile } from '../core/owteleport.ts';
 
 const COLORS = { normal: '#7ee07e', secret: '#ffe14c', none: '#ff4a4a', unknown: '#9aa0a6' };
 // the middle of layer 1 tile i (l1Index) in the map's pixels
@@ -42,11 +38,7 @@ export class ExitArrowLayer {
     if (!kinds || !shapes || !maps || !v.views) return null;
     const key = `${rom.gen}`;
     if (this.found?.key === key && this.found.mapsUsed === maps) return this.found.edges;
-    const graph = app.entrances.graph(), warps = new Map<number, OwTile[]>();
-    const levelWarps = (tl: number) => warps.get(tl) ?? warps.set(tl, levelTeleports(rom, graph, tl).map((t) => t.to)).get(tl)!;
-    const start = readStart(rom, 0);
-    const at = (p: number) => reachInput(rom, maps[p].l1, maps[p].tls, maps[p].flags, kinds, shapes, start, levelWarps);
-    const edges = exitEdges(rom, at, (i) => v.submapAt(i));
+    const edges = exitEdges(rom, progressInput(rom, maps, kinds, shapes, app.entrances.graph()), (i) => v.submapAt(i));
     this.found = { key, mapsUsed: maps, edges };
     return edges;
   }

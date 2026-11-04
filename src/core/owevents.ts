@@ -461,7 +461,7 @@ export function* submapViewsJob(loads: OverworldLoads): Job<Rect[]> {
   return submapViews(loads);
 }
 // the submap a layer 1 tile is on: 0 on the main map, else the one whose view's center is nearest (as LevelEmulator's)
-export function submapOf(views: Rect[], tile: number): number {
+export function submapOf(views: readonly Rect[], tile: number): number {
   if (tile < 0x400) return 0;
   const { x, y } = l1XY(tile), cx = x * 2 + 1, cy = y * 2 + 1;
   let best = 1, bd = Infinity;
