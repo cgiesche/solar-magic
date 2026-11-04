@@ -2,14 +2,14 @@
 // overworld's paint panel listing the problems – errors and warnings apart, each in its group (Paths, Progress, Links,
 // Look, Budget; empty ones not shown) – each with Show (the map at the event progress it is found at, the tile shown
 // and outlined) and Fix where one exists (one ROM edit). Checked again after every ROM edit and undo, and when what
-// the search needs is learned (owreachview.ts).
+// the search needs is learned (owreachview.ts); what an edit changed is said in a toast (new errors named, with Show).
 
 import type { OverworldView } from './overworld.ts';
 import { h, toast, emptyState } from './dom.ts';
 import { l1XY, OW_EVENTS } from '../core/overworld.ts';
 import { tileText } from '../core/owteleport.ts';
 import { hex2 } from '../core/names.ts';
-import { worldProblems, applyFix, errorCount, CHECK_GROUPS, type WorldProblem, type CheckSeverity } from '../core/worldcheck.ts';
+import { worldProblems, applyFix, errorCount, checkAgainst, diffText, CHECK_GROUPS, type CheckBaseline, type WorldProblem, type CheckSeverity } from '../core/worldcheck.ts';
 
 const ICON: Record<CheckSeverity, string> = { error: '⛔', warn: '⚠' };
 const SECTIONS: { severity: CheckSeverity; name: string; title: string }[] = [
@@ -23,6 +23,8 @@ export class WorldCheck {
   readonly root = h('div', { class: 'panel world-check', hidden: true });
   // (the tiles' places named once the submaps' views are known: searched again then)
   private found: { from: object; views: boolean; problems: WorldProblem[] } | null = null;
+  // the problems last checked: what an edit changed is said against them
+  private baseline: CheckBaseline | null = null;
 
   constructor(view: OverworldView) {
     this.view = view;
@@ -50,6 +52,7 @@ export class WorldCheck {
   // the button and (when open) the panel checked again
   update(): void {
     const ps = this.problems(), errors = ps ? errorCount(ps) : 0, warnings = ps ? ps.length - errors : 0;
+    if (ps) this.tell(ps);
     const b = this.button;
     b.classList.toggle('status-info', !errors);
     b.classList.toggle('status-error', errors > 0);
@@ -57,6 +60,21 @@ export class WorldCheck {
     b.title = !ps ? 'World check: being searched (the path tiles, the maps or the saves are being learned)'
       : `World check: ${errors} error${errors === 1 ? '' : 's'}, ${warnings} warning${warnings === 1 ? '' : 's'} – click to ${this.open ? 'close' : 'open'} the list`;
     if (this.open) this.fill(ps);
+  }
+
+  // what the ROM edits since the problems last checked changed, in a toast (at most one per check, none when nothing
+  // changed; checkAgainst)
+  private tell(ps: WorldProblem[]): void {
+    const v = this.view, { baseline, change } = checkAgainst(this.baseline, v.app.rom.gen, v.progress, ps);
+    this.baseline = baseline;
+    const said = change && diffText(change);
+    if (!said) return;
+    const show = said.show;
+    toast(`World check: ${said.text}`, show ? 'error' : 'info', show ? { label: 'Show', run: () => this.show(show) } : undefined);
+  }
+  // the problems checked from now on are the baseline (the overworld shown again: edits made elsewhere not said)
+  reset(): void {
+    this.baseline = null;
   }
 
   private fill(ps: WorldProblem[] | null): void {

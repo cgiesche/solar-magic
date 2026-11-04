@@ -30,6 +30,7 @@ export interface WorldProblem {
   group: CheckGroup;
   severity: CheckSeverity;
   text: string; // in the player's words
+  brief: string; // in a few words, to go on in a sentence ("dead end at Main map 0C,09")
   title?: string; // longer explanation
   tile: number; // where it is (l1Index): shown and outlined
   progress: number; // the event progress it is found at (OW_EVENTS: every event passed)
@@ -50,7 +51,7 @@ export function worldProblems(rom: Rom, now: CheckedAt, all: CheckedAt, place: (
   const l1 = readL1(rom), kinds = now.inp.kinds, stop = stopTile(l1, kinds);
   const out = reachProblems(rom, now, all, place).map((p): WorldProblem => {
     const progress = p.at === 'now' ? now.progress : all.progress;
-    const q: WorldProblem = { key: p.key, group: GROUP_OF[p.kind], severity: p.severity, text: p.text, title: p.title, tile: p.tile, progress };
+    const q: WorldProblem = { key: p.key, group: GROUP_OF[p.kind], severity: p.severity, text: p.text, brief: p.brief, title: p.title, tile: p.tile, progress };
     // a dead end: a stop tile in place of the path tile Mario is stuck on, where the map before events has the tile
     // he is stuck on (an event changing it would put its own back)
     const t = now.inp.l1[p.tile];
@@ -87,3 +88,48 @@ export function applyFix(rom: Rom, fix: WorldFix): void {
 }
 
 export const errorCount = (ps: readonly WorldProblem[]): number => ps.filter((p) => p.severity === 'error').length;
+
+// ---- what an edit changed ----
+
+// the problems new and gone between two lists of the World check (by key)
+export interface CheckDiff { added: WorldProblem[]; gone: WorldProblem[] }
+export function diffProblems(before: readonly WorldProblem[], after: readonly WorldProblem[]): CheckDiff {
+  const was = new Set(before.map((p) => p.key)), is = new Set(after.map((p) => p.key));
+  return { added: after.filter((p) => !was.has(p.key)), gone: before.filter((p) => !is.has(p.key)) };
+}
+
+// the problems last checked: of a ROM generation, at an event progress
+export interface CheckBaseline { gen: number; progress: number; problems: WorldProblem[] }
+// The problems checked (`ps`, of ROM generation `gen` at event progress `progress`) against the baseline: what the ROM
+// edits since changed (null: nothing to say – no baseline, no edit, or another event progress, whose problems no
+// edit made), and the new baseline. Checked again without an edit (the places named anew) it only takes the new list
+export function checkAgainst(last: CheckBaseline | null, gen: number, progress: number, ps: WorldProblem[]): { baseline: CheckBaseline; change: CheckDiff | null } {
+  const baseline = { gen, progress, problems: ps };
+  const change = last && last.gen !== gen && last.progress === progress ? diffProblems(last.problems, ps) : null;
+  return { baseline, change };
+}
+
+// What an edit changed, said in one sentence (a toast): the errors new and gone named – up to `max` in all, each list
+// then "and N more" – the warnings counted ("New: dead end at Main map 0C,09 · Fixed: level 105 not reached and 2
+// more · +2 warnings"); `show` the first new error; null when nothing changed
+export function diffText(d: CheckDiff, max = 3): { text: string; show: WorldProblem | null } | null {
+  if (!d.added.length && !d.gone.length) return null;
+  const errors = (ps: WorldProblem[]) => ps.filter((p) => p.severity === 'error');
+  const added = errors(d.added), gone = errors(d.gone);
+  const warnings = (n: number, sign: string) => (n ? `${sign}${n} warning${n > 1 ? 's' : ''}` : '');
+  let left = max;
+  // a list named up to what is left of `max` (at least one), "and N more" for the others
+  const names = (what: string, ps: WorldProblem[]) => {
+    if (!ps.length) return '';
+    const n = Math.max(1, left), more = ps.length - Math.min(n, ps.length);
+    left -= n;
+    return `${what}: ${ps.slice(0, n).map((p) => p.brief).join('; ')}${more ? ` and ${more} more` : ''}`;
+  };
+  const parts = [
+    names('New', added),
+    names('Fixed', gone),
+    warnings(d.added.length - added.length, '+'),
+    warnings(d.gone.length - gone.length, '−'),
+  ].filter((s) => s);
+  return { text: parts.join(' · '), show: added[0] ?? null };
+}

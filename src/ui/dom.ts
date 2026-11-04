@@ -214,16 +214,18 @@ export function clearLog(): void {
 }
 
 let toastStack: HTMLElement | null = null;
-export function toast(msg: string, kind: 'info' | 'error' = 'info'): void {
+// action: a button in the toast (e.g. Show), which closes it
+export function toast(msg: string, kind: 'info' | 'error' = 'info', action?: { label: string; run: () => void }): void {
   log(msg, kind);
   // one column for all toasts: a toast shown while others are visible goes below them instead of on top
   if (!toastStack?.isConnected) toastStack = document.body.appendChild(h('div', { class: 'toast-stack' }));
-  const t = h('div', { class: `toast ${kind}` }, msg);
+  const t = h('div', { class: `toast ${kind}` }, msg,
+    action ? h('button', { class: 'toast-action', onclick: () => { action.run(); t.remove(); } }, action.label) : null);
   toastStack.appendChild(t);
   // a burst (Ctrl+Z held, many errors) keeps only the newest few on screen; the log has them all
   while (toastStack.childElementCount > 5) toastStack.firstElementChild!.remove();
   setTimeout(() => t.classList.add('show'), 10);
-  setTimeout(() => { t.classList.remove('show'); setTimeout(() => t.remove(), 300); }, kind === 'error' ? 6000 : 2500);
+  setTimeout(() => { t.classList.remove('show'); setTimeout(() => t.remove(), 300); }, kind === 'error' || action ? 6000 : 2500);
 }
 
 // beforeClose: asked on every way of closing (buttons, ✕, Esc, click beside the dialog); false keeps it

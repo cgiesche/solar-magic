@@ -2,14 +2,16 @@
 // they are found at, with a stable key (kind and place). The clean game: the two level tiles nothing leads to (errors)
 // and the event of one of them (a warning), nothing else, the same keys searched again. A path made to lead nowhere on the test ROM
 // (a ROM edit): a dead end, its fix "Add a stop tile here" – one layer 1 tile of the map before events – leaves Mario
-// stopping there, the dead end gone, the other problems' keys as before.
+// stopping there, the dead end gone, the other problems' keys as before. What an edit changed (diffProblems, diffText):
+// the new dead end and up to three errors named, then "and N more"; its undo and the fix say them fixed; warnings
+// counted; nothing changed, nothing said.
 import { Rom } from '../src/core/rom.ts';
 import { OverworldEmulator, OverworldLoads, gameL1, l1XY, readL1, writeL1, OW_EVENTS } from '../src/core/overworld.ts';
 import { progressSaves } from '../src/core/owprogress.ts';
 import { reach, reachInput } from '../src/core/owreach.ts';
 import { readStart } from '../src/core/owsprites.ts';
 import { RAM } from '../src/core/ram.ts';
-import { worldProblems, applyFix, errorCount, stopTile, type CheckedAt, type WorldProblem } from '../src/core/worldcheck.ts';
+import { worldProblems, applyFix, errorCount, stopTile, diffProblems, diffText, checkAgainst, type CheckedAt, type WorldProblem } from '../src/core/worldcheck.ts';
 import { editorImage, pathKinds, pathShapes } from './fixture.ts';
 
 let bad = 0;
@@ -46,7 +48,15 @@ console.log(list(clean.problems));
   check(events.length === 1 && events[0].severity === 'warn' && events[0].group === 'progress', 'the event of level 112 reveals nothing Mario reaches: a warning');
   check(ps.length === 3 && errorCount(ps) === 2, `nothing else (${ps.length} problems, ${errorCount(ps)} errors)`);
   check(ps.every((p, k) => k === 0 || !(p.severity === 'error' && ps[k - 1].severity === 'warn')), 'errors listed before warnings');
-  check(keys(checkRom(new Rom(rom.data.slice())).problems) === keys(ps), 'searched again: the same keys');
+  const again = checkRom(new Rom(rom.data.slice())).problems;
+  check(keys(again) === keys(ps), 'searched again: the same keys');
+  check(diffText(diffProblems(ps, again)) === null, 'nothing changed: nothing said');
+  const warn = (n: number): WorldProblem => ({ ...events[0], key: `w${n}` });
+  check(diffText({ added: [warn(1), warn(2)], gone: [warn(3)] })?.text === '+2 warnings · −1 warning', 'warnings counted, not named');
+  // up to three named in all, the rest of each list counted with it
+  const err = (n: number): WorldProblem => ({ ...ps[0], key: `e${n}`, brief: `e${n}` });
+  const mixed = diffText({ added: [err(1), err(2)], gone: [err(3), err(4), err(5)] });
+  check(mixed?.text === 'New: e1; e2 · Fixed: e3 and 2 more' && mixed.show?.key === 'e1', `two new, three fixed: "${mixed?.text}", Show the first new`);
 }
 
 // ---- a path leading nowhere: a dead end and its fix ----
@@ -62,6 +72,18 @@ console.log(list(clean.problems));
   check(!!dead && dead.severity === 'error' && dead.group === 'paths' && dead.progress === 0 && dead.text.startsWith(`Dead end at ${at(end)}`),
     `level tile ${at(end)} made a path tile: a dead end at ${at(end)}, an error of Paths (${dead?.text})`);
   check(clean.problems.every((p) => cutCheck.problems.some((q) => q.key === p.key)), 'the clean game\'s problems keep their keys');
+  // what the edit says: the dead end new (shown), with the levels it keeps Mario from up to three, then "and N more";
+  // its undo (the clean game again): all of them fixed
+  const said = diffText(diffProblems(clean.problems, cutCheck.problems)), newErrors = errorCount(cutCheck.problems) - errorCount(clean.problems);
+  check(newErrors > 3 && !!said && said.text.startsWith(`New: dead end at ${at(end)}; level `) && said.text.includes(` and ${newErrors - 3} more · +`) && !said.text.includes('Fixed')
+    && said.show?.key === dead?.key, `the edit says: "${said?.text}" (Show: ${said?.show?.brief})`);
+  // when it is said: after an edit (another ROM generation) at the same event progress
+  const base = checkAgainst(null, 1, 0, clean.problems);
+  check(!base.change && checkAgainst(base.baseline, 1, 0, cutCheck.problems).change === null && checkAgainst(base.baseline, 2, 5, cutCheck.problems).change === null
+    && checkAgainst(base.baseline, 2, 0, cutCheck.problems).change?.added.length === cutCheck.problems.length - clean.problems.length,
+    'said after an edit at the same event progress; not first, not without an edit, not at another progress');
+  const undone = diffText(diffProblems(cutCheck.problems, clean.problems));
+  check(!!undone && undone.text.startsWith(`Fixed: dead end at ${at(end)}; `) && !undone.text.includes('New') && !undone.show, `its undo says: "${undone?.text}"`);
   const stop = stopTile(readL1(rom), kinds);
   check(!!dead?.fix && dead.fix.tile === end && dead.fix.to === stop && kinds[stop] === 'stop', `fixed by "${dead?.fix?.label}": stop tile ${hx(stop, 3)} at ${at(end)}`);
   if (dead?.fix) {
@@ -71,6 +93,8 @@ console.log(list(clean.problems));
     check(changed.join() === String(end), `the fix changes one tile of layer 1 (${changed.map(at).join(', ')})`);
     const fixed = checkRom(r), w2 = fixed.now.r.walks.get(k);
     check(!fixed.problems.some((p) => p.key.startsWith('dead-end:')) && w2?.to === end, `fixed: no dead end, the way stops at ${at(end)} (${w2 && at(w2.to)})`);
+    const saidFix = diffText(diffProblems(cutCheck.problems, fixed.problems));
+    check(!!saidFix && saidFix.text.startsWith(`Fixed: dead end at ${at(end)}`) && !saidFix.text.includes('New'), `the fix says: "${saidFix?.text}"`);
   }
 }
 

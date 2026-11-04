@@ -2099,6 +2099,7 @@ export class OverworldView {
 
   show(): void {
     this.shownViews = null;
+    this.check.reset(); // (edits made elsewhere are not said)
     this.pendingTile = -1;
     void this.views; // (asked for now: the links, sprites and events need them)
     this.event = loadEvent(this.app.romName);

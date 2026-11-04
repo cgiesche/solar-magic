@@ -202,7 +202,7 @@ What a level exit opens: exit E opens level B when B is reached at the event pro
 _Avoid_: unlock, level connection
 
 **World check**:
-Whether the overworld can be played through, answered in the player's terms: the side panel the status bar button opens (the button shows the number of errors). Its problems are **errors** (Mario gets stuck, a level can't be reached) or **warnings** (may be fine, e.g. the hack's own code does it; a warning never blocks), in groups – Paths, Progress, Links, Look, Budget – each found at an event progress (the progress shown, or with every event passed) with **Show** (the map at that progress, the tile outlined) and a **Fix** where one exists (a dead end: a stop tile in its place). A problem's key is its kind and place (an event's: its number), the same while it stays (core/worldcheck.ts).
+Whether the overworld can be played through, answered in the player's terms: the side panel the status bar button opens (the button shows the number of errors). Its problems are **errors** (Mario gets stuck, a level can't be reached) or **warnings** (may be fine, e.g. the hack's own code does it; a warning never blocks), in groups – Paths, Progress, Links, Look, Budget – each found at an event progress (the progress shown, or with every event passed) with **Show** (the map at that progress, the tile outlined) and a **Fix** where one exists (a dead end: a stop tile in its place). A problem's key is its kind and place (an event's: its number), the same while it stays (core/worldcheck.ts): after each overworld edit, undo and redo the problems new and gone are said in one toast (new errors named, with Show; warnings counted), compared by key at the same event progress.
 _Avoid_: problem list, validation (for the panel)
 
 **Event**:

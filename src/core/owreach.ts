@@ -239,10 +239,10 @@ export function reachInput(rom: Rom, l1: ArrayLike<number>, tls: ArrayLike<numbe
 
 // a problem of the overworld's paths, at a layer 1 tile: its kind, found at the event progress shown (`at` now) or
 // with every event passed (all); `key` its kind and place, the same while the problem stays (the World check compares
-// lists by it)
+// lists by it); `brief` the problem in a few words, to go on in a sentence ("dead end at Main map 0C,09")
 export type ReachKind = 'dead-end' | 'exit-nowhere' | 'unreached-level' | 'event-reveals-nothing';
 export type CheckSeverity = Exclude<Severity, 'info'>;
-export interface ReachProblem { key: string; kind: ReachKind; severity: CheckSeverity; text: string; title?: string; tile: number; at: 'now' | 'all' }
+export interface ReachProblem { key: string; kind: ReachKind; severity: CheckSeverity; text: string; brief: string; title?: string; tile: number; at: 'now' | 'all' }
 export interface Reached { inp: ReachInput; r: Reach }
 
 // What keeps Mario from tiles: at the event progress shown (now) the ways that end nowhere (a path without a stop tile
@@ -259,17 +259,17 @@ export function reachProblems(rom: Rom, now: Reached, all: Reached, place: (tile
     const at = w.stuck.at, way = `walking ${DIR_NAMES[k & 3]} from ${place(k >> 2)}`;
     add(w.stuck.why === 'exit'
       ? { key: `exit-nowhere:${at}`, kind: 'exit-nowhere', severity: 'error', tile: at, at: 'now',
-        text: `Exit path tile at ${place(at)} leads nowhere: Mario gets stuck ${way}`,
+        text: `Exit path tile at ${place(at)} leads nowhere: Mario gets stuck ${way}`, brief: `exit path tile at ${place(at)} leading nowhere`,
         title: 'No exit path is taken from the side Mario comes from: link the tile to where it leads (Links).' }
       : { key: `dead-end:${at}`, kind: 'dead-end', severity: 'error', tile: at, at: 'now',
-        text: `Dead end at ${place(at)}: Mario gets stuck ${way}`,
+        text: `Dead end at ${place(at)}: Mario gets stuck ${way}`, brief: `dead end at ${place(at)}`,
         title: w.stuck.why === 'loop' ? 'The path goes round in a circle without a level or stop tile.' : 'The path ends without a level or stop tile: Mario has no way on.' });
   }
   const { l1, tls, kinds } = all.inp;
   for (let i = 0; i < l1.length; i++) {
     if (kinds[l1[i]] !== 'level' || !tls[i] || all.r.stops.has(i)) continue;
     add({ key: `unreached-level:${i}`, kind: 'unreached-level', severity: 'error', tile: i, at: 'all',
-      text: `Level ${hex3(translevelToLevel(tls[i]))} at ${place(i)} can't be reached`,
+      text: `Level ${hex3(translevelToLevel(tls[i]))} at ${place(i)} can't be reached`, brief: `level ${hex3(translevelToLevel(tls[i]))} at ${place(i)} not reached`,
       title: 'Not even with every event passed: no path, star, pipe or exit leads Mario there.' });
   }
   const d = readEvents(rom), runners = eventRunners(rom);
@@ -280,7 +280,7 @@ export function reachProblems(rom: Rom, now: Reached, all: Reached, place: (tile
       const path = c.l1.filter((i) => kinds[l1[i]] !== 'none');
       if (!path.length || path.some((i) => all.r.tiles[i])) continue;
       add({ key: `event-reveals-nothing:${c.event}`, kind: 'event-reveals-nothing', severity: 'warn', tile: path[0], at: 'all',
-        text: `${eventTitle(runners, c.event)}: its event reveals nothing Mario reaches`,
+        text: `${eventTitle(runners, c.event)}: its event reveals nothing Mario reaches`, brief: `event ${hex2(c.event)} revealing nothing reached`,
         title: `None of the path or level tiles event ${hex2(c.event)} changes is reached with every event passed.` });
     }
   }
