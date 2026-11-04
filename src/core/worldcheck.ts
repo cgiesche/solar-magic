@@ -10,7 +10,7 @@ import { eventReveal } from './oweventtiles.ts';
 import { readEvents } from './owevents.ts';
 import { budgetLevel, budgetText, type Budget } from './owbudget.ts';
 import type { OwMode } from './owlayers.ts';
-import { reachProblems, WARP_TILES, ANY_WAY_TILE, type Reached, type ReachKind, type CheckSeverity } from './owreach.ts';
+import { reach, reachProblems, stuckProblems, WARP_TILES, ANY_WAY_TILE, type Reached, type ReachKind, type ReachProblem, type ReachInput, type CheckSeverity } from './owreach.ts';
 import { hex3 } from './names.ts';
 import type { PathKind } from './owpaths.ts';
 import type { OwRefusalData } from './owrefusal.ts';
@@ -56,28 +56,57 @@ const GROUP_OF: Record<ReachKind, CheckGroup> = {
 
 // The World check's problems: those of the paths at the event progress shown (`now`) and with every event passed
 // (`all`), with the problems of worldChecks (`checks`, found with every event passed: kept while the ROM is the same),
-// errors first, then by group. place: a tile's name ("Main map 0C,09")
-export function worldProblems(rom: Rom, now: CheckedAt, all: CheckedAt, place: (tile: number) => string, checks: readonly WorldProblem[] = []): WorldProblem[] {
-  const l1 = readL1(rom), kinds = now.inp.kinds, stop = stopTile(l1, kinds);
-  const out = reachProblems(rom, now, all, place).map((p): WorldProblem => {
-    const progress = p.at === 'now' ? now.progress : all.progress;
-    const q: WorldProblem = { key: p.key, group: GROUP_OF[p.kind], severity: p.severity, text: p.text, brief: p.brief, title: p.title, tile: p.tile, progress };
-    // a dead end: a stop tile in place of the path tile Mario is stuck on, where the map before events has the tile
-    // he is stuck on (an event changing it would put its own back)
-    const t = now.inp.l1[p.tile];
-    if (p.kind !== 'dead-end' || kinds[t] === 'stop' || kinds[t] === 'level') return q;
-    if (stop < 0) q.noFix = { kind: 'deadEndNoStopTile' };
-    else if (l1[p.tile] !== t) q.noFix = { kind: 'deadEndEventTile', cell: p.tile };
-    else {
-      q.fix = { label: 'Add a stop tile here', tile: p.tile, to: stop,
-        title: `Tile ${hex3(stop)} (a stop tile) in place of the path tile Mario gets stuck on, on the map before events: he stops there and can walk back` };
-    }
-    return q;
-  });
-  out.push(...checks);
+// errors first, then by group. everyProgress: the problems found at every event progress (stuckAtEveryProgress, the
+// Look group's paths), once they are learned – the dead ends and exit path tiles leading nowhere at every progress then in place of those at
+// the progress shown (each named with the first progress it is found at). place: a tile's name ("Main map 0C,09")
+export function worldProblems(rom: Rom, now: CheckedAt, all: CheckedAt, place: (tile: number) => string, checks: readonly WorldProblem[] = [], everyProgress: readonly WorldProblem[] | null = null): WorldProblem[] {
+  const l1 = readL1(rom), stop = stopTile(l1, now.inp.kinds);
+  const out = reachProblems(rom, now, all, place)
+    .filter((p) => !everyProgress || p.at !== 'now')
+    .map((p) => reachProblem(p, p.at === 'now' ? now : all, l1, stop));
+  out.push(...checks, ...everyProgress ?? []);
   const order = (p: WorldProblem) => (p.severity === 'error' ? 0 : 10) + CHECK_GROUPS.findIndex((g) => g.id === p.group);
   return out.sort((a, b) => order(a) - order(b));
 }
+
+// a problem of the paths (owreach.ts) found by search `at` (its progress), with its fix: a dead end a stop tile in
+// place of the path tile Mario is stuck on, where the map before events (`l1`) has the tile he is stuck on (an event
+// changing it would put its own back); stop: the stop tile a fix puts there (stopTile)
+function reachProblem(p: ReachProblem, at: CheckedAt, l1: ArrayLike<number>, stop: number): WorldProblem {
+  const q: WorldProblem = { key: p.key, group: GROUP_OF[p.kind], severity: p.severity, text: p.text, brief: p.brief, title: p.title, tile: p.tile, progress: at.progress };
+  const kinds = at.inp.kinds, t = at.inp.l1[p.tile];
+  if (p.kind !== 'dead-end' || kinds[t] === 'stop' || kinds[t] === 'level') return q;
+  if (stop < 0) q.noFix = { kind: 'deadEndNoStopTile' };
+  else if (l1[p.tile] !== t) q.noFix = { kind: 'deadEndEventTile', cell: p.tile };
+  else {
+    q.fix = { label: 'Add a stop tile here', tile: p.tile, to: stop,
+      title: `Tile ${hex3(stop)} (a stop tile) in place of the path tile Mario gets stuck on, on the map before events: he stops there and can walk back` };
+  }
+  return q;
+}
+
+// the searches at every event progress 0 … OW_EVENTS from their inputs, each searched once when first asked for: what
+// the checks at every progress share (stuckAtEveryProgress, owlook.ts lookProblems)
+export function progressSearches(input: (progress: number) => ReachInput): (progress: number) => CheckedAt {
+  const found: CheckedAt[] = [];
+  return (p) => (found[p] ??= (() => { const inp = input(p); return { inp, r: reach(inp), progress: p }; })());
+}
+
+// The dead ends and exit path tiles leading nowhere at every event progress 0 … OW_EVENTS (`at`:
+// the searches there, progressSearches), each once, found at the first progress it is at: one only a late event
+// brings is listed whatever progress is shown
+export function stuckAtEveryProgress(rom: Rom, at: (progress: number) => CheckedAt, place: (tile: number) => string): WorldProblem[] {
+  const l1 = readL1(rom), stop = stopTile(l1, at(0).inp.kinds), out = new Map<string, WorldProblem>();
+  for (let p = 0; p <= OW_EVENTS; p++) {
+    const s = at(p);
+    for (const q of stuckProblems(s, place)) if (!out.has(q.key)) out.set(q.key, reachProblem(q, s, l1, stop));
+  }
+  return [...out.values()];
+}
+
+// whether a World check problem is found at every event progress at once (stuckAtEveryProgress, the Look group's
+// paths): learned later than the others, said apart from them
+export const isFoundAtEveryProgress = (p: WorldProblem): boolean => /^(dead-end|exit-nowhere|path-late-look|path-no-look):/.test(p.key);
 
 // The checks of owchecks.ts with every event passed (`all`), the levels' exits in `graph`: events never run, links
 // stranding Mario, levels without level tile an exit leads into, events out of play order

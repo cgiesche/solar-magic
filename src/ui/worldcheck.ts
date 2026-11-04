@@ -4,8 +4,10 @@
 // and outlined) and Fix where one exists (one ROM edit). Under them every budget (core/owbudget.ts) as a gauge with
 // Show (where its limit applies); one full is an error, from 80 % a warning (budgetProblems). Checked again after every
 // ROM edit and undo, and when what the search needs is learned (owreachview.ts); what an edit changed is said in a
-// toast (new errors named, with Show). The paths without a look (core/owlook.ts) come once the maps at every event
-// progress are learned: what an edit changed there is said when they come (with the rest when it is there by then).
+// toast (new errors named, with Show). The problems found at every event progress – dead ends, exit path tiles leading
+// nowhere and the paths without a look (core/owlook.ts) – come once the maps at every event progress are learned (until then the ways
+// ending nowhere at the progress shown are listed): what an edit changed there is said when they come (with the rest
+// when it is there by then).
 
 import type { OverworldView } from './overworld.ts';
 import type { OwMode } from '../core/owlayers.ts';
@@ -14,8 +16,8 @@ import { refusalWords, refusedToast } from './owrefusal.ts';
 import { l1XY, OW_EVENTS } from '../core/overworld.ts';
 import { tileText } from '../core/owteleport.ts';
 import { hex2 } from '../core/names.ts';
-import { worldProblems, worldChecks, applyFix, errorCount, checkAgainst, diffText, budgetProblems, budgetPlace, CHECK_GROUPS, type CheckBaseline, type WorldProblem, type CheckSeverity } from '../core/worldcheck.ts';
-import { lookProblems, isPathLook } from '../core/owlook.ts';
+import { worldProblems, worldChecks, applyFix, errorCount, checkAgainst, diffText, budgetProblems, budgetPlace, progressSearches, stuckAtEveryProgress, isFoundAtEveryProgress, CHECK_GROUPS, type CheckBaseline, type WorldProblem, type CheckSeverity } from '../core/worldcheck.ts';
+import { lookProblems } from '../core/owlook.ts';
 import { progressInput } from '../core/owexitedges.ts';
 import { owBudgets, fullestSubmap, type Budget } from '../core/owbudget.ts';
 import { budgetGauge } from './budgetgauge.ts';
@@ -31,22 +33,22 @@ export class WorldCheck {
   readonly button = h('button', { class: 'status-warn world-check-btn', title: 'World check: is the world beatable? (opens the list)' });
   readonly root = h('div', { class: 'panel world-check', hidden: true });
   // (the tiles' places named once the submaps' views are known: searched again then)
-  private found: { from: object; views: boolean; looks: WorldProblem[] | null; problems: WorldProblem[] } | null = null;
+  private found: { from: object; views: boolean; every: WorldProblem[] | null; problems: WorldProblem[] } | null = null;
   // (the checks with every event passed and the budgets: kept while the ROM is the same)
   private checks: { key: string; problems: WorldProblem[]; budgets: Budget[] } | null = null;
-  // (the paths without a look: kept while the ROM and what they are found from are the same)
-  private looks: { gen: number; from: unknown[]; problems: WorldProblem[] } | null = null;
-  // the problems last checked: what an edit changed is said against them (the paths without a look apart: they come
-  // later)
+  // (the problems found at every event progress: kept while the ROM and what they are found from are the same)
+  private atEvery: { gen: number; from: unknown[]; problems: WorldProblem[] } | null = null;
+  // the problems last checked: what an edit changed is said against them (those found at every event progress apart:
+  // they come later)
   private baseline: CheckBaseline | null = null;
-  private lookBaseline: CheckBaseline | null = null;
+  private everyBaseline: CheckBaseline | null = null;
 
   constructor(view: OverworldView) {
     this.view = view;
     this.button.onclick = () => this.toggle();
   }
 
-  // something the paths without a look need came
+  // something the problems found at every event progress need came
   private learned = () => {
     if (this.view.root.isConnected) this.update();
   };
@@ -61,8 +63,8 @@ export class WorldCheck {
   problems(): WorldProblem[] | null {
     const v = this.view, st = v.reach.state();
     if (!st) return null;
-    const views = !!v.views, place = (i: number) => tileText({ submap: v.submapAt(i), ...l1XY(i) }), looks = this.pathLooks(place);
-    if (this.found?.from === st && this.found.views === views && this.found.looks === looks) return this.found.problems;
+    const views = !!v.views, place = (i: number) => tileText({ submap: v.submapAt(i), ...l1XY(i) }), every = this.atEveryProgress(place);
+    if (this.found?.from === st && this.found.views === views && this.found.every === every) return this.found.problems;
     const rom = v.app.rom, all = { ...st.all, progress: OW_EVENTS };
     // (the checks with every event passed: the same at every event progress, searched again after a ROM edit)
     const key = `${rom.gen}:${views}`;
@@ -71,30 +73,31 @@ export class WorldCheck {
       const budgets = owBudgets(rom, fullestSubmap(rom), st.now.inp.kinds);
       this.checks = { key, budgets, problems: [...worldChecks(rom, all, place, v.app.entrances.graph()), ...budgetProblems(budgets)] };
     }
-    const problems = worldProblems(rom, { ...st.now, progress: v.progress }, all, place, [...this.checks.problems, ...looks ?? []]);
-    this.found = { from: st, views, looks, problems };
+    const problems = worldProblems(rom, { ...st.now, progress: v.progress }, all, place, this.checks.problems, every);
+    this.found = { from: st, views, every, problems };
     return problems;
   }
 
-  // The paths without a look (owlook.ts), from the maps at every event progress and the tiles' looks (learned in the
-  // probe worker), the path kinds and shapes and the submaps' views; null while one of those is learned
-  private pathLooks(place: (tile: number) => string): WorldProblem[] | null {
+  // The problems found at every event progress – dead ends and exit path tiles leading nowhere (stuckAtEveryProgress), the paths without a
+  // look (owlook.ts) –, from the maps at every event progress (one search per progress, shared) and the tiles' looks
+  // (learned in the probe worker), the path kinds and shapes and the submaps' views; null while one of those is learned
+  private atEveryProgress(place: (tile: number) => string): WorldProblem[] | null {
     const v = this.view, app = v.app, rom = app.rom;
     const kinds = v.pathKinds(), shapes = app.pathShapes(this.learned), views = v.views;
     const maps = app.overworldProgressMaps(this.learned), own = app.overworldOwnLooks(this.learned);
     if (!kinds || !shapes || !views || !maps || !own) return null;
     const from = [kinds, shapes, views, maps, own];
-    if (this.looks?.gen === rom.gen && this.looks.from.every((x, k) => x === from[k])) return this.looks.problems;
-    const input = progressInput(rom, maps, kinds, shapes, app.entrances.graph());
-    const problems = lookProblems({ rom, maps, ownLooks: own, kinds, views, input, place });
-    this.looks = { gen: rom.gen, from, problems };
+    if (this.atEvery?.gen === rom.gen && this.atEvery.from.every((x, k) => x === from[k])) return this.atEvery.problems;
+    const search = progressSearches(progressInput(rom, maps, kinds, shapes, app.entrances.graph()));
+    const problems = [...stuckAtEveryProgress(rom, search, place), ...lookProblems({ rom, maps, ownLooks: own, kinds, views, search, place })];
+    this.atEvery = { gen: rom.gen, from, problems };
     return problems;
   }
 
   // the button and (when open) the panel checked again
   update(): void {
     const ps = this.problems(), errors = ps ? errorCount(ps) : 0, warnings = ps ? ps.length - errors : 0;
-    if (ps) this.tell(ps, this.found?.looks ?? null);
+    if (ps) this.tell(ps, this.found?.every ?? null);
     const b = this.button;
     b.classList.toggle('status-info', !errors);
     b.classList.toggle('status-error', errors > 0);
@@ -105,16 +108,17 @@ export class WorldCheck {
   }
 
   // what the ROM edits since the problems last checked changed, in a toast (at most one per check, none when nothing
-  // changed; checkAgainst): the paths without a look (`looks`, null while learned) against those last checked, once
-  // they come – at any event progress shown (they are found at every one)
-  private tell(ps: WorldProblem[], looks: WorldProblem[] | null): void {
+  // changed; checkAgainst): those found at every event progress (`every`, null while learned) against those last
+  // checked, once they come – at any event progress shown (the dead ends at the progress shown meanwhile not said:
+  // they are said with them)
+  private tell(ps: WorldProblem[], every: WorldProblem[] | null): void {
     const v = this.view, gen = v.app.rom.gen;
-    const main = checkAgainst(this.baseline, gen, v.progress, ps.filter((p) => !isPathLook(p)));
+    const main = checkAgainst(this.baseline, gen, v.progress, ps.filter((p) => !isFoundAtEveryProgress(p)));
     this.baseline = main.baseline;
     let change = main.change;
-    if (looks) {
-      const l = checkAgainst(this.lookBaseline, gen, 0, looks);
-      this.lookBaseline = l.baseline;
+    if (every) {
+      const l = checkAgainst(this.everyBaseline, gen, 0, every);
+      this.everyBaseline = l.baseline;
       if (l.change) change = change ? { added: [...change.added, ...l.change.added], gone: [...change.gone, ...l.change.gone] } : l.change;
     }
     const said = change && diffText(change);
@@ -125,7 +129,7 @@ export class WorldCheck {
   // the problems checked from now on are the baseline (the overworld shown again: edits made elsewhere not said)
   reset(): void {
     this.baseline = null;
-    this.lookBaseline = null;
+    this.everyBaseline = null;
   }
 
   private fill(ps: WorldProblem[] | null): void {

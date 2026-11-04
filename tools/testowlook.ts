@@ -15,7 +15,7 @@ import { ExitGraph } from '../src/core/exitgraph.ts';
 import { levelTileTest } from '../src/core/owpaths.ts';
 import { routeTiles, routeKind, writeRoute } from '../src/core/owroute.ts';
 import { l1OwnLooks, lookProblems, hasOwnLook } from '../src/core/owlook.ts';
-import { diffProblems, diffText, type WorldProblem } from '../src/core/worldcheck.ts';
+import { diffProblems, diffText, progressSearches, type WorldProblem } from '../src/core/worldcheck.ts';
 import { editorImage, pathKinds, pathShapes } from './fixture.ts';
 
 let bad = 0;
@@ -36,9 +36,9 @@ function checkLooks(what: string): Checked {
   while (!step.done) step = job.next();
   const maps = step.value, views = submapViews(loads), own = l1OwnLooks(rom, loads);
   const emulated = performance.now() - t;
-  const input = progressInput(rom, maps, kinds, shapes, new ExitGraph(rom));
+  const search = progressSearches(progressInput(rom, maps, kinds, shapes, new ExitGraph(rom)));
   t = performance.now();
-  const problems = lookProblems({ rom, maps, ownLooks: own, kinds, views, input, place: at });
+  const problems = lookProblems({ rom, maps, ownLooks: own, kinds, views, search, place: at });
   console.log(`     ${what}: the maps at every progress and the looks in ${Math.round(emulated)} ms, the rules in ${Math.round(performance.now() - t)} ms`);
   for (const p of problems.slice(0, 4)) console.log(`     ${p.key} @${hx(p.progress)}: ${p.text}`);
   return { maps, views, problems };

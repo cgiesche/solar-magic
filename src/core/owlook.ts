@@ -14,14 +14,11 @@ import type { Rom } from './rom.ts';
 import { OW_EVENTS, OW_L1_TILES, MAP_NAMES, l1Index, l1XY, l2Index, owTileWords, readL2, owTileIndexes, type OverworldLoads, type OwRender } from './overworld.ts';
 import { readEvents, eventPieces, drawPiece, pieceTiles, l2XY, eventRunners, eventTitle, submapOf, type Rect } from './owevents.ts';
 import { hex2 } from './names.ts';
-import { reach, type ReachInput } from './owreach.ts';
+import type { Reached } from './owreach.ts';
 import type { PathKind } from './owpaths.ts';
 import type { ProgressMap } from './owexitedges.ts';
 import type { Job } from './jobrunner.ts';
 import type { WorldProblem } from './worldcheck.ts';
-
-// whether a World check problem is one of the paths without a look (found at every event progress at once)
-export const isPathLook = (p: WorldProblem): boolean => p.key.startsWith('path-late-look:') || p.key.startsWith('path-no-look:');
 
 const pixels = new Uint8Array(64);
 
@@ -54,7 +51,7 @@ export interface LookInput {
   ownLooks: readonly Uint8Array[]; // l1OwnLooks
   kinds: readonly PathKind[];
   views: readonly Rect[]; // the submaps' views (submapViews)
-  input: (progress: number) => ReachInput; // the search's input at an event progress (from maps)
+  search: (progress: number) => Reached; // the search at an event progress (from maps; worldcheck.ts progressSearches)
   place: (tile: number) => string;
 }
 
@@ -105,7 +102,7 @@ export function lookProblems(inp: LookInput): WorldProblem[] {
   for (let p = 0; p <= last; p++) {
     const l1 = maps[p].l1, open = cells.filter((c) => firstL2[c] >= p && firstL2[c] < OW_EVENTS && !lateAt.has(c) && lookless(c, l1[c]));
     if (!open.length) continue;
-    const r = reach(inp.input(p));
+    const r = inp.search(p).r;
     for (const c of open) if (r.tiles[c]) lateAt.set(c, p);
   }
   for (const [c, p] of lateAt) {

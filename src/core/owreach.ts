@@ -259,6 +259,25 @@ export type CheckSeverity = Exclude<Severity, 'info'>;
 export interface ReachProblem { key: string; kind: ReachKind; severity: CheckSeverity; text: string; brief: string; title?: string; tile: number; at: 'now' | 'all' }
 export interface Reached { inp: ReachInput; r: Reach }
 
+// the ways of a search that end nowhere (at: 'now'): a path without a stop tile at its end (a dead end), an exit path
+// tile no exit path is taken from where Mario comes; a tile several ways get stuck on once (the first way named)
+export function stuckProblems(s: Reached, place: (tile: number) => string): ReachProblem[] {
+  const out = new Map<string, ReachProblem>();
+  for (const [k, w] of s.r.walks) {
+    if (!w.stuck) continue;
+    const at = w.stuck.at, way = `walking ${DIR_NAMES[k & 3]} from ${place(k >> 2)}`;
+    const p: ReachProblem = w.stuck.why === 'exit'
+      ? { key: `exit-nowhere:${at}`, kind: 'exit-nowhere', severity: 'error', tile: at, at: 'now',
+        text: `Exit path tile at ${place(at)} leads nowhere: Mario gets stuck ${way}`, brief: `exit path tile at ${place(at)} leading nowhere`,
+        title: 'No exit path is taken from the side Mario comes from: link the tile to where it leads (Links).' }
+      : { key: `dead-end:${at}`, kind: 'dead-end', severity: 'error', tile: at, at: 'now',
+        text: `Dead end at ${place(at)}: Mario gets stuck ${way}`, brief: `dead end at ${place(at)}`,
+        title: w.stuck.why === 'loop' ? 'The path goes round in a circle without a level or stop tile.' : 'The path ends without a level or stop tile: Mario has no way on.' };
+    if (!out.has(p.key)) out.set(p.key, p);
+  }
+  return [...out.values()];
+}
+
 // The level tiles the clean game leaves unreached, by their level and place: level 019 at main map 03,19 and level 112
 // at submaps 12,07 – no path, star, pipe or exit leads there even with every event passed (found by the search on the
 // clean game: tools/testworldcheck.ts). A fixed list, not a comparison with a clean ROM: a level tile of the same level
@@ -278,17 +297,7 @@ export function reachProblems(rom: Rom, now: Reached, all: Reached, place: (tile
   const out: ReachProblem[] = [];
   const keys = new Set<string>();
   const add = (p: ReachProblem) => { if (!keys.has(p.key)) { keys.add(p.key); out.push(p); } };
-  for (const [k, w] of now.r.walks) {
-    if (!w.stuck) continue;
-    const at = w.stuck.at, way = `walking ${DIR_NAMES[k & 3]} from ${place(k >> 2)}`;
-    add(w.stuck.why === 'exit'
-      ? { key: `exit-nowhere:${at}`, kind: 'exit-nowhere', severity: 'error', tile: at, at: 'now',
-        text: `Exit path tile at ${place(at)} leads nowhere: Mario gets stuck ${way}`, brief: `exit path tile at ${place(at)} leading nowhere`,
-        title: 'No exit path is taken from the side Mario comes from: link the tile to where it leads (Links).' }
-      : { key: `dead-end:${at}`, kind: 'dead-end', severity: 'error', tile: at, at: 'now',
-        text: `Dead end at ${place(at)}: Mario gets stuck ${way}`, brief: `dead end at ${place(at)}`,
-        title: w.stuck.why === 'loop' ? 'The path goes round in a circle without a level or stop tile.' : 'The path ends without a level or stop tile: Mario has no way on.' });
-  }
+  for (const p of stuckProblems(now, place)) add(p);
   const { l1, tls, kinds } = all.inp;
   for (let i = 0; i < l1.length; i++) {
     if (kinds[l1[i]] !== 'level' || !tls[i] || all.r.stops.has(i)) continue;

@@ -7,17 +7,22 @@
 // the new dead end and up to three errors named, then "and N more"; its undo and the fix say them fixed; warnings
 // counted; nothing changed, nothing said. Budgets: the clean game's two warnings (the reveal list full, the levels with a
 // level tile amber), none an error; the destroy list amber, then full (an error said new); the fullest submap's custom
-// sprites; where Show goes.
+// sprites; where Show goes. Dead ends at every event progress (#377): none in the clean game; a path tile a late
+// event (the last) takes away gives one, found after that event, listed with the playthrough strip at progress 0; the searches at progress 0 from the maps at every progress
+// find the dead ends the World check's search there finds.
 import { Rom } from '../src/core/rom.ts';
 import { OverworldEmulator, OverworldLoads, gameL1, l1XY, l1Index, readL1, writeL1, readTranslevels, writeTranslevels, freeTranslevel, OW_EVENTS, readDestroyList, writeDestroyList, revealEventCount, NO_EVENT } from '../src/core/overworld.ts';
 import { progressSaves } from '../src/core/owprogress.ts';
-import { reach, reachInput } from '../src/core/owreach.ts';
+import { reach, reachInput, stuckProblems } from '../src/core/owreach.ts';
+import { progressMapsJob, progressInput } from '../src/core/owexitedges.ts';
+import { ExitGraph } from '../src/core/exitgraph.ts';
+import type { Job } from '../src/core/jobrunner.ts';
 import { readStart } from '../src/core/owsprites.ts';
 import { RAM } from '../src/core/ram.ts';
-import { worldProblems, applyFix, errorCount, stopTile, diffProblems, diffText, checkAgainst, budgetProblems, budgetPlace, type CheckedAt, type WorldProblem } from '../src/core/worldcheck.ts';
+import { worldProblems, progressSearches, stuckAtEveryProgress, applyFix, errorCount, stopTile, diffProblems, diffText, checkAgainst, budgetProblems, budgetPlace, type CheckedAt, type WorldProblem } from '../src/core/worldcheck.ts';
 import { owBudgets, fullestSubmap } from '../src/core/owbudget.ts';
 import { eventReveal } from '../src/core/oweventtiles.ts';
-import { readEvents } from '../src/core/owevents.ts';
+import { readEvents, writeEvents } from '../src/core/owevents.ts';
 import { readCustomSprites, writeCustomSprites, OW_CUSTOM_MAX } from '../src/core/owcustom.ts';
 import { editorImage, pathKinds, pathShapes } from './fixture.ts';
 
@@ -30,16 +35,17 @@ const rom = new Rom(await editorImage());
 const kinds = pathKinds(rom), shapes = pathShapes(rom); // (they don't depend on the overworld's data: testowreach)
 // the World check of a ROM at progress 0 (the event progress shown) and with every event passed, its loads and saves
 // emulated anew
-function checkRom(r: Rom): { problems: WorldProblem[]; now: CheckedAt } {
+function checkRom(r: Rom): { problems: WorldProblem[]; now: CheckedAt; all: CheckedAt } {
   const loads = new OverworldLoads(new OverworldEmulator(r), 4), saves = progressSaves(loads);
   const search = (progress: number): CheckedAt => {
     const g = loads.get(0, progress);
     const inp = reachInput(r, gameL1(g).slice(), g.wram.slice(RAM.owTranslevels, RAM.owTranslevelsEnd), saves[progress].levelFlags, kinds, shapes, readStart(r, 0));
     return { inp, r: reach(inp), progress };
   };
-  const now = search(0);
-  return { problems: worldProblems(r, now, search(OW_EVENTS), at), now };
+  const now = search(0), all = search(OW_EVENTS);
+  return { problems: worldProblems(r, now, all, at), now, all };
 }
+const runJob = <T>(job: Job<T>): T => { let st = job.next(); while (!st.done) st = job.next(); return st.value; };
 const list = (ps: WorldProblem[]) => ps.map((p) => `     ${p.severity} [${p.group}] ${p.key} @${hx(p.progress)}: ${p.text}${p.fix ? ` – fix: ${p.fix.label}` : ''}`).join('\n');
 const keys = (ps: WorldProblem[]) => ps.map((p) => p.key).sort().join();
 
@@ -71,7 +77,7 @@ console.log(list(clean.problems));
   // a cell of the main map with nothing Mario walks on around it (nothing leads there)
   const l1 = readL1(rom), lonely = Array.from({ length: 0x400 }, (_, i) => i).find((i) => {
     const { x, y } = l1XY(i);
-    return x > 1 && y > 1 && x < 30 && y < 30 && [-1, 0, 1].every((dy) => [-1, 0, 1].every((dx) => kinds[l1[i + dx + dy * 16]] === 'none' && ((i + dx) >> 4) === (i >> 4)));
+    return x > 0 && y > 0 && x < 31 && y < 31 && [-1, 0, 1].every((dy) => [-1, 0, 1].every((dx) => kinds[l1[l1Index(0, x + dx, y + dy)]] === 'none'));
   })!;
   const at019 = l1Index(0, 0x03, 0x19), levelTile = l1[at019];
   const unreached = (r: Rom, i: number) => checkRom(r).problems.find((p) => p.key === `unreached-level:${i}`);
@@ -136,6 +142,47 @@ console.log(list(clean.problems));
     const saidFix = diffText(diffProblems(cutCheck.problems, fixed.problems));
     check(!!saidFix && saidFix.text.startsWith(`Fixed: dead end at ${at(end)}`) && !saidFix.text.includes('New'), `the fix says: "${saidFix?.text}"`);
   }
+}
+
+// ---- dead ends at every event progress (#377) ----
+{
+  // the problems found at every event progress of a ROM, from the maps at every progress
+  const atEvery = (r: Rom) => {
+    const loads = new OverworldLoads(new OverworldEmulator(r), 4);
+    const maps = runJob(progressMapsJob(loads));
+    const t = performance.now(), search = progressSearches(progressInput(r, maps, kinds, shapes, new ExitGraph(r)));
+    const ps = stuckAtEveryProgress(r, search, at);
+    console.log(`     the searches at every progress and their dead ends in ${Math.round(performance.now() - t)} ms`);
+    return { ps, search };
+  };
+  const cleanEvery = atEvery(rom).ps;
+  check(!cleanEvery.length, `the clean game: no dead end, no exit path tile leading nowhere at any event progress (${cleanEvery.map((p) => p.brief).join('; ')})`);
+  // the last event's layer 1 changes taking away a path tile Mario walks over (one the map before events has) – one
+  // whose taking away leaves him stuck at one place (found by a search with every event passed without the tile)
+  const full = clean.all, e = OW_EVENTS - 1, empty = kinds.findIndex((k) => k === 'none'), before = readL1(rom);
+  const stuckWithout = (cut: number) => {
+    const l1 = Uint16Array.from(full.inp.l1);
+    l1[cut] = empty;
+    return stuckProblems({ inp: { ...full.inp, l1 }, r: reach({ ...full.inp, l1 }) }, at);
+  };
+  const cut = [...full.r.walks.values()].filter((w) => !w.stuck).flatMap((w) => w.path)
+    .find((i) => full.inp.l1[i] === before[i] && stuckWithout(i).length === 1)!;
+  const end = stuckWithout(cut)[0].tile, r = new Rom(rom.data.slice()), d = readEvents(r);
+  d.silent[e].push({ layer: 1, tile: empty, loc: cut });
+  writeEvents(r, d);
+  const { ps: every, search } = atEvery(r), dead = every.filter((p) => p.key.startsWith('dead-end:'));
+  check(dead.length === 1 && dead[0].tile === end && dead[0].progress === e + 1 && dead[0].severity === 'error' && dead[0].group === 'paths',
+    `the path tile at ${at(cut)} taken away by event ${hx(e)}: one dead end at ${at(end)}, found after event ${hx(e)} (${dead.map((p) => `${p.brief} @${hx(p.progress)}`).join('; ')})`);
+  check(!!dead[0]?.fix && dead[0].fix.tile === end, `its fix: a stop tile at ${at(end)} on the map before events (${dead[0]?.fix?.label ?? dead[0]?.noFix?.kind})`);
+  // the playthrough strip at progress 0: the dead end listed (none there), once, with the progress it is found at
+  const shown = checkRom(r), ps = worldProblems(r, shown.now, shown.all, at, [], every);
+  check(!stuckProblems(shown.now, at).length && ps.filter((p) => p.key === dead[0]?.key).length === 1 && ps.find((p) => p.key === dead[0]?.key)?.progress === e + 1,
+    'the playthrough strip at progress 0 (no dead end there): the dead end listed once, with the progress it is found at');
+  // (the search at the progress shown and the one from the maps at every progress agree: the list doesn't change
+  // when the maps come)
+  const keysOf = (c: CheckedAt) => stuckProblems(c, at).map((p) => p.key).sort().join();
+  check(keysOf(search(0)) === keysOf(shown.now) && keysOf(search(OW_EVENTS)) === keysOf(shown.all) && keysOf(shown.all) === dead.map((p) => p.key).join(),
+    'the searches from the maps at every progress find what the search at the progress shown finds (progress 0, every event passed)');
 }
 
 // ---- budgets ----
