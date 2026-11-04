@@ -8,13 +8,13 @@
 // there, the level flags of the save there: progressMapsJob, emulated in the probe worker).
 
 import type { Rom } from './rom.ts';
-import { OW_EVENTS, gameL1, readL1, readDestroyList, destroyEffects, destroyedCells, type OverworldLoads } from './overworld.ts';
-import { eventChanges, eventRunners, exitChanges, readEvents, type ExitChanges } from './owevents.ts';
+import { OW_EVENTS, DIR_FLAGS, exitDirections, gameL1, readL1, readDestroyList, destroyEffects, destroyedCells, type OverworldLoads } from './overworld.ts';
+import { eventChanges, eventRunners, exitChanges, readEvents, submapViews, submapOf, type EventChanges, type EventRunner, type ExitChanges } from './owevents.ts';
 import { progressSaves } from './owprogress.ts';
 import { inputWithout, reach, reachInput, waysFrom, type Reach, type ReachInput } from './owreach.ts';
 import { levelTeleports } from './owlinks.ts';
 import { readStart } from './owsprites.ts';
-import type { ExitGraph } from './exitgraph.ts';
+import { ExitGraph } from './exitgraph.ts';
 import type { PathKind, PathShapes } from './owpaths.ts';
 import type { OwTile } from './owteleport.ts';
 import { RAM } from './ram.ts';
@@ -44,13 +44,21 @@ function searched(inp: ReachInput, destroyed: ReadonlySet<number>): Searched {
 // The edges of every level exit running an event whose level is the first to run it (owevents.ts eventRunners: the
 // event is that exit's, as exitChanges has it), in event order; a secret exit whose event changes nothing on the map
 // and opens nothing is left out (every level gets events for three secret exits: one the level likely hasn't).
-// A level is opened by either rule: reached with every event passed and not with every event but the exit's (its
-// layer 1 changes undone, the way the exit opens closed – what the exit is needed for, whatever order the events
-// pass in), or reached at the progress after the event and not at the one before (events in number order) – of those
-// the first on the way (nextLevels). Its level not reached, what the exit opens is still told by the rules – where
-// the event's way leads from tiles reached, not from the level. at(p): the search's input at event progress p (0 …
-// OW_EVENTS); submapAt: the submap a layer 1 tile is on (default its region: main map 0, submaps 1).
+// A level is opened by either rule: reached with every event passed and not without the exit's event – what the exit
+// is needed for, whatever order the events pass in –, or reached at the progress after the event and not at the one
+// before (events in number order) – of those the first on the way (nextLevels). "Without the exit's event": here
+// with every event but the exit's (its layer 1 changes undone, the way the exit opens closed: cheap, shown until the
+// probe worker's passableEdgesJob comes, which has the events still passable without it – this misses levels Mario
+// reaches backwards with every event passed). Its level not reached, what the exit opens is still told by the rules –
+// where the event's way leads from tiles reached, not from the level. at(p): the search's input at event progress p
+// (0 … OW_EVENTS); submapAt: the submap a layer 1 tile is on (default its region: main map 0, submaps 1).
 export function exitEdges(rom: Rom, at: (progress: number) => ReachInput, submapAt: (tile: number) => number = (i) => i >> 10): ExitEdge[] {
+  const steps = exitEdgeSteps(rom, at, submapAt, false);
+  for (;;) { const s = steps.next(); if (s.done) return s.value; }
+}
+
+// exitEdges a step per exit (a job's); passable: without the exit's event the events still passable (passableWithout)
+function* exitEdgeSteps(rom: Rom, at: (progress: number) => ReachInput, submapAt: (tile: number) => number, passable: boolean): Generator<void, ExitEdge[]> {
   const out: ExitEdge[] = [], d = readEvents(rom), runners = eventRunners(rom), changes = new Map<number, ExitChanges[]>(), eventChange = eventChanges(rom, d);
   const before = readL1(rom), effects = destroyEffects(rom), destroyed = new Set<number>();
   for (const x of readDestroyList(rom)) if (x.event < OW_EVENTS) for (const i of destroyedCells(effects, before, x.tile)) destroyed.add(i);
@@ -58,6 +66,7 @@ export function exitEdges(rom: Rom, at: (progress: number) => ReachInput, submap
   // the search at event progress p (each once)
   const search = (p: number) => progress.get(p) ?? progress.set(p, searched(at(p), destroyed)).get(p)!;
   const all = search(OW_EVENTS);
+  const without = passable ? passableWithout(rom, at, runners, eventChange, before) : null;
   const changesNothing = (tl: number, exit: number) => {
     const c = (changes.get(tl) ?? changes.set(tl, exitChanges(rom, tl, d, runners)).get(tl)!).find((x) => x.exit === exit);
     return !c || (!c.l1.length && !c.l2.length);
@@ -79,11 +88,59 @@ export function exitEdges(rom: Rom, at: (progress: number) => ReachInput, submap
     };
     const post = search(event + 1);
     add(post, search(event));
-    add(all, searched(inputWithout(rom, all.inp, eventChange(event), eventRuns, before), destroyed));
+    add(all, searched(without ? without(event) : inputWithout(rom, all.inp, eventChange(event), eventRuns, before), destroyed));
+    yield;
     if (run.exit > 0 && !opens.length && changesNothing(run.tl, run.exit)) continue;
     out.push({ tl: run.tl, exit: run.exit, event, from: run.tile, reached: all.r.stops.has(run.tile) || post.r.stops.has(run.tile), opens });
   }
   return out;
+}
+
+// The search's input with the events still passable without event e, per e: start with no event passed, add every
+// event whose level is reached (the level whose base event it is, else the first running it: a level without secret
+// exits has the next levels' events as its secret exits'), repeat until the set stops growing – never adding e. The
+// events no level exit runs (a teleport's, the hack's own code's) count as passed from the start: no exit needs them,
+// and Mario can't pass them by reaching a level. The rounds are those without any event left out until e would be
+// added: each e starts from the last round before that (the set only grows). The map with a set of events passed: a
+// cell some event changes has its tile after the last of them passed (at the progress after it, events in number
+// order), the map before events' when none is – so a tile two events change stays as long as one of them is passed
+// (with every event but e's, e's tiles are undone: a Star Road star another exit reveals too is gone, and the Star
+// World levels behind it seem opened by e); the level flags those before events, and per event passed those its save
+// sets (the ones in the save after it not in the one before) and its exit's way.
+function passableWithout(rom: Rom, at: (progress: number) => ReachInput, runners: Map<number, EventRunner[]>, eventChange: (e: number) => EventChanges,
+  before: ArrayLike<number>): (e: number) => ReachInput {
+  const all = at(OW_EVENTS), inputs = new Map<number, ReachInput>();
+  const input = (p: number) => inputs.get(p) ?? inputs.set(p, at(p)).get(p)!;
+  // per cell the events changing it, in number order; per event its level (exits: the runner whose event it is) and
+  // the level flags passing it sets (an earlier event setting one of them too: its exit's way at least)
+  const changers = new Map<number, number[]>(), sets: Uint8Array[] = [];
+  for (let e = 0; e < OW_EVENTS; e++) for (const i of eventChange(e).l1) (changers.get(i) ?? changers.set(i, []).get(i)!).push(e);
+  const exits = [...runners].filter(([e]) => e < OW_EVENTS).map(([e, runs]) => [e, runs.find((r) => !r.exit) ?? runs[0]] as const);
+  for (let e = 0; e < OW_EVENTS; e++) { const a = input(e).flags, b = input(e + 1).flags; sets.push(Uint8Array.from(b, (f, tl) => f & ~a[tl])); }
+  for (const [e, { tl, exit }] of exits) sets[e][tl] |= DIR_FLAGS[exitDirections(rom, tl)[exit]] & ~input(0).flags[tl];
+  const inputWith = (passed: ReadonlySet<number>): ReachInput => {
+    const l1 = Uint16Array.from(all.l1), flags = Uint8Array.from(input(0).flags);
+    for (const [i, es] of changers) {
+      let k = es.length - 1;
+      while (k >= 0 && !passed.has(es[k])) k--;
+      l1[i] = k < 0 ? before[i] : input(es[k] + 1).l1[i];
+    }
+    for (const e of passed) if (e < OW_EVENTS) sets[e].forEach((f, tl) => { flags[tl] |= f; });
+    return { ...all, l1, flags };
+  };
+  // the events whose exit's level the search with `passed` reaches, not passed yet (and not e)
+  const next = (passed: ReadonlySet<number>, e: number): number[] => {
+    const r = reach(inputWith(passed));
+    return exits.filter(([x, run]) => x !== e && !passed.has(x) && r.stops.has(run.tile)).map(([x]) => x);
+  };
+  // the rounds without any event left out (each the one before and the events it adds)
+  const rounds: Set<number>[] = [new Set(Array.from({ length: OW_EVENTS }, (_, e) => e).filter((e) => !runners.get(e)?.length))];
+  for (let added = next(rounds[0], -1); added.length; added = next(rounds[rounds.length - 1], -1)) rounds.push(new Set([...rounds[rounds.length - 1], ...added]));
+  return (e) => {
+    const k = rounds.findIndex((r) => r.has(e)), passed = new Set(rounds[k < 0 ? rounds.length - 1 : k - 1]);
+    for (let added = next(passed, e); added.length; added = next(passed, e)) for (const x of added) passed.add(x);
+    return inputWith(passed);
+  };
 }
 
 // The levels reached in `now` and not in `then` that Mario comes to first: reached in `now`'s search ending at the
@@ -155,4 +212,15 @@ export function progressInput(rom: Rom, maps: readonly ProgressMap[], kinds: rea
   const warps = new Map<number, OwTile[]>(), start = readStart(rom, 0);
   const levelWarps = (tl: number) => warps.get(tl) ?? warps.set(tl, levelTeleports(rom, graph, tl).map((t) => t.to)).get(tl)!;
   return (p) => reachInput(rom, maps[p].l1, maps[p].tls, maps[p].flags, kinds, shapes, start, levelWarps);
+}
+
+// The exits' edges with the events still passable without each exit's event (exitEdgeSteps passable), as a job of the
+// result learner (probe worker): the maps at every progress (progressMapsJob, kept by the loads), then a step per exit.
+// kinds, shapes: the path kinds and shapes (sent with the job)
+export function* passableEdgesJob(rom: Rom, loads: OverworldLoads, kinds: readonly PathKind[], shapes: PathShapes): Job<ExitEdge[]> {
+  const job = progressMapsJob(loads);
+  let step = job.next();
+  for (; !step.done; step = job.next()) yield;
+  const maps = step.value, views = submapViews(loads);
+  return yield* exitEdgeSteps(rom, progressInput(rom, maps, kinds, shapes, new ExitGraph(rom)), (i) => submapOf(views, i), true);
 }

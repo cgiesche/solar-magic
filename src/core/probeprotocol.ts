@@ -20,6 +20,7 @@ import type { ArcLoad } from './jumparcs.ts';
 import type { Prefab } from './prefabs.ts';
 import type { PrefabSkip } from './prefabplaces.ts';
 import type { OwTriggerSwitches } from './owanimview.ts';
+import type { PathKind, PathShapes } from './owpaths.ts';
 
 // a probe in tileset ts: what a Map16 tile does, how Mario collides with it, what a sprite does, Mario's
 // run speeds, the scroll bands in a level of that mode and vertical scroll setting
@@ -109,6 +110,7 @@ export type LearnJob =
   | { kind: 'owL1Without'; event: number }
   | { kind: 'owProgressMaps' }
   | { kind: 'owOwnLooks' }
+  | { kind: 'owExitEdges'; kinds: PathKind[]; shapes: PathShapes }
   | { kind: 'msgRoutine' }
   | { kind: 'gameBg'; level: number }
   | { kind: 'prefabPlaces'; prefab: Prefab; levels: number[]; open?: Level; skip?: PrefabSkip }
@@ -171,6 +173,7 @@ export const LEARN_KINDS: { [K in LearnJob['kind']]: { keep: Keep; picture: bool
   owL1Without: { keep: 'memory', picture: true, boot: false },
   owProgressMaps: { keep: 'memory', picture: true, boot: false },
   owOwnLooks: { keep: 'memory', picture: true, boot: false },
+  owExitEdges: { keep: 'memory', picture: true, boot: false },
   msgRoutine: { keep: true, picture: false },
   gameBg: { keep: true, picture: false },
   prefabPlaces: { keep: false, picture: false },
@@ -194,7 +197,7 @@ export type LearnLane =
   | 'sprites' | 'variants' | 'bytes' | 'spritemem' | 'animated' | 'layer3' | 'l2' | 'lt' | 'uses' | 'arcs' | 'thumbs'
   | 'placement' | 'sizes' | 'prefab-suggest' | 'msgr' | 'level-png' | 'level-images' | 'gamebg' | 'prefab-places'
   | 'breakup' | 'slippery' | 'otab'
-  | 'ow' | 'owpick' | 'owpk1' | 'owsh' | 'owreach' | 'owrw' | 'owlw' | 'owps' | 'owpm' | 'owol' | 'owv' | 'owt' | 'owgc' | 'ows' | 'owbs' | 'owbt' | 'owl' | 'owan' | `owc${number}`;
+  | 'ow' | 'owpick' | 'owpk1' | 'owsh' | 'owreach' | 'owrw' | 'owlw' | 'owps' | 'owpm' | 'owol' | 'owxe' | 'owv' | 'owt' | 'owgc' | 'ows' | 'owbs' | 'owbt' | 'owl' | 'owan' | `owc${number}`;
 
 // what the probe client shows as busy: the probes, the tasks, the learn jobs' lanes
 export type ProbeBusyKey = 'probe' | TaskType | LearnLane;

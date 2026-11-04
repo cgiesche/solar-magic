@@ -76,7 +76,7 @@ import type { OwTriggerSwitches } from '../core/owanimview.ts';
 import type { Rect } from '../core/owevents.ts';
 import type { OwSpriteView } from '../core/owsprites.ts';
 import type { ProgressSave } from '../core/owprogress.ts';
-import type { ProgressMap } from '../core/owexitedges.ts';
+import type { ExitEdge, ProgressMap } from '../core/owexitedges.ts';
 import type { Map16Target } from './gfx/target.ts';
 import type { WsTarget } from './gfxworkspace.ts';
 
@@ -1143,6 +1143,12 @@ export class App {
   // a look), learned and kept as overworldProgressMaps
   overworldOwnLooks(done: () => void): Uint8Array[] | undefined {
     return this.probes.learn<Uint8Array[]>('owol1', { kind: 'owOwnLooks' }, { lane: 'owol', label: 'Overworld tile looks', done });
+  }
+  // the exits' edges with the events still passable without each exit's event (owexitedges.ts passableEdgesJob, the
+  // Levels mode's arrows), from the path kinds and shapes, learned and kept as overworldProgressMaps (seconds: the maps
+  // at every progress first)
+  overworldExitEdges(kinds: PathKind[], shapes: PathShapes, done: () => void): ExitEdge[] | undefined {
+    return this.probes.learn<ExitEdge[]>('owxe1', { kind: 'owExitEdges', kinds, shapes }, { lane: 'owxe', label: 'Exit arrows', input: [kinds, shapes], done });
   }
   // which overworld tiles are level tiles (owpaths.ts levelTileTest), from the path tiles: null while they are learned
   levelTileTest(done: () => void): LevelTileTest | null {

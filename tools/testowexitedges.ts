@@ -3,14 +3,16 @@
 // on the way only. On the test ROM (the clean game): Yoshi's Island's edges as the game has them, Forest of Illusion's
 // and Chocolate Island's (events out of number order there), a castle opening the level behind it (not the exit
 // before it), an arrow to another submap ending at the link leaving the exit's submap, the maps of progressMapsJob
-// the same as the loads'.
+// the same as the loads'. With the events still passable without an exit's event (passableEdgesJob, the probe
+// worker's, #380): the Valley of Bowser and Chocolate Island exits Mario reaches back through Star Road get their
+// arrows, the Star World ones a star revealed by another exit makes needless lose theirs, Yoshi's Island's the same.
 import { Rom } from '../src/core/rom.ts';
 import { OverworldEmulator, OverworldLoads, translevelToLevel, l1XY, gameL1, OW_EVENTS, EXIT_NAMES } from '../src/core/overworld.ts';
 import { progressSaves } from '../src/core/owprogress.ts';
 import { reachInput } from '../src/core/owreach.ts';
 import { readStart } from '../src/core/owsprites.ts';
 import { submapViews, submapOf } from '../src/core/owevents.ts';
-import { exitEdges, progressMapsJob, type ProgressMap } from '../src/core/owexitedges.ts';
+import { exitEdges, passableEdgesJob, progressMapsJob, type ExitEdge, type ProgressMap } from '../src/core/owexitedges.ts';
 import { RAM } from '../src/core/ram.ts';
 import { ExitGraph } from '../src/core/exitgraph.ts';
 import { levelTeleports } from '../src/core/owlinks.ts';
@@ -106,6 +108,38 @@ check(yi.filter((e) => e.opens.length).length === want.length, `no other exit on
   // (124 has its normal exit only: the events of secret exits 1–3 after its base event change nothing)
   const t124 = edges.filter((e) => lv(e.tl) === '124');
   check(t124.length === 1 && t124[0].exit === 0, `a level's secret exits whose events change and open nothing left out (124: ${t124.map(text).join(', ')})`);
+}
+
+// ---- the events still passable without the exit's event (the probe worker's job, after the maps: they are kept) ----
+{
+  const job = passableEdgesJob(rom, loads, kinds, shapes), t1 = performance.now();
+  let s = job.next(), n = 0;
+  for (; !s.done; s = job.next()) n++;
+  const passable: ExitEdge[] = s.value, ms = Math.round(performance.now() - t1);
+  console.log(`     passable: ${passable.filter((e) => e.opens.length).length} exits with arrows in ${ms} ms (${n} steps)`);
+  check(n >= OW_EVENTS + 2 + edges.length, `a step per progress loaded, then per exit (${n})`);
+  const same = (a: ExitEdge[], b: ExitEdge[]) => a.length === b.length
+    && a.every((e, k) => text(e) === text(b[k]) && e.opens.every((o, j) => o.tile === b[k].opens[j].tile && o.end === b[k].opens[j].end));
+  check(same(passable.filter((e) => sub(e.from) === 1), yi), `Yoshi's Island's edges unchanged`);
+  for (const w of [
+    '115 secret exit 1 → 111', // Valley of Bowser 2: the Valley Fortress
+    '113 normal exit → 10F', // Valley of Bowser 3: Valley of Bowser 4
+    '111 normal exit → 10E', // the Valley Fortress: the Back Door
+    '01A normal exit → 018', // Wendy's Castle: the Sunken Ghost Ship
+    '018 normal exit → 116', // the Sunken Ghost Ship: Valley of Bowser 1
+  ]) check(passable.some((e) => text(e) === w) && !edges.some((e) => text(e) === w), `reached back through Star Road with every event passed: ${w}`);
+  // (Mario gets there without the exit: Wendy's Castle through the Chocolate Secret, Valley of Bowser 3 and Larry's
+  // Castle from the Valley's star on Star Road)
+  for (const w of ['01C normal exit → nothing', '114 secret exit 1 → nothing', '10F normal exit → nothing']) {
+    check(passable.some((e) => text(e) === w), `opens nothing (another way leads there): ${w}`);
+  }
+  // (Star World 1, 2 and 4 are reached from the Star Road stars of Donut Plains, Vanilla Dome and Forest of Illusion:
+  // their stars revealed by another exit too, which every event but the exit's undid)
+  const of = (e: ExitEdge) => passable.find((p) => p.tl === e.tl && p.exit === e.exit);
+  const lost = edges.filter((e) => e.opens.some((o) => !of(e)?.opens.some((p) => p.tl === o.tl))).map(text);
+  check(lost.join() === '134 secret exit 1 → 130,132 secret exit 1 → 135,136 normal exit → 134',
+    `lost only the Star World arrows a star of another exit makes needless (${lost.join(', ')})`);
+  check(passable.filter((e) => e.opens.length).length === 70, `70 exits with arrows (68 before)`);
 }
 
 if (bad) { console.log(`${bad} failed`); process.exit(1); }

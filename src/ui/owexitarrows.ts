@@ -4,7 +4,8 @@
 // dotted one when Mario doesn't reach its level even with every event passed (nothing can't be told). Hovering one
 // says what it is in the status bar; the "When beaten…" sentences tell the same levels. Derived once per ROM edit from
 // the maps at every event progress (learned in the probe worker), the path kinds and shapes; nothing is drawn while
-// those are learned.
+// those are learned. The rule with the events still passable without an exit's event takes seconds: it runs in the
+// probe worker (passableEdgesJob), the cheap one with every event but the exit's shown until it comes.
 
 import type { OverworldView } from './overworld.ts';
 import { arrow } from './owlinkview.ts';
@@ -24,20 +25,30 @@ export class ExitArrowLayer {
   show = true; // drawn in the Levels mode
   // the edges found, for the ROM generation and the maps (by identity: learned again) they were found with
   private found: { key: string; mapsUsed: unknown; edges: ExitEdge[] } | null = null;
+  // the probe worker's edges (with the events still passable) for the ROM generation (not asked again while it holds)
+  private passable: { gen: number; edges: ExitEdge[] } | null = null;
+  private asked = -1; // the ROM generation they were asked for at (until something comes: not asked again each paint)
   constructor(private view: OverworldView) {}
 
   // something the edges need came (the arrows and the "When beaten…" sentences show them)
   private learned = () => {
+    this.asked = -1;
     if (!this.view.root.isConnected || this.view.mode !== 'levels') return;
     if (this.show) this.view.paint();
     if (this.edges()) this.view.buildSide(); // (the sentences tell them once they are found)
   };
 
-  // the edges of the ROM as it is, null while something they need is learned (also the "When beaten…" sentences')
+  // the edges of the ROM as it is, null while something they need is learned (also the "When beaten…" sentences'):
+  // those with the events still passable without each exit's event once the probe worker has them, the cheap rule's
+  // before
   edges(): ExitEdge[] | null {
     const v = this.view, app = v.app, rom = app.rom;
+    if (this.passable?.gen === rom.gen) return this.passable.edges;
     const kinds = v.pathKinds(), shapes = app.pathShapes(this.learned), maps = app.overworldProgressMaps(this.learned);
     if (!kinds || !shapes || !maps || !v.views) return null;
+    const passable = this.asked === rom.gen ? undefined : app.overworldExitEdges(kinds, shapes, this.learned);
+    if (passable) { this.passable = { gen: rom.gen, edges: passable }; return passable; }
+    this.asked = rom.gen;
     const key = `${rom.gen}`;
     if (this.found?.key === key && this.found.mapsUsed === maps) return this.found.edges;
     const edges = exitEdges(rom, progressInput(rom, maps, kinds, shapes, app.entrances.graph()), (i) => v.submapAt(i));
