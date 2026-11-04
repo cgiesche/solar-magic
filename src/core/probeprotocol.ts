@@ -107,6 +107,7 @@ export type LearnJob =
   | { kind: 'owSave'; progress: number }
   | { kind: 'owAnimated'; map: number; progress: number }
   | { kind: 'owL1Without'; event: number }
+  | { kind: 'owProgressMaps' }
   | { kind: 'msgRoutine' }
   | { kind: 'gameBg'; level: number }
   | { kind: 'prefabPlaces'; prefab: Prefab; levels: number[]; open?: Level; skip?: PrefabSkip }
@@ -133,9 +134,9 @@ export function learnRetargets(was: LearnJob, now: LearnJob): boolean {
 // the level as edited, the placement preview and the jump arcs change with every edit (memory only); the others to the
 // result cache. The overworld's jobs run on the overworld's own emulator (layer 1 without an event's changes on a ROM
 // copy's), not on one booted for levels: its boot doesn't count for them (boot false, jobrunner.ts JobSpec); it has no
-// skip mask, so they count the display data, the submaps' views, the save at a progress and layer 1 without an event's
-// changes (no pictures) too: marked pictures (ADR 0008). They change with the map painted, the event progress slider
-// goes through many (memory only). A level's game BG (Map16 numbers, no picture) goes to the result cache; the places of
+// skip mask, so they count the display data, the submaps' views, the save at a progress, layer 1 without an event's
+// changes and the maps at every progress (no pictures) too: marked pictures (ADR 0008). They change with the map
+// painted, the event progress slider goes through many (memory only). A level's game BG (Map16 numbers, no picture) goes to the result cache; the places of
 // a prefab and whether two loads draw the same tiles are asked for once, by a dialog or an action (to the editor only).
 // A sprite set's images are kept as their parts only (whole false, learnParts).
 export const LEARN_KINDS: { [K in LearnJob['kind']]: { keep: Keep; picture: boolean; boot?: false; whole?: false } } = {
@@ -167,6 +168,7 @@ export const LEARN_KINDS: { [K in LearnJob['kind']]: { keep: Keep; picture: bool
   owSave: { keep: 'memory', picture: true, boot: false },
   owAnimated: { keep: 'memory', picture: true, boot: false },
   owL1Without: { keep: 'memory', picture: true, boot: false },
+  owProgressMaps: { keep: 'memory', picture: true, boot: false },
   msgRoutine: { keep: true, picture: false },
   gameBg: { keep: true, picture: false },
   prefabPlaces: { keep: false, picture: false },
@@ -190,7 +192,7 @@ export type LearnLane =
   | 'sprites' | 'variants' | 'bytes' | 'spritemem' | 'animated' | 'layer3' | 'l2' | 'lt' | 'uses' | 'arcs' | 'thumbs'
   | 'placement' | 'sizes' | 'prefab-suggest' | 'msgr' | 'level-png' | 'level-images' | 'gamebg' | 'prefab-places'
   | 'breakup' | 'slippery' | 'otab'
-  | 'ow' | 'owpick' | 'owpk1' | 'owsh' | 'owreach' | 'owrw' | 'owlw' | 'owps' | 'owv' | 'owt' | 'owgc' | 'ows' | 'owbs' | 'owbt' | 'owl' | 'owan' | `owc${number}`;
+  | 'ow' | 'owpick' | 'owpk1' | 'owsh' | 'owreach' | 'owrw' | 'owlw' | 'owps' | 'owpm' | 'owv' | 'owt' | 'owgc' | 'ows' | 'owbs' | 'owbt' | 'owl' | 'owan' | `owc${number}`;
 
 // what the probe client shows as busy: the probes, the tasks, the learn jobs' lanes
 export type ProbeBusyKey = 'probe' | TaskType | LearnLane;

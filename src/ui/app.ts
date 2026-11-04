@@ -76,6 +76,7 @@ import type { OwTriggerSwitches } from '../core/owanimview.ts';
 import type { Rect } from '../core/owevents.ts';
 import type { OwSpriteView } from '../core/owsprites.ts';
 import type { ProgressSave } from '../core/owprogress.ts';
+import type { ProgressMap } from '../core/owexitedges.ts';
 import type { Map16Target } from './gfx/target.ts';
 import type { WsTarget } from './gfxworkspace.ts';
 
@@ -1131,6 +1132,12 @@ export class App {
   // undefined while it is emulated, then `done` is called
   overworldAllEvents(done: () => void): OwRender | undefined {
     return this.probes.learn<OwRender>('owma1', { kind: 'owMap', map: 0, progress: OW_EVENTS }, { lane: 'owreach', label: 'Overworld', done });
+  }
+  // the overworld's layer 1, translevels and level flags at every event progress (owexitedges.ts: what each level exit
+  // opens), learned in the probe worker in a lane of its own and kept in memory while the ROM bytes it read are
+  // unchanged: undefined while it is emulated, then `done` is called
+  overworldProgressMaps(done: () => void): ProgressMap[] | undefined {
+    return this.probes.learn<ProgressMap[]>('owpm1', { kind: 'owProgressMaps' }, { lane: 'owpm', label: 'Overworld progress', done });
   }
   // which overworld tiles are level tiles (owpaths.ts levelTileTest), from the path tiles: null while they are learned
   levelTileTest(done: () => void): LevelTileTest | null {

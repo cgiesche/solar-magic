@@ -189,6 +189,10 @@ _Avoid_: tile direction, path direction
 A layer 1 tile Mario can get to at an event progress, from his start position: along the paths as the game moves him (path shapes), through stars, pipes, exit paths and the game's hardcoded paths, with the level flags of a save at the progress (the directions open) and the ways back that arriving opens (owreach.ts, path validation). Not reached: dimmed on the map ("Unreached tiles"); a way that ends without a stop tile is a **dead end**.
 _Avoid_: accessible, unlocked (for a tile)
 
+**Exit edge**:
+What a level exit opens: exit E opens level B when B is reached at the event progress just after E's event and not at the one before (owexitedges.ts, the path search at the two progresses) – derived, never stored. An exit whose event opens no level Mario reaches opens nothing – can't be told when its own level isn't reached at the progress after its event either (events pass in number order: a later one opens the way there). A secret exit whose event changes nothing and opens nothing counts as one the level hasn't. Drawn in the Levels mode as arrows from the level tile ("Exit arrows": solid the normal exit, dashed a secret one, to a level on another submap ending at the link leaving the exit's submap; a red stub for nothing, a grey one for can't be told).
+_Avoid_: unlock, level connection
+
 **Event**:
 One of the overworld's 0x78 changes run once when a level is passed (its base event, + 1…3 for its secret exits) or by a teleport or the user's own code: layer 2 steps, layer 1 changes, reveals and destroyed level tiles. Chosen by the level and exit that runs it; its number shown only for those that run otherwise.
 _Avoid_: path reveal (that is part of one), trigger

@@ -336,7 +336,7 @@ export class LinkLayer {
 }
 
 // an arrow from p to q (heads at q, and at p with `both`), drawn over a dark outline; `on`: selected
-function arrow(ctx: CanvasRenderingContext2D, lw: number, p: { x: number; y: number }, q: { x: number; y: number }, color: string, both: boolean, on: boolean, dashed: boolean): void {
+export function arrow(ctx: CanvasRenderingContext2D, lw: number, p: { x: number; y: number }, q: { x: number; y: number }, color: string, both: boolean, on: boolean, dashed: boolean): void {
   const dx = q.x - p.x, dy = q.y - p.y, len = Math.hypot(dx, dy);
   if (len < 1) return;
   const ux = dx / len, uy = dy / len, s = 4, inset = 5;

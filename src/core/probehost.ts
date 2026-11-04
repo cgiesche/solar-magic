@@ -35,6 +35,7 @@ import { objectThumbsJob, placementPreviewJob, withPlaced } from './objthumbs.ts
 import { jumpArcsJob } from './jumparcs.ts';
 import { layer2MotionsJob } from './l2scroll.ts';
 import { pathKindsJob, pathShapesJob } from './owpaths.ts';
+import { progressMapsJob } from './owexitedges.ts';
 import { revealWalkJob } from './revealwalk.ts';
 import { KeptSuggestions, prefabSuggestionsJob } from './prefabsuggest.ts';
 import { SizeProbe, sizesJob } from './objresize.ts';
@@ -124,6 +125,7 @@ function learnJob(j: LearnJob, state: LearnState, show: (items: unknown[] | null
     case 'owAnimated': return () => owAnimatedJob(owLoads(state), j.map, j.progress);
     case 'owSave': return (emu) => progressSaveJob(owLoads(state), j.progress, { uses: state.uses, emu, prober: state.prober });
     case 'owL1Without': return () => layer1WithoutJob(state.l1Copy ??= new EventL1Copy(), state.rom, j.event);
+    case 'owProgressMaps': return () => progressMapsJob(owLoads(state));
     case 'msgRoutine': return (emu) => messageRoutineJob(state.rom, emu);
     case 'gameBg': return (emu) => gameBgJob(emu, j.level);
     case 'prefabPlaces': return (emu) => prefabPlacesJob(state.rom, emu, j.prefab, j.levels, j.open, j.skip);

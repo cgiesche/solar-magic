@@ -199,6 +199,21 @@ export function reach(inp: ReachInput): Reach {
   return { tiles, stops, walks, flags };
 }
 
+// The ways Mario takes on from stop tile s in a search's result (reach): the tiles he passes (walked over, an exit
+// path tile then the tile it leads to) and where he stops – walking off as the flags let him, a star or pipe, a
+// level's exit teleporting
+export function waysFrom(inp: ReachInput, r: Reach, s: number): { path: number[]; to: number }[] {
+  const out: { path: number[]; to: number }[] = [];
+  for (let d = 0; d < 4; d++) {
+    const w = r.walks.get(s * 4 + d);
+    if (w && w.to >= 0) out.push({ path: w.path, to: w.to });
+  }
+  if (WARP_TILES.includes(lowByte(inp.l1[s]))) for (const to of inp.stars.get(s) ?? []) out.push({ path: [], to });
+  const tl = inp.tls[s];
+  if (tl) for (const to of inp.levelWarps?.(tl) ?? []) out.push({ path: [], to });
+  return out;
+}
+
 // ---- the input at an event progress ----
 
 // the input of the search for a ROM at an event progress: layer 1 and the translevels as the game has them there

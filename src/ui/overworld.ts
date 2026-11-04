@@ -48,6 +48,7 @@ import { songLabel, playButton } from './musicdialog.ts';
 import { musicPlayer, submapMusicLabel } from './musicplayer.ts';
 import type { Rom } from '../core/rom.ts';
 import { ReachLayer } from './owreachview.ts';
+import { ExitArrowLayer } from './owexitarrows.ts';
 import { layerStrengths, isLayerMode, type OwMode } from '../core/owlayers.ts';
 import { OW_OPTIONS, owOption, owOptionValue, setOwOption, revealSpeed, setRevealSpeed, revealStepFrames, MAX_REVEAL_SPEED, DEFAULT_REVEAL_SPEED, submapLightning, setSubmapLightning, LIGHTNING_TITLE, lightningEditLabel } from '../core/owoptions.ts';
 
@@ -131,6 +132,7 @@ export class OverworldView {
   levelTiles = new LevelTileLayer(this); // the level tiles as objects (the levels mode)
   nameEditor = new LevelNameEditor(this); // the selected level tile's name, edited in place (the levels mode)
   reach = new ReachLayer(this); // path validation: the tiles Mario doesn't reach dimmed, the problems of the paths
+  exits = new ExitArrowLayer(this); // the Levels mode's arrows from each level tile to the levels its exits open
   // the event the map is shown and painted as after (both layers; "Map after" in the bar), -1: the map before events
   // (kept per ROM in the browser, not in the ROM)
   event = -1;
@@ -428,6 +430,7 @@ export class OverworldView {
     if (this.mode === 'sprites') {
       // the sprites show what is under the mouse
     } else if (this.mode === 'levels' || this.levelTiles.dragged) {
+      if (this.mode === 'levels') this.exits.paint(ctx, lw);
       this.levelTiles.paint(ctx, lw);
     } else if (this.mode === 'links') {
       if (this.hover) {
@@ -845,6 +848,8 @@ export class OverworldView {
       this.statusText.textContent = 'Click: select a sprite, a start position (M, L) or a Koopa Kid\'s place (K1–K3) · Drag moves it (8 pixels, 1 with Shift) · Delete empties a sprite slot';
       return;
     }
+    const exit = this.mode === 'levels' && !this.levelTiles.status() ? this.exits.status() : '';
+    if (exit) { this.statusText.textContent = exit; return; }
     if (this.mode === 'levels' && (this.levelTiles.status() || !c)) {
       this.statusText.textContent = this.levelTiles.status() ?? 'Click: select a level tile · Drag moves it (swaps with the tile there) · Delete: a stop tile in its place · Right click: Place level here… · Double click: open the level';
       return;
@@ -1253,6 +1258,8 @@ export class OverworldView {
           'Layer 1 tiles Mario walks, climbs (rungs) or swims along (blue), exits to another submap on (red) or stops on without entering a level (cross) – invisible in the game; what each does is learned from the game\'s code'),
         view('Unreached tiles', () => this.reach.show, (v) => (this.reach.show = v),
           'Path and level tiles Mario can\'t get to at this event progress dimmed – searched along the paths as the game moves him (what each tile does learned from the game\'s code), with the level flags of a save at the progress; the problems of the paths are in the status bar'),
+        view('Exit arrows', () => this.exits.show, (v) => (this.exits.show = v),
+          'In the Levels mode: from each level tile an arrow to each level its exits open (solid the normal exit, dashed a secret one; to another submap ending at the link leading there), a red stub for an exit opening nothing Mario reaches – exit E opens level B when Mario reaches B at the event progress after E\'s event and not at the one before (events pass in number order)'),
         view('Sprites', () => this.showSprites, (v) => (this.showSprites = v),
           'The overworld\'s sprites as the game shows them at the event progress (always shown in the Sprites mode)'),
         view('Sprite shadows', () => this.sprites.showShadows, (v) => (this.sprites.showShadows = v), 'A shadow on the ground under each sprite'),
