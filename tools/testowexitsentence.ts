@@ -4,12 +4,13 @@
 // level revealed is told as the tile it becomes; each reveal and destroy clause names
 // its cells and what removes it; an exit to the overworld teleporting is told with the exit it passes. The levels opened
 // come from the exits' edges (owexitedges.ts, #375): for every exit of the clean game the sentence names exactly the
-// levels its arrows point to.
+// levels its arrows point to, by the cheap rule (exitEdges) and by the probe worker's (passableEdgesJob,
+// #380).
 // node tools/testowexitsentence.ts
 import { Rom } from '../src/core/rom.ts';
 import { l1Index, readTranslevels, OverworldEmulator, OverworldLoads } from '../src/core/overworld.ts';
 import { eventRunners, eventPieces, readEvents, submapViews, submapOf } from '../src/core/owevents.ts';
-import { exitEdges, progressInput, progressMapsJob } from '../src/core/owexitedges.ts';
+import { exitEdges, passableEdgesJob, progressInput, progressMapsJob, type ExitEdge } from '../src/core/owexitedges.ts';
 import { ExitGraph } from '../src/core/exitgraph.ts';
 import { exitSentences, type ExitSentence } from '../src/core/owexitsentence.ts';
 import { addReveal, removeReveal, eventReveal } from '../src/core/oweventtiles.ts';
@@ -92,8 +93,10 @@ const iggy = levelName(rom, tls[castle]);
   check(all.flat().length > 0 && all.flat().every((x) => x.clauses.every((c) => c.text)), `every level's exits: ${all.flat().length} sentences, ${none.length} opening nothing yet${none.length ? ` (e.g. event ${hx(none[0].event)})` : ''}`);
 }
 
-{
-  // every exit of the clean game: the levels the sentence says it opens are exactly those its arrows point to
+// every exit of the clean game: the levels the sentence says it opens are exactly those its arrows point to – by
+// the cheap rule (exitEdges) and by the probe worker's (passableEdgesJob: the events still passable without the
+// exit, #380)
+function sentencesOpen(edges: readonly ExitEdge[], rule: string) {
   const wrong: string[] = [];
   let told = 0;
   for (const e of edges) {
@@ -103,7 +106,17 @@ const iggy = levelName(rom, tls[castle]);
     if (!n || said.join() !== e.opens.map((o) => `opens ${words.level(o.tl)}`).join()) wrong.push(`${hx(e.tl)}/${e.exit}: ${said.join(', ') || 'nothing'}`);
   }
   check(!wrong.length && told === edges.reduce((k, e) => k + e.opens.length, 0) && told > 0,
-    `every exit's sentence opens the levels of its arrows (${edges.length} exits, ${told} levels${wrong.length ? `; wrong: ${wrong.join(' | ')}` : ''})`);
+    `${rule}: every exit's sentence opens the levels of its arrows (${edges.length} exits, ${told} levels${wrong.length ? `; wrong: ${wrong.join(' | ')}` : ''})`);
+}
+sentencesOpen(edges, 'the cheap rule (exitEdges)');
+{
+  const job = passableEdgesJob(rom, loads, pathKinds(rom), pathShapes(rom));
+  let st = job.next();
+  while (!st.done) st = job.next();
+  const differ = st.value.filter((e) => edges.find((x) => x.tl === e.tl && x.exit === e.exit)?.opens.map((o) => o.tl).join() !== e.opens.map((o) => o.tl).join());
+  // (the two rules differ on the clean game – #380's exits – so the sentences follow the edges they are given)
+  check(differ.length > 0, `the worker's edges differ from the cheap rule's at ${differ.length} exits`);
+  sentencesOpen(st.value, 'the worker\'s rule (passableEdgesJob)');
 }
 
 if (bad) { console.log(`${bad} failed`); process.exit(1); }
