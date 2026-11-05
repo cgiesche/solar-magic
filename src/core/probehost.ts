@@ -13,6 +13,10 @@
 // tables) run here too, in lanes (one job at a time, a request replacing the lane's others drops them), taking turns
 // with the tasks; they choose whether the display data counts for them (pictures: it does; the probes and tasks: it
 // doesn't, ADR 0008).
+// The open level's work goes first (CONTEXT.md "Open level's work", #393): the images of its sprites (their loads of the
+// sprite set first), the kinds of its objects (their loads of the object kinds first) and the object boxes for
+// resizing run before the asked probes, the other lanes and tasks and the prefetch; the rest of the sprite set and of
+// the kinds then takes turns as before.
 // The level as edited the tiles of the level and the placement preview are learned on comes whole once (then named by
 // its id, probeprotocol.ts StateRef), the latest few kept.
 // After the first copy of the ROM the editor sends the ranges a change wrote: queued jobs stay, a task starts over
@@ -22,7 +26,7 @@ import { Rom } from './rom.ts';
 import { BlockProber } from './blockprobe.ts';
 import { storeKey, type CacheEntry } from './romdeps.ts';
 import { JobRunner, type Job, type JobRun } from './jobrunner.ts';
-import { objKindsJob, kindsKey } from './objkinds.ts';
+import { objKindsJob, kindsKey, type ObjKind } from './objkinds.ts';
 import { levelScanJob, type ScanResult } from './levelscan.ts';
 import { cameraAtJob, type CameraAt } from './camerareach.ts';
 import { spriteSetJob, spriteAtJob, spriteBytesJob } from './spritegfx.ts';
@@ -54,15 +58,19 @@ import { slipperyJob } from './slippery.ts';
 import { objectTableJob } from './objectnames.ts';
 import { inputHash, type EditState } from './inputs.ts';
 import { Lane, Lanes, laneId } from './lanes.ts';
-import { jobId, jobKey, learnKeep, LEARN_KINDS, EDIT_STATES, type StateRef, type ProbeJob, type ProbeMessage, type ProbeReply, type TaskMessage, type TaskType, type LearnJob, type LearnMessage, type LearnLane } from './probeprotocol.ts';
+import { jobId, jobKey, learnKeep, learnAhead, learnRetargets, LEARN_KINDS, EDIT_STATES, type StateRef, type ProbeJob, type ProbeMessage, type ProbeReply, type TaskMessage, type TaskType, type LearnJob, type LearnMessage, type LearnLane } from './probeprotocol.ts';
 
-// a longer task: what was asked (a request asking for the same result may have replaced it) and its job
-interface Task { msg: TaskMessage; run: JobRun<unknown> }
+// a longer task: what was asked (a request asking for the same result may have replaced it) and its job; ahead: it is
+// the open level's work now (the object kinds while those of the open level's objects are to come); shown: the kinds of
+// the open level's objects found since the last reply
+interface Task { msg: TaskMessage; run: JobRun<unknown>; ahead: boolean; shown: [number, ObjKind][] | null }
 
 // a task's job (none of them is a picture); one that finds nothing (null) gives undefined, which isn't kept
-function taskJob(m: TaskMessage): (emu: LevelEmulator) => Job<unknown> {
+function taskJob(t: Task): (emu: LevelEmulator) => Job<unknown> {
+  const m = t.msg;
   switch (m.type) {
-    case 'kinds': return (emu) => objKindsJob(emu, { ...m.level, header: { ...m.level.header, tileset: m.ts } }, m.layer2Pointer);
+    case 'kinds': return (emu) => objKindsJob(emu, { ...m.level, header: { ...m.level.header, tileset: m.ts } }, m.layer2Pointer,
+      () => (t.msg.type === 'kinds' && t.msg.first) || [], (k) => (t.shown = k), (a) => (t.ahead = a));
     case 'scan': return (emu) => found(levelScanJob(emu, m.level));
     case 'camera': return (emu) => found(cameraAtJob(emu, m.level, m.x, m.y));
   }
@@ -81,10 +89,13 @@ interface LearnState {
 const owLoads = (state: LearnState) => (state.ow ??= new OverworldLoads(new OverworldEmulator(state.rom), OW_LOADS_KEPT, state.prober.results.fp));
 
 // a learn job's job; show takes what it shows while it runs (null: it started, also over); latest: the job of the latest
-// request it answers (learnRetargets: the levels' uses take up its list as they run)
-function learnJob(j: LearnJob, state: LearnState, show: (items: unknown[] | null) => void, latest: () => LearnJob = () => j): JobRun<unknown>['start'] {
+// request it answers (learnRetargets: the levels' uses take up its list as they run, a sprite set the sprites it captures
+// first); ahead: whether it is the open level's work (learnAhead) from now on, as the job tells
+function learnJob(
+  j: LearnJob, state: LearnState, show: (items: unknown[] | null) => void, latest: () => LearnJob = () => j, ahead: (pending: boolean) => void = () => {},
+): JobRun<unknown>['start'] {
   switch (j.kind) {
-    case 'sprites': return (emu, _p, part) => spriteSetJob(emu, j.level, j.nums, show, part, j.input);
+    case 'sprites': return (emu, _p, part) => spriteSetJob(emu, j.level, j.nums, show, part, j.input, () => (latest() as typeof j).first ?? [], ahead);
     case 'spriteAt': return (emu) => spriteAtJob(emu, j.level, j.id, j.x, j.y);
     case 'spriteBytes': return (emu) => spriteBytesJob(emu, j.level, j.id, j.bytes);
     case 'uses': return (emu) => levelUsesJob(state.uses, emu, () => (latest() as typeof j).levels, show);
@@ -144,14 +155,19 @@ function sent(s: StateRef): EditState {
   throw new Error(`level as edited ${s.id} not sent`);
 }
 
-// a learn job asked for: the latest request for its result, its job and what it showed since the last reply
-interface Learn { msg: LearnMessage; run: JobRun<unknown>; fresh: boolean; shown: unknown[] }
+// a learn job asked for: the latest request for its result, its job and what it showed since the last reply; ahead: it
+// is the open level's work now (learnAhead, then as the job tells)
+interface Learn { msg: LearnMessage; run: JobRun<unknown>; fresh: boolean; shown: unknown[]; ahead: boolean }
 // what takes turns: the tasks and the lanes with jobs (a lane's first job runs; its name is its emulator's, as a task's
 // type is: a lane is named as no task, ProbeBusyKey)
 type Turn = Task | Lane<LearnLane, Learn>;
 
 // the result cache key of a task's result
 const taskKey = (m: TaskMessage) => (m.type === 'kinds' ? kindsKey(m.ts) : m.key);
+// the open level's objects the object kinds find first, and whether a task starts as the open level's work (the object
+// kinds with objects first; the job then tells)
+const taskFirst = (m: TaskMessage) => (m.type === 'kinds' ? (m.first ?? []).join() : '');
+const taskAhead = (m: TaskMessage) => m.type === 'kinds' && !!m.first?.length;
 
 export class ProbeHost {
   private rom: Rom | null = null;
@@ -224,6 +240,16 @@ export class ProbeHost {
     this.state!.sizes = null;
     this.prober.reset();
     this.keepHolding();
+    this.aheadAgain();
+  }
+
+  // A job that read a changed byte starts over at its next step: each running one is the open level's work again as when
+  // asked (learnAhead, taskAhead), until its next step tells (so a restarted one doesn't wait behind the asked probes)
+  private aheadAgain(): void {
+    for (const t of this.turns) {
+      if (!(t instanceof Lane)) t.ahead = taskAhead(t.msg);
+      else if (t.first) t.first.ahead = learnAhead(t.first.msg.job);
+    }
   }
 
   handle(m: ProbeMessage): void {
@@ -250,11 +276,15 @@ export class ProbeHost {
     const { job, added, lane } = this.lanes.join(msg.lane, id, () => {
       const show = (items: unknown[] | null) => { if (items === null) { l.fresh = true; l.shown = []; } else l.shown.push(...items); };
       // (a job starting over runs for the latest request, the levels' uses take up its list as they run)
-      const start: JobRun<unknown>['start'] = (emu, p, part) => learnJob(l.msg.job, state, show, () => l.msg.job)(emu, p, part);
-      const l: Learn = { msg, fresh: false, shown: [], run: runner.run({ key: msg.key, input: msg.input, ...LEARN_KINDS[msg.job.kind], start }) };
+      const start: JobRun<unknown>['start'] = (emu, p, part) => learnJob(l.msg.job, state, show, () => l.msg.job, (a) => (l.ahead = a))(emu, p, part);
+      const l: Learn = { msg, fresh: false, shown: [], ahead: learnAhead(msg.job), run: runner.run({ key: msg.key, input: msg.input, ...LEARN_KINDS[msg.job.kind], start }) };
       return l;
     });
-    if (!added) job.msg = msg;
+    if (!added) {
+      // (other work for the running job: the open level's again until the job tells, learnRetargets)
+      if (learnRetargets(job.msg.job, msg.job)) job.ahead = learnAhead(msg.job);
+      job.msg = msg;
+    }
     this.turns.add(lane); // (one with jobs keeps its turn)
   }
 
@@ -326,10 +356,16 @@ export class ProbeHost {
     if (!this.runner) return;
     const running = this.tasks.get(msg.type), t = running ?? this.cancelled.get(msg.type);
     this.cancelled.delete(msg.type);
-    if (t && taskKey(t.msg) === taskKey(msg)) { t.msg = msg; this.setTask(t); return; } // (a running one keeps its turn)
+    if (t && taskKey(t.msg) === taskKey(msg)) {
+      // (a running one keeps its turn; other objects first: the open level's work again until the job tells)
+      if (taskFirst(t.msg) !== taskFirst(msg)) t.ahead = taskAhead(msg);
+      t.msg = msg;
+      this.setTask(t);
+      return;
+    }
     if (running) this.turns.delete(running); // (the new one's turn comes last)
     // (a job starting over runs for the latest request)
-    const task: Task = { msg, run: this.runner.run({ key: taskKey(msg), keep: true, picture: false, boot: msg.type !== 'kinds', start: (emu) => taskJob(task.msg)(emu) }) };
+    const task: Task = { msg, ahead: taskAhead(msg), shown: null, run: this.runner.run({ key: taskKey(msg), keep: true, picture: false, boot: msg.type !== 'kinds', start: (emu) => taskJob(task)(emu) }) };
     this.setTask(task);
   }
 
@@ -373,30 +409,43 @@ export class ProbeHost {
     for (const id of this.asked.keys()) this.prefetch.delete(id);
   }
 
+  // the first turn that is the open level's work (its task's or lane's first job ahead)
+  private ahead(): Turn | undefined {
+    for (const t of this.turns) if (t instanceof Lane ? t.first?.ahead : t.ahead) return t;
+    return undefined;
+  }
+
+  // a step of a turn's job (the turn goes last: the next turn's next)
+  private turn(turn: Turn): ProbeReply | null {
+    this.turns.delete(turn);
+    if (turn instanceof Lane) {
+      const first = turn.first;
+      if (!first) return null; // (all done)
+      const d = this.learnStep(turn, first);
+      if (turn.first) this.turns.add(turn);
+      return d;
+    }
+    const m = turn.msg;
+    let r: { result: unknown } | null;
+    try { r = this.runner!.step(m.type, turn.run); } catch (e) { console.error(e); r = { result: null }; }
+    if (r) { this.tasks.delete(m.type); return this.taskDone(turn, r.result ?? null); }
+    this.turns.add(turn);
+    const shown = turn.shown;
+    turn.shown = null;
+    return shown && m.type === 'kinds' ? { type: 'kindsShown', gen: this.gen, ts: m.ts, kinds: shown, put: this.put(null) } : null;
+  }
+
   get pending(): number { return this.asked.size + this.turns.size + this.prefetch.size; }
 
-  // runs the next job (asked probes, then a step of a longer task or a learn job taking turns with a prefetched probe,
-  // so a long one, as the levels' uses, doesn't hold up what the palettes show); null when nothing finished (a learn
-  // job's step gives its progress)
+  // Runs the next job: a turn of the open level's work (CONTEXT.md "Open level's work": the tasks and lanes whose job is
+  // ahead, taking turns among them), else the asked probes, else a step of a longer task or a learn job taking turns
+  // with a prefetched probe (so a long one, as the levels' uses, doesn't hold up what the palettes show); null when
+  // nothing finished (a learn job's step gives its progress, the object kinds' the kinds of the open level's objects
+  // once known)
   next(): ProbeReply | null {
-    this.turned = !this.asked.size && this.turns.size > 0 && !(this.turned && this.prefetch.size);
-    if (this.turned) {
-      const [turn] = this.turns;
-      this.turns.delete(turn);
-      if (turn instanceof Lane) {
-        const first = turn.first;
-        if (!first) return null; // (all done)
-        const d = this.learnStep(turn, first);
-        if (turn.first) this.turns.add(turn); // (the next turn's next)
-        return d;
-      }
-      const type = turn.msg.type;
-      let r: { result: unknown } | null;
-      try { r = this.runner!.step(type, turn.run); } catch (e) { console.error(e); r = { result: null }; }
-      if (r) { this.tasks.delete(type); return this.taskDone(turn, r.result ?? null); }
-      this.turns.add(turn); // (the next turn's next)
-      return null;
-    }
+    const ahead = this.ahead();
+    this.turned = !!ahead || (!this.asked.size && this.turns.size > 0 && !(this.turned && this.prefetch.size));
+    if (this.turned) return this.turn(ahead ?? this.turns.values().next().value!);
     const p = this.prober;
     const q = this.asked.size ? this.asked : this.prefetch;
     const [id, job] = q.entries().next().value ?? [];

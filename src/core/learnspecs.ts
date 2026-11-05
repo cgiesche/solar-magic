@@ -2,7 +2,7 @@
 // (inputs.ts), as App asks for them; here so that tests ask with the same.
 
 import type { Rom } from './rom.ts';
-import { SPRITE_MEMORY, serializeLayer1, type Level } from './level.ts';
+import { SPRITE_MEMORY, serializeLayer1, spriteId, type Level } from './level.ts';
 import type { LevelOverride } from './levelemu.ts';
 import type { SpriteLevel } from './spritegfx.ts';
 import type { LearnJob } from './probeprotocol.ts';
@@ -31,8 +31,9 @@ export function spriteInput(rom: Rom, lv: Level, custom: number[], filesHash = (
   return { gfx: hd.spriteGfx, palette: hd.spritePalette, memory: lv.spriteHeader & SPRITE_MEMORY, files: filesHash(spriteGfxFiles(rom, lv)), custom };
 }
 
-// What the images of level lv's sprites are learned with: all sprites (nums: the ids the picker lists), a custom sprite
-// with extra bytes, a sprite's variant at a place; input: spriteInput's
+// What the images of level lv's sprites are learned with: all sprites (nums: the ids the picker lists; the loads with
+// the level's own sprites first, spriteSetJob – not part of the key or input), a custom sprite with extra bytes, a
+// sprite's variant at a place; input: spriteInput's
 export function spriteJobs(lv: Level, nums: number[], input: SpriteInput): { all: LearnSpec; bytes: (id: number, bytes: number[]) => LearnSpec; at: (id: number, x: number, y: number) => LearnSpec } {
   const hd = lv.header, set = `${hd.spriteGfx}-${hd.spritePalette}`;
   // (the level as sprite images are captured in it)
@@ -43,7 +44,7 @@ export function spriteJobs(lv: Level, nums: number[], input: SpriteInput): { all
   // added or changed captures only its load again)
   const { custom: _, ...loadInput } = input;
   return {
-    all: { key: `i6${set}`, job: { kind: 'sprites', level, nums, input: inputHash(loadInput) }, input },
+    all: { key: `i6${set}`, job: { kind: 'sprites', level, nums, input: inputHash(loadInput), first: levelSprites(lv) }, input },
     bytes: (id, b) => ({ key: `b3${set}:${id}:${b.join(',')}`, job: { kind: 'spriteBytes', level, id, bytes: b }, input }),
     at: (id, x, y) => ({ key: `v5${set}:${id}:${x}:${y}`, job: { kind: 'spriteAt', level, id, x, y }, input }),
   };
@@ -58,3 +59,10 @@ export function layer3Spec(rom: Rom, lv: Level, ov: LevelOverride, tileset: numb
   // (the load leaves out the sprites and the owners of level bytes: not sent)
   return { key: `l3k2:${tileset}`, job: { kind: 'layer3', level: lv.number, ov: { ...load, sprites: undefined, byteOwner: undefined } }, input };
 }
+
+// the ids of the sprites placed in level lv, each once, in number order
+export const levelSprites = (lv: Pick<Level, 'sprites'>): number[] => [...new Set(lv.sprites.map(spriteId))].sort((a, b) => a - b);
+// the standard objects (01-3F) of level lv's layers 1 and 2, each once, in number order (their kinds are found first,
+// objkinds.ts objKindsJob)
+export const levelObjects = (lv: Pick<Level, 'objects' | 'layer2Objects'>): number[] =>
+  [...new Set([...lv.objects, ...lv.layer2Objects ?? []].map((o) => o.num).filter((n) => n > 0))].sort((a, b) => a - b);

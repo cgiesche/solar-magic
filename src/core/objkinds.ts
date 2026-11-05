@@ -89,6 +89,7 @@ export type KindLevel = Pick<Level, 'number' | 'header'>;
 interface Spec { num: number; size: number; extension?: number[] }
 
 // the 16 values of each nibble of a byte, the other nibble 2
+const NIBBLE_SPECS = 32; // (specs per standard object, nibbleValues)
 const nibbleValues = (): number[] => [...Array.from({ length: 16 }, (_, v) => 0x20 | v), ...Array.from({ length: 16 }, (_, v) => (v << 4) | 2)];
 // the settings (5th byte) of a custom number tried first: whether it draws
 const DRAW_TRIES: [number, number][] = [[0x00, 0x00], [0x22, 0x22]]; // (3rd byte, 5th byte)
@@ -96,7 +97,9 @@ const FIXED_BYTE = 0x22; // the byte not probed, while the other's nibbles are
 
 // Objects 01-3F, each with the low nibble 0-F (high = 2) and the high nibble 0-F (low = 2). Where object 2D has an
 // extension: each custom number at DRAW_TRIES, then those that drew at either the same for its 5th byte and its 3rd.
-// Runs in steps (one emulated level load each) so a UI can spread it over idle time.
+// Runs in steps (one emulated level load each) so a UI can spread it over idle time. The loads of some standard objects
+// can go first (prefer: the open level's), their kinds known before the rest (partial); the loads are the same, only
+// their order changes, so the result is the same.
 export class ObjKindProbe {
   private specs: Spec[] = [];
   private customs: number[] = []; // the custom numbers probed for their nibbles, in this order after the first ones
@@ -113,6 +116,7 @@ export class ObjKindProbe {
   private romRead = new Set<number>();
   private pos: (off: number) => [number, number] | undefined;
   private todo: [number, number][] = []; // spec ranges still to load, in order
+  private standardEnd: number; // where the standard objects' specs end
   private emu: LevelEmulator;
   private level: KindLevel;
   private layer2Pointer: number;
@@ -123,6 +127,7 @@ export class ObjKindProbe {
     this.layer2Pointer = layer2Pointer;
     this.pos = tilePos(tileByOffset(layerGeom(emu.rom, 0, 0, 32)));
     for (let n = 1; n < 0x40; n++) for (const size of nibbleValues()) this.specs.push({ num: n, size });
+    this.standardEnd = this.specs.length;
     this.len2d = objectLength2D(emu.rom);
     // (the specs depend on object 2D's length: what finding it read counts, as single bytes)
     for (const [start, end] of objectLength2DReads(emu.rom)) for (let o = start; o < end; o++) this.romRead.add(o);
@@ -140,6 +145,28 @@ export class ObjKindProbe {
 
   private queue(from: number): void {
     for (let i = from; i < this.specs.length; i += PER) this.todo.push([i, Math.min(i + PER, this.specs.length)]);
+  }
+
+  // the loads of the specs of these standard objects first (as queued: the same loads, in another order)
+  prefer(nums: readonly number[]): void {
+    const want = ([a, b]: [number, number]) => a < this.standardEnd && nums.some((n) => a < n * NIBBLE_SPECS && b > (n - 1) * NIBBLE_SPECS);
+    this.todo = [...this.todo.filter(want), ...this.todo.filter((r) => !want(r))];
+  }
+
+  // whether every load of these standard objects is done (their kinds known: partial)
+  has(nums: readonly number[]): boolean {
+    return nums.every((n) => { for (let i = (n - 1) * NIBBLE_SPECS; i < n * NIBBLE_SPECS; i++) if (!this.runs[i]) return false; return true; });
+  }
+
+  // the kinds of these standard objects (has: their loads done), those not plain, as result gives them: classified with
+  // the code the loads so far ran (an object's types end where its tables run into code, typeCount)
+  partial(nums: readonly number[]): [number, ObjKind][] {
+    return nums.flatMap((n): [number, ObjKind][] => { const k = this.kindOf(n); return k ? [[n, k]] : []; });
+  }
+
+  private kindOf(n: number): ObjKind | null {
+    const k = (n - 1) * NIBBLE_SPECS;
+    return classify(this.runs.slice(k, k + 16), this.runs.slice(k + 16, k + NIBBLE_SPECS), this.code);
   }
 
   get done(): boolean { return !this.todo.length && (this.firstAt < 0 || this.nibblesAt >= 0); }
@@ -216,8 +243,7 @@ export class ObjKindProbe {
     while (!this.done) this.step();
     const kinds = new Map<number, ObjKind>();
     for (let n = 1; n < 0x40; n++) {
-      const k = (n - 1) * 32;
-      const kind = classify(this.runs.slice(k, k + 16), this.runs.slice(k + 16, k + 32), this.code);
+      const kind = this.kindOf(n);
       if (kind) kinds.set(n, kind);
     }
     const custom = new Map<number, ObjKind>(), drawsWith = new Map<number, [number, number]>();
@@ -317,13 +343,29 @@ export function resizeObjectSize(kind: ObjKind | null | undefined, size: number,
 }
 
 // ObjKindProbe as a job (jobrunner.ts, without the boot's reads): a step per emulated level load; what it reads is
-// what the probe's reads() gives, not the level loads around the object routines
-export function* objKindsJob(emu: LevelEmulator, level: KindLevel, layer2Pointer: number): Generator<void, ObjKinds> {
+// what the probe's reads() gives, not the level loads around the object routines. The loads of first's standard objects
+// (the open level's, asked again before each step: a later request may name others) go first, show gets their kinds
+// once known (ObjKindProbe.partial, once per list), ahead whether loads of them are still to come (at the start and
+// after each step)
+export function* objKindsJob(
+  emu: LevelEmulator, level: KindLevel, layer2Pointer: number, first: () => readonly number[] = () => [],
+  show?: (kinds: [number, ObjKind][]) => void, ahead?: (pending: boolean) => void,
+): Generator<void, ObjKinds> {
   const untracked = <T>(fn: () => T) => emu.tracked(fn, null, false).result;
   const probe = untracked(() => new ObjKindProbe(emu, level, layer2Pointer));
+  let preferred: string | null = null, shown: string | null = null;
+  const lookAhead = () => {
+    const f = [...new Set(first())].filter((n) => n > 0 && n < 0x40).sort((a, b) => a - b), key = f.join();
+    if (key !== preferred) { preferred = key; probe.prefer(f); }
+    const known = probe.has(f);
+    if (known && key !== shown && f.length) { shown = key; show?.(probe.partial(f)); }
+    ahead?.(!known);
+  };
+  lookAhead();
   while (!probe.done) {
     untracked(() => probe.step());
     emu.count(probe.reads());
+    lookAhead();
     yield;
   }
   return probe.result();

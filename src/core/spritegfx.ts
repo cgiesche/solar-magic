@@ -381,21 +381,27 @@ export function spriteLoads(nums: number[]): Map<number, number[]> {
 // step, each a part of the result (jobrunner.ts Part: kept on its own with the bytes it read, input the hash of what
 // the images depend on outside the ROM besides the sprites in the load; a load as stored takes no step of its own),
 // so a change that one sprite's code read captures only its load again; show gets each load's images as they come
-// (null first: the capture started, also over)
+// (null first: the capture started, also over). The loads with a sprite of first (the open level's sprites, asked
+// again before each load: a later request may name others) are captured before the others; ahead is told whether
+// such a load is still to come (at the start and after each load). The result is the loads' images in their order
+// (spriteSetParts), whichever was captured first.
 export function* spriteSetJob(
   emu: LevelEmulator, lv: SpriteLevel, nums: number[], show: (images: [number, SpriteImage][] | null) => void, part: Part, input?: string,
+  first: () => readonly number[] = () => [], ahead?: (pending: boolean) => void,
 ): Generator<string, [number, SpriteImage][]> {
   show(null);
-  const loads = spriteSetParts(nums, input), images: [number, SpriteImage][] = [];
-  let i = 0;
-  for (const p of loads) {
-    i++;
+  const loads = spriteSetParts(nums, input), images: [number, SpriteImage][][] = [], left = loads.map((_, i) => i);
+  const firstLeft = () => { const f = new Set(first()); return left.findIndex((i) => loads[i].ids.some((n) => f.has(n))); };
+  ahead?.(firstLeft() >= 0);
+  while (left.length) {
+    const i = left.splice(Math.max(0, firstLeft()), 1)[0], p = loads[i];
     const r = part(p.sub, p.input, () => [...captureSprites(emu, lv, p.ids)]);
     show(r.result!);
-    images.push(...r.result!);
-    if (r.learned) yield `Sprite graphics ${Math.round(i / loads.length * 100)} %`;
+    images[i] = r.result!;
+    ahead?.(firstLeft() >= 0);
+    if (r.learned) yield `Sprite graphics ${Math.round((loads.length - left.length) / loads.length * 100)} %`;
   }
-  return images;
+  return images.flat();
 }
 // the parts of spriteSetJob's result in its order: a test level load each, with its sprites, its sub key and its input
 // (input: the job's); the result is these parts' images one after another

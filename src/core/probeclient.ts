@@ -9,7 +9,7 @@
 // bytes they read are unchanged.
 
 import { ProbeHost, pumpProbes } from './probehost.ts';
-import { jobId, jobKey, learnKeep, learnRetargets, learnParts, EDIT_STATES, type ProbeJob, type ProbeMessage, type ProbeDone, type ProbeReply, type KindsDone, type ScanDone, type CameraDone, type LearnJob, type LearnMessage, type Learned, type Learning, type LearnLane, type ProbeBusyKey } from './probeprotocol.ts';
+import { jobId, jobKey, learnKeep, learnRetargets, learnParts, EDIT_STATES, type ProbeJob, type ProbeMessage, type ProbeDone, type ProbeReply, type KindsDone, type KindsShown, type ScanDone, type CameraDone, type LearnJob, type LearnMessage, type Learned, type Learning, type LearnLane, type ProbeBusyKey } from './probeprotocol.ts';
 import { Lanes, laneId, type LaneLabel } from './lanes.ts';
 import { inputHash } from './inputs.ts';
 import { partKey, memoryResults, type MemoryResults, type Keep } from './jobrunner.ts';
@@ -18,7 +18,7 @@ import type { Rom } from './rom.ts';
 import { SPRITE_PROBE_END, probeable, type BlockProbe, type CollisionProbe, type SpriteProbe, type RunStates } from './blockprobe.ts';
 import type { CameraBands } from './camerabands.ts';
 import type { CameraAt } from './camerareach.ts';
-import { kindsKey, type ObjKinds, type KindLevel } from './objkinds.ts';
+import { kindsKey, type ObjKind, type ObjKinds, type KindLevel } from './objkinds.ts';
 import type { ScanLevel, ScanResult } from './levelscan.ts';
 
 // a learn job that failed (learnOrFailed)
@@ -33,7 +33,9 @@ export interface ProbeClientDeps {
   cacheReady: Promise<void>; // stored results are loaded
   rom(): Pick<Rom, 'gen' | 'data' | 'changesSince'>; // the current ROM, its count of changes and what they wrote
   tileset(): number; // the tileset probes are asked for
-  kindLevel(): { level: KindLevel; layer2Pointer: number }; // the level object kinds are found with
+  // the level object kinds are found with; first: its standard objects (their kinds are known first, kindsSoFar)
+  kindLevel(): { level: KindLevel; layer2Pointer: number; first?: number[] };
+  level?(): number; // the open level's number (another one opened while the kinds run: its objects' kinds next)
   // starts the worker (replies go to reply, failed() once it broke down); null or a throw: none
   connect?(reply: (d: ProbeReply) => void, failed: () => void): Send | null;
   later(key: string, step: () => void): void; // a background slice on the main thread (waits while a dialog is open)
@@ -41,7 +43,7 @@ export interface ProbeClientDeps {
   setBusy(key: ProbeBusyKey, label: string | null): void;
   ready(): void; // the asked or the prefetched probes are all done
   progress?(): void; // an asked or prefetched probe is done (more may follow)
-  kindsReady(): void; // object kinds asked for are known (or failed)
+  kindsReady(): void; // object kinds asked for are known (or failed), or those of the open level's objects (kindsSoFar)
 }
 
 // a learn job asked for (ProbeClient.learn)
@@ -71,6 +73,7 @@ export class ProbeClient {
   private failed = new Set<string>();
   private kindsWant: ProbeMessage & { type: 'kinds' } | null = null;
   private kindsFailed = new Set<number>(); // tilesets
+  private levelKinds: { ts: number; kinds: Map<number, ObjKind> } | null = null; // KindsShown while the kinds run
   // the level scan and the camera at a place asked for, one of each
   private playWant = new Map<Played, { msg: ProbeMessage & { type: Played }; done: (r: unknown) => void }>();
   private lanes = new Lanes<LearnLane, LearnWant>((w) => laneId(w.msg.key, w.msg.input)); // learn jobs asked for and not done yet
@@ -168,9 +171,12 @@ export class ProbeClient {
     if (k !== undefined) return k;
     this.sync();
     if (this.kindsFailed.has(ts)) return null;
-    if (this.kindsWant?.ts === ts) return undefined;
-    const { level, layer2Pointer } = this.d.kindLevel();
-    const msg = this.kindsWant = { type: 'kinds', ts, level, layer2Pointer };
+    const was = this.kindsWant;
+    // (asked for already, for the open level: its objects first)
+    if (was?.ts === ts && (!this.d.level || this.d.level() === was.level.number)) return undefined;
+    const { level, layer2Pointer, first } = this.d.kindLevel();
+    const msg = this.kindsWant = { type: 'kinds', ts, level, layer2Pointer, ...(first && { first }) };
+    if (was?.ts !== ts) this.levelKinds = null;
     this.d.setBusy('kinds', 'Object kinds');
     // (stored results first: they may be known by then)
     this.d.cacheReady.then(() => {
@@ -179,6 +185,12 @@ export class ProbeClient {
       else this.kindsDone({ type: 'kinds', gen: this.gen, ts, failed: false, put: [] });
     });
     return undefined;
+  }
+
+  // While the object kinds of tileset ts run (kinds undefined): the kinds of the open level's objects (KindLevel's
+  // first) once known, those not plain (an object not among them is plain or not known yet); undefined before
+  kindsSoFar(ts = this.d.tileset()): Map<number, ObjKind> | undefined {
+    return this.levelKinds?.ts === ts && this.kindsWant?.ts === ts ? this.levelKinds.kinds : undefined;
   }
 
   // A level scan (replaces one still running); its result goes to the cache under key too
@@ -330,6 +342,7 @@ export class ProbeClient {
       this.send({ type: 'edit', gen: this.gen, size: this.size, edits });
     } else {
       this.send({ type: 'rom', gen: this.gen, data: rom.data.slice() });
+      this.levelKinds = null; // (a new ROM: shown again for it)
       if (this.asked.size) this.send({ type: 'ask', jobs: [...this.asked.values()] });
       if (this.kindsWant) this.send(this.kindsWant);
       for (const w of this.playWant.values()) this.send(w.msg);
@@ -376,6 +389,7 @@ export class ProbeClient {
     switch (d.type) {
       case 'probe': this.probeDone(d); break;
       case 'kinds': this.kindsDone(d); break;
+      case 'kindsShown': this.kindsShown(d); break;
       case 'scan': case 'camera': this.playDone(d); break;
       case 'learning': this.learning(d); break;
       case 'learned': this.learned(d); break;
@@ -476,8 +490,17 @@ export class ProbeClient {
     if (this.kindsWant?.ts !== d.ts) return;
     if (d.gen !== this.gen && this.d.results.get(kindsKey(d.ts)) === undefined) { this.send?.(this.kindsWant); return; }
     if (d.failed) this.kindsFailed.add(d.ts);
-    this.kindsWant = null;
+    this.kindsWant = this.levelKinds = null;
     this.d.setBusy('kinds', null);
+    this.d.kindsReady();
+  }
+
+  // the kinds of the open level's objects while the kinds run (kindsSoFar): those of the latest objects asked first (a
+  // job started over shows them again, as found on the ROM it then has)
+  private kindsShown(d: KindsShown): void {
+    this.take(d);
+    if (this.kindsWant?.ts !== d.ts) return;
+    this.levelKinds = { ts: d.ts, kinds: new Map(d.kinds) };
     this.d.kindsReady();
   }
 

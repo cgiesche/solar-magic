@@ -390,6 +390,10 @@ _Avoid_: pass, generation
 A queue of the result learner's background jobs: one runs at a time, in the order asked; asking again for a job already there (the same key and input) joins it; a request may replace the lane's other jobs (they are not wanted any more). The busy indicator shows a lane's running job.
 _Avoid_: queue (for the probes' asked and prefetched jobs)
 
+**Open level's work**:
+What the background worker does first because the open level needs it to be shown and edited: the images of its sprites, the kinds of its objects and the boxes of its objects at sizes (resizing). It runs before the probes asked directly (the overlays, the status bar), the other lanes and tasks and the prefetch, taking turns among itself. The sprite images of the set and the kinds of the tileset's objects are learned the level's sprites and objects first, and only that part is the open level's work; the rest (for the pickers, for objects added later) then takes turns with the others as before. Another level opened while they run has its sprites and objects taken next. The order changes nothing learned; an object whose kind is not known yet is plain.
+_Avoid_: urgent (a job that runs while a dialog is open), priority
+
 **Watch**:
 What a view draws from the ROM through: it records the ROM bytes the drawing read, and the view is told only when a ROM change changed one of them (then it draws again). A watch held while a stroke is drawn is told nothing, and the level's re-emulation waits meanwhile; a ROM edit the view makes itself is taken as seen (it already shows it). The follow-ups of a ROM edit (the open level reloaded, its header, prefabs) are told the same way, by the bytes they read.
 _Avoid_: signature, subscription (for the thing itself)
@@ -439,7 +443,7 @@ Where Mario died in a recent test play of a level, drawn over it (View → Death
 _Avoid_: death point, skull
 
 **Prefetch**:
-Probing what the palettes could show before anyone asks for it, after everything asked for directly.
+Probing what the palettes could show before anyone asks for it, after the open level's work and everything asked for directly; it takes turns with the lanes and tasks.
 
 **Scroll bands**:
 Where Mario is on the game's screen while the camera scrolls in a direction, or follows him after L/R looked ahead; learned by moving him in the probe level with the open level's mode and vertical scroll setting (an emulated result); a setting that keeps the camera still has no band that way.

@@ -3,7 +3,7 @@
 
 import type { CacheEntry } from './romdeps.ts';
 import { blockKey, collisionKey, spriteKey, runsKey, cameraKey } from './blockprobe.ts';
-import type { KindLevel } from './objkinds.ts';
+import type { KindLevel, ObjKind } from './objkinds.ts';
 import type { ScanLevel, ScanResult } from './levelscan.ts';
 import type { CameraAt } from './camerareach.ts';
 import type { SpriteLevel } from './spritegfx.ts';
@@ -54,11 +54,14 @@ export interface ProbeDone {
 
 // the object kinds of tileset ts, with their result cache entry (none: the probe failed)
 export interface KindsDone { type: 'kinds'; gen: number; ts: number; failed: boolean; put: [string, CacheEntry][] }
+// while the object kinds of tileset ts run: those of the open level's objects (the task's first), known before the rest
+// (objkinds.ts objKindsJob; those not plain), with the entries set meanwhile; not kept, the result replaces them
+export interface KindsShown { type: 'kindsShown'; gen: number; ts: number; kinds: [number, ObjKind][]; put: [string, CacheEntry][] }
 // a level scan (id: the editor's request; result null: it failed), with its result cache entry
 export interface ScanDone { type: 'scan'; gen: number; id: number; result: ScanResult | null; put: [string, CacheEntry][] }
 // the camera at Mario standing at a place (id: the editor's request; result null: it failed), with its result cache entry
 export interface CameraDone { type: 'camera'; gen: number; id: number; result: CameraAt | null; put: [string, CacheEntry][] }
-export type ProbeReply = ProbeDone | KindsDone | ScanDone | CameraDone | Learned | Learning;
+export type ProbeReply = ProbeDone | KindsDone | KindsShown | ScanDone | CameraDone | Learned | Learning;
 
 // A result learner job (CONTEXT.md) run here: the images of all sprites of a sprite set, the image of a sprite at a
 // tile (its variant by position), the image of a custom sprite with extra bytes, the tiles of the levels not known yet
@@ -82,7 +85,8 @@ export type ProbeReply = ProbeDone | KindsDone | ScanDone | CameraDone | Learned
 // (slippery.ts slipperyJob), the object table of a tileset (objectnames.ts objectTableJob), the level scan of a level
 // an image draws (levelscan.ts; the open level's own scan is a task, its result under the same key)
 export type LearnJob =
-  | { kind: 'sprites'; level: SpriteLevel; nums: number[]; input?: string } // (input: of each test level load, spriteSetJob)
+  // (input: of each test level load; first: the open level's sprites, captured first, spriteSetJob)
+  | { kind: 'sprites'; level: SpriteLevel; nums: number[]; input?: string; first?: number[] }
   | { kind: 'spriteAt'; level: SpriteLevel; id: number; x: number; y: number }
   | { kind: 'spriteBytes'; level: SpriteLevel; id: number; bytes: number[] }
   | { kind: 'uses'; levels: number[] }
@@ -127,9 +131,18 @@ export type StateRef = EditState | { id: string };
 export const EDIT_STATES = 4;
 
 // Whether a later request for the same result (key and input) asks the job for other work, which it then takes up as
-// it runs: the levels' uses with another list of levels (the running job scans the levels the latest list still needs)
+// it runs: the levels' uses with another list of levels (the running job scans the levels the latest list still needs),
+// a sprite set with other sprites first (another level opened: its sprites are captured next)
 export function learnRetargets(was: LearnJob, now: LearnJob): boolean {
+  if (was.kind === 'sprites' && now.kind === 'sprites') return (was.first ?? []).join() !== (now.first ?? []).join();
   return was.kind === 'uses' && now.kind === 'uses' && was.levels.join() !== now.levels.join();
+}
+
+// Whether a learn job is the open level's work (CONTEXT.md "Open level's work"): run before the asked probes, the other lanes
+// and the tasks, and the prefetch (probehost.ts ProbeHost.next) – the object boxes for resizing, a sprite set while the
+// loads with the open level's sprites are to come (the job says when they are done, spriteSetJob's ahead)
+export function learnAhead(j: LearnJob): boolean {
+  return j.kind === 'sizes' || (j.kind === 'sprites' && !!j.first?.length);
 }
 
 // Per kind of learn job where its result goes (keep, jobrunner.ts Keep) and whether it is a picture (CONTEXT.md, ADR
@@ -246,7 +259,8 @@ export type ProbeMessage =
   | { type: 'edit'; gen: number; size: number; edits: [number, Uint8Array][] }
   | { type: 'ask'; jobs: ProbeJob[] }
   | { type: 'prefetch'; jobs: ProbeJob[] }
-  | { type: 'kinds'; ts: number; level: KindLevel; layer2Pointer: number }
+  // (first: the open level's standard objects, their kinds known first, KindsShown)
+  | { type: 'kinds'; ts: number; level: KindLevel; layer2Pointer: number; first?: number[] }
   | { type: 'scan'; id: number; key: string; level: ScanLevel }
   | { type: 'camera'; id: number; key: string; level: ScanLevel; x: number; y: number }
   | { type: 'cancel'; task: CancelableTask }

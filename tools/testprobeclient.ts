@@ -3,7 +3,7 @@
 // again, results come in after it, and one still valid is kept, one whose bytes changed meanwhile not (asked again); after the first copy of the ROM it gets the
 // ranges a change wrote; a broken worker hands everything
 // wanted to the main thread, and without a worker it all runs there; a failed probe is not asked again until the ROM changes; the
-// prefetch follows the tileset; object kinds are kept while the bytes they read are unchanged; a cancelled
+// prefetch follows the tileset; object kinds are kept while the bytes they read are unchanged, those of the open level's objects known first (#393); a cancelled
 // scan is told to the worker; learn jobs (the sprite images) come in as they run, with a worker and without; a lane's
 // jobs can be dropped (telling their askers), an urgent one (or any, urged) runs without a worker while a dialog holds the background slices; a failed job
 // asked again is FAILED without telling the asker again, the open level's last known tiles hold for their level and ROM
@@ -23,6 +23,7 @@ import type { ScanLevel } from '../src/core/levelscan.ts';
 import { captureSprites, spriteLoad, spriteSetParts, type SpriteLevel } from '../src/core/spritegfx.ts';
 import type { LearnJob } from '../src/core/probeprotocol.ts';
 import { inputHash, editState } from '../src/core/inputs.ts';
+import { levelObjects } from '../src/core/learnspecs.ts';
 import { partKey } from '../src/core/jobrunner.ts';
 import { serialize } from 'node:v8';
 import { levelTilesKey, levelOverride, OpenLevelTiles, type LevelTiles } from '../src/core/levelusage.ts';
@@ -65,7 +66,7 @@ function editor(worker: Worker | null) {
   const rom = new Rom(file.slice()), emu = new LevelEmulator(rom);
   const steps: [string, () => void][] = [];
   const e = {
-    rom, emu, ts: 0, ready: 0, progress: 0, kindsReady: 0, busy: new Map<string, string>(), steps, soon: [] as (() => void)[],
+    rom, emu, ts: 0, ready: 0, progress: 0, kindsReady: 0, level: 0x105, kindsFirst: false, busy: new Map<string, string>(), steps, soon: [] as (() => void)[],
     results: new ResultCache(new RomFingerprint(rom)),
     client: null as unknown as ProbeClient,
     // background slices on the main thread (the prefetch after a ROM change only when asked)
@@ -85,10 +86,12 @@ function editor(worker: Worker | null) {
     setBusy: (key, label) => { if (label === null) e.busy.delete(key); else e.busy.set(key, label); },
     ready: () => e.ready++,
     progress: () => e.progress++,
+    // (the open level's objects first: when kindsFirst)
     kindLevel: () => {
-      const lv = loadLevel(rom, 0x105);
-      return { level: { number: lv.number, header: lv.header }, layer2Pointer: rom.r24(L2_PTRS + 0x105 * 3) };
+      const lv = loadLevel(rom, e.level), first = levelObjects(lv);
+      return { level: { number: lv.number, header: lv.header }, layer2Pointer: rom.r24(L2_PTRS + e.level * 3), ...(e.kindsFirst && { first }) };
     },
+    level: () => e.level,
     kindsReady: () => e.kindsReady++,
   });
   return e;
@@ -288,6 +291,31 @@ function editor(worker: Worker | null) {
   check(kindsSent(w3) === 1, '… not asked again');
   touch(e3.rom);
   check(e3.client.kinds(1) === undefined, 'after a ROM change: asked again');
+
+  // the open level's objects first (#393): their kinds known before the tileset's (kindsSoFar, told), the rest plain
+  // until the result; another level opened: its objects asked first, the running kinds go on
+  const w4 = new Worker(), e4 = editor(w4);
+  e4.kindsFirst = true;
+  const objs = levelObjects(lv);
+  e4.client.kinds(1);
+  await settle();
+  const sent4 = w4.sent.find((m) => m.type === 'kinds');
+  check(sent4?.type === 'kinds' && sent4.first?.join() === objs.join() && e4.client.kindsSoFar(1) === undefined, `kinds: asked with the level's objects first (${objs.map((n) => n.toString(16)).join(' ')})`);
+  w4.run(1);
+  const so = e4.client.kindsSoFar(1);
+  check(e4.client.kinds(1) === undefined && e4.kindsReady === 1 && !!so && objs.every((n) => JSON.stringify(so.get(n)) === JSON.stringify(direct.kinds.get(n))) && [...so.keys()].every((n) => objs.includes(n)),
+    `kinds: the level's objects' kinds first, as in the tileset's, told (${so?.size} not plain)`);
+  check(e4.client.kindsSoFar(2) === undefined, '… for their tileset only');
+  e4.level = 0x106;
+  e4.client.kinds(1);
+  await settle();
+  const sent5 = w4.sent.filter((m) => m.type === 'kinds');
+  check(sent5.length === 2 && sent5[1].type === 'kinds' && sent5[1].first?.join() === levelObjects(loadLevel(e4.rom, 0x106)).join() && w4.host.started === 1, 'kinds: another level opened: its objects asked first, the kinds not started over');
+  e4.client.kinds(1);
+  await settle();
+  check(w4.sent.filter((m) => m.type === 'kinds').length === 2, '… asked once');
+  w4.run();
+  check(same(e4.client.kinds(1)) && e4.client.kindsSoFar(1) === undefined && !e4.busy.has('kinds'), 'kinds: the result, the level\'s first ones gone with it');
 }
 
 // a scan not wanted any more: the worker is told (only when one was asked for), and nothing is busy with it

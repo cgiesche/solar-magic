@@ -53,7 +53,7 @@ import { tideLines, type TideLines, type Layer3Kind } from '../core/layer3.ts';
 import { type Layer2Motions } from '../core/l2scroll.ts';
 import { variantOf, blockKey, collisionKey, type BlockProbe, type CollisionProbe, type RunStates, type SwitchState, SWITCH_STATES, SWITCH_TRIGGER } from '../core/blockprobe.ts';
 import { SAVE_LANES, OW_LEFT_LANES, type ProbeReply, type ProbeBusyKey, type LearnLane, type SaveAsker } from '../core/probeprotocol.ts';
-import { spriteJobs, spriteInput, layer3Spec, type SpriteInput } from '../core/learnspecs.ts';
+import { spriteJobs, spriteInput, layer3Spec, levelObjects, type SpriteInput } from '../core/learnspecs.ts';
 import { ProbeClient, FAILED } from '../core/probeclient.ts';
 import { messageRoutineInput, UNKNOWN_ROUTINE, type MessageRoutine } from '../core/messagedraw.ts';
 import { ResultLearner } from '../core/learner.ts';
@@ -286,9 +286,10 @@ export class App {
       rom: () => this.rom,
       tileset: () => this.level.header.tileset,
       kindLevel: () => {
-        const lv = this.level;
-        return { level: { number: lv.number, header: lv.header }, layer2Pointer: levelBgPointer(this.rom, lv) };
+        const lv = this.level, first = levelObjects(lv);
+        return { level: { number: lv.number, header: lv.header }, layer2Pointer: levelBgPointer(this.rom, lv), first };
       },
+      level: () => this.level.number,
       connect: (reply, failed) => {
         const w = new Worker(new URL('./probeworker.ts', import.meta.url), { type: 'module' });
         w.onmessage = (e: MessageEvent<ProbeReply>) => reply(e.data);
@@ -1354,10 +1355,12 @@ export class App {
     try { this.romEdit(name.trim() ? `${what} renamed` : `${what}: name reset`, () => setObjectName(this.rom, key, name)); } catch (e) { toast(String(e instanceof Error ? e.message : e), 'error'); }
   }
 
-  // kind of a standard object in the current tileset; null while unknown (then treated as plain)
+  // kind of a standard object in the current tileset; null while unknown (then treated as plain): the open level's
+  // objects' kinds come before the tileset's others (ProbeClient.kindsSoFar)
   objectKind(num: number): ObjKind | null {
     if (num === 0) return null;
-    return this.tilesetKinds()?.kinds.get(num) ?? null;
+    const k = this.tilesetKinds();
+    return (k ? k.kinds.get(num) : this.probes.kindsSoFar()?.get(num)) ?? null;
   }
   // kind of an object (or spec) in the current tileset: a custom number's of object 2D with an extension (UNSIZED for
   // one that draws nothing), else objectKind; null while unknown

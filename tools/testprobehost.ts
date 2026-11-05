@@ -1,6 +1,6 @@
 // Probe jobs (probehost.ts, run by the editor's probe worker): results as the prober's own, asked
 // jobs before prefetched ones, a new ROM drops the queue; object kinds, level scan and camera as
-// computed directly, a step at a time that lets asked jobs go first. A ROM change sent as the ranges it wrote keeps
+// computed directly, a step at a time that lets asked jobs go first (the kinds of the open level's objects before them, #393). A ROM change sent as the ranges it wrote keeps
 // the queue and the tasks; only a task that read a changed byte starts over, before its next step (overworld edits
 // restart nothing).
 // A cancelled scan runs no further slice and goes on when asked for again. Results a task's slice found before a ROM
@@ -8,7 +8,8 @@
 // can be cancelled. Learn jobs (the sprite images, the levels' uses, the sprite memory check, the animated tiles, the layer 3
 // kinds, the tiles of the level as edited, the object thumbnails, the placement preview, the jump arcs, the layer 2
 // motions, the path kinds, the prefab suggestions, the object boxes) as learned directly, with the entries the job runner on
-// the main thread makes (its jobs learned there at once), in lanes; prefetched probes take turns with the tasks.
+// the main thread makes (its jobs learned there at once), in lanes; prefetched probes take turns with the tasks. The open level's work
+// (the object boxes, the loads of the sprite set with its sprites) goes before asked probes, the prefetch and the other lanes.
 import { readFileSync } from 'node:fs';
 import { Rom, snesToPc } from '../src/core/rom.ts';
 import { BlockProber, blockKey, collisionKey, spriteKey, runsKey, cameraKey } from '../src/core/blockprobe.ts';
@@ -21,6 +22,7 @@ import { levelScanJob, type ScanLevel } from '../src/core/levelscan.ts';
 import { cameraAtJob } from '../src/core/camerareach.ts';
 import { runJob, JobRunner, partKey, type JobSpec } from '../src/core/jobrunner.ts';
 import { loadLevel, serializeLayer1, serializeSprites, encodeSecondaryHeader, newUid, L2_PTRS } from '../src/core/level.ts';
+import { levelObjects } from '../src/core/learnspecs.ts';
 import { editorImage } from './fixture.ts';
 import { checkJobRunner, learnAtOnce } from './runnercheck.ts';
 import { gfxSkipMask, gfxDisplaySkipMask } from '../src/core/gfxpages.ts';
@@ -123,16 +125,24 @@ const atOnce = <T>(spec: JobSpec<T>): T => learnAtOnce(mainRunner, spec);
 const same = (a: CacheEntry | undefined, b: CacheEntry | undefined) => !!a && !!b && JSON.stringify(a) === JSON.stringify(b);
 const kindProbe = new ObjKindProbe(emu, { ...lv, header: { ...lv.header, tileset: 1 } }, l2), kinds = kindProbe.result();
 const scanned = runJob(levelScanJob(emu, scanLevel));
-host.handle({ type: 'kinds', ts: 1, level: { number: lv.number, header: lv.header }, layer2Pointer: l2 });
+// (the kinds of the level's objects first, #393)
+const lvObjects = levelObjects(lv);
+host.handle({ type: 'kinds', ts: 1, level: { number: lv.number, header: lv.header }, layer2Pointer: l2, first: lvObjects });
 host.handle({ type: 'scan', id: 7, key: 'scan-key', level: scanLevel });
 host.handle({ type: 'camera', id: 9, key: 'camera-key', level: scanLevel, x: 0xbb8, y: 0x20 });
 const replies: ProbeReply[] = [];
+let kindsSteps = 0; // (next() calls until the level's objects' kinds were shown)
 for (let i = 0; host.pending; i++) {
   if (i === 3) host.ask([{ kind: 'block', ts: 1, tile: 0x130 }]);
   const d = host.next();
   if (d) replies.push(d);
+  if (d?.type === 'kindsShown') kindsSteps = i + 1;
 }
-check(replies[0]?.type === 'probe', 'asked job before the rest of the tasks');
+const shownAt = replies.findIndex((d) => d.type === 'kindsShown'), shownKinds = replies[shownAt];
+check(shownAt === 0 && replies[1]?.type === 'probe' && replies.findIndex((d) => d.type === 'kinds') > 1 && kindsSteps > 3,
+  `the kinds of the level's objects first (${kindsSteps} steps, an asked job waiting), then the asked job, then the rest of the tasks`);
+check(shownKinds?.type === 'kindsShown' && shownKinds.ts === 1 && JSON.stringify(shownKinds.kinds) === JSON.stringify(lvObjects.flatMap((n) => (kinds.kinds.has(n) ? [[n, kinds.kinds.get(n)]] : []))),
+  `the level's objects' kinds as in the tileset's (${lvObjects.length} objects, ${shownKinds?.type === 'kindsShown' ? shownKinds.kinds.length : 0} not plain)`);
 const k = replies.find((d) => d.type === 'kinds'), sc = replies.find((d) => d.type === 'scan');
 const kEntry = k?.type === 'kinds' ? k.put.find(([key]) => key === kindsKey(1))?.[1] : undefined;
 check(k?.type === 'kinds' && k.ts === 1 && !k.failed && JSON.stringify([...(kEntry?.data as ObjKinds).kinds]) === JSON.stringify([...kinds.kinds]), 'object kinds as computed directly, in a result cache entry');
@@ -754,6 +764,74 @@ for (const changeRead of [false, true]) {
   const sz3 = run({ type: 'learn', lane: 'sizes', key: 'sizes', input: '3', job: { kind: 'sizes', level: kl, layer2Pointer: l2p, specs: sizes }, replace: false });
   check(!sz2.out.some((d) => d.type === 'learning') && sz2.done?.type === 'learned' && sz3.out.filter((d) => d.type === 'learning').length > 0 && JSON.stringify(sz3.done?.type === 'learned' && sz3.done.result) === JSON.stringify(sz.done?.type === 'learned' && sz.done.result),
     'object boxes: asked again, known without a load; after a ROM change probed again');
+}
+
+// The open level's work first (#393): the object boxes and the loads of a sprite set with the open level's sprites run
+// before asked probes, the prefetch and the other lanes; the rest of the set then takes turns as before (an asked probe
+// before it); a request with other sprites first while the set runs captures theirs next; the result and the parts'
+// entries as without
+{
+  const r = new Rom(file), lv5 = loadLevel(r, 0x105);
+  const level: SpriteLevel = { number: 0x105, header: lv5.header, spriteHeader: lv5.spriteHeader, bgPointer: 0xffd900 };
+  const nums = [0x00, 0x04, 0x0d, 0x0f, 0x11, 0x1d, 0x21, 0x3e], input = inputHash({ set: 'test', nums }); // (loads 00 04 / 0d 0f 11 / 1d / 21 / 3e)
+  const asked: ProbeJob = { kind: 'block', ts: 0, tile: 0x130 }, prefetched: ProbeJob = { kind: 'block', ts: 0, tile: 0x131 };
+  const host = (first?: number[]) => {
+    const h = new ProbeHost();
+    h.setRom(1, r.data.slice());
+    h.ask([asked]);
+    h.setPrefetch([prefetched]);
+    h.handle({ type: 'learn', lane: 'sprites', key: 'spr-set', input, job: { kind: 'sprites', level, nums, ...(first && { first }) }, replace: true });
+    return h;
+  };
+  const drain = (h: ProbeHost, out: ProbeReply[] = []) => { while (h.pending) { const d = h.next(); if (d) out.push(d); } return out; };
+  // what each reply is: a load of the set (its sprites shown), the set's end, a probe
+  const what = (d: ProbeReply) => (d.type === 'probe' ? `probe ${d.job.kind === 'block' ? d.job.tile.toString(16) : ''}` : d.type === 'learning' ? (d.shown as [number][]).map(([n]) => n).sort((a, b) => a - b).map((n) => n.toString(16)).join(' ') : d.type);
+  const parts = (out: ProbeReply[]) => JSON.stringify(out.flatMap((d) => ('put' in d ? d.put : [])).filter(([k]) => k.startsWith('spr-set/')).sort(([a], [b]) => (a < b ? -1 : 1)));
+  const result = (out: ProbeReply[]) => { const d = out.find((x) => x.type === 'learned'); return d?.type === 'learned' ? JSON.stringify(d.result) : ''; };
+
+  const plain = drain(host());
+  const withFirst = drain(host([0x3e, 0x0d]));
+  const order = withFirst.map(what);
+  check(order[0] === 'd f 11' && order[1] === '3e' && order[2] === 'probe 130' && order.indexOf('probe 131') > 2,
+    `sprite set: the loads of the level's sprites (0d, 3e) before the asked probe, the rest after it, taking turns with the prefetch (${order.join(', ')})`);
+  check(result(withFirst) === result(plain) && result(plain) !== '' && parts(withFirst) === parts(plain), 'sprite set with the level\'s sprites first: the result and the parts\' entries as without');
+  check(plain.map(what)[0] === 'probe 130', `sprite set without the level's sprites: after the asked probe, as before (${plain.map(what).join(', ')})`);
+
+  // another level's sprites asked first while the set runs: their load next, before the asked probe
+  const h = host([0x0d]), out: ProbeReply[] = [];
+  for (let d = h.next(); ; d = h.next()) if (d) { out.push(d); break; }
+  h.handle({ type: 'learn', lane: 'sprites', key: 'spr-set', input, job: { kind: 'sprites', level, nums, first: [0x21] }, replace: true });
+  const retargeted = drain(h, out).map(what);
+  check(retargeted[0] === 'd f 11' && retargeted[1] === '21' && retargeted[2] === 'probe 130', `sprite set asked with other sprites first: theirs next, before the asked probe (${retargeted.join(', ')})`);
+
+  // a ROM change to a page the load of the level's sprites read (one the fewest other loads read), after it was
+  // captured: the set starts over, that load again before the asked probe (the open level's work again)
+  const putOf = (out: ProbeReply[]) => out.flatMap((d) => ('put' in d ? d.put : [])).filter(([k]) => k.startsWith('spr-set/'));
+  const own = putOf(plain).map(([k, e]) => ({ k, pages: new Set(e.deps.pages) })), d0 = own.find((o) => o.k.startsWith(`spr-set/${spriteLoad(0x0d).toString(16)}`));
+  const readers = (p: number) => own.filter((o) => o.pages.has(p)).length;
+  const page = d0 && [...d0.pages].sort((a, b) => readers(a) - readers(b))[0];
+  check(page !== undefined && readers(page) < own.length, `(a page the load of 0d read, not every load: ${page?.toString(16)}, ${own.map((o) => o.k.split('#')[0]).join(' ')})`);
+  const he = host([0x0d]), heOut: ProbeReply[] = [];
+  for (let d = he.next(); ; d = he.next()) if (d) { heOut.push(d); break; }
+  const o = (page ?? 0) << 8, changed = r.data.slice();
+  changed[o] ^= 1;
+  he.handle({ type: 'edit', gen: 2, size: changed.length, edits: [[o, changed.slice(o, o + 1)]] });
+  const afterEdit = drain(he, heOut);
+  const restarted = afterEdit.findIndex((d, i) => i > 0 && d.type === 'learning' && d.fresh);
+  check(what(afterEdit[0]) === 'd f 11' && restarted === 1 && what(afterEdit[1]) === 'd f 11' && what(afterEdit[2]) === 'probe 130',
+    `sprite set started over by a ROM change: the level's load again before the asked probe (${afterEdit.map(what).join(', ')})`);
+
+  // the object boxes before the asked probe, the prefetch and a lane taking turns (the levels' uses)
+  const hs = new ProbeHost();
+  hs.setRom(1, r.data.slice());
+  hs.ask([asked]);
+  hs.setPrefetch([prefetched]);
+  hs.handle({ type: 'learn', lane: 'uses', key: 'uses', job: { kind: 'uses', levels: [0x106] }, replace: false });
+  const sizes: SizeSpec[] = Array.from({ length: 32 }, (_, size) => ({ num: 0x21, ext: 0, size })); // (in three loads)
+  hs.handle({ type: 'learn', lane: 'sizes', key: 'sizes', input: '1', job: { kind: 'sizes', level: { number: 0x105, header: lv5.header }, layer2Pointer: lv5.layer2Pointer, specs: sizes }, replace: false });
+  const so = drain(hs), sizesAt = so.findIndex((d) => d.type === 'learned' && d.lane === 'sizes');
+  check(sizesAt >= 0 && so.slice(0, sizesAt).every((d) => d.type !== 'probe' && !(d.type === 'learned' && d.lane === 'uses')),
+    `object boxes: before the asked probe, the prefetch and the levels' uses (${so.map((d) => ('lane' in d ? `${d.type} ${d.lane}` : what(d))).join(', ')})`);
 }
 
 // the job runner under both owners (runnercheck.ts)
