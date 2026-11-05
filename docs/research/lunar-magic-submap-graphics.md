@@ -272,7 +272,7 @@ as `$0FF025` for the "Extra Options"):
 code: `$04F882` gives non-zero (and the code skips the lightning) when the mask has the player's submap's bit, from the
 game's table at `$04F875` (`80 40 20 10 08 04 02`, the main map to Star Road). So the switch is a mask of the submaps the
 lightning is off on, kept in the game's code, and works without ExAnimation; the settings bytes (target `+$4A`) stayed
-the same. *Journey to Kaizo* has `7D` there (the lightning on the main map and Star Road).
+the same. *Journey to Kaizo* (v1.1) has `FE` there (the lightning off on every submap), the code around it the game's.
 
 The editor writes that byte the same way (`submapLightning`/`setSubmapLightning` in `src/core/owoptions.ts`, an overworld option (#267), each submap's bit read
 from the game's table as its check does; BOWSIE's code from `$04F76E` leaves the table alone, checked with BOWSIE installed) and keeps no bit of its own;
