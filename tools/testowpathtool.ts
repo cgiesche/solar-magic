@@ -7,18 +7,21 @@
 // no tile held, their initial flags the stops' ways, and Mario leaves the junction in every direction at every
 // progress from the event on (with translevel 0 he doesn't); undo frees them; no translevel left: refused, nothing
 // written. Translevels without tile with a name, base event or messages are never taken (#382): only those left,
-// refused at the first stop, nothing written, the refusal saying why.
+// refused at the first stop, nothing written, the refusal saying why. A path painted over a stop tile of the path
+// tool (#392) frees its translevel and resets it – in the event or before events –, unless the cell is a stop at
+// another progress (a stop before events painted over as after an event keeps it).
 // node tools/testowpathtool.ts
 import { Rom } from '../src/core/rom.ts';
 import { RomEditSession } from '../src/core/romedit.ts';
 import {
-  OverworldEmulator, OverworldLoads, gameL1, readL1, readTranslevels, writeTranslevels, baseEvent, setBaseEvent, hasNameEventOrMessages, exitDirections, initialFlags, l1XY, translevelToLevel,
+  OverworldEmulator, OverworldLoads, gameL1, readL1, readL2, readTranslevels, writeTranslevels, baseEvent, setBaseEvent, hasNameEventOrMessages, exitDirections, initialFlags, l1XY, translevelToLevel,
   DIR_NAMES, DIR_FLAGS, NO_EVENT, OW_EVENTS,
 } from '../src/core/overworld.ts';
 import { progressSaves } from '../src/core/owprogress.ts';
 import { reach, reachInput, neighbor, type ReachInput } from '../src/core/owreach.ts';
 import { readStart } from '../src/core/owsprites.ts';
-import { readEvents, layer1Without, eventL1Tiles, submapViews, submapOf } from '../src/core/owevents.ts';
+import { readEvents, applyEvents, layer1Without, eventL1Tiles, submapViews, submapOf } from '../src/core/owevents.ts';
+import { OverworldStroke, type OwEventMaps } from '../src/core/owstroke.ts';
 import { levelTileTest } from '../src/core/owpaths.ts';
 import { RAM } from '../src/core/ram.ts';
 import { routeTiles, routeKind, writeRoute, stopTranslevels } from '../src/core/owroute.ts';
@@ -173,6 +176,61 @@ if (found) {
       `before events: its ${solved3.stops.length} stop tiles take free translevels, their flags their ways`);
     s.undo();
     check(same(rom.data, before2), 'undone: as before');
+
+    // ---- a path painted over a stop tile of the path tool (#392) ----
+    // frees its translevel (reset: no name, event or flags; free for a new stop) – unless the cell is a stop at
+    // another event progress: the translevel table is one for every progress (owstars.ts paintStars, owleveltiles.ts
+    // heldElsewhere). The stop's translevel is given a name first, so the reset shows
+    {
+      const paths = { kinds, shapes };
+      // (a layer 1 stroke painting tile t at cell i, on the map before events or as after event e; one ROM edit)
+      const paintOver = (i: number, t: number, inEvent: boolean) => {
+        const game = inEvent ? mapAt(e + 1) : null;
+        const evm: OwEventMaps | null = game ? { event: e, after: applyEvents(readL2(rom), readEvents(rom), 0, e + 1), l1: game.slice(), game, without: layer1Without(rom, e), place: () => null } : null;
+        const st = new OverworldStroke(rom, 'l1', { l1: readL1(rom), l2: readL2(rom) }, isLevel, evm, paths), { x, y } = l1XY(i);
+        const painted = st.paint(i >> 10, x, y, t), end = st.end();
+        s.edit(end.label, end.write!, { key: null });
+        return painted;
+      };
+      const freedReset = (tl: number) => {
+        const t = readTranslevels(rom);
+        return levelsWithoutTile(t).includes(tl) && stopTranslevels(rom, t).free.includes(tl) && !hasNameEventOrMessages(rom, tl) && initialFlags(rom, tl) === 0 && exitDirections(rom, tl).every((d) => d === 0);
+      };
+      const pathTile = after1[j]; // (the first route's tile at the junction)
+
+      // the junction of the route in the event, painted over as after the event: its translevel freed and reset
+      // (a route and a name for one of its stops, as the player might give one)
+      const named = (stop: number, write: () => void) => s.edit('Path', () => { write(); setLevelNameTiles(rom, readTranslevels(rom)[stop], [0x00, 0x01]); }, { key: null });
+      named(j, () => { writeRoute(rom, cross!, solved2, ev2); });
+      const tlJ = readTranslevels(rom)[j], others = solved2.stops.filter((x) => x.cell !== j).map((x) => [x.cell, readTranslevels(rom)[x.cell]]);
+      const undos = s.history.undoStack.length, was = rom.data.slice();
+      check(!!tlJ && initialFlags(rom, tlJ) !== 0 && hasNameEventOrMessages(rom, tlJ) && paintOver(j, pathTile, true) && s.history.undoStack.length === undos + 1,
+        `a path (${hx(pathTile)}) painted over the junction (translevel ${hx(tlJ)}) as after event ${hx(e)}: one ROM edit`);
+      check(readTranslevels(rom)[j] === 0 && freedReset(tlJ) && others.every(([c, tl]) => readTranslevels(rom)[c] === tl),
+        `its translevel ${hx(tlJ)} freed and reset (its name and flags gone; free for a new stop), the other stops keep theirs`);
+      check(mapAt(e + 1)[j] === pathTile, 'the game shows the path there from the event on');
+      s.undo();
+      check(same(rom.data, was), 'undone: the junction holds it again, its name and flags back');
+      s.undo();
+      check(same(rom.data, before2), 'undone: as before');
+
+      // a stop of the route before events, painted over as after the event: kept (the cell is a stop before it)
+      const end0 = solved3.stops[0].cell;
+      named(end0, () => { writeRoute(rom, cross!, solved3, null); });
+      const tl0 = readTranslevels(rom)[end0], flags0 = initialFlags(rom, tl0), stop0 = readL1(rom)[end0], was0 = rom.data.slice();
+      check(flags0 !== 0 && hasNameEventOrMessages(rom, tl0) && paintOver(end0, pathTile, true), `a path (${hx(pathTile)}) painted over it as after event ${hx(e)}`);
+      check(readTranslevels(rom)[end0] === tl0 && initialFlags(rom, tl0) === flags0 && hasNameEventOrMessages(rom, tl0) && eventL1Tiles(readEvents(rom), e).includes(end0) && readL1(rom)[end0] === stop0,
+        `a stop of the route before events (${at(end0)}, translevel ${hx(tl0)}) painted over with a path as after event ${hx(e)}: kept with its name and flags, the path a change of the event, the map before events still the stop`);
+      s.undo();
+      check(same(rom.data, was0), 'undone: as before');
+      // the same stop painted over before events: freed and reset
+      const others0 = solved3.stops.filter((x) => x.cell !== end0).map((x) => [x.cell, readTranslevels(rom)[x.cell]]), undos0 = s.history.undoStack.length;
+      check(paintOver(end0, pathTile, false) && s.history.undoStack.length === undos0 + 1 && others0.every(([c, tl]) => readTranslevels(rom)[c] === tl) && readTranslevels(rom)[end0] === 0 && readL1(rom)[end0] === pathTile && freedReset(tl0), `painted over before events (one ROM edit): translevel ${hx(tl0)} freed and reset, the other stop keeps its`);
+      s.undo();
+      check(same(rom.data, was0), 'undone: the stop holds it again');
+      s.undo();
+      check(same(rom.data, before2), 'undone: as before');
+    }
 
     // no translevel free: refused at the stop tile it runs out at, nothing written
     const full = Uint8Array.from(tls0), left = levelsWithoutTile(full);
