@@ -20,6 +20,9 @@ export type OwRefusalData =
   | { kind: 'destroyNothing'; tile: number } // the game destroys no tile `tile`
   | { kind: 'crumbleNoEvent'; tl: number } // translevel tl's normal exit runs no event
   | { kind: 'crumblesByOther'; event: number; cell: number } // another event than the level's base event destroys cell
+  // ---- a change moved to another event from a cell's history (owmovechange.ts) ----
+  | { kind: 'moveCrossed'; event: number; cell: number; from: number; to: number } // event changes cell between from and to (to: -1 before events)
+  | { kind: 'moveNoLayer1'; event: number; cell: number } // event changes cell only on layer 2 (its steps aren't moved)
   // ---- links (owlinks.ts) ----
   | { kind: 'linkToItself' }
   | { kind: 'l1TilePast'; tile: number; tiles: number } // a layer 1 tile past the overworld's (000…tiles-1)
@@ -89,6 +92,8 @@ export function refusalDetails(r: OwRefusalData): string {
     case 'destroyTaken': return `Event ${hex(r.event, 2)} already destroys the tile at ${cellText(r.cell)}.`;
     case 'destroysFull': return `Event ${hex(r.event, 2)}: all ${r.max} entries of the destroy list are used.`;
     case 'destroyNothing': return `Tile ${tileHex(r.tile)} has no destroy effect.`;
+    case 'moveCrossed': return `Event ${hex(r.event, 2)} changes the tile at ${cellText(r.cell)} ${r.event === r.to ? 'too' : `between event ${hex(r.from, 2)} and ${r.to < 0 ? 'the map before events' : `event ${hex(r.to, 2)}`}`}.`;
+    case 'moveNoLayer1': return `Event ${hex(r.event, 2)} changes only layer 2 at ${cellText(r.cell)}.`;
     case 'l1TilePast': return `Tile ${tileHex(r.tile)} is past the overworld's layer 1 tiles (000–${hex(r.tiles - 1, 3)}).`;
     case 'linkNoStart': return `Tile ${tileHex(r.tile)} (${r.path}): a star or pipe is a tile Mario stops on, an exit path an exit path tile.`;
     case 'crumbleNoEvent': return `Translevel ${hex(r.tl, 2)} has no base event (FF).`;

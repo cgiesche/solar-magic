@@ -154,6 +154,9 @@ export class OverworldView {
   check = new WorldCheck(this); // the World check: the status bar button, the panel of problems
   exits = new ExitArrowLayer(this); // the Levels mode's arrows from each level tile to the levels its exits open
   cellHistory = new CellHistoryPopup(this); // a cell's history over the game, the mouse resting on it
+  // a change of a cell's history being moved to another event (owcellhistoryview.ts): the cells that would move,
+  // outlined on the map (refused: hatched red)
+  movePreview: { cells: number[]; refused: boolean } | null = null;
   // the event the map is shown and painted as after (both layers; the playthrough strip under the map), -1: the map before events
   // (kept per ROM in the browser, not in the ROM)
   event = -1;
@@ -457,6 +460,7 @@ export class OverworldView {
     if (this.mode !== 'links' && this.mode !== 'sprites') this.paintSelected(lw);
     this.nameEditor.paint(ctx, lw);
     this.hatchRefused(ctx, lw);
+    this.paintMovePreview(ctx, lw);
     this.paintStep(lw);
     const s = this.cellSize;
     if (this.mode === 'sprites') {
@@ -585,6 +589,20 @@ export class OverworldView {
     }
   }
 
+  // the cells a change being moved from a cell's history takes along (green; red where the move is refused)
+  private paintMovePreview(ctx: CanvasRenderingContext2D, lw: number): void {
+    const m = this.movePreview;
+    if (!m) return;
+    ctx.lineWidth = 2 * lw;
+    ctx.strokeStyle = m.refused ? '#ff5050' : '#5cff7a';
+    ctx.fillStyle = m.refused ? 'rgba(255,80,80,0.25)' : 'rgba(92,255,122,0.25)';
+    for (const i of m.cells) {
+      if ((i >= 0x400) !== (this.region === 1)) continue;
+      const { x, y } = l1XY(i);
+      ctx.fillRect(x * 16, y * 16, 16, 16);
+      ctx.strokeRect(x * 16 + lw, y * 16 + lw, 16 - 2 * lw, 16 - 2 * lw);
+    }
+  }
   // the selected tile outlined; a level tile's exits as arrows in the directions they enable (labelled N, 1–3)
   paintSelected(lw: number): void {
     const i = this.selected;
@@ -1075,6 +1093,7 @@ export class OverworldView {
     const list = this.stripList;
     const chip = (x: StripEntry) => h('button', {
       class: `ow-strip-chip${x.event === this.event ? ' active' : ''}${x.event >= 0 && !x.number ? ' unrun' : ''}`,
+      'data-event': String(x.event), // (a change dragged from a cell's history drops on it)
       title: `${x.label}${x.others.length ? ` (also run by ${x.others.join(', ')})` : ''} – the map as after loading a save in which the events up to this one passed, in their number order as the game does; what is painted goes into ${x.event < 0 ? 'the map before events' : 'this event'}`,
       onclick: () => this.setEvent(x.event),
     }, x.label, x.number ? h('small', null, ` ${x.number}`) : null);
@@ -1447,6 +1466,7 @@ export class OverworldView {
     }
     // (Esc with any modifier: a stroke is never left running)
     if (k === 'escape' && this.brushDrag.cancel()) { this.paint(); return true; }
+    if (k === 'escape' && this.cellHistory.cancelMove()) return true;
     if (k === 'escape' && this.levelTiles.cancel()) return true;
     if (k === 'escape' && this.nameEditor.cancel()) return true;
     if (k === 'escape' && this.pathTool.cancel()) return true;

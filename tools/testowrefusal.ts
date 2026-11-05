@@ -30,6 +30,8 @@ const samples: { [K in OwRefusalKind]: Extract<OwRefusalData, { kind: K }> } = {
   destroyNothing: { kind: 'destroyNothing', tile: 0x5c },
   crumbleNoEvent: { kind: 'crumbleNoEvent', tl: 0x29 },
   crumblesByOther: { kind: 'crumblesByOther', event: 3, cell: l1Index(1, 9, 1) },
+  moveCrossed: { kind: 'moveCrossed', event: 2, cell: l1Index(0, 2, 0x11), from: 1, to: 3 },
+  moveNoLayer1: { kind: 'moveNoLayer1', event: 3, cell: l1Index(1, 9, 6) },
   linkToItself: { kind: 'linkToItself' },
   l1TilePast: { kind: 'l1TilePast', tile: 0x200, tiles: 0x200 },
   linkNoStart: { kind: 'linkNoStart', tile: 0x5c, path: 'walk' },

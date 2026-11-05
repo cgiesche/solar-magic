@@ -64,6 +64,12 @@ export function refusalWords(rom: Rom, r: OwRefusalData): RefusalWords {
       'Remove the destroy of another event first.');
     case 'destroyNothing': return w('This tile can\'t be destroyed',
       'the game destroys only castles, fortresses and switch palaces', 'Click a castle, fortress or switch palace.');
+    case 'moveCrossed': return w('The change isn\'t moved',
+      `${eventRunners(rom).has(r.event) ? eventPhrase(rom, r.event) : 'an event no level exit runs'} changes this tile ${r.event === r.to ? 'too' : 'in between'}, so the map would end up different – a move changes only when a change comes`,
+      r.event === r.to ? 'Move it to another event, or with Alt held only a tile that event leaves alone.'
+        : `Move it to an event ${r.to > r.from ? 'before' : 'after'} that one, or with Alt held only a tile that event leaves alone.`);
+    case 'moveNoLayer1': return w('This change can\'t be moved', 'it is a change of layer 2, whose steps stay with their event',
+      'Paint the layer 2 look into the other event instead.');
     case 'linkNoStart': return w('No link starts here', 'Mario doesn\'t stop on this tile: a star or pipe is a tile he stops on, a path to another submap an exit path tile',
       'Start the link on a star, pipe or exit path tile.');
     case 'l1TilePast': return w('This tile can\'t be edited', 'it is past the tiles the overworld has');
