@@ -11,6 +11,7 @@ import { Rom } from '../src/core/rom.ts';
 import { LevelEmulator } from '../src/core/levelemu.ts';
 import { runJob } from '../src/core/jobrunner.ts';
 import { revealWalkJob, skipsRevealWalk, handledWithoutEvent, type RevealWalkSkips } from '../src/core/revealwalk.ts';
+import { exitEvent } from '../src/core/owevents.ts';
 import { MAX_TRANSLEVEL, readTranslevels, setBaseEvent, NO_EVENT, DIR_FLAGS, exitDirections, FLAG, EXIT_NAMES } from '../src/core/overworld.ts';
 import { PlaySession } from '../src/core/playsession.ts';
 import { GM, RAM, OW_PROCESS } from '../src/core/ram.ts';
@@ -85,6 +86,9 @@ check(skipsRevealWalk(s, 0x28, 0, 0x0a) && !skipsRevealWalk(s, 0x29, 3, 0x01), '
   const atOnce = got.map((g) => !!g && afterHandling(g.processes) === OW_PROCESS.noRevealWalk);
   check(atOnce.every((a, x) => a === handledWithoutEvent(s, x, NO_EVENT)) && atOnce.some((a) => a),
     `with no event, the exits handled at once: ${atOnce.map((a, x) => (a ? x : '')).join('')} – learned ${hx(s.noEvent)}`);
+  // (owevents.ts exitEvent, the ROM-only rule eventRunners follows, as learned: only secret exit 1 runs an event – 00)
+  check(atOnce.every((a, x) => a === exitEvent(NO_EVENT, x) < 0) && exitEvent(NO_EVENT, 1) === 0,
+    `exitEvent with no event as learned: ${EXIT_NAMES.map((_, x) => exitEvent(NO_EVENT, x)).join(' ')}`);
   check(!!got[1] && got[1].events.join() === `${NO_EVENT},0` && !!got[1].others.length && !handledWithoutEvent(s, 1, NO_EVENT),
     `secret exit 1 with no event runs event 00 and walks ($1DEA ${got[1]?.events.map(hx).join(' ')}, the way back on ${got[1]?.others.map(hx).join(' ')})`);
   check(skipsRevealWalk(s, 0x29, 0, NO_EVENT) && !skipsRevealWalk(s, 0x29, 0, 0x01) && skipsRevealWalk(s, 0x28, 1, NO_EVENT),

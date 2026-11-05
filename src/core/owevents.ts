@@ -27,7 +27,7 @@ import { missingPatch } from './patches.ts';
 import { OwRefusal } from './owrefusal.ts';
 import {
   OW_EVENTS, OverworldEmulator, type OverworldLoads, gameL1, readL1, readTranslevels, baseEvent, translevelToLevel, l1XY, revealAt, revealEventCount, readDestroyList,
-  destroyEffects, destroyedCells, l1Index, MAX_TRANSLEVEL, owTilemapRanges, isStarPipeTile, revealedTile,
+  destroyEffects, destroyedCells, l1Index, MAX_TRANSLEVEL, owTilemapRanges, isStarPipeTile, revealedTile, NO_EVENT,
 } from './overworld.ts';
 import { RAM, getS16 } from './ram.ts';
 import { record, countReads } from './romdeps.ts';
@@ -370,11 +370,20 @@ function isReversed(steps: Piece[], d: EventData, place: EventPlace): boolean {
 
 // ---- which level runs an event, where it is shown ----
 
-// a level exit that runs an event: the translevel, the exit (0 normal, 1–3 the secret exits: the base event + it),
-// a layer 1 tile entering the level (l1Index: the first the translevel table gives it, levelTileLevels)
+// The event that exit `exit` (0 normal, 1–3 the secret exits) of a level with base event `base` runs, -1 none: the base
+// event + the exit, none past the last event. With "No event" (FF) the game handles the normal exit and secret exits 2
+// and 3 at once, but secret exit 1 runs the event after FF – 00 ($1DEA + 1), with its reveal walk. That is learned by
+// emulation (revealwalk.ts RevealWalkSkips.noEvent: 0D in the clean game), but eventRunners reads only the ROM: the
+// rule is the clean game's, testrevealwalk checks it against what is learned.
+export const exitEvent = (base: number, exit: number): number =>
+  base === NO_EVENT ? (exit === 1 ? 0 : -1) : base + exit < OW_EVENTS ? base + exit : -1;
+
+// a level exit that runs an event: the translevel, the exit (0 normal, 1–3 the secret exits: exitEvent), the
+// layer 1 tile entering the level (l1Index: the first the translevel table gives it, levelTileLevels)
 export interface EventRunner { tl: number; exit: number; tile: number }
 // The level exits running each event, of the levels with a tile (the one rule every text naming an event by its
-// level exit goes through): every level's normal exit; a secret exit where the ROM shows the level has it
+// level exit goes through), the event an exit runs as exitEvent gives it (a level with "No event": its secret exit 1
+// runs 00): every level's normal exit; a secret exit where the ROM shows the level has it
 // (secretexits.ts: a keyhole, a secret goal tape, an overworld exit). A secret exit 1 the ROM doesn't show only where
 // its event is no level's base event and changes something (layer 1 or 2, a reveal or destroy): what else would run
 // it – the clean game's Donut Secret House and Chocolate Island 2 have secret exits nothing in their data shows. So a
@@ -392,9 +401,10 @@ export function eventRunners(rom: Rom): Map<number, EventRunner[]> {
   const does = eventDoesSomething(rom);
   for (const [tl, tile] of [...tileOf].sort((a, b) => a[0] - b[0])) {
     const b = baseEvent(rom, tl);
-    for (let exit = 0; exit < 4 && b + exit < OW_EVENTS; exit++) {
-      if (exit && !shown.get(tl)?.has(exit) && (exit > 1 || bases.has(b + exit) || !does(b + exit))) continue;
-      (out.get(b + exit) ?? out.set(b + exit, []).get(b + exit)!).push({ tl, exit, tile });
+    for (let exit = 0; exit < 4; exit++) {
+      const e = exitEvent(b, exit);
+      if (e < 0 || (exit && !shown.get(tl)?.has(exit) && (exit > 1 || bases.has(e) || !does(e)))) continue;
+      (out.get(e) ?? out.set(e, []).get(e)!).push({ tl, exit, tile });
     }
   }
   // the normal exits first
@@ -422,14 +432,14 @@ function eventDoesSomething(rom: Rom): (e: number) => boolean {
       || readDestroyList(rom).some((x) => x.event === e);
   };
 }
-// What passing translevel tl changes on the overworld, per exit (0 normal, 1–3 the secret exits) whose event is the
+// What passing translevel tl changes on the overworld, per exit (0 normal, 1–3 the secret exits) whose event (exitEvent) is the
 // level's (no other level's normal exit runs it, as eventRunners orders them): the event's changes (eventChanges).
 export interface ExitChanges extends EventChanges { exit: number }
 export function exitChanges(rom: Rom, tl: number, d: EventData = readEvents(rom), runners = eventRunners(rom)): ExitChanges[] {
   const b = baseEvent(rom, tl), changes = eventChanges(rom, d), out: ExitChanges[] = [];
-  for (let exit = 0; exit < 4 && b + exit < OW_EVENTS; exit++) {
-    const e = b + exit, r = runners.get(e)?.[0];
-    if (r?.tl !== tl || r.exit !== exit) continue;
+  for (let exit = 0; exit < 4; exit++) {
+    const e = exitEvent(b, exit), r = runners.get(e)?.[0];
+    if (e < 0 || r?.tl !== tl || r.exit !== exit) continue;
     out.push({ exit, ...changes(e) });
   }
   return out;

@@ -5,13 +5,17 @@
 // Yoshi's Island 4's base event + 1 (Iggy's castle's) isn't named its secret exit – a secret goal tape or an
 // overworld exit passing it by secret exit 2 makes it one. The texts naming events go through it (eventTitle, the
 // refusals' eventPhrase, eventNames).
+// A level with the base event "No event" (FF): its secret exit 1 runs event 00 (FF + 1, #389, as testrevealwalk
+// emulates it), its other exits none – named by eventRunners where the level has the secret exit, its changes the
+// level's (exitChanges), and the saves at every progress (progressSaves, emulated) pass it for event 00.
 // node tools/testsecretexits.ts
 import { Rom } from '../src/core/rom.ts';
 import { loadLevel, readSecondaryEntrance, writeSecondaryEntrance, newOverworldExit, EXIT_NEW, OW_SECRET } from '../src/core/level.ts';
 import { saveLevel, saveSprites } from '../src/core/save.ts';
 import { ExitGraph } from '../src/core/exitgraph.ts';
-import { baseEvent, setBaseEvent, eventNames, NO_EVENT } from '../src/core/overworld.ts';
-import { eventRunners, eventTitle } from '../src/core/owevents.ts';
+import { baseEvent, setBaseEvent, eventNames, NO_EVENT, OverworldEmulator, OverworldLoads, FLAG, MAX_TRANSLEVEL } from '../src/core/overworld.ts';
+import { eventRunners, eventTitle, exitChanges, exitEvent } from '../src/core/owevents.ts';
+import { progressSaves } from '../src/core/owprogress.ts';
 import { shownSecretExits } from '../src/core/secretexits.ts';
 import { eventPhrase } from '../src/ui/owrefusal.ts';
 import { editorImage } from './fixture.ts';
@@ -78,6 +82,26 @@ const runs = (rom: Rom, e: number, tl: number, exit: number) => !!eventRunners(r
   const r = eventRunners(rom).get(e) ?? [];
   check(shownSecretExits(rom).get(YI4)?.has(2) === true && r.some((x) => x.tl === YI4 && x.exit === 2) && !runs(rom, e - 1, YI4, 1),
     `an overworld exit with secret exit 2: ${hx(e)} also run by Yoshi's Island 4's secret exit 2 (${r.map((x) => `${hx(x.tl)}/${x.exit}`).join(' ')}), secret exit 1 still not`);
+}
+
+// ---- "No event": secret exit 1 runs event 00 (#389) ----
+{
+  check(exitEvent(NO_EVENT, 1) === 0 && [0, 2, 3].every((x) => exitEvent(NO_EVENT, x) < 0) && exitEvent(0x76, 1) === 0x77 && exitEvent(0x76, 2) < 0,
+    'exitEvent: with no event only secret exit 1 runs one (00); past the last event none');
+  const rom = new Rom(image.slice());
+  setBaseEvent(rom, VD2, NO_EVENT);
+  const r = eventRunners(rom).get(0) ?? [];
+  check(runs(rom, 0, VD2, 1) && r[0]?.exit === 0 && !exitChanges(rom, VD2).length,
+    `Vanilla Dome 2 with no event (a keyhole): its secret exit 1 runs event 00, after ${r[0] && `${hx(r[0].tl)}'s normal exit`}: no changes of its own`);
+  // event 00's levels without their event: a no-event level's secret exit 1 is the first to run it
+  const owners = Array.from({ length: MAX_TRANSLEVEL }, (_, k) => k + 1).filter((tl) => baseEvent(rom, tl) === 0);
+  for (const tl of owners) setBaseEvent(rom, tl, NO_EVENT);
+  const first = eventRunners(rom).get(0)?.[0];
+  check(!!first && first.exit === 1 && baseEvent(rom, first.tl) === NO_EVENT && exitChanges(rom, first.tl).some((c) => c.exit === 1 && c.event === 0),
+    `${owners.map((tl) => hx(tl)).join(' ')} with no event too: event 00 first run by ${first && `${hx(first.tl)}'s secret exit 1`}, its changes that level's`);
+  const saves = progressSaves(new OverworldLoads(new OverworldEmulator(rom), 4));
+  check(!!first && (saves[1].levelFlags[first.tl] & FLAG.passed) !== 0 && !(saves[0].levelFlags[first.tl] & FLAG.passed) && saves[1].eventsTriggered === saves[0].eventsTriggered + 1,
+    `the save after event 00 (emulated): ${first && hx(first.tl)} passed (flags ${first && hx(saves[1].levelFlags[first.tl])}), ${saves[1].eventsTriggered} event triggered`);
 }
 
 console.log(bad ? `\n${bad} FAILED` : '\nall ok');

@@ -19,7 +19,7 @@ import { messageRoutineNote, messageRoutineUnknown, MESSAGE_ROUTINE_CHECKING } f
 import { levelName, hasLevelName } from '../core/levelnames.ts';
 import { levelNameField } from './levelnamefield.ts';
 import {
-  readEvents, writeEvents, applyEvents, reorderSteps, eventRunners, eventTitle, eventWords, playthroughStrip, stepEvent, eventPlace, submapOf, pieceTiles, isBig, l2XY,
+  readEvents, writeEvents, applyEvents, reorderSteps, eventRunners, exitEvent, eventTitle, eventWords, playthroughStrip, stepEvent, eventPlace, submapOf, pieceTiles, isBig, l2XY,
   eventL1Tiles, exitChanges, type EventData, type EventRunner, type Rect, type ExitChanges, type StripEntry,
 } from '../core/owevents.ts';
 import { OverworldStroke, shownMaps } from '../core/owstroke.ts';
@@ -1780,8 +1780,9 @@ export class OverworldView {
     const skips = this.app.revealWalkSkips(this.revealWalksLearned);
     const exits = EXIT_NAMES.map((name, k) => {
       // (with "No event" an exit the game doesn't handle at once runs the event after FF – secret exit 1 event 00)
-      const run = ev === NO_EVENT ? (skips && !handledWithoutEvent(skips, k, ev) ? `event ${hex((ev + k) & 0xff, 2)}` : 'no event')
-        : ev + k < OW_EVENTS ? `event ${hex(ev + k, 2)}` : 'no event (past the last)';
+      const e = exitEvent(ev, k);
+      const run = ev === NO_EVENT ? (skips && !handledWithoutEvent(skips, k, ev) && e >= 0 ? `event ${hex(e, 2)}` : 'no event')
+        : e >= 0 ? `event ${hex(e, 2)}` : 'no event (past the last)';
       const s = select(DIR_NAMES.map((n, d) => [d, `${DIR_ARROWS[d]} ${n}`] as [number, string]), dirs[k], (v) => edit(`${name.toLowerCase()} direction`, () => setExitDirection(rom, tl, k, v)));
       // why the exit skips the reveal walk (null: it walks, or that is being learned)
       const why = !skips ? null : handledWithoutEvent(skips, k, ev) ? NO_EVENT_WALK : skipsRevealWalk(skips, tl, k, ev) ? NO_REVEAL_WALK : null;
