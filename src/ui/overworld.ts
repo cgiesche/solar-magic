@@ -1425,7 +1425,6 @@ export class OverworldView {
         h('button', { class: this.mode === 'sprites' ? 'active' : '', title: 'Sprites (5): the overworld\'s sprites as the game shows them at the event progress, the start positions and the Koopa Kids\' places; drag to move', onclick: () => this.setMode('sprites') }, 'Sprites')),
       ...(this.mode === 'l1' ? [h('button', { class: this.pathTool.on ? 'active' : '', onclick: () => this.setPathTool(!this.pathTool.on),
         title: 'Path tool (P): press on a cell and drag Mario\'s route – the editor chooses the path tiles (a cell none fits in red, why in the status bar); released, they go into the map shown ("Map after": the event\'s layer 1 changes), and a level tile at an end gets the direction of its exit running the event' }, 'Path tool')] : []),
-      h('button', { title: `${MAP_NAMES[this.map]}'s border (layer 3, fixed on the screen) in the Game workspace`, onclick: () => this.onEditBorder(this.map) }, 'Edit border…'),
       h('span', { class: 'sep' }),
       menuButton({ label: 'View', items: [
         { heading: 'Layers' },
@@ -1539,20 +1538,28 @@ export class OverworldView {
     this.buildProps();
   }
 
+  // the mode's properties (of what is selected), under them the global settings in two sections shown in every mode:
+  // "Map" (the map shown: music, graphics, border; open by default) and "Overworld" (the game's options, the reveal
+  // list; collapsed by default) – each open or closed for the session
+  private mapOpen = true;
+  private overworldOpen = false;
   private revealListOpen = false;
   buildProps(): void {
-    if (this.mode === 'links') { this.props.replaceChildren(h('div', { class: 'panel-title' }, 'Overworld link'), this.links.props()); return; }
-    if (this.mode === 'sprites') { this.props.replaceChildren(h('div', { class: 'panel-title' }, 'Sprite'), this.sprites.props()); return; }
-    this.props.replaceChildren(h('div', { class: 'panel-title' }, 'Properties'),
-      this.mapSettings(),
-      this.selected >= 0 ? this.tileInfo(this.selected) : emptyState(this.mode === 'levels' ? 'Click a level tile on the map or in the list on the left.'
-        : 'Select a level tile in the list on the left, or any tile with Alt/Ctrl+click on the map.'),
-      this.revealList(),
-      this.optionsPanel());
+    const own = this.mode === 'links' ? [h('div', { class: 'panel-title' }, 'Overworld link'), this.links.props()]
+      : this.mode === 'sprites' ? [h('div', { class: 'panel-title' }, 'Sprite'), this.sprites.props()]
+      : [h('div', { class: 'panel-title' }, 'Properties'),
+        this.selected >= 0 ? this.tileInfo(this.selected) : emptyState(this.mode === 'levels' ? 'Click a level tile on the map or in the list on the left.'
+          : 'Select a level tile in the list on the left, or any tile with Alt/Ctrl+click on the map.')];
+    const map = h('details', { class: 'ow-section', open: this.mapOpen, ontoggle: () => (this.mapOpen = map.open) },
+      h('summary', { title: `The settings of the map shown (${MAP_NAMES[this.map]})` }, 'Map', h('span', { class: 'hint' }, ` · ${MAP_NAMES[this.map]}`)),
+      this.mapSettings());
+    const ow = h('details', { class: 'ow-section', open: this.overworldOpen, ontoggle: () => (this.overworldOpen = ow.open) },
+      h('summary', { title: 'The settings of the whole overworld' }, 'Overworld'),
+      this.optionsPanel(), this.revealList());
+    this.props.replaceChildren(...own, map, ow);
   }
 
   // the game's overworld options (Lunar Magic's "Extra Options", core/owoptions.ts): each switch one ROM edit
-  private optionsOpen = false;
   private optionsPanel(): HTMLElement {
     const rom = this.app.rom;
     const rows: HTMLElement[] = [];
@@ -1590,9 +1597,7 @@ export class OverworldView {
         rows.push(c);
       });
     }
-    const d = h('details', { class: 'ow-reveals', open: this.optionsOpen, ontoggle: () => (this.optionsOpen = d.open) },
-      h('summary', null, 'Overworld options', h('span', { class: 'hint' }, ' · the game\'s switches')), ...rows);
-    return d;
+    return h('div', { class: 'ow-info' }, h('div', { class: 'hint' }, 'Options · the game\'s switches'), ...rows);
   }
 
   // the settings of the map shown: its song (one ROM edit), from the ROM's songs as for levels

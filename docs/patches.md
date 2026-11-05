@@ -826,10 +826,11 @@ the clean game's layer 1 changes painted as they are change no byte.
 
 ### Overworld options
 
-Lunar Magic's "Extra Options" of the overworld that the community uses are switches in the overworld's properties
-(*Overworld options*), each one ROM edit (`src/core/owoptions.ts`). A switch writes the bytes Lunar Magic writes in
-its places, turned back the clean game's – read from Lunar Magic 3.71's code (its table of ROM places and the routine
-that writes the options; ROMs Lunar Magic saved with options set show the same):
+Lunar Magic's "Extra Options" of the overworld that the community uses are switches in the overworld editor's
+*Overworld* section under the properties (shown in every mode), each one ROM edit (`src/core/owoptions.ts`). A
+switch writes the bytes Lunar Magic writes in its places, turned back the clean game's – read from Lunar Magic 3.71's
+code (its table of ROM places and the routine that writes the options; ROMs Lunar Magic saved with options set show
+the same):
 
 | Option | Places | Changed |
 |---|---|---|
