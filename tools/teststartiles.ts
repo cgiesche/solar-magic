@@ -10,15 +10,21 @@
 //   there; the name changed it shows the new one, the translevel zeroed the blank name of translevel 0;
 // - A on a star warps by Mario's position only (the star/pipe table): with the translevel zeroed he goes to the same
 //   place, the game reads neither the tile's translevel nor $13BF for it.
+// So a star runs no event (#390): eventRunners names none of the stars' base events – the six's (64 56 53 59 50 5C)
+// nor those of the four stars events reveal with a base event (36 44 6D 5F; the cells are 5A before) –, the save with
+// every event passed (progressSaves) leaves the stars' flags without "passed" and counts none of those 10 events as
+// triggered (110 before the fix).
 // node tools/teststartiles.ts
 import { Rom } from '../src/core/rom.ts';
 import { LevelEmulator } from '../src/core/levelemu.ts';
 import {
   OverworldEmulator, OverworldLoads, gameL1, readTranslevels, writeTranslevels, readL1, l1XY, l1Index, setInitialFlags, initialFlags,
-  OW_EVENTS, MAX_TRANSLEVEL, DIR_NAMES, DIR_FLAGS, FLAG,
+  OW_EVENTS, MAX_TRANSLEVEL, DIR_NAMES, DIR_FLAGS, FLAG, revealedTile, baseEvent, NO_EVENT,
 } from '../src/core/overworld.ts';
 import { levelNameTiles, setLevelNameTiles, encodeName, levelName, NAME_VRAM, NAME_LEN, NAME_SPACE } from '../src/core/levelnames.ts';
 import { reachInput, walkFrom } from '../src/core/owreach.ts';
+import { eventRunners } from '../src/core/owevents.ts';
+import { progressSaves } from '../src/core/owprogress.ts';
 import { readStart } from '../src/core/owsprites.ts';
 import { PlaySession } from '../src/core/playsession.ts';
 import { GM, RAM, PAD, get16 } from '../src/core/ram.ts';
@@ -189,6 +195,21 @@ const UNUSED = Array.from({ length: MAX_TRANSLEVEL }, (_, k) => k + 1).find((t) 
     res.push(`${hx(tl)} → ${at(to)}${good ? '' : ` (zeroed ${at(zt)}, ${hx(UNUSED)} ${at(ot)}; read ${[...inOw].join(' ')})`}`);
   }
   check(ok, `A on a star: the same place with its translevel zeroed or another, the tile's translevel and $13BF not read for it: ${res.join('; ')}`);
+}
+
+// ---- a star runs no event (#390) ----
+{
+  // (the stars before events, and the cells the reveal list turns into stars: 5A → 5F)
+  const cells = [...l1.keys()].filter((i) => tls[i] && (STARS.includes(i) || (revealedTile(rom, l1[i]) & 0xff) === 0x5f));
+  const starTls = new Set(cells.map((i) => tls[i])), starEvents = new Set([...starTls].map((tl) => baseEvent(rom, tl)).filter((e) => e !== NO_EVENT));
+  check(starTls.size === 13 && [...starEvents].map((e) => hx(e)).sort().join() === '36,44,50,53,56,59,5C,5F,64,6D',
+    `the stars at any progress: translevels ${[...starTls].map((tl) => hx(tl)).join(' ')}, base events ${[...starEvents].map((e) => hx(e)).join(' ')}`);
+  const runners = eventRunners(rom);
+  const byStar = [...runners].filter(([, rs]) => rs.some((r) => starTls.has(r.tl) || cells.includes(r.tile)));
+  check(!byStar.length, `eventRunners names no star as running an event: ${byStar.map(([e, rs]) => `${hx(e)} by ${rs.map((r) => hx(r.tl)).join('/')}`).join(', ') || 'none'}`);
+  const last = progressSaves(new OverworldLoads(new OverworldEmulator(rom), 4)).at(-1)!;
+  check([...starTls].every((tl) => !(last.levelFlags[tl] & FLAG.passed)) && last.eventsTriggered === 110 - starEvents.size,
+    `every event passed: no star passed (${[...starTls].map((tl) => `${hx(tl)}=${hx(last.levelFlags[tl])}`).join(' ')}), ${last.eventsTriggered} events triggered (110 less the stars' ${starEvents.size})`);
 }
 
 if (bad) { console.log(`${bad} failed`); process.exit(1); }

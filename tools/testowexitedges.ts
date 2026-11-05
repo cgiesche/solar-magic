@@ -12,7 +12,7 @@ import { OverworldEmulator, OverworldLoads, translevelToLevel, l1XY, gameL1, OW_
 import { progressSaves, progressSearches, progressMapsFromEvents, type ProgressMap } from '../src/core/owprogress.ts';
 import { reachInput } from '../src/core/owreach.ts';
 import { readStart } from '../src/core/owsprites.ts';
-import { submapViews, submapOf, eventRunners } from '../src/core/owevents.ts';
+import { submapViews, submapOf, eventRunners, eventChanges } from '../src/core/owevents.ts';
 import { exitEdges, passableEdgesJob, type ExitEdge } from '../src/core/owexitedges.ts';
 import { RAM } from '../src/core/ram.ts';
 import { ExitGraph } from '../src/core/exitgraph.ts';
@@ -111,9 +111,11 @@ check(yi.filter((e) => e.opens.length).length === want.length, `no other exit on
   check(none.some((e) => lv(e.tl) === '014'), `exits opening nothing listed with no level, the Yellow Switch Palace's among them (${none.length})`);
   // (112: a level tile of the clean game no way leads to)
   check(unknown.map((e) => lv(e.tl)).join() === '112', `what an exit opens can't be told only where its level isn't reached with every event passed either (${unknown.map(text).join(', ')})`);
-  // (124 has its normal exit only: the events of secret exits 1–3 after its base event change nothing)
+  // (a secret exit whose event changes nothing has no edge; 124 none at all: its tile is a star an event reveals,
+  // which runs no event – #390)
+  const changes = eventChanges(rom), idle = edges.filter((e) => e.exit && !changes(e.event).l1.length && !changes(e.event).l2.length);
   const t124 = edges.filter((e) => lv(e.tl) === '124');
-  check(t124.length === 1 && t124[0].exit === 0, `a level's secret exits whose events change and open nothing left out (124: ${t124.map(text).join(', ')})`);
+  check(!idle.length && !t124.length, `a level's secret exits whose events change and open nothing left out (${idle.map(text).join(', ') || 'none'}), the revealed star 124 runs no event (${t124.map(text).join(', ') || 'no edge'})`);
 }
 
 // ---- the events still passable without the exit's event (the probe worker's job, after the saves: they are kept) ----

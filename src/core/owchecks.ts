@@ -5,7 +5,8 @@
 import type { Rom } from './rom.ts';
 import { OW_EVENTS, MAX_TRANSLEVEL, translevelToLevel, readL1, readTranslevels, l1Index } from './overworld.ts';
 import { readEvents, eventChanges, eventRunners, eventPieces, drawPiece, l2XY, type EventData, type EventChanges, type EventRunner } from './owevents.ts';
-import { reach, inputWithout, WARP_TILES, type Reach } from './owreach.ts';
+import { reach, inputWithout, type Reach } from './owreach.ts';
+import { isStarPipeTile } from './overworld.ts';
 import { readSecondaryEntrance, mainTranslevel, OW_NORMAL, OW_SECRET } from './level.ts';
 import type { ExitGraph } from './exitgraph.ts';
 import { hex2, hex3 } from './names.ts';
@@ -69,7 +70,7 @@ export function stranded(c: CheckContext): WorldProblem[] {
     if (at !== undefined) links.push({ at, from: k >> 2, to: w.to, what: 'exit path tile' });
   }
   for (const s of r.stops) {
-    if (!WARP_TILES.includes(inp.l1[s] & 0xff)) continue;
+    if (!isStarPipeTile(inp.l1[s])) continue;
     for (const to of inp.stars.get(s) ?? []) links.push({ at: s, from: s, to, what: 'star or pipe' });
   }
   const out: WorldProblem[] = [], keys = new Set<string>();

@@ -5,7 +5,7 @@
 // before and after an edit can be compared.
 
 import type { Rom } from './rom.ts';
-import { readL1, writeL1, readDestroyList, revealEventCount, gameL1, l1XY, NO_EVENT, OW_EVENTS, type OverworldLoads } from './overworld.ts';
+import { readL1, writeL1, readDestroyList, revealEventCount, gameL1, l1XY, NO_EVENT, OW_EVENTS, STAR_PIPE_TILES, type OverworldLoads } from './overworld.ts';
 import { eventReveal } from './oweventtiles.ts';
 import { readEvents, submapViewsJob, submapOf } from './owevents.ts';
 import { budgetLevel, budgetText, owBudgets, fullestSubmap, type Budget } from './owbudget.ts';
@@ -17,7 +17,7 @@ import type { ScreenExit } from './level.ts';
 import type { Job } from './jobrunner.ts';
 import { RAM } from './ram.ts';
 import type { OwMode } from './owlayers.ts';
-import { reach, reachProblems, stuckProblems, WARP_TILES, ANY_WAY_TILE, type Reached, type ReachKind, type ReachProblem, type CheckSeverity } from './owreach.ts';
+import { reach, reachProblems, stuckProblems, ANY_WAY_TILE, type Reached, type ReachKind, type ReachProblem, type CheckSeverity } from './owreach.ts';
 import { hex3 } from './names.ts';
 import type { PathKind, PathShapes } from './owpaths.ts';
 import type { OwRefusalData } from './owrefusal.ts';
@@ -197,7 +197,7 @@ export function budgetPlace(rom: Rom, b: Budget, chosen = -1): BudgetPlace {
 }
 
 // (the star and pipe tiles stop Mario too, but look like a way on; tile 82 is a stop tile he walks off any way)
-const STAR_PIPE = WARP_TILES.filter((t) => t !== ANY_WAY_TILE);
+const STAR_PIPE = STAR_PIPE_TILES.filter((t) => t !== ANY_WAY_TILE);
 // the stop tile a fix puts on the map: the one used most on the map before events (its look the map's), not a star or
 // pipe; none used: the first there is; -1: none
 export function stopTile(l1: ArrayLike<number>, kinds: readonly PathKind[]): number {

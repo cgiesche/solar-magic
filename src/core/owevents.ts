@@ -27,7 +27,7 @@ import { missingPatch } from './patches.ts';
 import { OwRefusal } from './owrefusal.ts';
 import {
   OW_EVENTS, OverworldEmulator, type OverworldLoads, gameL1, readL1, readTranslevels, baseEvent, translevelToLevel, l1XY, revealAt, revealEventCount, readDestroyList,
-  destroyEffects, destroyedCells, l1Index, MAX_TRANSLEVEL, owTilemapRanges,
+  destroyEffects, destroyedCells, l1Index, MAX_TRANSLEVEL, owTilemapRanges, isStarPipeTile, revealedTile,
 } from './overworld.ts';
 import { RAM, getS16 } from './ram.ts';
 import { record, countReads } from './romdeps.ts';
@@ -379,11 +379,15 @@ export interface EventRunner { tl: number; exit: number; tile: number }
 // its event is no level's base event and changes something (layer 1 or 2, a reveal or destroy): what else would run
 // it – the clean game's Donut Secret House and Chocolate Island 2 have secret exits nothing in their data shows. So a
 // level without secret exits doesn't name the next level's base event (Yoshi's Island 4's + 1, Iggy's castle's) nor
-// an event that does nothing; an event no exit runs is named by none.
+// an event that does nothing; an event no exit runs is named by none. A star or pipe (isStarPipeTile) enters no level,
+// so its translevel runs nothing: not on the map before events, nor where the reveal list or an event's layer 1
+// changes turn the cell into one – the clean game's six stars (translevels 4D 52 53 57 5B 5C) and the four revealed
+// ones with a base event (1E 30 48 55) run none of their base events (64 56 53 59 50 5C, 36 44 6D 5F, which change
+// nothing): A on a star takes Mario to another place (docs/research/star-tile-translevels.md).
 export function eventRunners(rom: Rom): Map<number, EventRunner[]> {
-  const tls = readTranslevels(rom), out = new Map<number, EventRunner[]>(), shown = shownSecretExits(rom);
+  const tls = readTranslevels(rom), out = new Map<number, EventRunner[]>(), shown = shownSecretExits(rom), starPipe = starPipeCells(rom);
   const tileOf = new Map<number, number>();
-  tls.forEach((tl, i) => { if (tl && !tileOf.has(tl)) tileOf.set(tl, i); });
+  tls.forEach((tl, i) => { if (tl && !tileOf.has(tl) && !starPipe.has(i)) tileOf.set(tl, i); });
   const bases = new Set(Array.from({ length: MAX_TRANSLEVEL }, (_, k) => baseEvent(rom, k + 1)));
   const does = eventDoesSomething(rom);
   for (const [tl, tile] of [...tileOf].sort((a, b) => a[0] - b[0])) {
@@ -395,6 +399,16 @@ export function eventRunners(rom: Rom): Map<number, EventRunner[]> {
   }
   // the normal exits first
   for (const l of out.values()) l.sort((a, b) => a.exit - b.exit || a.tl - b.tl);
+  return out;
+}
+// the cells (l1Index) that are a star or pipe tile at some event progress: on the map before events, the tile the
+// reveal list turns it into, an event's layer 1 change (a ROM whose events can't be read: those of the map and reveals)
+function starPipeCells(rom: Rom): Set<number> {
+  const l1 = readL1(rom), out = new Set<number>();
+  l1.forEach((t, i) => { if (isStarPipeTile(t) || isStarPipeTile(revealedTile(rom, t))) out.add(i); });
+  let silent: EventData['silent'] = [];
+  try { silent = readEvents(rom).silent; } catch { /* (no event patch) */ }
+  for (const steps of silent) for (const s of steps) if (s.layer === 1 && isStarPipeTile(s.tile)) out.add(s.loc);
   return out;
 }
 // whether event e changes something: layer 1 or layer 2 tiles, a reveal, a destroy (the events read when first asked;

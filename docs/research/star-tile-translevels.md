@@ -36,8 +36,9 @@ Two follow-ups for the editor:
   no destroy). Because `eventRunners` reads the table, it still lists the stars as their runners ("STAR ROAD · normal
   exit"). So `progressSaves` "passes" each star. The flags of the all-events save get bit 7 and an exit direction
   (for example `4D: 89`), and the events-triggered count includes these six events (110 at every event passed). The
-  game can't do this, because A on a star warps. `eventRunners` should skip tiles that enter no level, and that would
-  fix it. It is a separate issue.
+  game can't do this, because A on a star warps. Fixed in #390: `eventRunners` skips the cells that are a star or
+  pipe at any progress (before events, by the reveal list or an event's layer 1 change), so also the four revealed
+  stars below with a base event (36 44 6D 5F, which change nothing either); the all-events save counts 100 events.
 - **A 5F painted today has translevel 0.** Mario then walks off it only in the directions of translevel 0's flags.
   Every tile without a translevel shares those flags (CONTEXT.md "Route": "a stop of translevel 0 sharing them with
   every other"). The status bar shows a blank name there. `owreach.ts` already models the flags (`flags[tls[s]]` for

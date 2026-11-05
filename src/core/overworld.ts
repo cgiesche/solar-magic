@@ -212,6 +212,11 @@ export function writeL2(rom: Rom, entries: Uint16Array): number {
 // Translevel 0 is no level (the scan starts at 1); a level tile has one, any other tile 0. Which tiles are level
 // tiles the game's code decides: learned by emulation (owpaths.ts levelTileTest), passed in where it matters.
 
+// the star and pipe tiles: A takes Mario from them to a star/pipe entry's destination ($04915E), they enter no level
+// whatever translevel they hold (the game reads the tiles' low byte there, $7EC800: a tile 182 is one too)
+export const STAR_PIPE_TILES = [0x5b, 0x5f, 0x82];
+export const isStarPipeTile = (t: number): boolean => STAR_PIPE_TILES.includes(t & 0xff);
+
 export function translevelToLevel(t: number): number {
   return t < 0x25 ? t : t + 0xdc;
 }

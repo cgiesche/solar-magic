@@ -20,7 +20,7 @@
 // reveal walk). Flags only open, so the search runs until nothing more opens.
 
 import { Rom, snesToPc } from './rom.ts';
-import { l1Index, l1XY, DIR_FLAGS, DIR_NAMES, exitDirections, translevelToLevel, MAX_TRANSLEVEL, initialFlags, revealAt, revealEventCount, readDestroyList } from './overworld.ts';
+import { isStarPipeTile, l1Index, l1XY, DIR_FLAGS, DIR_NAMES, exitDirections, translevelToLevel, MAX_TRANSLEVEL, initialFlags, revealAt, revealEventCount, readDestroyList } from './overworld.ts';
 import { readEvents, eventRunners, exitChanges, eventTitle, eventL1Tiles, type EventData, type EventChanges, type EventRunner } from './owevents.ts';
 import { hex2, hex3 } from './names.ts';
 import type { Severity } from './problems.ts';
@@ -36,8 +36,6 @@ export function neighbor(i: number, dir: number): number {
 // directions in the order of DIR_NAMES / DIR_FLAGS: up, down, left, right
 const TURNS = [3, 2, 1, 0]; // the game's order of trying another way: right, left, down, up
 export const ANY_WAY_TILE = 0x82; // the game lets Mario walk off it in every direction ($049268)
-export const WARP_TILES = [0x5b, 0x5f, 0x82]; // the tiles A takes Mario to a star/pipe entry's destination from ($04915E)
-// (the game reads the tiles' low byte there, $7EC800: a tile 182 is one too)
 const lowByte = (t: number) => t & 0xff;
 
 const tileOf = (t: OwTile): number => l1Index(t.submap ? 1 : 0, t.x, t.y);
@@ -176,7 +174,7 @@ export function reach(inp: ReachInput): Reach {
   while (queue.length) {
     const s = queue.pop()!, tl = inp.tls[s];
     if (inp.ends?.(s)) continue;
-    if (WARP_TILES.includes(lowByte(inp.l1[s]))) for (const to of inp.stars.get(s) ?? []) stand(to);
+    if (isStarPipeTile(inp.l1[s])) for (const to of inp.stars.get(s) ?? []) stand(to);
     if (tl) for (const to of inp.levelWarps?.(tl) ?? []) stand(to);
     for (let d = 0; d < 4; d++) {
       if (walks.has(s * 4 + d) || (lowByte(inp.l1[s]) !== ANY_WAY_TILE && !(flags[tl] & DIR_FLAGS[d]))) continue;
@@ -201,7 +199,7 @@ export function waysFrom(inp: ReachInput, r: Reach, s: number): { path: number[]
     const w = r.walks.get(s * 4 + d);
     if (w && w.to >= 0) out.push({ path: w.path, to: w.to });
   }
-  if (WARP_TILES.includes(lowByte(inp.l1[s]))) for (const to of inp.stars.get(s) ?? []) out.push({ path: [], to });
+  if (isStarPipeTile(inp.l1[s])) for (const to of inp.stars.get(s) ?? []) out.push({ path: [], to });
   const tl = inp.tls[s];
   if (tl) for (const to of inp.levelWarps?.(tl) ?? []) out.push({ path: [], to });
   return out;

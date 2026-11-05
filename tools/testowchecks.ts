@@ -46,11 +46,11 @@ const clean = checks(rom);
   const all = [...clean.never, ...clean.stranded, ...clean.untiled, ...clean.order];
   console.log(list(all));
   check(!all.length, `the clean game: no event never run, no link stranding Mario, no level without level tile an exit leads into, no events out of order (${all.length})`);
-  // (the play order: Star World 5's event before the Special World's – its secret exit opens the way there –; events
-  // whose numbers are not in play order, changing no tile both)
+  // (the play order: Star World 5's secret exit's event before the Special World levels' events, as it opens the way
+  // there; the star leading there runs no event, #390. Events whose numbers are not in play order change no tile both)
   const outOfOrder = clean.needed.flatMap((as, b) => as.filter((a) => a < b).map((a) => [b, a]));
-  check(clean.needed[0x5e].includes(0x64) && outOfOrder.length > 0,
-    `play order: event 5E before 64; out of number order: ${outOfOrder.map(([b, a]) => `${hx(b)} before ${hx(a)}`).join(', ')}`);
+  check(clean.needed[0x5e].includes(0x65) && outOfOrder.length > 0,
+    `play order: event 5E before 65 (${clean.needed[0x5e].map((e) => hx(e)).join(' ')}); out of number order: ${outOfOrder.map(([b, a]) => `${hx(b)} before ${hx(a)}`).join(', ')}`);
 }
 const [late, early] = clean.needed.flatMap((as, b) => as.filter((a) => a < b).map((a) => [b, a]))[0];
 
