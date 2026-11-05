@@ -1117,10 +1117,11 @@ export class App {
   pathKinds(done: () => void): PathKind[] | null {
     return this.probes.learn<PathKind[]>('owpk1', { kind: 'pathKinds' }, { lane: 'owpk1', label: 'Path tiles', done }) ?? null;
   }
-  // per translevel the exits whose first pass skips the reveal walk (revealwalk.ts): learned in the probe worker once
-  // and kept in the result cache while the game's code is unchanged; null while that runs, then `done` is called
+  // the exits whose first pass skips the reveal walk, per translevel and with the base event "No event" (revealwalk.ts):
+  // learned in the probe worker once and kept in the result cache while the game's code is unchanged; null while that
+  // runs, then `done` is called
   revealWalkSkips(done: () => void): RevealWalkSkips | null {
-    return this.probes.learn<RevealWalkSkips>('owrw1', { kind: 'revealWalks' }, { lane: 'owrw', label: 'Reveal walks', done }) ?? null;
+    return this.probes.learn<RevealWalkSkips>('owrw2', { kind: 'revealWalks' }, { lane: 'owrw', label: 'Reveal walks', done }) ?? null;
   }
   // how path tiles move Mario on the overworld (owpaths.ts path shapes, for path validation): learned in the probe
   // worker once and kept in the result cache while the game's code is unchanged; null while that runs, then `done` is

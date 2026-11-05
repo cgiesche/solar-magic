@@ -19,6 +19,7 @@ export const GM = {
 
 // overworld processes ($13D9, RAM.owProcess) the editor tells apart by value
 export const OW_PROCESS = {
+  handleExit: 0x01, // the overworld handling the exit a level was left by (revealwalk.ts)
   noRevealWalk: 0x05, // a passed level's exit handled without the reveal walk (revealwalk.ts)
 } as const;
 

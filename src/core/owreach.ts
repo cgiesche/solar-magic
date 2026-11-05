@@ -15,12 +15,12 @@
 // - with no tile next to him, the game's hardcoded paths ($049078: from a translevel, or a place of the main map,
 //   in a direction, the steps and tiles of the way) – the game's own, not tiles of the map (not editable).
 //
-// The flags at an event progress are the save's there (owprogress.ts, learned by playing the events' levels); a level
-// that runs no event opens its normal exit's direction once Mario reaches it (passing it changes nothing else).
-// Flags only open, so the search runs until nothing more opens.
+// The flags at an event progress are the save's there (owprogress.ts, learned by playing the events' levels); passing a
+// level that runs no event opens nothing (revealwalk.ts: the game handles the exit enabling no direction, without the
+// reveal walk). Flags only open, so the search runs until nothing more opens.
 
 import { Rom, snesToPc } from './rom.ts';
-import { l1Index, l1XY, DIR_FLAGS, DIR_NAMES, NO_EVENT, baseEvent, exitDirections, translevelToLevel, MAX_TRANSLEVEL, initialFlags, revealAt, revealEventCount, readDestroyList } from './overworld.ts';
+import { l1Index, l1XY, DIR_FLAGS, DIR_NAMES, exitDirections, translevelToLevel, MAX_TRANSLEVEL, initialFlags, revealAt, revealEventCount, readDestroyList } from './overworld.ts';
 import { readEvents, eventRunners, exitChanges, eventTitle, eventL1Tiles, type EventData, type EventChanges, type EventRunner } from './owevents.ts';
 import { hex2, hex3 } from './names.ts';
 import type { Severity } from './problems.ts';
@@ -72,7 +72,6 @@ export interface ReachInput {
   exitPaths: { from: { region: number; x: number; y: number }; to: { x: number; y: number }; tile: number; dir: number }[];
   hard: HardPath[];
   levelWarps?: (tl: number) => number[]; // the tiles a level's exits to the overworld teleport to
-  noEvent?: (tl: number) => number; // a level running no event: the direction its normal exit opens (-1: it runs one)
   ends?: (tile: number) => boolean; // stop tiles Mario goes no further from (no walk, star or teleport): the search ends there
 }
 
@@ -172,9 +171,6 @@ export function reach(inp: ReachInput): Reach {
     if (stops.has(i)) return;
     stops.add(i);
     queue.push(i);
-    const tl = inp.tls[i];
-    const nd = tl ? inp.noEvent?.(tl) ?? -1 : -1;
-    if (nd >= 0) open(tl, DIR_FLAGS[nd]);
   };
   stand(inp.start);
   while (queue.length) {
@@ -228,10 +224,9 @@ export function reachInput(rom: Rom, l1: ArrayLike<number>, tls: ArrayLike<numbe
     const dir = dx || dy ? dirOf(dx, dy, Math.abs(dx) > Math.abs(dy)) : -1;
     return [{ from: { region: e.from.submap ? 1 : 0, x: e.from.x, y: e.from.y }, to: { x: e.to.x, y: e.to.y }, tile, dir }];
   });
-  const noEvent = (tl: number) => (baseEvent(rom, tl) === NO_EVENT ? exitDirections(rom, tl)[0] : -1);
   return {
     l1, tls, flags, kinds, shapes, start: tileOf(start), stars, exitPaths, hard: hardPaths(rom),
-    levelWarps: levelWarps && ((tl) => levelWarps(tl).map(tileOf)), noEvent,
+    levelWarps: levelWarps && ((tl) => levelWarps(tl).map(tileOf)),
   };
 }
 

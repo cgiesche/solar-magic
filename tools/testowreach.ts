@@ -3,12 +3,12 @@
 // flags of the event progress, walking off in a direction, stops where the search says (ways along paths, bends and
 // junctions, through exit paths to another submap, the game's hardcoded paths, a way the flags close, a path cut). The
 // clean game's map: every level tile reached with every event passed but two nothing leads to, only Yoshi's house
-// and Yoshi's Islands 1 and 2 before any; a path tile leading nowhere is a dead end, reported. The path shapes don't
-// depend on the overworld's data.
+// and Yoshi's Islands 1 and 2 before any (Yoshi's Island 1 without its event too: passing it opens nothing); a path
+// tile leading nowhere is a dead end, reported. The path shapes don't depend on the overworld's data.
 import { Rom } from '../src/core/rom.ts';
 import { LevelEmulator } from '../src/core/levelemu.ts';
 import {
-  OverworldEmulator, OverworldLoads, gameL1, translevelToLevel, l1Index, l1XY, OW_EVENTS, MAX_TRANSLEVEL, DIR_NAMES, readL1, writeL1, readTranslevels, writeTranslevels, setExitDirection,
+  OverworldEmulator, OverworldLoads, gameL1, translevelToLevel, l1Index, l1XY, OW_EVENTS, MAX_TRANSLEVEL, DIR_NAMES, readL1, writeL1, readTranslevels, writeTranslevels, setExitDirection, setBaseEvent, NO_EVENT,
 } from '../src/core/overworld.ts';
 import { progressSaves } from '../src/core/owprogress.ts';
 import { reach, reachInput, reachProblems, walkFrom, type ReachInput } from '../src/core/owreach.ts';
@@ -50,6 +50,13 @@ const all = input(OW_EVENTS), none = input(0);
   check(!stuck.length, `no dead end ${stuck.map(([k, w]) => `${at(k >> 2)} ${DIR_NAMES[k & 3]} → ${w.stuck!.why} at ${at(w.stuck!.at)}`).join('; ')}`);
   const r0 = reach(none), got = levelTiles(none).filter((i) => r0.stops.has(i)).map((i) => hx(translevelToLevel(none.tls[i]), 3));
   check(got.join() === '104,105,106', `no event passed: Yoshi's house, Yoshi's Islands 1 and 2 reached, nothing else (${got.join(' ')})`);
+  // a level with no base event opens nothing when passed (testrevealwalk: no direction, no way back): Yoshi's Island 1
+  // (29) without its event, before any event Mario still stops there and goes no further than with it
+  const r1 = new Rom(rom.data.slice());
+  setBaseEvent(r1, 0x29, NO_EVENT);
+  const n1 = reach(reachInput(r1, none.l1, none.tls, none.flags, kinds, shapes, readStart(r1, 0)));
+  check(n1.tiles.join() === r0.tiles.join() && n1.flags[0x29] === r0.flags[0x29],
+    `29 with no event: the same tiles reached, its flags not opened (${hx(n1.flags[0x29])})`);
 }
 
 // ---- the ways by emulation ----
