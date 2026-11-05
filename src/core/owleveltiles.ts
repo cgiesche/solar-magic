@@ -1,4 +1,4 @@
-// Level tiles as objects on top of layer 1 (the overworld editor's Levels mode, ADR 0012): moved, removed and placed
+// Level tiles as objects on top of layer 1 (the overworld editor's layer 1 mode, ADR 0012): moved, removed and placed
 // as a whole – the tile with its translevel – each one ROM edit of layer 1 and the translevel table, the map before
 // events. A level tile moved swaps with the tile where it is dropped (a level moved along a path leaves the path
 // whole; two level tiles swap with their translevels); one removed leaves the stop tile (Mario stops there, enters no

@@ -102,7 +102,7 @@ export function stranded(c: CheckContext): WorldProblem[] {
 
 // ---- levels without level tile an exit leads into ----
 
-// The translevels no level tile on any map enters (the Levels mode's "Without level tile") whose level another level's
+// The translevels no level tile on any map enters (the overworld editor's "Without level tile") whose level another level's
 // exit leads into: shown at the level tile of the level the exit is in (-1: none)
 export function untiledLevelsEntered(c: CheckContext, graph: ExitGraph): WorldProblem[] {
   const { rom, place } = c, tls = readTranslevels(rom), tileOf = new Map<number, number>();
@@ -116,7 +116,7 @@ export function untiledLevelsEntered(c: CheckContext, graph: ExitGraph): WorldPr
     const tile = ptl ? tileOf.get(ptl) ?? -1 : -1;
     out.push({ key: `untiled-level:${level}`, group: 'progress', severity: 'warn', tile, progress: OW_EVENTS,
       text: `Level ${hex3(level)} has no level tile, but an exit of level ${hex3(by)} leads into it`, brief: `level ${hex3(level)} without level tile`,
-      title: `Players get there only through ${into.length > 1 ? `${into.length} exits` : 'that exit'}${tile >= 0 ? ` (from the level tile at ${place(tile)})` : ''}. Fine if it is meant as part of that level; a level of its own on the map needs a level tile (Levels mode).` });
+      title: `Players get there only through ${into.length > 1 ? `${into.length} exits` : 'that exit'}${tile >= 0 ? ` (from the level tile at ${place(tile)})` : ''}. Fine if it is meant as part of that level; a level of its own on the map needs a level tile (layer 1: "Levels" in the picker).` });
   }
   return out;
 }

@@ -1,17 +1,18 @@
-// The exits' arrows in the Levels mode (View → "Exit arrows", on by default; owexitedges.ts): from each level tile an
-// arrow to each level its exits open – solid for the normal exit, dashed for a secret one, ending at the link leaving
-// the submap when the level is on another; an exit opening nothing Mario reaches a short red stub – a grey
-// dotted one when Mario doesn't reach its level even with every event passed (nothing can't be told). Hovering one
-// says what it is in the status bar; the "When beaten…" sentences tell the same levels. Learned in the probe worker
-// once per ROM edit (passableEdgesJob: the searches at every event progress over the maps built from the events and
-// the saves' level flags, the rule with the events still passable without an exit's event), from the path kinds and
-// shapes; nothing is drawn while those are first learned. After an edit the arrows learned before stay drawn, dimmed, until
-// the new ones come (#388); the "When beaten…" sentences tell no levels meanwhile, marked as being learned.
+// The exits' arrows in the layer 1 mode (owexitedges.ts): the selected level tile's always, every level tile's with
+// View → "Exit arrows" (off by default; shownExitEdges) – from a level tile an arrow to each level its exits open –
+// solid for the normal exit, dashed for a secret one, ending at the link leaving the submap when the level is on
+// another; an exit opening nothing Mario reaches a short red stub – a grey dotted one when Mario doesn't reach its
+// level even with every event passed (nothing can't be told). Hovering one says what it is in the status bar; the "When
+// beaten…" sentences tell the same levels. Learned in the probe worker once per ROM edit (passableEdgesJob: the
+// searches at every event progress over the maps built from the events and the saves' level flags, the rule with the
+// events still passable without an exit's event), from the path kinds and shapes; nothing is drawn while those are
+// first learned. After an edit the arrows learned before stay drawn, dimmed, until the new ones come (#388); the "When
+// beaten…" sentences tell no levels meanwhile, marked as being learned.
 
 import type { OverworldView } from './overworld.ts';
 import { arrow } from './owlinkview.ts';
 import { l1XY, EXIT_NAMES, MAP_NAMES, translevelToLevel } from '../core/overworld.ts';
-import type { ExitEdge } from '../core/owexitedges.ts';
+import { shownExitEdges, type ExitEdge } from '../core/owexitedges.ts';
 import { levelName } from '../core/levelnames.ts';
 import { hex } from '../core/names.ts';
 
@@ -23,7 +24,7 @@ type Pt = { x: number; y: number };
 interface Drawn { p: Pt; q: Pt; color: string; dashed: boolean; head: boolean; text: string }
 
 export class ExitArrowLayer {
-  show = true; // drawn in the Levels mode
+  show = false; // every level tile's drawn (else the selected one's)
   // the probe worker's edges for the ROM generation (not asked again while it holds; of an older one: drawn dimmed)
   private passable: { rom: object; gen: number; edges: ExitEdge[] } | null = null;
   private asked = -1; // the ROM generation they were asked for at (until something comes: not asked again each paint)
@@ -32,8 +33,8 @@ export class ExitArrowLayer {
   // something the edges need came (the arrows and the "When beaten…" sentences show them)
   private learned = () => {
     this.asked = -1;
-    if (!this.view.root.isConnected || this.view.mode !== 'levels') return;
-    if (this.show) this.view.paint();
+    if (!this.view.root.isConnected) return;
+    if (this.view.mode === 'l1') this.view.paint();
     if (this.edges()) this.view.buildSide(); // (the sentences tell them once they are found)
   };
 
@@ -58,12 +59,15 @@ export class ExitArrowLayer {
     return p && p.rom === this.view.app.rom ? { edges: p.edges, stale: true } : null;
   }
 
-  // the lines of the region shown: arrows, stubs (fanned out by exit), an arrow to the other region as a short one
-  // labelled with the level; stale: the edges learned before an edit
+  // the lines of the region shown (the selected level tile's, all with "Exit arrows"): arrows, stubs (fanned out by
+  // exit), an arrow to the other region as a short one labelled with the level; stale: the edges learned before an edit
   private lines(): { lines: Drawn[]; stale: boolean } {
+    // (none to draw: the edges not asked for – the probe worker's search is long)
+    const v = this.view, sel = v.selected;
+    if (!this.show && (sel < 0 || !v.isLevelTile(v.levelL1()[sel]))) return { lines: [], stale: false };
     const d = this.drawn();
     if (!d) return { lines: [], stale: false };
-    const { edges, stale } = d, rom = this.view.app.rom, region = this.view.region, out: Drawn[] = [];
+    const edges = shownExitEdges(d.edges, this.show, sel), stale = d.stale, rom = v.app.rom, region = v.region, out: Drawn[] = [];
     const levelText = (tl: number) => `${levelName(rom, tl)} (${hex(translevelToLevel(tl), 3)})`;
     const stub = (from: number, k: number): Pt => { const p = center(from), a = -Math.PI / 4 + (k - 1.5) * 0.45; return { x: p.x + Math.cos(a) * 14, y: p.y + Math.sin(a) * 14 }; };
     for (const e of edges) {
@@ -106,7 +110,6 @@ export class ExitArrowLayer {
 
   // the lines of the region shown, the one under the mouse highlighted (arrows as the links', stubs without a head)
   paint(ctx: CanvasRenderingContext2D, lw: number): void {
-    if (!this.show) return;
     const { lines, stale } = this.lines(), hot = this.hovered(lines, this.view.mouse);
     ctx.save();
     if (stale) ctx.globalAlpha = 0.4;
@@ -127,6 +130,6 @@ export class ExitArrowLayer {
 
   // what the status bar says of the line under the mouse ('' none)
   status(): string {
-    return this.show ? this.hovered(this.lines().lines, this.view.mouse)?.text ?? '' : '';
+    return this.hovered(this.lines().lines, this.view.mouse)?.text ?? '';
   }
 }

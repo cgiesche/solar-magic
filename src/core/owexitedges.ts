@@ -1,8 +1,8 @@
 // What a level exit opens (CONTEXT.md "Exit edge"): exit E opens level B when B is reached (owreach.ts) with every
 // event passed and not with every event but E's (owreach.ts inputWithout) – or, the first rule kept as a supplement,
 // at the event progress just after E's event and not at the one before – and B is a first level on the way: Mario
-// gets there without passing another level so opened. Derived from the path searches, never stored. The Levels mode
-// draws them as arrows (ui/owexitarrows.ts).
+// gets there without passing another level so opened. Derived from the path searches, never stored. The layer 1 mode
+// draws them as arrows (ui/owexitarrows.ts): the selected level tile's, every one with View → "Exit arrows".
 //
 // It searches the maps at every event progress built from the events (owprogress.ts progressMapsFromEvents: layer 1
 // through the events, the saves' level flags), searched as the World check searches them (progressSearches).
@@ -25,6 +25,12 @@ export interface Opened { tl: number; tile: number; end: number }
 // progress after the event – when not, an exit opening nothing can't be told from one whose level isn't reached;
 // opens: the levels (none: the event opens nothing Mario reaches)
 export interface ExitEdge { tl: number; exit: number; event: number; from: number; reached: boolean; opens: Opened[] }
+
+// the edges drawn as arrows (#396): every one with View → "Exit arrows" (all), else those of the selected level tile
+// (l1Index; -1: none)
+export function shownExitEdges(edges: readonly ExitEdge[], all: boolean, selected: number): ExitEdge[] {
+  return all ? edges.slice() : edges.filter((e) => e.from === selected);
+}
 
 // a path search: its input, its result, the translevels whose level tiles it reaches (each with its first tile
 // reached); a level tile: one with a translevel, a level tile on the map searched or one an event destroys

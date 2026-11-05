@@ -267,7 +267,7 @@ console.log(list(clean.problems));
   check(csPlace?.mode === 'sprites' && csPlace.submap === 3, 'Show: the sprites mode on that submap');
   // where each other limit applies
   const of = (k: string) => budgetPlace(rom, all.find((b) => b.key === k)!);
-  check(of('l1Tiles').mode === 'l1' && of('translevels').mode === 'levels' && of('stars').mode === 'links' && of('exitPaths').mode === 'links', 'Show: layer 1 tiles in the layer 1 mode, levels in the Levels mode, links in the links mode');
+  check(of('l1Tiles').mode === 'l1' && of('translevels').mode === 'l1' && of('stars').mode === 'links' && of('exitPaths').mode === 'links', 'Show: layer 1 tiles in the layer 1 mode, levels in the layer 1 mode (level tiles as objects there), links in the links mode');
   const rv = of('revealPairs'), st = of('eventStorage'), revealBudget = all.find((b) => b.key === 'revealPairs')!;
   const past = revealEventCount(rom); // (the editor's reveal table has every event: nothing past it)
   check(budgetPlace(rom, revealBudget, 5).event === 5 && (past >= OW_EVENTS || budgetPlace(rom, revealBudget, past).event === rv.event),

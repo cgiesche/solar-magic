@@ -1,8 +1,9 @@
-// What the overworld editor draws of its two layers: while a layer is painted (modes l1/l2) the other one dimmed, or
-// gone while Q is held (solo); in the object modes (levels, links, sprites) both at full strength. View → Layers' switches
+// What the overworld editor draws of its two layers: while a layer is painted (modes l1/l2; l1 with the level tiles as
+// objects on it, ADR 0012) the other one dimmed, or gone while Q is held (solo); in the object modes (links, sprites)
+// both at full strength. View → Layers' switches
 // (showL1/showL2) win: a layer switched off is never drawn, and with the painted one switched off the other is drawn
 // at full strength (nothing to set it apart from).
-export type OwMode = 'l1' | 'l2' | 'levels' | 'links' | 'sprites';
+export type OwMode = 'l1' | 'l2' | 'links' | 'sprites';
 // whether mode m paints a layer (l1, l2) rather than objects
 export const isLayerMode = (m: OwMode): m is 'l1' | 'l2' => m === 'l1' || m === 'l2';
 export interface LayerView {

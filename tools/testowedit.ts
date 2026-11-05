@@ -1,7 +1,7 @@
 // Overworld changes are ROM edits: a paint stroke (owstroke.ts) is one undo step; layer 1 changes only the bytes of
 // the painted tiles, layer 2 stays where it is when it fits (each stream in its own place, the other untouched) and
 // moves to free space only otherwise; a layer 1 stroke leaves level tiles alone (paints none, paints over none – they
-// are edited in the Levels mode – the translevels untouched); the game shows the painted map (emulated).
+// are objects on top of layer 1 – the translevels untouched); the game shows the painted map (emulated).
 import { Rom, snesToPc, pcToSnes } from '../src/core/rom.ts';
 import { RomEditSession } from '../src/core/romedit.ts';
 import {
@@ -241,7 +241,7 @@ const diff = (a: Uint8Array, b: Uint8Array) => { const out: number[] = []; for (
   check(syncs === 4, 'overworld view: undo resyncs');
 }
 
-// level tiles (ADR 0012: edited in the Levels mode only): a layer 1 stroke neither paints one nor paints over one,
+// level tiles (ADR 0012: objects on top of layer 1, edited as such only): a layer 1 stroke neither paints one nor paints over one,
 // NO_TILE (where a pick left a level tile out of the brush) paints nothing; the translevels stay
 {
   const { rom, s } = fresh();

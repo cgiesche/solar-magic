@@ -1,7 +1,8 @@
 // The overworld editor's layer 1 paint sheet (owl1sheet.ts) on the editor's test ROM: which tiles are free (drawn as
 // tile 000, on no map, doing what 000 does), the rows of each page shown and folded (page 1 folded whole while it has
 // none of the ROM's own tiles), and the hover popup's lines (each tile's function – a path tile's with its shape –,
-// "acts like" on page 1); level tiles left out of a brush (placed in the Levels mode).
+// "acts like" on page 1); level tiles left out of a brush (placed from the layer 1 picker's "Levels", objects on layer
+// 1 – ADR 0012).
 // node tools/testowl1sheet.ts
 import { Rom } from '../src/core/rom.ts';
 import { owTileWords, setOwTileWords, readL1, writeL1, OW_L1_TILES } from '../src/core/overworld.ts';
@@ -76,6 +77,7 @@ check(/^Path: walk · from .+, from /.test(walkLine), `a walk tile (${hx(walk)})
 check(l1TileLines(walk, kinds, false, null)[0] === `Path: walk · ${SHAPES_LEARNING}`, 'shapes not known: "Path: walk · its shape is being learned…"');
 check(l1TileLines(exit, kinds, false, shapes)[0] === PATH_KIND_NAMES.exit, `an exit tile (${hx(exit)}): its function`);
 check(l1TileLines(level, kinds, false, shapes)[0] === LEVEL_TILE_LINE, `a level tile (${hx(level)}): "${LEVEL_TILE_LINE}"`);
+check(!/mode/i.test(LEVEL_TILE_LINE) && /layer 1/i.test(LEVEL_TILE_LINE) && /Levels/.test(LEVEL_TILE_LINE), 'the level tile line names no Levels mode (#396): the layer 1 mode and its picker\'s "Levels"');
 check(/^No path/.test(l1TileLines(none, kinds, false, shapes)[0]), `a tile Mario doesn't go on (${hx(none)}): no path`);
 check(range(0, OW_L1_TILES).every((t) => l1TileLines(t, kinds, free[t], shapes).length >= 1 && l1TileLines(t, kinds, free[t], shapes)[0] !== KINDS_LEARNING), 'every tile has its function');
 const p1walk = l1TileLines(0x100 + walk, kinds, free[0x100 + walk], shapes);

@@ -25,7 +25,7 @@ const check = (ok: boolean, what: string) => { console.log((ok ? 'ok   ' : 'FAIL
 const hx = (v: number) => v.toString(16).toUpperCase().padStart(2, '0');
 
 const rom = new Rom(await editorImage()), runners = eventRunners(rom), tls = readTranslevels(rom);
-// the exits' edges as the Levels mode finds them (the maps at every progress built from the events, the saves' level
+// the exits' edges as the layer 1 mode's arrows find them (the maps at every progress built from the events, the saves' level
 // flags as the probe worker learns them)
 const loads = new OverworldLoads(new OverworldEmulator(rom), 4), views = submapViews(loads);
 const maps = progressMapsFromEvents(rom, progressSaves(loads).map((s) => s.levelFlags));

@@ -1145,7 +1145,7 @@ export class App {
     return this.probes.learn<WorldCheckLearned>('owwc1', { kind: 'owWorldCheck', kinds, shapes, open }, { lane: 'owwc', label: 'World check', input: [kinds, shapes, open], done });
   }
   // the exits' edges with the events still passable without each exit's event (owexitedges.ts passableEdgesJob, the
-  // Levels mode's arrows), from the path kinds and shapes, learned in the probe worker and kept in memory while the ROM
+  // layer 1 mode's exit arrows), from the path kinds and shapes, learned in the probe worker and kept in memory while the ROM
   // bytes they read are unchanged (seconds: the saves at every progress first); dropped: the request was dropped (the
   // overworld left, overworldLeft)
   overworldExitEdges(kinds: PathKind[], shapes: PathShapes, done: () => void, dropped?: () => void): ExitEdge[] | undefined {

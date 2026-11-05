@@ -2,6 +2,8 @@
 
 _The "Map after" select named below was replaced by the playthrough strip (ADR 0013): "Map after: event X" reads as event X chosen in the strip._
 
+_Amended (#396): the Levels mode is gone – level tiles are objects on top of layer 1 **in the layer 1 mode** (see "Amendment: no mode of their own" below). The rules below stay; what is said of the Levels mode applies to the layer 1 mode._
+
 A level tile (CONTEXT.md) is a layer 1 tile entering a level, its translevel moving with it. It could only be painted: moving one meant picking it up (the brush carries its translevel), painting it elsewhere and painting over the old one, which only a toast hinted at; placing one meant knowing which tile numbers are level tiles (56–80 in the clean game). For users level tiles are objects, as overworld links and sprites are, which have modes of their own (#335).
 
 We decided that the overworld editor has a **Levels mode** (key 3, between the layers and the overworld links; no layer dimmed) in which level tiles are objects on top of layer 1 – the only way to place, move or remove one (#340) –, each change one ROM edit of layer 1 and the translevel table on the map before events, or with "Map after: event X" a layer 1 change of event X (core/owleveltiles.ts):
@@ -13,15 +15,29 @@ We decided that the overworld editor has a **Levels mode** (key 3, between the l
 - **Look**: the looks are the visible tiles the path kinds call "level" (56–80 without the invisible ones in the clean game) and one invisible level tile for a level drawn on layer 2; choosing one replaces the tile and keeps the translevel.
 
 - **In an event** ("Map after: event X"): placing, moving and removing a level tile are layer 1 changes of event X (owevents.ts paintEventL1, as layer 1 painted into an event): the tile changes from the event on, the map before events stays; "Before events" edits the map before events. The translevel table is one per cell for every event progress: a cell with a level tile on another map (before events, before the event, put there by another event, revealed) keeps its translevel when the event takes the level tile away, and can't enter another level after the event (refused with the reason). Destroys and a castle's top stay where they are when a level tile moves in an event. The badge on the map says where the changes go.
-- **Layer 1 mode**: level tiles are no brush tiles. The layer 1 sheet shows them hatched and leaves them out of a block picked ("Levels: mode 3"); on the map they are lightly hatched, a stroke neither paints over one nor paints one, a rectangle picked leaves them out of the brush. A single click on one (no drag) goes to the Levels mode with it selected ("Level tiles are edited in the Levels mode (3) · 1: back to layer 1"); a double click still opens its level.
+- **Layer 1 mode** (until #396 – now the level tiles live there, see the amendment): level tiles are no brush tiles. The layer 1 sheet shows them hatched and leaves them out of a block picked ("Levels: mode 3"); on the map they are lightly hatched, a stroke neither paints over one nor paints one, a rectangle picked leaves them out of the brush. A single click on one (no drag) goes to the Levels mode with it selected ("Level tiles are edited in the Levels mode (3) · 1: back to layer 1"); a double click still opens its level.
 
 Which tiles are level tiles and which tile Mario stops on are the path kinds' (learned by emulation, owpaths.ts): 81 while it is a stop tile, else the first one. Edits wait for the path kinds and the submaps' views, as layer 1 painting does, in an event also for its maps (as after it with and without its layer 1 changes).
+
+## Amendment: no mode of their own (#396)
+
+The Levels mode is gone. Level tiles are objects on top of layer 1 **in the layer 1 mode** ("Layer 1 (paths & levels)", key 1; the modes are 1 layer 1, 2 layer 2, 3 overworld links, 4 sprites). The rules above stay – swap on move, the stop tile on remove, strokes never painting or erasing level tiles, edits into the event chosen in the strip, the refusals:
+
+- **Select / move**: a left click on a level tile selects it (its settings in the Properties, its name under it on the map, editable in place); a left drag starting on one moves it (Esc cancels). A pick rectangle starts beside a level tile – no modifier – and leaves level tiles out as before.
+- **Remove**: Delete removes the selected level tile.
+- **Place**: the layer 1 picker has a section **"Levels"** with the looks (the visible level tiles and the invisible one) and the budget "Levels with a level tile". A look chosen is the brush (beside the tile brushes and the route brush, "Path (auto)"): a right click (or Shift+click) on a cell opens "Place level here…" with that look preselected; a right drag places only on its first cell. A level dragged from "Without level tile" onto the map stays. One level tile picked in the sheet chooses it as the look.
+- **Menu**: a right click on a level tile, with any brush, opens its menu – Open level, Change look…, Remove (with the route brush once released without a drag: a route may start at a level tile).
+- **Exit arrows**: the selected level tile's arrows are always shown; View → "Exit arrows" shows every level tile's (off by default).
+- Level tiles stay lightly hatched on the map and in the sheet; the selected one gets the selection frame and its name label.
+
+Why: a mode of its own kept apart what users see as one map – a click on a level tile while painting paths switched modes, and placing a path to a level meant going back and forth. Level tiles never mix with a brush (a left click on one selects instead of picking, a stroke leaves it alone), so they can live on layer 1 as items, as objects do in the level editor (ADR 0011's exceptions). A step towards one canvas without modes (#372); links and sprites keep their modes for now.
 
 ## Considered options
 
 - **Move as "paint here, old cell becomes path"**: rejected, which path tile the old cell should get depends on its neighbours; swapping keeps whatever was at the target, which along a path is the path.
 - **Remove leaves tile 000 or the tile before the level was placed**: rejected, 000 cuts the path; no history of the cell is kept. The stop tile keeps the path walkable with nothing to enter.
 - **Edits into the event chosen in "Map after"**: first rejected (a level tile's translevel is per cell of the map before events; the Levels mode only selected in an event), so level tiles appearing through an event could only be painted. Accepted with #340, the translevel per cell kept as it is: the conflicts (a cell entering two levels at different progresses) are refused.
+- **A mode of its own for level tiles** (the Levels mode, #340): replaced (#396) by level tiles as objects in the layer 1 mode – see the amendment.
 - **Painting level tiles on layer 1 kept beside the Levels mode**: rejected (#340): two ways for one thing, and a stroke created or erased a level unnoticed (the brush carried translevels, a stroke warned of levels entered twice).
 
 ## Consequences

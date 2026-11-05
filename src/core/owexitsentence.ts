@@ -1,4 +1,4 @@
-// What passing a level does, one sentence per exit in the player's words (the Levels mode's "When beaten…", #361):
+// What passing a level does, one sentence per exit in the player's words (a level tile's "When beaten…", #361):
 // "Normal exit: opens Iggy's Castle · Iggy's Castle crumbles · the tile at submaps 09,06 becomes 66 · Mario goes to
 // Main map 0C,09". The clauses come from the exit's edge – the levels it opens (owexitedges.ts, as its arrows: the
 // sentence and the arrows never disagree) – from the exit's event – the tiles it destroys, the tile it reveals, the rest

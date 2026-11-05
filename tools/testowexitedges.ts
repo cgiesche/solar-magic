@@ -13,7 +13,7 @@ import { progressSaves, progressSearches, progressMapsFromEvents, type ProgressM
 import { reachInput } from '../src/core/owreach.ts';
 import { readStart } from '../src/core/owsprites.ts';
 import { submapViews, submapOf, eventRunners, eventChanges } from '../src/core/owevents.ts';
-import { exitEdges, passableEdgesJob, type ExitEdge } from '../src/core/owexitedges.ts';
+import { exitEdges, passableEdgesJob, shownExitEdges, type ExitEdge } from '../src/core/owexitedges.ts';
 import { RAM } from '../src/core/ram.ts';
 import { ExitGraph } from '../src/core/exitgraph.ts';
 import { levelTeleports } from '../src/core/owlinks.ts';
@@ -24,6 +24,15 @@ const check = (ok: boolean, what: string) => { console.log((ok ? 'ok   ' : 'FAIL
 const hx = (v: number, n = 2) => v.toString(16).toUpperCase().padStart(n, '0');
 const at = (i: number) => { const { x, y } = l1XY(i); return `${i >> 10 ? 'submaps' : 'main'} ${hx(x)},${hx(y)}`; };
 const lv = (tl: number) => hx(translevelToLevel(tl), 3);
+
+// the arrows drawn (#396): the selected level tile's always, every one with View → "Exit arrows"
+{
+  const e = (from: number): ExitEdge => ({ tl: 1, exit: 0, event: 0, from, reached: true, opens: [] });
+  const edges = [e(5), e(7), e(5), e(9)];
+  check(shownExitEdges(edges, true, -1).length === 4 && shownExitEdges(edges, true, 7).length === 4, '"Exit arrows" on: every level tile\'s arrows');
+  check(shownExitEdges(edges, false, 5).length === 2 && shownExitEdges(edges, false, 5).every((x) => x.from === 5), 'off: the selected level tile\'s only');
+  check(shownExitEdges(edges, false, -1).length === 0 && shownExitEdges(edges, false, 8).length === 0, 'off, nothing (or a tile without exits) selected: none');
+}
 
 const rom = new Rom(await editorImage());
 const kinds = pathKinds(rom), shapes = pathShapes(rom);

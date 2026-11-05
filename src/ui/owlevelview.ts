@@ -1,9 +1,11 @@
-// The level tiles as objects on the map (the overworld view's "Levels" mode, ADR 0012): a click selects a level tile
-// (its settings in the Properties panel), a drag moves it – it swaps with the tile where it is dropped, its translevel
-// with it –, Delete leaves the stop tile, a right click places a level on a cell ("Place level here…": the level and
-// its look chosen), a level without a level tile is dragged from the list onto the map. Each change one ROM edit of
-// the map before events – with event X chosen in the strip a layer 1 change of that event (the level tiles as after it) –
-// (owleveltiles.ts), made once the path kinds, the submaps' views and an event's maps are known.
+// The level tiles as objects on top of layer 1 (the overworld view's layer 1 mode, ADR 0012): a click selects a level
+// tile (its settings in the Properties panel), a drag starting on one moves it – it swaps with the tile where it is
+// dropped, its translevel with it –, Delete leaves the stop tile, a right click on one opens its menu (Open level,
+// Change look…, Remove). A look chosen as the brush in the layer 1 picker's "Levels" (`look`): a right click on a cell
+// places a level there ("Place level here…": the level chosen, the look preselected); a level without a level tile is
+// dragged from the list onto the map. Each change one ROM edit of the map before events – with event X chosen in the
+// strip a layer 1 change of that event (the level tiles as after it) – (owleveltiles.ts), made once the path kinds, the
+// submaps' views and an event's maps are known.
 
 import type { OverworldView, PickCheck } from './overworld.ts';
 import type { Rom } from '../core/rom.ts';
@@ -41,6 +43,11 @@ export class LevelTileLayer {
   drag: { from: number; to: number } | null = null;
   // the translevel of a level dragged from the list ("Without level tile") onto the map
   dragged = 0;
+  // the level tile look chosen as the layer 1 mode's brush (the picker's "Levels"; -1: none – a tile brush or the route
+  // brush): a right click on a cell places a level with it
+  look = -1;
+  // a level tile or a level from the list being dragged (the map shows where it goes)
+  get moving(): boolean { return !!this.drag || !!this.dragged; }
   constructor(private view: OverworldView) {}
 
   private get rom() { return this.view.app.rom; }
@@ -107,11 +114,14 @@ export class LevelTileLayer {
   }
 
   // ---- the mouse ----
-  // a click on cell (x, y): a level tile selected and picked up, else nothing selected
+  // whether cell (x, y) of the map shown holds a level tile (as after the event chosen)
+  at(x: number, y: number): boolean {
+    return this.inside(x, y) && this.isLevelAt(l1Index(this.view.region, x, y));
+  }
+  // a click on the level tile at cell (x, y): selected and picked up (a drag moves it)
   down(x: number, y: number): void {
-    if (!this.inside(x, y)) return;
+    if (!this.at(x, y)) return;
     const v = this.view, i = l1Index(v.region, x, y);
-    if (!this.isLevelAt(i)) { v.selectTile(-1, false); return; }
     v.selectTile(i, false);
     this.drag = { from: i, to: i };
   }
@@ -153,25 +163,36 @@ export class LevelTileLayer {
     return true;
   }
 
-  // a right click on cell (x, y) (cx, cy: where on the screen): "Place level here…", on a level tile also its removal
+  // a right click on the level tile at cell (x, y) (cx, cy: where on the screen; any brush): selected, its menu – Open
+  // level, Change look…, Remove
   menu(cx: number, cy: number, x: number, y: number): void {
-    if (!this.inside(x, y)) return;
-    const v = this.view, i = l1Index(v.region, x, y), level = this.isLevelAt(i);
+    if (!this.at(x, y)) return;
+    const v = this.view, i = l1Index(v.region, x, y), tl = v.tls[i];
+    v.selectTile(i, false);
     contextMenu(cx, cy, [
-      { heading: `Tile ${hex(x, 2)},${hex(y, 2)} · ${l1Hex(v.levelL1()[i])}` },
-      { label: level ? 'Place another level here…' : 'Place level here…', onClick: () => this.placeDialog(i) },
-      ...(level ? [{ label: 'Remove level tile', shortcut: 'Del', onClick: () => { v.selectTile(i, false); this.remove(); } }] : []),
+      { heading: `${tl ? `Level ${levelHex(tl)} · ` : ''}tile ${hex(x, 2)},${hex(y, 2)} · ${l1Hex(v.levelL1()[i])}` },
+      { label: 'Open level', disabled: () => !tl, title: tl ? `Level ${levelHex(tl)} in the level editor (also by double click)` : 'It enters no level', onClick: () => v.onOpenLevel(translevelToLevel(tl)) },
+      { label: 'Change look…', onClick: () => this.lookDialog(i) },
+      { label: 'Remove', shortcut: 'Del', title: 'The stop tile 81 in its place – the level keeps its settings', onClick: () => { v.selectTile(i, false); this.remove(); } },
     ]);
+  }
+  // "Change look…": the looks, a click on one changes the look of the level tile at i (its level kept)
+  private lookDialog(i: number): void {
+    if (!this.ready()) return;
+    const { x, y } = l1XY(i);
+    const d = modal(`Look of ${this.label(i, true)}`, h('div', { class: 'ow-place' },
+      h('div', { class: 'hint' }, `Tile ${hex(x, 2)},${hex(y, 2)} – the tile changes, its level stays`),
+      this.lookPicker(this.view.levelL1()[i], (t) => { d.close(); this.setLook(i, t); })), [{ label: 'Cancel' }]);
   }
 
   // ---- placing ----
-  // the dialog placing a level at i: the level (a free one proposed) and its look
-  placeDialog(i: number): void {
+  // the dialog placing a level at i: the level (a free one proposed) and its look (`look` preselected, else the default)
+  placeDialog(i: number, preset = -1): void {
     if (!this.ready()) return;
     const v = this.view, rom = this.rom, { x, y } = l1XY(i);
     const free = freeTranslevel(v.tls, (n) => translevelUse(rom, n));
     let tl = free || 1;
-    let look = this.defaultLook();
+    let look = preset >= 0 ? preset : this.defaultLook();
     const body = h('div', { class: 'ow-place' });
     const build = () => body.replaceChildren(
       h('div', { class: 'prop' }, h('label', null, 'Level'), this.levelChoice(tl, i, (t) => { tl = t; build(); })),
@@ -215,7 +236,7 @@ export class LevelTileLayer {
     if (!kinds) return h('div', { class: 'hint' }, 'The level tiles are being learned …');
     const inv = invisibleLevelTile(this.rom, kinds);
     const looks = [...levelTileLooks(this.rom, kinds), ...(inv >= 0 ? [inv] : [])];
-    if (!looks.includes(current)) looks.push(current);
+    if (current >= 0 && !looks.includes(current)) looks.push(current);
     return h('div', { class: 'ow-looks' }, ...looks.map((t) => h('button', {
       class: `ow-look${t === current ? ' current' : ''}`,
       title: `Tile ${l1Hex(t)}${t === inv ? ' · invisible: for a level drawn on layer 2 (a castle, a fortress)' : ''}`,
@@ -249,7 +270,7 @@ export class LevelTileLayer {
 
   // ---- drawing ----
   // a level tile being dragged: the two cells as after the swap (layer 1 of each in the other's place), the target
-  // outlined; else the cell under the mouse
+  // outlined; else (a level dragged from the list) the cell under the mouse
   paint(ctx: CanvasRenderingContext2D, lw: number): void {
     const v = this.view, d = this.drag;
     if (d && d.to !== d.from) {
@@ -284,12 +305,12 @@ export class LevelTileLayer {
   }
 
   // the list's levels without a level tile (translevels no tile on any map holds), each dragged onto the map in the
-  // levels mode to place it; a double click opens it
+  // layer 1 mode to place it; a double click opens it
   withoutTile(tls: number[]): HTMLElement[] {
-    const rom = this.rom, look = l1Hex(this.defaultLook()), on = this.view.mode === 'levels';
+    const rom = this.rom, look = l1Hex(this.defaultLook()), on = this.view.mode === 'l1';
     return tls.map((tl) => h('div', {
       class: 'level-item unused', draggable: on,
-      title: `${levelName(rom, tl)}\n${on ? `Drag onto the map to place it (look ${look}) · Right click on the map: Place level here…` : 'Placed in the Levels mode (3)'} · Double click: open in the level editor`,
+      title: `${levelName(rom, tl)}\n${on ? `Drag onto the map to place it (look ${look}) · or choose a look under "Levels" in the picker and right click on the map` : 'Placed in the layer 1 mode (1)'} · Double click: open in the level editor`,
       ondragstart: (e: DragEvent) => { this.dragged = tl; e.dataTransfer?.setData('text/plain', levelHex(tl)); },
       ondragend: () => { this.dragged = 0; this.view.hover = null; this.view.paint(); },
       ondblclick: () => this.view.onOpenLevel(translevelToLevel(tl)),

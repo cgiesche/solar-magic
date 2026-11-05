@@ -26,7 +26,7 @@ export class PathTool {
   constructor(private view: OverworldView) {}
 
   // why a route can't be drawn now (null: it can): not before the path kinds and shapes are learned and, with an
-  // event chosen, its maps are emulated (the event's layer 1 changes are written as the Levels mode's)
+  // event chosen, its maps are emulated (the event's layer 1 changes are written as the level tiles')
   private blocked(): string | null {
     const v = this.view;
     if (!v.pathKinds() || !v.pathShapes()) return 'The path tiles are still being learned – routes can be drawn in a moment.';

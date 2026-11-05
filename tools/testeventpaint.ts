@@ -1,6 +1,6 @@
 // Painting a layer 2 event (owevents.ts paintEvent, ADR 0005): the map after the event becomes its steps; a paint
-// stroke on the event (owstroke.ts) is one ROM edit; layer 1 painted as after an event leaves level tiles alone (the
-// Levels mode places them). Every
+// stroke on the event (owstroke.ts) is one ROM edit; layer 1 painted as after an event leaves level tiles alone (objects
+// on top of layer 1, placed as such). Every
 // clean game's event painted as it is (its own map after it) and written back leaves the layer 2 of every event
 // progress as it was; a painted change is shown by the game – passing the level, the steps on its submap appear one
 // after the other in their order (VRAM, frame by frame), those on another submap at once in the tilemap (silent);
@@ -151,7 +151,7 @@ check(romDiff(image, rom.data) === 0, 'undone: the ROM as before');
 }
 
 // layer 1 painted as after level 105's normal exit: a path tile painted a layer 1 change of the event (the game shows it
-// from the event on, not before); a level tile is neither painted nor painted over (the Levels mode places them), the
+// from the event on, not before); a level tile is neither painted nor painted over (objects on top of layer 1), the
 // translevels stay
 {
   const r3 = new Rom(image.slice()), isLevel = levelTiles(r3), maps = readMaps(r3), em = new OverworldEmulator(r3);

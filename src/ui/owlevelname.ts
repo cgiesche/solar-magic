@@ -1,11 +1,12 @@
-// The name of the selected level tile in the overworld's Levels mode (#369): the level's name drawn in a box under the
-// tile in the map's own font (as the overworld's border shows it). A click on the box opens a popover editing the name
-// in place – typed as its tiles (core/levelnames.ts typeNameChar, nameKey), a character the font lacks refused while
-// typing, said why; Enter or a click outside the popover writes it (one ROM edit), Esc drops it. Beside it the
-// translevel's switches as the Levels properties have them (no entry once passed, save prompt) and the other level
-// tiles entering the level ("Also used by the tile on Vanilla Dome", owleveltiles.ts alsoUsedBy). A star selected in the
-// layer 1 mode (owstars.ts) has its name drawn so too – the status bar's while Mario stands on it –, the popover opened
-// by its properties' button (a click on the map paints there), without the switches (it enters no level).
+// The name of the selected level tile in the overworld's layer 1 mode (#369, level tiles as objects there: ADR 0012):
+// the level's name drawn in a box under the tile in the map's own font (as the overworld's border shows it). A click on
+// the box opens a popover editing the name in place – typed as its tiles (core/levelnames.ts typeNameChar, nameKey), a
+// character the font lacks refused while typing, said why; Enter or a click outside the popover writes it (one ROM
+// edit), Esc drops it. Beside it the translevel's switches as the level tile's properties have them (no entry once
+// passed, save prompt) and the other level tiles entering the level ("Also used by the tile on Vanilla Dome",
+// owleveltiles.ts alsoUsedBy). A star selected (owstars.ts) has its name drawn so too – the status bar's while Mario
+// stands on it –, the popover opened by its properties' button (a click on the map paints there), without the switches
+// (it enters no level).
 
 import type { OverworldView } from './overworld.ts';
 import { h, checkbox } from './dom.ts';
@@ -48,14 +49,14 @@ export class LevelNameEditor {
   private image: { tiles: string; r: OwRender; c: HTMLCanvasElement } | null = null; // the box's tiles drawn
   constructor(private view: OverworldView) {}
 
-  // the selected level tile (Levels mode) or star (layer 1 mode) and its translevel (null: none, another mode, no level
-  // names in the ROM)
+  // the selected level tile or star (layer 1 mode) and its translevel (null: none, another mode, no level names in the
+  // ROM)
   private target(): { i: number; tl: number; star: boolean } | null {
     const v = this.view, i = v.selected;
-    if ((v.mode !== 'levels' && v.mode !== 'l1') || i < 0 || (i >= 0x400) !== (v.region === 1) || !levelNamePatch(v.app.rom)) return null;
+    if (v.mode !== 'l1' || i < 0 || (i >= 0x400) !== (v.region === 1) || !levelNamePatch(v.app.rom)) return null;
     const tl = v.tls[i], t = v.levelL1()[i];
     if (!tl) return null;
-    if (v.mode === 'levels') return v.isLevelTile(t) ? { i, tl, star: false } : null;
+    if (v.isLevelTile(t)) return { i, tl, star: false };
     return v.pathKinds() && isStar(t) ? { i, tl, star: true } : null;
   }
   // the name shown: as typed while edited, else as in the ROM
@@ -95,7 +96,7 @@ export class LevelNameEditor {
     ctx.drawImage(this.image.c, b.x + PAD, b.y + PAD);
   }
 
-  // a click on the map at pixel p; true: taken – one open closed (the name typed written), or (Levels mode) the
+  // a click on the map at pixel p; true: taken – one open closed (the name typed written), or (a level tile's) the
   // popover opened by a click on the name's box
   down(p: { x: number; y: number }): boolean {
     if (this.pop) { this.close(true); return true; }

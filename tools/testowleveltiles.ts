@@ -1,4 +1,4 @@
-// The overworld editor's Levels mode (owleveltiles.ts, ADR 0012) on the editor's test ROM: a level tile moved swaps
+// The overworld editor's level tiles as objects on layer 1 (owleveltiles.ts, ADR 0012) on the editor's test ROM: a level tile moved swaps
 // with the tile where it is dropped (its translevel and settings with it, the path left whole), two level tiles swap;
 // one removed leaves the stop tile 81 and its level without a level tile; one placed gets the look and translevel
 // chosen, a look changed keeps the translevel. Each one ROM edit, undone in one step. The looks are the visible tiles

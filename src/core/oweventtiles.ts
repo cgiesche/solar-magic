@@ -105,7 +105,7 @@ export function removeDestroy(rom: Rom, e: number, i: number): void {
   writeDestroyList(rom, readDestroyList(rom).map((d) => (d.event === e && d.tile === i ? { event: NO_EVENT, tile: 0 } : d)));
 }
 
-// ---- "Crumbles when beaten" (the Levels mode, #368) ----
+// ---- "Crumbles when beaten" (a level tile's properties, #368) ----
 // A level tile the game destroys – a castle by its top (the tile above, destroyTarget), a fortress or switch palace
 // itself – crumbles when its level's normal exit is passed: a destroy of that cell in the level's base event. tl: the
 // translevel the level tile at i enters; shown: the map as the game shows it (destroyTarget).

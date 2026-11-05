@@ -3,7 +3,7 @@
 // ROM edit undone in one step; the game's limits (one reveal and one destroy per event, 0x18 destroys) refused with
 // the reason, so is a destroy of a tile the game doesn't destroy (a castle's level tile clicked: set on its top); a
 // reveal picked to become another tile changes the cell to the tile the reveal list turns into it. A castle moved in
-// the Levels mode (moveLevelTile) moves whole with its destroy, a reveal on its old cell stays; a level tile where its
+// a drag in the layer 1 mode (moveLevelTile) moves whole with its destroy, a reveal on its old cell stays; a level tile where its
 // top would go keeps the top in place. "Crumbles when beaten" (#368) on a tile another event destroys: on, disabled,
 // that event's level exit named, ticking refused (#378).
 // node tools/testoweventtiles.ts

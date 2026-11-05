@@ -143,7 +143,7 @@ export function encodeName(text: string, multi = true): EncodedName {
   return { tiles, missing, shown };
 }
 
-// ---- a name typed in place (the overworld's Levels mode, #369): as its tiles, drawn in the map's font ----
+// ---- a name typed in place (the overworld's layer 1 mode, #369): as its tiles, drawn in the map's font ----
 // a name being typed: its tiles (trailing spaces left out) and the caret, before tile `at`
 export interface NameCaret { tiles: number[]; at: number }
 // a name's tiles without the trailing spaces (what is typed into)

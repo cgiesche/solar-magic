@@ -2,8 +2,9 @@
 // being painted), cells painted into them, ended into one ROM edit. It hides the choice between the map before events
 // (layer 1 where it changed, layer 2 in place when it fits) and the event's steps (layer 2: paintEvent; layer 1:
 // paintEventL1 against the map after it without its layer 1 changes). Layer 1 strokes leave level tiles alone: they
-// neither paint over one nor paint one (level tiles are placed, moved and removed in the Levels mode, ADR 0012). A
-// star painted takes a translevel of its own, a star or stop painted over with a path frees its (owstars.ts paintStars).
+// neither paint over one nor paint one (level tiles are objects on top of layer 1, placed, moved and removed as such,
+// ADR 0012). A star painted takes a translevel of its own, a star or stop painted over with a path frees its
+// (owstars.ts paintStars).
 
 import type { Rom } from './rom.ts';
 import {
