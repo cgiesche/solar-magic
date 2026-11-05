@@ -156,6 +156,7 @@ export function revealStepFrames(rom: Rom): number {
 // of Bowser only. Lunar Magic 3.71 writes this byte and no other for the switch (ROMs it saved,
 // docs/research/lunar-magic-submap-graphics.md, "The lightning switch"); it doesn't need the ExAnimation patch.
 export const LIGHTNING_MASK = 0x04f709;
+const LIGHTNING_GAME = 0xf7; // the clean game's mask: on the Valley of Bowser only
 const SUBMAP_BITS = 0x04f875;
 const SUBMAPS = 7; // the main map … Star Road (overworld.ts MAP_NAMES; not imported, see LF_SAVE_SWITCH)
 export const LIGHTNING_TITLE = 'The game\'s lightning flashes of color 4·7 on this submap (in the game on the Valley of Bowser only)';
@@ -163,6 +164,10 @@ export const lightningEditLabel = (name: string, on: boolean): string => `${name
 // the game's LDA #mask : JSR $F882 around the mask (as the other options, a patch may have changed it)
 const gameCode = (rom: Pick<Rom, 'r8'>) =>
   rom.r8(LIGHTNING_MASK - 1) === 0xa9 && [0x20, 0x82, 0xf8].every((v, k) => rom.r8(LIGHTNING_MASK + 1 + k) === v);
+// the game's code the switch reads and writes (patchapply.ts refuses a patch there while the mask isn't the game's, #324)
+export const LIGHTNING_HOOKS: [number, number][] = [[LIGHTNING_MASK - 1, 5]];
+// whether the switch is set: the mask changed from the game's F7 (false when a patch changed the code there)
+export const lightningSet = (rom: Pick<Rom, 'r8'>): boolean => gameCode(rom) && rom.r8(LIGHTNING_MASK) !== LIGHTNING_GAME;
 // whether the lightning is on on the submap; null: the game's code there was changed by a patch
 export function submapLightning(rom: Pick<Rom, 'r8'>, submap: number): boolean | null {
   return gameCode(rom) ? !(rom.r8(LIGHTNING_MASK) & rom.r8(SUBMAP_BITS + submap)) : null;

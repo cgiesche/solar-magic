@@ -9,7 +9,7 @@ import { listPatches, removeEntry } from '../src/core/patchreg.ts';
 import { installEditorPatch } from '../src/core/patches.ts';
 import { inspectUpload } from '../src/core/packages.ts';
 import { installMap16Ext } from '../src/core/map16ext.ts';
-import { setOwOption } from '../src/core/owoptions.ts';
+import { setOwOption, setSubmapLightning } from '../src/core/owoptions.ts';
 import { editorImage } from './fixture.ts';
 
 await loadAsar();
@@ -103,6 +103,22 @@ check(diff === 0 && listPatches(rom).length === 0 && rom.scanRats().length === 0
   const set = option(true), unset = option(false);
   check(!set.ok && set.errors[0].includes('Start+Select'), 'code of a set overworld option rejected: ' + set.errors[0]);
   check(unset.ok && unset.warnings.some((w) => w.includes('Start+Select') && w.includes('can no longer be set')), 'code of an overworld option not set only warns: ' + unset.warnings.join(' | '));
+  // the lightning per submap (#324): its mask at $04F709 and the game's LDA #mask : JSR $F882 around it
+  const lightning = (on: boolean, at: number) => {
+    const rom = new Rom(image.slice());
+    if (on) setSubmapLightning(rom, 0, true);
+    const was = rom.data.slice();
+    return { r: applyPatch(rom, src('HitsLightning', `lorom\norg $${at.toString(16)}\ndb $EA\n`)), kept: rom.data.every((v, i) => v === was[i]) };
+  };
+  for (const at of [0x04f709, 0x04f708, 0x04f70c]) {
+    const s = lightning(true, at), u = lightning(false, at);
+    check(!s.r.ok && s.kept && s.r.errors[0].includes('Lightning per submap') && s.r.errors[0].includes('which is set'), `lightning set: a patch at $${at.toString(16)} rejected: ${s.r.errors[0]}`);
+    check(u.r.ok && u.r.warnings.some((w) => w.includes('Lightning per submap') && w.includes('can no longer be set')), `lightning as in the game: a patch at $${at.toString(16)} only warns: ${u.r.warnings.join(' | ')}`);
+  }
+  for (const at of [0x04f707, 0x04f70d]) {
+    const { r } = lightning(true, at);
+    check(r.ok && !r.warnings.some((w) => w.includes('Lightning per submap')), `lightning set: a patch just outside its code at $${at.toString(16)} is no conflict`);
+  }
 }
 
 // 3b. smwe.asm describes the ROM's editor patches

@@ -20,7 +20,7 @@ import { hasTranslevelTable, hasLevelFlagsPatch, hasDestroyPatch, hasOwMap16Ext,
 import { hasEventPatch, EVENT_HOOKS } from './owevents.ts';
 import { hasOwTeleportPatch, TELEPORT_HOOKS, OW_TELEPORT_PATCH_NAME } from './owteleport.ts';
 import { levelNamePatch, LEVEL_NAME_HOOKS } from './levelnames.ts';
-import { OW_OPTIONS, owOptionValue } from './owoptions.ts';
+import { OW_OPTIONS, owOptionValue, LIGHTNING_HOOKS, lightningSet } from './owoptions.ts';
 
 // hook sites of the editor's own patches (SNES address, length); an overworld option (`option`) is "installed" while
 // it is set to a value other than the clean game's
@@ -51,6 +51,7 @@ export function builtins(): Builtin[] {
       installed: (r) => owOptionValue(r, o.id) === !o.game,
       hooks: o.bytes.map((b): [number, number] => [b.at, b.game.length]),
     })),
+    { name: 'the overworld option “Lightning per submap”', option: true, installed: lightningSet, hooks: LIGHTNING_HOOKS },
   ];
 }
 
