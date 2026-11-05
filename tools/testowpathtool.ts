@@ -1,4 +1,4 @@
-// The layer 1 mode's Path tool, its ROM edit (owroute.ts writeRoute): a route drawn from a level tile on the test ROM
+// The layer 1 mode's route brush ("Path (auto)"), its ROM edit (owroute.ts writeRoute): a route drawn from a level tile on the test ROM
 // to a level Mario doesn't reach yet, through cells without a path, its tiles (routeTiles) written in the level's
 // event – layer 1 changes of the event, the level's exit running it set to the route's direction, one ROM edit, undo
 // restores – and Mario reaches the level at the event progress after the event (owreach.ts, with the save at that
@@ -7,8 +7,8 @@
 // no tile held, their initial flags the stops' ways, and Mario leaves the junction in every direction at every
 // progress from the event on (with translevel 0 he doesn't); undo frees them; no translevel left: refused, nothing
 // written. Translevels without tile with a name, base event or messages are never taken (#382): only those left,
-// refused at the first stop, nothing written, the refusal saying why. A path painted over a stop tile of the path
-// tool (#392) frees its translevel and resets it – in the event or before events –, unless the cell is a stop at
+// refused at the first stop, nothing written, the refusal saying why. A path painted over a stop tile of the route
+// brush (#392) frees its translevel and resets it – in the event or before events –, unless the cell is a stop at
 // another progress (a stop before events painted over as after an event keeps it).
 // node tools/testowpathtool.ts
 import { Rom } from '../src/core/rom.ts';

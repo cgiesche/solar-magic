@@ -1,7 +1,7 @@
 // Stars (CONTEXT.md "Star", docs/research/star-tile-translevels.md): a star tile (5F) is a stop tile from which A takes
 // Mario to another place (the star/pipe table). Its translevel is used as a stop tile's: its level flags ($1EA2) are the
 // ways Mario walks off it, its name the status bar's while he stands there; it enters no level and runs no event
-// (owevents.ts eventRunners). So a star keeps a translevel of its own as the path tool's stops do (owroute.ts): painted
+// (owevents.ts eventRunners). So a star keeps a translevel of its own as a route's stop tiles do (owroute.ts): painted
 // on a cell without one it takes a free one without name, base event or messages (stopTranslevels; of them the one
 // bringing least along), its initial flags (every new game) the ways its paths open; painted over with another star or
 // stop it keeps it; painted over with a path it frees it – unless the cell is a stop or level tile on another map (at

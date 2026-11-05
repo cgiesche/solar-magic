@@ -1,5 +1,5 @@
 // The World check's path look warnings (owlook.ts, issue #366). The clean game: no "path shown after Mario walks it"
-// (A) nor "path without a look" (B) at any event progress. A route drawn into a level's event (the Path tool's
+// (A) nor "path without a look" (B) at any event progress. A route drawn into a level's event (the route brush's
 // writeRoute) over ground: one B per path cell, said as new warnings; map pieces painted under it in the same event
 // clear them (said as fixed); the same pieces in a later event give A instead of B, Show going to that event. A path
 // tile with its own look (its Map16 tile given a visible one's 8x8s) is never warned about. The maps at every event

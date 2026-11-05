@@ -37,7 +37,7 @@ export type OwRefusalData =
   | { kind: 'eventStorageFull'; max: number; need?: number } // the places the events' tiles are kept in
   | { kind: 'levelTileHeld'; cell: number; tl: number } // cell enters translevel tl on another map
   | { kind: 'submapsLoading' } // an event's layer 2 painted before the submaps' views are known
-  // ---- a route drawn with the path tool (owroute.ts; told in the status bar) ----
+  // ---- a route drawn with the route brush, "Path (auto)" (owroute.ts; told in the status bar) ----
   | { kind: 'routeGap' } // a cell not next to the one before
   | { kind: 'routeExitInside' } // an exit tile not at the route's end
   | { kind: 'routeCrosses' }

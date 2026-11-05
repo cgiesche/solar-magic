@@ -1,6 +1,8 @@
-// The layer 1 mode's Path tool (CONTEXT.md "Route"): pressed on a cell and dragged through cells (each next to the one
-// before; dragged back over the route it shortens), the route shows the tiles the editor chooses for it
-// (owroute.ts routeTiles) – a cell no tile fits in red, why in the status bar. Released, the tiles are written as one
+// The layer 1 mode's route brush, "Path (auto)" above the layer 1 sheet (CONTEXT.md "Route"): with it as the brush a
+// right drag (or Shift+drag, ADR 0011's paint buttons) from a cell through cells (each next to the one before; dragged
+// back over the route it shortens) draws a route; a left click picks tiles as always, which ends it (the tiles
+// picked are the brush), P goes back and forth between it and the last tile brush. The route shows the tiles the
+// editor chooses for it (owroute.ts routeTiles) – a cell no tile fits in red, why in the status bar. Released, the tiles are written as one
 // ROM edit into the progress chosen ("Map after": the event's layer 1 changes, else the map before events), as a
 // stroke, and a level tile at an end whose exit runs the event gets that exit's direction (owroute.ts writeRoute). A
 // stop tile it puts takes a level without level tile and without name, base event or messages (its translevel: the
@@ -17,7 +19,7 @@ import { routeTiles, routeExits, routeKind, writeRoute, stopTranslevels, type Ro
 import { hex } from '../core/names.ts';
 
 export class PathTool {
-  on = false; // the tool chosen (the layer 1 mode's left button draws routes)
+  on = false; // the route brush chosen (the layer 1 mode's right button draws routes)
   private route: number[] | null = null; // the route being drawn (l1Index), its tiles
   private solved: RouteTiles | null = null;
   private stopTls: StopTranslevels | null = null; // (the translevels a stop may take, read once per drag)
@@ -121,7 +123,7 @@ export class PathTool {
 
   // the status bar while a route is drawn (null: none)
   status(): string | null {
-    if (!this.route) return this.on ? 'Path tool: press on a cell and drag Mario\'s route (back over it shortens it) · release writes its tiles · Esc cancels · P: off' : null;
+    if (!this.route) return this.on ? 'Path (auto): Click/drag picks up tiles · Right click/Shift+drag draws the route, the editor chooses its tiles (back over it shortens it) · release writes them · Esc cancels · P: the last tile brush' : null;
     const s = this.solved;
     return s?.refusal ? `Route of ${this.route.length} cells · ${this.refusalText(s)}` : `Route of ${this.route.length} cells · release writes its tiles · Esc cancels`;
   }

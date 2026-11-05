@@ -59,8 +59,8 @@ without regard to the tile's kind, so the editor can store whatever it decides w
 
 ## Options for the editor
 
-**A. Stars are stop tiles with a translevel (recommended).** A star keeps its translevel the way a stop tile from the
-path tool does (CONTEXT.md "Route"):
+**A. Stars are stop tiles with a translevel (recommended).** A star keeps its translevel the way a stop tile a route
+puts does (CONTEXT.md "Route"):
 
 - Painting a 5F gives it a free translevel that has no name, base event or messages. Its initial flags are the ways
   its paths have, as `owroute.ts` sets them for a stop.
