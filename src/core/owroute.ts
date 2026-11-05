@@ -294,18 +294,22 @@ export function writeRoute(rom: Rom, route: readonly number[], solved: Pick<Rout
     for (const [c, t] of cells) l1[c] = t;
     writeL1(rom, l1);
   }
-  const taken = need.map((s) => {
-    // (one with a name, base event or messages ranked out: never taken)
-    const tl = freeTranslevel(tls, (n) => (st.free.includes(n) ? translevelUse(rom, n) : Infinity));
-    tls[s.cell] = tl;
-    resetTranslevel(rom, tl);
-    setInitialFlags(rom, tl, stopFlags(s));
-    return tl;
-  });
+  const taken = need.map((s) => takeStopTranslevel(rom, tls, st, s.cell, stopFlags(s)));
   if (taken.length) writeTranslevels(rom, tls);
   const exits = routeExits(rom, route, ev);
   for (const x of exits) setExitDirection(rom, x.tl, x.exit, x.dir);
   return { exits, taken };
 }
-// the level flags ($1EA2) opening a stop's directions
-export const stopFlags = (s: RouteStop): number => s.dirs.reduce((f, d) => f | DIR_FLAGS[d], 0);
+// the level flags ($1EA2) opening directions `dirs` (DIR_NAMES order); a stop's
+export const dirFlags = (dirs: readonly number[]): number => dirs.reduce((f, d) => f | DIR_FLAGS[d], 0);
+export const stopFlags = (s: RouteStop): number => dirFlags(s.dirs);
+// a free translevel (of st.free, the one bringing least along: freeTranslevel by translevelUse) for the stop tile or star
+// at `cell` (tls changed; the caller writes it): its settings reset, its initial flags `flags`. Call it only while
+// st.free has one left (one with a name, base event or messages is ranked out: never taken)
+export function takeStopTranslevel(rom: Rom, tls: Uint8Array, st: StopTranslevels, cell: number, flags: number): number {
+  const tl = freeTranslevel(tls, (n) => (st.free.includes(n) ? translevelUse(rom, n) : Infinity));
+  tls[cell] = tl;
+  resetTranslevel(rom, tl);
+  setInitialFlags(rom, tl, flags);
+  return tl;
+}

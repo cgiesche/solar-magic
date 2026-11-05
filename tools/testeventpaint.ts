@@ -4,13 +4,14 @@
 // clean game's event painted as it is (its own map after it) and written back leaves the layer 2 of every event
 // progress as it was; a painted change is shown by the game – passing the level, the steps on its submap appear one
 // after the other in their order (VRAM, frame by frame), those on another submap at once in the tilemap (silent);
-// reordering the steps changes the order in the game. All by emulation.
+// reordering the steps changes the order in the game. All by emulation. A star painted as after an event takes a
+// translevel of its own (owstars.ts, #288), the map before events unchanged; a path painted over it there frees it.
 import { Rom } from '../src/core/rom.ts';
 import { LevelEmulator } from '../src/core/levelemu.ts';
 import { PlaySession } from '../src/core/playsession.ts';
 import { RomEditSession } from '../src/core/romedit.ts';
 import {
-  OverworldEmulator, OverworldLoads, gameL1, gameL2, readL1, readL2, readMaps, readTranslevels, baseEvent, OW_EVENTS, l1XY, l2Index,
+  OverworldEmulator, OverworldLoads, gameL1, gameL2, readL1, readL2, readMaps, readTranslevels, baseEvent, OW_EVENTS, l1XY, l2Index, initialFlags,
 } from '../src/core/overworld.ts';
 import { OverworldStroke, type OwEventMaps } from '../src/core/owstroke.ts';
 import {
@@ -18,7 +19,9 @@ import {
   layer1Without, l2XY, STORAGE_MAX, type EventData,
 } from '../src/core/owevents.ts';
 import { GM, RAM } from '../src/core/ram.ts';
-import { editorImage, romDiff, levelTiles } from './fixture.ts';
+import { editorImage, romDiff, levelTiles, pathKinds, pathShapes } from './fixture.ts';
+import { STAR_TILE, starDirs } from '../src/core/owstars.ts';
+import { dirFlags } from '../src/core/owroute.ts';
 
 let bad = 0;
 const check = (ok: boolean, what: string) => { console.log((ok ? 'ok   ' : 'FAIL ') + what); if (!ok) bad++; };
@@ -166,6 +169,29 @@ check(romDiff(image, rom.data) === 0, 'undone: the ROM as before');
   check(s3.history.undoStack.length === 1 && end.label === `${eventTitle(runners, e)}: paint layer 1` && !levelPainted && readL1(r3)[i] === game[i]
     && steps.length === 1 && steps[0].tile === v && same(readTranslevels(r3), tls), `layer 1 as after the event: the path tile a change of the event, the map before events as it was; a level tile neither painted nor painted over, the translevels as they were`);
   check(gameL1(em.load(0, e + 1))[i] === v && gameL1(em.load(0, e))[i] === game[i], `the game shows it at event progress ${hx(e + 1)}, at ${hx(e)} not`);
+}
+
+// a star painted as after level 105's normal exit: a translevel of its own, its flags the ways its paths open there;
+// a path painted over it in the event frees it
+{
+  const r4 = new Rom(image.slice()), isLevel = levelTiles(r4), paths = { kinds: pathKinds(r4), shapes: pathShapes(r4) }, em = new OverworldEmulator(r4);
+  const game = gameL1(em.load(0, e + 1)), without = layer1Without(r4, e), tls = readTranslevels(r4), before = readL1(r4);
+  const stopLike = (t: number) => paths.kinds[t] === 'stop' || paths.kinds[t] === 'level';
+  // (a path tile next to a path, the same before events and without the event, no stop anywhere)
+  const i = Array.from({ length: 0x400 }, (_, k) => k).find((k) => ['walk', 'climb', 'swim'].includes(paths.kinds[game[k]]) && !tls[k]
+    && game[k] === before[k] && game[k] === without[k] && !stopLike(before[k]) && starDirs(game, k, paths).length)!;
+  const stroke = (t: number, from: Uint16Array) => {
+    const ev: OwEventMaps = { event: e, after: applyEvents(readL2(r4), readEvents(r4), 0, e + 1), l1: from.slice(), game: from, without, place: () => place };
+    const st = new OverworldStroke(r4, 'l1', readMaps(r4), isLevel, ev, paths), { x, y } = l1XY(i);
+    st.paint(0, x, y, t);
+    st.end().write!();
+    return ev.l1!;
+  };
+  const after = stroke(STAR_TILE, game), tl = readTranslevels(r4)[i];
+  check(!!tl && !tls.includes(tl) && initialFlags(r4, tl) === dirFlags(starDirs(after, i, paths)) && same(readL1(r4), before) && gameL1(em.load(0, e + 1))[i] === STAR_TILE,
+    `a star painted as after event ${hx(e)} at ${hx(i)}: translevel ${hx(tl)}, flags ${hx(initialFlags(r4, tl))}; the game shows it from the event on, the map before events unchanged`);
+  stroke(game[i], after);
+  check(readTranslevels(r4)[i] === 0, `a path painted over it in the event frees it (${hx(readTranslevels(r4)[i])})`);
 }
 
 if (bad) { console.log(`${bad} failed`); process.exit(1); }

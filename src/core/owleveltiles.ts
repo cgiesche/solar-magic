@@ -146,7 +146,7 @@ export function placeLevelTileCheck(rom: Rom, look: number, tl: number, ev: Leve
 // why the cells an edit at cell i sets as after the event can't be (eventCellsRefusal); before events nothing is refused
 function cellsCheck(rom: Rom, ev: LevelTileEvent | null, cells: (tls: Uint8Array, ev: LevelTileEvent, i: number) => [number, number, number][]): (i: number) => OwRefusalData | null {
   if (!ev) return () => null;
-  const tls = readTranslevels(rom), held = heldElsewhere(rom, ev);
+  const tls = readTranslevels(rom), held = heldElsewhere(rom, ev.isLevelTile, ev.event, ev.without);
   return (i) => eventCellsRefusal(ev, held, tls, cells(tls, ev, i));
 }
 
@@ -173,7 +173,7 @@ export interface LevelTileEvent { event: number; after: ArrayLike<number>; witho
 // layer 1 changes of the event, the translevel table with them. Throws (nothing written) where a cell would enter
 // another level than it does on another map (heldElsewhere)
 function editInEvent(rom: Rom, ev: LevelTileEvent, cells: [number, number, number][]): void {
-  const after = Uint16Array.from(ev.after), tls = readTranslevels(rom), held = heldElsewhere(rom, ev);
+  const after = Uint16Array.from(ev.after), tls = readTranslevels(rom), held = heldElsewhere(rom, ev.isLevelTile, ev.event, ev.without);
   const why = eventCellsRefusal(ev, held, tls, cells);
   if (why) throw new OwRefusal(why);
   for (const [i, tile, tl] of cells) {
@@ -184,10 +184,14 @@ function editInEvent(rom: Rom, ev: LevelTileEvent, cells: [number, number, numbe
   writeEvents(rom, paintEventL1(readEvents(rom), ev.event, after, ev.without, new Set(cells.map(([i]) => i))));
   writeTranslevels(rom, tls);
 }
-// whether cell i's translevel is used on another map than the one after the event: a level tile there before events
-// (or one the reveal list turns it into), before the event (without its layer 1 changes) or put there by another event
-function heldElsewhere(rom: Rom, ev: LevelTileEvent): (i: number) => boolean {
-  const l1 = readL1(rom), lv = ev.isLevelTile, others = new Set<number>();
-  readEvents(rom).silent.forEach((steps, e) => { if (e !== ev.event) for (const s of steps) if (s.layer === 1 && lv(s.tile)) others.add(s.loc); });
-  return (i) => lv(l1[i]) || lv(revealedTile(rom, l1[i])) || lv(ev.without[i]) || others.has(i);
+// whether cell i holds a tile `test` takes (a level tile; a stop or level tile for a star, owstars.ts) on another map
+// than the one edited: before events (or one the reveal list turns it into), before event `event` (`without`: as
+// after it without its layer 1 changes) or put there by another event; event -1: the map before events is the one
+// edited. The translevel table is per cell for every event progress, so such a cell keeps its translevel
+export function heldElsewhere(rom: Rom, test: (t: number) => boolean, event = -1, without: ArrayLike<number> | null = null): (i: number) => boolean {
+  const l1 = readL1(rom), others = new Set<number>();
+  let silent: ReturnType<typeof readEvents>['silent'] = [];
+  try { silent = readEvents(rom).silent; } catch { /* (no event patch: no layer 1 changes) */ }
+  silent.forEach((steps, e) => { if (e !== event) for (const s of steps) if (s.layer === 1 && test(s.tile)) others.add(s.loc); });
+  return (i) => others.has(i) || test(revealedTile(rom, l1[i])) || (event >= 0 && (test(l1[i]) || (without !== null && test(without[i]))));
 }

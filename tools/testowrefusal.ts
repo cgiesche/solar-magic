@@ -46,6 +46,8 @@ const samples: { [K in OwRefusalKind]: Extract<OwRefusalData, { kind: K }> } = {
   routeCrosses: { kind: 'routeCrosses' },
   routeNoTile: { kind: 'routeNoTile', dir: 0, out: 2, where: 'pathBefore' },
   routeNoTranslevel: { kind: 'routeNoTranslevel', max: 0x5f, kept: 2 },
+  starNoTranslevel: { kind: 'starNoTranslevel', max: 0x5f, kept: 2 },
+  starOnLevel: { kind: 'starOnLevel', cell: l1Index(0, 4, 4), tl: 0x29 },
   pieceSame: { kind: 'pieceSame' },
   pieceNoneInside: { kind: 'pieceNoneInside' },
   pieceNotFound: { kind: 'pieceNotFound', selection: true },

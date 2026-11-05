@@ -178,7 +178,7 @@ A layer 1 tile drawn as tile 000, on no map (nor put there by an event) and doin
 _Avoid_: empty tile (an empty tile may still be an invisible path or level tile)
 
 **Budget** (overworld):
-How much of one of the overworld's ROM tables an edit can run out of is used: destroyed level tiles (0x18), the reveal list's pairs (0x16), layer 1 tiles (those not free, of 0x200), star/pipe entries (0x100), exit path entries (0x80), levels with a level tile (0x5F translevels), the event tile storage (0x3600 places), custom overworld sprites per submap (0x18). Counted from the ROM by one function (core/owbudget.ts owBudgets), shown as a gauge beside the action the limit stops – neutral, amber from 80 %, red when full; its hover says what it counts, the numbers after –, all of them together for the World check to list.
+How much of one of the overworld's ROM tables an edit can run out of is used: destroyed level tiles (0x18), the reveal list's pairs (0x16), layer 1 tiles (those not free, of 0x200), star/pipe entries (0x100), exit path entries (0x80), levels with a level tile, stop or star (0x5F translevels), the event tile storage (0x3600 places), custom overworld sprites per submap (0x18). Counted from the ROM by one function (core/owbudget.ts owBudgets), shown as a gauge beside the action the limit stops – neutral, amber from 80 %, red when full; its hover says what it counts, the numbers after –, all of them together for the World check to list.
 _Avoid_: quota, capacity
 
 **Map piece** (overworld layer 2):
@@ -245,6 +245,10 @@ _Avoid_: collapse (that is the animation), destruction event
 **Layer 1 change**:
 A layer 1 tile an event writes when it ends (a silent step on layer 1, shown when the map is loaded again: for other submaps and tiles not seen). Painted as layer 1 after the event, as event steps are.
 _Avoid_: layer 1 event (Lunar Magic's mode)
+
+**Star** (overworld):
+A layer 1 star tile (5F): a stop tile from which A takes Mario where its overworld link leads; it enters no level and runs no event, but its translevel is used as a stop tile's – its level flags are the ways Mario walks off it (a new game's: the initial flags; arriving by a path or the reveal walk opens the way back), its name the status bar's while he stands there. So a star holds a translevel of its own, as the path tool's stops do (see **Route**): painted on a cell without one (or one sharing a level's) it takes a free one without name, base event or messages (none left: the stroke is refused; on a cell that is a level tile at another event progress too), its initial flags the ways its paths open; painted over with another star or stop it keeps it; painted over with a path it frees it (unless the cell is a stop or level tile at another event progress), its name and flags reset once no tile holds it. Its properties (layer 1 mode, Alt+click) are only the ways Mario walks off it (a switch each) and the status-bar name (drawn in the box under it on the map, typed there after its Edit… button, as a level tile's name); no base event, exits, messages or level switches. Counted by the budget of levels on the overworld. A star on translevel 0 (a hack's) shares translevel 0's flags with every tile without one and shows a blank name: a World check warning, a button gives it one. What the game uses its translevel for: docs/research/star-tile-translevels.md.
+_Avoid_: star road (that is the submap), warp star
 
 **Overworld link**:
 A star, pipe or exit path tile leading to another place of the overworld (one-way or both ways: an entry leading back), a location that an exit to the overworld teleports to, or the place a Koopa Kid puts Mario; an entry of the star/pipe table (0x100) or the exit path table (0x80), as in Lunar Magic; of two entries with the same tile the game finds the last (it searches from the last entry down), an edit changes that one. Made by dragging from the tile, drawn as an arrow.

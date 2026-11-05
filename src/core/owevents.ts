@@ -394,7 +394,7 @@ export interface EventRunner { tl: number; exit: number; tile: number }
 // ones with a base event (1E 30 48 55) run none of their base events (64 56 53 59 50 5C, 36 44 6D 5F, which change
 // nothing): A on a star takes Mario to another place (docs/research/star-tile-translevels.md).
 export function eventRunners(rom: Rom): Map<number, EventRunner[]> {
-  const tls = readTranslevels(rom), out = new Map<number, EventRunner[]>(), shown = shownSecretExits(rom), starPipe = starPipeCells(rom);
+  const tls = readTranslevels(rom), out = new Map<number, EventRunner[]>(), shown = shownSecretExits(rom), starPipe = cellsBecoming(rom, isStarPipeTile);
   const tileOf = new Map<number, number>();
   tls.forEach((tl, i) => { if (tl && !tileOf.has(tl) && !starPipe.has(i)) tileOf.set(tl, i); });
   const bases = new Set(Array.from({ length: MAX_TRANSLEVEL }, (_, k) => baseEvent(rom, k + 1)));
@@ -411,14 +411,15 @@ export function eventRunners(rom: Rom): Map<number, EventRunner[]> {
   for (const l of out.values()) l.sort((a, b) => a.exit - b.exit || a.tl - b.tl);
   return out;
 }
-// the cells (l1Index) that are a star or pipe tile at some event progress: on the map before events, the tile the
-// reveal list turns it into, an event's layer 1 change (a ROM whose events can't be read: those of the map and reveals)
-function starPipeCells(rom: Rom): Set<number> {
+// the cells (l1Index) that hold a layer 1 tile `test` takes at some event progress: on the map before events, the tile
+// the reveal list turns it into, an event's layer 1 change (a ROM whose events can't be read: those of the map and
+// reveals)
+export function cellsBecoming(rom: Rom, test: (t: number) => boolean): Set<number> {
   const l1 = readL1(rom), out = new Set<number>();
-  l1.forEach((t, i) => { if (isStarPipeTile(t) || isStarPipeTile(revealedTile(rom, t))) out.add(i); });
+  l1.forEach((t, i) => { if (test(t) || test(revealedTile(rom, t))) out.add(i); });
   let silent: EventData['silent'] = [];
   try { silent = readEvents(rom).silent; } catch { /* (no event patch) */ }
-  for (const steps of silent) for (const s of steps) if (s.layer === 1 && isStarPipeTile(s.tile)) out.add(s.loc);
+  for (const steps of silent) for (const s of steps) if (s.layer === 1 && test(s.tile)) out.add(s.loc);
   return out;
 }
 // whether event e changes something: layer 1 or layer 2 tiles, a reveal, a destroy (the events read when first asked;

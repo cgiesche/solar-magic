@@ -14,6 +14,11 @@
 // nor those of the four stars events reveal with a base event (36 44 6D 5F; the cells are 5A before) –, the save with
 // every event passed (progressSaves) leaves the stars' flags without "passed" and counts none of those 10 events as
 // triggered (110 before the fix).
+// The editor (#288, owstars.ts): a star painted (OverworldStroke) on a stop tile without translevel takes a free one
+// without name, base event or messages, its initial flags the ways its paths open – Mario (emulated, a new game) walks
+// off it in each of them and in no other; painted over with a stop it keeps it, with a path it frees it; no translevel
+// left, the stroke is refused with nothing written. The budget of levels on the overworld counts it. A star without
+// translevel is found (the World check's warning) and given one.
 // node tools/teststartiles.ts
 import { Rom } from '../src/core/rom.ts';
 import { LevelEmulator } from '../src/core/levelemu.ts';
@@ -22,8 +27,16 @@ import {
   OW_EVENTS, MAX_TRANSLEVEL, DIR_NAMES, DIR_FLAGS, FLAG, revealedTile, baseEvent, NO_EVENT,
 } from '../src/core/overworld.ts';
 import { levelNameTiles, setLevelNameTiles, encodeName, levelName, NAME_VRAM, NAME_LEN, NAME_SPACE } from '../src/core/levelnames.ts';
-import { reachInput, walkFrom } from '../src/core/owreach.ts';
-import { eventRunners } from '../src/core/owevents.ts';
+import { reachInput, walkFrom, neighbor } from '../src/core/owreach.ts';
+import { eventRunners, readEvents, writeEvents } from '../src/core/owevents.ts';
+import { OverworldStroke } from '../src/core/owstroke.ts';
+import { starDirs, giveStarTranslevel, starsWithoutTranslevel, STAR_TILE } from '../src/core/owstars.ts';
+import { dirFlags } from '../src/core/owroute.ts';
+import { starsWithoutTranslevelProblems, type CheckContext } from '../src/core/owchecks.ts';
+import { owBudgets } from '../src/core/owbudget.ts';
+import { OwRefusal } from '../src/core/owrefusal.ts';
+import { hasNameEventOrMessages, setBaseEvent, readL2 } from '../src/core/overworld.ts';
+import { levelsWithoutTile, stopTile } from '../src/core/owleveltiles.ts';
 import { progressSaves } from '../src/core/owprogress.ts';
 import { readStart } from '../src/core/owsprites.ts';
 import { PlaySession } from '../src/core/playsession.ts';
@@ -210,6 +223,72 @@ const UNUSED = Array.from({ length: MAX_TRANSLEVEL }, (_, k) => k + 1).find((t) 
   const last = progressSaves(new OverworldLoads(new OverworldEmulator(rom), 4)).at(-1)!;
   check([...starTls].every((tl) => !(last.levelFlags[tl] & FLAG.passed)) && last.eventsTriggered === 110 - starEvents.size,
     `every event passed: no star passed (${[...starTls].map((tl) => `${hx(tl)}=${hx(last.levelFlags[tl])}`).join(' ')}), ${last.eventsTriggered} events triggered (110 less the stars' ${starEvents.size})`);
+}
+
+// ---- the editor: a star painted takes a translevel of its own (#288) ----
+{
+  const paths = { kinds, shapes }, isLevel = (t: number) => kinds[t] === 'level';
+  // (a stop tile of the map before events without translevel with a path off it – in the clean game a pipe 82; a stop
+  // tile painted over it: stopTile, 81)
+  const cell = [...l1.keys()].find((i) => kinds[l1[i]] === 'stop' && !tls[i] && (l1[i] & 0xff) !== STAR_TILE && starDirs(l1, i, paths).length)!, stop = stopTile(kinds);
+  const paint = (r: Rom, i: number, t: number) => {
+    const maps = { l1: readL1(r), l2: readL2(r) }, s = new OverworldStroke(r, 'l1', maps, isLevel, null, paths), { x, y } = l1XY(i);
+    s.paint(i >> 10, x, y, t);
+    s.end().write!();
+  };
+  const levels = (r: Rom) => owBudgets(r, 0, kinds).find((b) => b.key === 'translevels')!.used;
+  const r = new Rom(rom.data.slice());
+  paint(r, cell, STAR_TILE);
+  const tl = readTranslevels(r)[cell], dirs = starDirs(readL1(r), cell, paths);
+  check(!!tl && !tls.includes(tl) && !hasNameEventOrMessages(r, tl) && initialFlags(r, tl) === dirFlags(dirs) && levels(r) === levels(rom) + 1,
+    `a star painted at ${at(cell)}: translevel ${hx(tl)} of its own, no name or event, its flags ${hx(initialFlags(r, tl))} the ways its paths open (${dirs.map((d) => DIR_NAMES[d]).join(' ')}); levels on the overworld ${levels(rom)} → ${levels(r)}`);
+  const walks = PADS.map((pad) => press(onTile(r, cell), pad) !== cell);
+  check(walks.some(Boolean) && walks.every((w, d) => w === dirs.includes(d)), `Mario (a new game) walks off it ${walks.map((w, d) => (w ? DIR_NAMES[d] : '')).filter(Boolean).join(' ')}, in no other way`);
+  paint(r, cell, stop);
+  check(readTranslevels(r)[cell] === tl, `a stop (${hx(stop)}) painted over it keeps translevel ${hx(readTranslevels(r)[cell])}`);
+  paint(r, cell, STAR_TILE);
+  const path = readL1(r)[[0, 1, 2, 3].map((d) => neighbor(cell, d)).find((n) => n >= 0 && ['walk', 'climb', 'swim'].includes(kinds[readL1(r)[n]]))!];
+  paint(r, cell, path);
+  check(readTranslevels(r)[cell] === 0 && levels(r) === levels(rom), `a path (tile ${hx(path)}) painted over it frees it (${hx(readTranslevels(r)[cell])}), levels on the overworld ${levels(r)}`);
+  // a path painted over a star of the clean game: its translevel freed and reset (no name: free for a new star or stop)
+  const r2 = new Rom(rom.data.slice()), s0 = STARS[0], t0 = tls[s0];
+  paint(r2, s0, path);
+  check(readTranslevels(r2)[s0] === 0 && !hasNameEventOrMessages(r2, t0) && levelsWithoutTile(readTranslevels(r2)).includes(t0),
+    `a path painted over the star at ${at(s0)}: translevel ${hx(t0)} freed, its name "${levelName(rom, t0).trim()}" and event reset`);
+  // a star painted where an event puts a level tile: refused (the cell keeps one translevel all game long)
+  // (event 00 given a layer 1 change putting a level tile, with a translevel, on the pipe cell)
+  const r4 = new Rom(rom.data.slice()), d4 = readEvents(r4), lt = l1.find((t) => isLevel(t))!, t4 = readTranslevels(r4);
+  d4.silent[0] = [...d4.silent[0], { layer: 1, tile: lt, loc: cell }];
+  writeEvents(r4, d4);
+  t4[cell] = tls[l1.findIndex((t) => isLevel(t))]; writeTranslevels(r4, t4);
+  let onLevel = '';
+  try { paint(r4, cell, STAR_TILE); } catch (e) { onLevel = e instanceof OwRefusal ? e.refusal.kind : String(e); }
+  check(onLevel === 'starOnLevel', `a star painted before events at ${at(cell)}, where an event puts a level tile: refused (${onLevel})`);
+  // a star on a cell sharing a level tile's translevel: one of its own
+  const lvTile = [...l1.keys()].find((k) => isLevel(l1[k]) && tls[k])!, r3 = new Rom(rom.data.slice()), t3 = readTranslevels(r3);
+  t3[cell] = tls[lvTile]; writeTranslevels(r3, t3);
+  paint(r3, cell, STAR_TILE);
+  check(readTranslevels(r3)[cell] !== tls[lvTile] && !!readTranslevels(r3)[cell] && readTranslevels(r3)[lvTile] === tls[lvTile],
+    `a star painted on a cell holding level tile ${at(lvTile)}'s translevel ${hx(tls[lvTile])}: one of its own (${hx(readTranslevels(r3)[cell])})`);
+  // no translevel left: refused, nothing written
+  const full = new Rom(rom.data.slice());
+  for (const t of levelsWithoutTile(readTranslevels(full))) if (!hasNameEventOrMessages(full, t)) setBaseEvent(full, t, 0);
+  const was = full.data.slice();
+  let why = '';
+  try { paint(full, cell, STAR_TILE); } catch (e) { why = e instanceof OwRefusal ? e.refusal.kind : String(e); }
+  check(why === 'starNoTranslevel' && full.data.every((v, k) => v === was[k]), `every free translevel with a base event: the star refused (${why}), nothing written`);
+}
+
+// ---- a star without translevel: the World check's warning, one given ----
+{
+  const paths = { kinds, shapes };
+  check(!starsWithoutTranslevel(rom).length, 'the clean game: every star (before events or revealed) has a translevel');
+  const r = withTl(STARS[0], 0), place = (i: number) => at(i);
+  const ps = starsWithoutTranslevelProblems({ rom: r, place } as CheckContext);
+  check(ps.length === 1 && ps[0].tile === STARS[0] && ps[0].severity === 'warn' && ps[0].progress === 0, `its translevel zeroed: "${ps[0]?.text}"`);
+  const tl = giveStarTranslevel(r, STARS[0], readL1(r), paths);
+  check(!!tl && readTranslevels(r)[STARS[0]] === tl && initialFlags(r, tl) === dirFlags(starDirs(readL1(r), STARS[0], paths)) && !starsWithoutTranslevel(r).length,
+    `given one: ${hx(tl)}, its flags ${hx(initialFlags(r, tl))}`);
 }
 
 if (bad) { console.log(`${bad} failed`); process.exit(1); }

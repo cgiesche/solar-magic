@@ -7,7 +7,8 @@
 // - l1Tiles: the layer 1 tiles not free (owl1sheet.ts freeL1Tiles: known once the path kinds are learned) of 0x200
 // - stars: the star/pipe entries used (0x100): leading somewhere, taken from a tile or a location an exit teleports to
 // - exitPaths: the exit path entries used (0x80)
-// - translevels: the translevels a tile on a map holds (0x5F; the others are levels without level tile)
+// - translevels: the translevels a tile on a map holds (0x5F; the others are levels without level tile) – level tiles,
+//   stops and stars (owstars.ts: each painted takes one)
 // - eventStorage: the event tile storage's places the events' layer 2 pieces use (0x3600)
 // - customSprites: the custom overworld sprites on the submap (0x18)
 // A table the ROM lacks (its patch not installed) has no budget.
@@ -60,7 +61,7 @@ export function owBudgets(rom: Rom, submap: number, kinds: readonly PathKind[] |
       'Exit paths', 'Exit paths to another submap (a link both ways: one each way)');
   }
   add('translevels', MAX_TRANSLEVEL - levelsWithoutTile(readTranslevels(rom)).length, MAX_TRANSLEVEL,
-    'Levels on the overworld', 'Levels a level tile enters or a stop tile holds (a route\'s stops: the ways Mario walks off them) – the others are without level tile, free to place; a new stop takes only one without name, base event or messages');
+    'Levels on the overworld', 'Levels a level tile enters or a stop tile or star holds (a route\'s stops and the stars painted: the ways Mario walks off them, a star\'s name) – the others are without level tile, free to place; a new stop or star takes only one without name, base event or messages');
   if (hasEventPatch(rom)) add('eventStorage', storagePlacesUsed(readEvents(rom)), STORAGE_MAX,
     'Event tile storage', 'Room for the layer 2 tiles events write (each step\'s piece of 2×2 or 6×6 tiles)');
   add('customSprites', readCustomSprites(rom)[submap]?.length ?? 0, OW_CUSTOM_MAX,

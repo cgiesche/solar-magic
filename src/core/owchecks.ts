@@ -1,12 +1,12 @@
 // The World check's checks beyond the paths' problems (worldcheck.ts): events nothing runs, links Mario can't come
-// back from, levels without level tile an exit leads into, and events a loaded save draws in another order than they
-// ran in play. Each a plain function of the ROM and the searches of owreach.ts with every event passed.
+// back from, levels without level tile an exit leads into, events a loaded save draws in another order than they
+// ran in play, and stars without a translevel of their own. Each a plain function of the ROM and the searches of owreach.ts with every event passed.
 
 import type { Rom } from './rom.ts';
-import { OW_EVENTS, MAX_TRANSLEVEL, translevelToLevel, readL1, readTranslevels, l1Index } from './overworld.ts';
+import { OW_EVENTS, MAX_TRANSLEVEL, translevelToLevel, readL1, readTranslevels, l1Index, isStarPipeTile } from './overworld.ts';
 import { readEvents, eventChanges, eventRunners, eventPieces, drawPiece, l2XY, type EventData, type EventChanges, type EventRunner } from './owevents.ts';
 import { reach, inputWithout, type Reach } from './owreach.ts';
-import { isStarPipeTile } from './overworld.ts';
+import { starsWithoutTranslevel, isStar } from './owstars.ts';
 import { readSecondaryEntrance, mainTranslevel, OW_NORMAL, OW_SECRET } from './level.ts';
 import type { ExitGraph } from './exitgraph.ts';
 import { hex2, hex3 } from './names.ts';
@@ -54,6 +54,20 @@ export function eventsNeverRun(c: CheckContext): WorldProblem[] {
       title: 'No level with a level tile runs it (its base event, or + 1–3 for a secret exit it has), nor an exit to the overworld with its own event. The hack\'s own code may run it.' });
   }
   return out;
+}
+
+// ---- stars without a translevel ----
+
+// The stars (owstars.ts) at any event progress that hold no translevel – a hack's, or one painted before the editor
+// gave stars one: Mario walks off them only in the ways translevel 0's flags open, shared with every tile without
+// one, and the status bar shows its blank name. Found at progress 0 when the star is on the map before events.
+export function starsWithoutTranslevelProblems(c: CheckContext): WorldProblem[] {
+  const l1 = readL1(c.rom);
+  return starsWithoutTranslevel(c.rom).map((i) => ({
+    key: `star-no-translevel:${i}`, group: 'paths', severity: 'warn', tile: i, progress: isStar(l1[i]) ? 0 : OW_EVENTS,
+    text: `Star at ${c.place(i)} has no translevel of its own`, brief: `star without translevel at ${c.place(i)}`,
+    title: 'Mario walks off it only in the ways translevel 00\'s flags open – shared with every tile without one – and the status bar shows a blank name. Select it in the layer 1 mode (Alt+click) and give it a translevel.',
+  }));
 }
 
 // ---- stranded by a link ----

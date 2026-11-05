@@ -94,3 +94,8 @@ open. Nothing is shown.
 **Recommendation:** A, with C's automatic part as its default. Painting a star gives or keeps a translevel with the
 ways its paths open, and its name and directions can be changed in the tile's properties. Fix `eventRunners`
 separately, so that it lists only tiles that enter a level.
+
+**Decided and implemented (#288): A.** `src/core/owstars.ts` (paintStars from the layer 1 stroke, starDirs, the World
+check's starsWithoutTranslevel), the star's properties in the layer 1 mode, CONTEXT.md "Star". Checked by
+`tools/teststartiles.ts` (a star painted on a pipe: Mario walks off it in the ways it was given, emulated) and
+`tools/testeventpaint.ts` (painted as after an event).

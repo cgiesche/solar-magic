@@ -2,8 +2,8 @@
 // being painted), cells painted into them, ended into one ROM edit. It hides the choice between the map before events
 // (layer 1 where it changed, layer 2 in place when it fits) and the event's steps (layer 2: paintEvent; layer 1:
 // paintEventL1 against the map after it without its layer 1 changes). Layer 1 strokes leave level tiles alone: they
-// neither paint over one nor paint one (level tiles are placed, moved and removed in the Levels mode, ADR 0012), so
-// the translevels stay as they are.
+// neither paint over one nor paint one (level tiles are placed, moved and removed in the Levels mode, ADR 0012). A
+// star painted takes a translevel of its own, a star or stop painted over with a path frees its (owstars.ts paintStars).
 
 import type { Rom } from './rom.ts';
 import {
@@ -11,6 +11,7 @@ import {
 } from './overworld.ts';
 import { readEvents, writeEvents, paintEvent, paintEventL1, eventRunners, eventTitle, type EventPlace } from './owevents.ts';
 import type { LevelTileTest } from './owpaths.ts';
+import { paintStars, type StarPaths } from './owstars.ts';
 import { OwRefusal } from './owrefusal.ts';
 
 export type StrokeLayer = 'l1' | 'l2';
@@ -44,9 +45,11 @@ export class OverworldStroke {
   private readonly isLevelTile: LevelTileTest;
   private readonly ev: OwEventMaps | null;
   private readonly began: Uint16Array[]; // what it paints in place, as when it began (cancel)
-  // `maps` (and an event's `ev.after`/`ev.l1`) are painted in place: the view shows them while the stroke goes on
-  constructor(rom: Rom, layer: StrokeLayer, maps: OwMaps, isLevelTile: LevelTileTest, ev: OwEventMaps | null = null) {
-    this.rom = rom; this.layer = layer; this.maps = maps; this.isLevelTile = isLevelTile; this.ev = ev;
+  private readonly paths: StarPaths | null;
+  // `maps` (and an event's `ev.after`/`ev.l1`) are painted in place: the view shows them while the stroke goes on;
+  // paths: the path kinds and shapes the stars' translevels follow (null: layer 2, or the translevels left alone)
+  constructor(rom: Rom, layer: StrokeLayer, maps: OwMaps, isLevelTile: LevelTileTest, ev: OwEventMaps | null = null, paths: StarPaths | null = null) {
+    this.rom = rom; this.layer = layer; this.maps = maps; this.isLevelTile = isLevelTile; this.ev = ev; this.paths = paths;
     this.began = this.painted().map((a) => a.slice());
   }
   // the arrays the stroke paints in place
@@ -96,13 +99,22 @@ export class OverworldStroke {
       }
       const after = ev.l1, game = ev.game, without = ev.without;
       const write = after && game && without ? () => {
-        const painted = new Set([...after.keys()].filter((i) => after[i] !== game[i]));
+        const painted = new Set([...after.keys()].filter((i) => after[i] !== game[i])), p = this.paths;
+        if (p) paintStars(rom, painted, game, after, p, e, without);
         writeEvents(rom, paintEventL1(readEvents(rom), e, after, without, painted));
       } : null;
       return { label: `${title}: paint layer 1`, write };
     }
     if (this.layer === 'l2') return { label: 'Paint layer 2', write: () => writeL2(rom, maps.l2) };
-    return { label: 'Paint layer 1', write: () => writeL1(rom, maps.l1) };
+    const before = this.began[0], l1 = maps.l1;
+    return {
+      label: 'Paint layer 1',
+      write: () => {
+        const p = this.paths;
+        if (p) paintStars(rom, [...l1.keys()].filter((i) => l1[i] !== before[i]), before, l1, p);
+        writeL1(rom, l1);
+      },
+    };
   }
 }
 

@@ -3,7 +3,9 @@
 // in place – typed as its tiles (core/levelnames.ts typeNameChar, nameKey), a character the font lacks refused while
 // typing, said why; Enter or a click outside the popover writes it (one ROM edit), Esc drops it. Beside it the
 // translevel's switches as the Levels properties have them (no entry once passed, save prompt) and the other level
-// tiles entering the level ("Also used by the tile on Vanilla Dome", owleveltiles.ts alsoUsedBy).
+// tiles entering the level ("Also used by the tile on Vanilla Dome", owleveltiles.ts alsoUsedBy). A star selected in the
+// layer 1 mode (owstars.ts) has its name drawn so too – the status bar's while Mario stands on it –, the popover opened
+// by its properties' button (a click on the map paints there), without the switches (it enters no level).
 
 import type { OverworldView } from './overworld.ts';
 import { h, checkbox } from './dom.ts';
@@ -12,8 +14,9 @@ import { nameFont } from './levelnamefield.ts';
 import { l1XY, owShownAt, translevelToLevel, levelTilesOf, initialFlags, setInitialFlags, FLAG, type OwRender } from '../core/overworld.ts';
 import { levelNameTiles, setLevelNameTiles, levelNamePatch, trimName, typeNameChar, nameKey, NAME_LEN, type NameCaret } from '../core/levelnames.ts';
 import { alsoUsedBy } from '../core/owleveltiles.ts';
+import { isStar } from '../core/owstars.ts';
 import { blit8 } from '../core/render.ts';
-import { hex3 } from '../core/names.ts';
+import { hex2, hex3 } from '../core/names.ts';
 
 const PAD = 2, BOX_H = 8 + 2 * PAD; // the name's box on the map: its tiles in a dark box (map pixels)
 const EDIT_COLS = NAME_LEN + 1; // the editor: the 19 tiles and room for the caret after them
@@ -33,7 +36,7 @@ function nameImage(r: OwRender | null, tiles: number[], cols: number): { img: Im
 }
 
 interface Popover {
-  i: number; tl: number; // the level tile (l1Index) and its translevel
+  i: number; tl: number; star: boolean; // the level tile or star (l1Index), its translevel
   name: NameCaret;
   dirty: boolean; // typed into since opened (else it follows the ROM: undo)
   root: HTMLElement; canvas: HTMLCanvasElement; input: HTMLTextAreaElement; note: HTMLElement; rest: HTMLElement;
@@ -45,12 +48,15 @@ export class LevelNameEditor {
   private image: { tiles: string; r: OwRender; c: HTMLCanvasElement } | null = null; // the box's tiles drawn
   constructor(private view: OverworldView) {}
 
-  // the selected level tile and its translevel (null: none, not in the Levels mode, no level names in the ROM)
-  private target(): { i: number; tl: number } | null {
+  // the selected level tile (Levels mode) or star (layer 1 mode) and its translevel (null: none, another mode, no level
+  // names in the ROM)
+  private target(): { i: number; tl: number; star: boolean } | null {
     const v = this.view, i = v.selected;
-    if (v.mode !== 'levels' || i < 0 || (i >= 0x400) !== (v.region === 1) || !levelNamePatch(v.app.rom)) return null;
-    const tl = v.tls[i];
-    return tl && v.isLevelTile(v.levelL1()[i]) ? { i, tl } : null;
+    if ((v.mode !== 'levels' && v.mode !== 'l1') || i < 0 || (i >= 0x400) !== (v.region === 1) || !levelNamePatch(v.app.rom)) return null;
+    const tl = v.tls[i], t = v.levelL1()[i];
+    if (!tl) return null;
+    if (v.mode === 'levels') return v.isLevelTile(t) ? { i, tl, star: false } : null;
+    return v.pathKinds() && isStar(t) ? { i, tl, star: true } : null;
   }
   // the name shown: as typed while edited, else as in the ROM
   private tiles(tl: number): number[] {
@@ -89,17 +95,26 @@ export class LevelNameEditor {
     ctx.drawImage(this.image.c, b.x + PAD, b.y + PAD);
   }
 
-  // a click on the map at pixel p (Levels mode); true: taken – one open closed (the name typed written), or the
+  // a click on the map at pixel p; true: taken – one open closed (the name typed written), or (Levels mode) the
   // popover opened by a click on the name's box
   down(p: { x: number; y: number }): boolean {
     if (this.pop) { this.close(true); return true; }
     const t = this.target();
-    if (!t) return false;
+    if (!t || t.star) return false;
     const b = this.box(t.i, this.tiles(t.tl).length);
     if (p.x < b.x || p.x >= b.x + b.w || p.y < b.y || p.y >= b.y + b.h) return false;
-    this.open(t.i, t.tl);
+    this.open(t.i, t.tl, false);
     return true;
   }
+  // the popover opened on the selected star's name (its properties' button); false: no star selected, no level names
+  openStar(): boolean {
+    const t = this.target();
+    if (!t?.star) return false;
+    if (!this.pop) this.open(t.i, t.tl, true);
+    return true;
+  }
+  // whether the name is being typed (a click on the map closes it first)
+  get editing(): boolean { return !!this.pop; }
   // Esc outside the name: the popover closed, the name typed dropped; false: none open
   cancel(): boolean {
     if (!this.pop) return false;
@@ -108,7 +123,7 @@ export class LevelNameEditor {
   }
 
   // ---- the popover ----
-  private open(i: number, tl: number): void {
+  private open(i: number, tl: number, star: boolean): void {
     const v = this.view, tiles = trimName(levelNameTiles(v.app.rom, tl));
     const canvas = h('canvas', { width: EDIT_COLS * 8, height: 8, class: 'ow-name-canvas' });
     const input = h('textarea', { class: 'msg-input', spellcheck: false, autocomplete: 'off', 'aria-label': 'Level name',
@@ -117,7 +132,7 @@ export class LevelNameEditor {
     const root = h('div', { class: 'ow-name-pop' }, h('div', { class: 'ow-name-box' }, canvas, input), note, rest);
     // (clicks on the map: down)
     const outside = (e: MouseEvent) => { const t = e.target as Node; if (!root.contains(t) && !v.scroller.contains(t)) this.close(true); };
-    this.pop = { i, tl, name: { tiles, at: tiles.length }, dirty: false, root, canvas, input, note, rest, outside };
+    this.pop = { i, tl, star, name: { tiles, at: tiles.length }, dirty: false, root, canvas, input, note, rest, outside };
     this.wire(this.pop);
     window.addEventListener('mousedown', outside, true);
     v.scroller.parentElement!.append(root);
@@ -135,7 +150,7 @@ export class LevelNameEditor {
     p.root.remove();
     const rom = this.view.app.rom;
     if (commit && p.dirty && trimName(levelNameTiles(rom, p.tl)).join() !== p.name.tiles.join())
-      this.view.app.romEdit(`Level name ${hex3(translevelToLevel(p.tl))}`, () => setLevelNameTiles(rom, p.tl, p.name.tiles));
+      this.view.app.romEdit(p.star ? `Star name (translevel ${hex2(p.tl)})` : `Level name ${hex3(translevelToLevel(p.tl))}`, () => setLevelNameTiles(rom, p.tl, p.name.tiles));
     this.view.paint();
   }
   // the popover under the name's box where the view paints it (its screen pixels per map pixel, its scroll: paint);
@@ -157,14 +172,17 @@ export class LevelNameEditor {
     if (v.selected !== p.i || v.tls[p.i] !== p.tl || !this.target()) { this.close(false); return; }
     if (!p.dirty) { const t = trimName(levelNameTiles(rom, p.tl)); p.name = { tiles: t, at: Math.min(p.name.at, t.length) }; }
     const flags = initialFlags(rom, p.tl), lvl = hex3(translevelToLevel(p.tl));
-    const views = v.views, others = levelTilesOf(v.levelL1(), v.tls, p.tl, v.isLevelTile).filter((k) => k !== p.i);
+    const views = v.views, others = (p.star ? [...v.tls.keys()].filter((k) => v.tls[k] === p.tl) : levelTilesOf(v.levelL1(), v.tls, p.tl, v.isLevelTile)).filter((k) => k !== p.i);
     const shared = !others.length ? '' : views ? alsoUsedBy(others, views) : `Also used by ${others.length} other tile${others.length > 1 ? 's' : ''}`;
+    // (a star: no switches – it enters no level)
+    const rest = p.star ? { note: 'The status bar shows it while Mario stands on the star', owner: 'name and ways are the translevel\'s' }
+      : { note: '', owner: 'name and switches are the level\'s' };
     p.rest.replaceChildren(
-      ...SWITCHES.map(([label, bit, title]) => checkbox(` ${label}`, title, (flags & bit) !== 0, (on) => {
+      ...(rest.note ? [h('div', { class: 'hint' }, rest.note)] : SWITCHES.map(([label, bit, title]) => checkbox(` ${label}`, title, (flags & bit) !== 0, (on) => {
         v.app.romEdit(`Level ${lvl}: initial flags`, () => setInitialFlags(rom, p.tl, on ? flags | bit : flags & ~bit));
         p.input.focus(); // (typing goes on)
-      })),
-      ...(shared ? [h('div', { class: 'hint warn-text' }, `${shared} – the name and switches are the level's, for all of them`)] : []));
+      }))),
+      ...(shared ? [h('div', { class: 'hint warn-text' }, `${shared} – the ${rest.owner}, for all of them`)] : []));
     this.draw();
   }
 

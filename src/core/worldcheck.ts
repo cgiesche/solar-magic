@@ -21,7 +21,7 @@ import { reach, reachProblems, stuckProblems, ANY_WAY_TILE, type Reached, type R
 import { hex3 } from './names.ts';
 import type { PathKind, PathShapes } from './owpaths.ts';
 import type { OwRefusalData } from './owrefusal.ts';
-import { checkContext, eventsNeverRun, stranded, untiledLevelsEntered, eventOrderProblems } from './owchecks.ts';
+import { checkContext, eventsNeverRun, stranded, untiledLevelsEntered, eventOrderProblems, starsWithoutTranslevelProblems } from './owchecks.ts';
 
 export type CheckGroup = 'paths' | 'progress' | 'links' | 'look' | 'budget';
 // the groups in the panel's order (an empty one is not shown)
@@ -111,10 +111,10 @@ export function stuckAtEveryProgress(rom: Rom, at: (progress: number) => Checked
 export const isFoundAtEveryProgress = (p: WorldProblem): boolean => /^(dead-end|exit-nowhere|path-late-look|path-no-look):/.test(p.key);
 
 // The checks of owchecks.ts with every event passed (`all`), the levels' exits in `graph`: events never run, links
-// stranding Mario, levels without level tile an exit leads into, events out of play order
+// stranding Mario, levels without level tile an exit leads into, events out of play order, stars without translevel
 export function worldChecks(rom: Rom, all: CheckedAt, place: (tile: number) => string, graph: ExitGraph): WorldProblem[] {
   const c = checkContext(rom, all, place);
-  return [...eventsNeverRun(c), ...stranded(c), ...untiledLevelsEntered(c, graph), ...eventOrderProblems(c)];
+  return [...eventsNeverRun(c), ...stranded(c), ...untiledLevelsEntered(c, graph), ...eventOrderProblems(c), ...starsWithoutTranslevelProblems(c)];
 }
 
 // What the World check learns in the probe worker (worldCheckJob): the problems of worldChecks and the budgets' (found
