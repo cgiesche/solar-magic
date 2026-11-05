@@ -2,8 +2,9 @@
 // level tile an exit leads into, events drawn by a loaded save in another order than in play. The clean game: only
 // the cases the game itself has (listed here); each check provoked by a ROM edit on the test ROM.
 import { Rom } from '../src/core/rom.ts';
-import { OverworldEmulator, OverworldLoads, gameL1, l1XY, l1Index, OW_EVENTS, readL1, readTranslevels, writeTranslevels, baseEvent } from '../src/core/overworld.ts';
+import { OverworldEmulator, OverworldLoads, gameL1, l1XY, l1Index, OW_EVENTS, readL1, readTranslevels, writeTranslevels, baseEvent, setBaseEvent, revealedTile, setRevealAt, readDestroyList, writeDestroyList, NO_EVENT } from '../src/core/overworld.ts';
 import { readEvents, writeEvents, eventRunners } from '../src/core/owevents.ts';
+import { shownSecretExits } from '../src/core/secretexits.ts';
 import { readTeleport, writeTeleport, readExitPaths, writeExitPath } from '../src/core/owteleport.ts';
 import { progressSaves } from '../src/core/owprogress.ts';
 import { reach, reachInput } from '../src/core/owreach.ts';
@@ -77,6 +78,35 @@ const [late, early] = clean.needed.flatMap((as, b) => as.filter((a) => a < b).ma
   console.log(list(p));
   check(!!n && n.severity === 'warn' && n.progress === e + 1 && n.tile === cell && p.length === 1,
     `event ${hx(e)} (translevel ${hx(tl)}'s base event + 2, no secret exit 2) changing ${at(cell)}: never run (${n?.text})`);
+}
+
+{
+  // #391: a reveal, a destroy or a layer 1 change leaving the cell's tile as it is – as the events before it in number
+  // order left it and on the map before events – changes nothing: event 77 given one is not never run (as Journey to
+  // Kaizo's reveals at main 00,01, tile 000 before and after); one that changes the tile on either still counts
+  const e = 0x77, cell = l1Index(0, 0, 1), level = l1Index(1, 9, 6), revealable = readL1(rom)[level]; // (6E, revealed as 66)
+  const never = (edit: (r: Rom) => void) => { const r = copy(); edit(r); return has(checks(r).never, `event-never-run:${e}`); };
+  check(readL1(rom)[cell] === 0 && revealedTile(rom, 0) < 0 && revealedTile(rom, revealable) >= 0, `main 00,01 is tile 000, not in the reveal list; ${hx(revealable, 3)} is`);
+  check(!never((r) => setRevealAt(r, e, cell)), `event ${hx(e)} revealing ${at(cell)} (tile 000 stays): changes nothing, not never run`);
+  check(!!never((r) => setRevealAt(r, e, level)), `event ${hx(e)} revealing ${at(level)} (${hx(revealable, 3)} before events, which it turns into another; 03 reveals it first in number order): never run`);
+  check(!never((r) => { const d = readEvents(r); d.silent[e].push({ layer: 1, tile: 0, loc: cell }); writeEvents(r, d); }),
+    `event ${hx(e)} writing tile 000 on ${at(cell)} (tile 000): changes nothing`);
+  check(!never((r) => { const l = readDestroyList(r), k = l.findIndex((x) => x.event === NO_EVENT); l[k] = { event: e, tile: cell }; writeDestroyList(r, l); }),
+    `event ${hx(e)} destroying ${at(cell)} (tile 000 has no destroy effect): changes nothing`);
+  // (an earlier event's layer 1 change making the reveal change the tile where the map before events has one it
+  // keeps; one making it keep a tile it changes before events: still a change, in play it may pass first)
+  const earlier = (tile: number, at: number) => (r: Rom) => { const d = readEvents(r); d.silent[3].push({ layer: 1, tile, loc: at }); writeEvents(r, d); setRevealAt(r, e, at); };
+  check(!!never(earlier(revealable, cell)), `event 03 putting ${hx(revealable, 3)} on ${at(cell)}, event ${hx(e)} revealing it: never run`);
+  check(!!never(earlier(0, level)), `event 03 putting 000 on ${at(level)}, event ${hx(e)} revealing it (${hx(revealable, 3)} before events): never run`);
+  // a secret exit 1 nothing shows runs its event only where it changes something (eventRunners): not for the reveal
+  // leaving the tile (Yoshi's Island 2, which shows none, given base event 76: its secret exit 1 would run 77)
+  const tl = eventRunners(rom).get(3)![0].tl, runs = (cell: number) => {
+    const r = copy();
+    setBaseEvent(r, tl, 0x76);
+    setRevealAt(r, e, cell);
+    return eventRunners(r).get(e)?.some((x) => x.tl === tl && x.exit === 1) ?? false;
+  };
+  check(!shownSecretExits(rom).get(tl)?.has(1) && !runs(cell) && runs(level), `translevel ${hx(tl)}'s secret exit 1 (not shown) runs event ${hx(e)} revealing ${at(level)}, not revealing ${at(cell)}`);
 }
 
 // ---- a star stranding Mario ----

@@ -26,13 +26,14 @@ import { rleEncode } from './rle.ts';
 import { missingPatch } from './patches.ts';
 import { OwRefusal } from './owrefusal.ts';
 import {
-  OW_EVENTS, OverworldEmulator, type OverworldLoads, gameL1, readL1, readTranslevels, baseEvent, translevelToLevel, l1XY, revealAt, revealEventCount, readDestroyList,
-  destroyEffects, destroyedCells, l1Index, MAX_TRANSLEVEL, owTilemapRanges, isStarPipeTile, revealedTile, NO_EVENT,
+  OW_EVENTS, OverworldEmulator, type OverworldLoads, gameL1, readL1, readTranslevels, baseEvent, translevelToLevel, l1XY,
+  l1Index, MAX_TRANSLEVEL, owTilemapRanges, isStarPipeTile, revealedTile, NO_EVENT,
 } from './overworld.ts';
 import { RAM, getS16 } from './ram.ts';
 import { record, countReads } from './romdeps.ts';
 import { shownSecretExits } from './secretexits.ts';
 import { runJob, type Job } from './jobrunner.ts';
+import { layer1AtEveryProgress, layer1AfterEvent } from './owcellhistory.ts';
 
 const DIVIDERS = 0x04e359, DIVIDER_WORDS = 0x79; // words: the first step of each event, the end
 const STEP_OPS = [0x04e49f, 0x04e709, 0x04ee5a], STEP_OPS2 = [0x04e4a4, 0x04e710, 0x04ee3f];
@@ -422,15 +423,15 @@ export function cellsBecoming(rom: Rom, test: (t: number) => boolean): Set<numbe
   for (const steps of silent) for (const s of steps) if (s.layer === 1 && test(s.tile)) out.add(s.loc);
   return out;
 }
-// whether event e changes something: layer 1 or layer 2 tiles, a reveal, a destroy (the events read when first asked;
-// a ROM whose events can't be read: every event)
+// whether event e changes something (eventChanges: layer 1 tiles – a reveal or destroy leaving the tile as it is
+// none –, layer 2 tiles; the events read when first asked; a ROM whose events can't be read: every event)
 function eventDoesSomething(rom: Rom): (e: number) => boolean {
-  let d: EventData | null | undefined;
+  let changes: ((e: number) => EventChanges) | null | undefined;
   return (e) => {
-    if (d === undefined) try { d = readEvents(rom); } catch { d = null; }
-    if (!d) return true;
-    return eventL1Tiles(d, e).length > 0 || eventPieces(d, e).length > 0 || (e < revealEventCount(rom) && revealAt(rom, e) !== 0)
-      || readDestroyList(rom).some((x) => x.event === e);
+    if (changes === undefined) try { changes = eventChanges(rom, readEvents(rom)); } catch { changes = null; }
+    if (!changes) return true;
+    const c = changes(e);
+    return c.l1.length > 0 || c.l2.length > 0;
   };
 }
 // What passing translevel tl changes on the overworld, per exit (0 normal, 1–3 the secret exits) whose event (exitEvent) is the
@@ -445,17 +446,23 @@ export function exitChanges(rom: Rom, tl: number, d: EventData = readEvents(rom)
   }
   return out;
 }
-// What event e changes on the overworld: the layer 1 tiles (l1Index) it writes, reveals and destroys (with those
-// destroying the tile on the map before events changes), the layer 2 tilemap entries (readL2 indexes) its steps write.
-// (the ROM's tables read once: ask it for several events)
+// What event e changes on the overworld: the layer 1 cells (l1Index) whose tile it changes – by its layer 1 changes,
+// its reveal, its destroys – and the layer 2 tilemap entries (readL2 indexes) its steps write. A reveal, a destroy or a
+// layer 1 change leaving the cell's tile as it is changes nothing (#391: a reveal of a tile the reveal list doesn't
+// have, a destroy of a tile without destroy effect, a step writing the tile there). As it is: as the events before e
+// in number order left it (owcellhistory.ts layer1AtEveryProgress: the order a loaded save applies them, the strip's)
+// and on the map before events – in play e may pass first (two exits revealing the same star: the second in number
+// order finds it revealed); a change on either counts.
+// (layer 1 through the events walked once, when first asked: ask it for several events)
 export interface EventChanges { event: number; l1: number[]; l2: number[] }
 export function eventChanges(rom: Rom, d: EventData = readEvents(rom)): (e: number) => EventChanges {
-  const destroys = readDestroyList(rom), effects = destroyEffects(rom), map = readL1(rom), reveals = revealEventCount(rom);
+  let at: Uint16Array[] | null = null;
   return (e) => {
-    const reveal = e < reveals ? revealAt(rom, e) : 0;
-    const destroyed = destroys.filter((x) => x.event === e).flatMap((x) => destroyedCells(effects, map, x.tile));
-    const l1 = new Set([...eventL1Tiles(d, e), ...(reveal ? [reveal] : []), ...destroyed]);
-    return { event: e, l1: [...l1], l2: [...new Set(eventPieces(d, e).flatMap((p) => pieceTiles(d, p)))] };
+    at ??= layer1AtEveryProgress(rom, d);
+    // (before: e at its point in number order; alone: e alone on the map before events)
+    const before = at[e], after = at[e + 1], alone = layer1AfterEvent(rom, at[0], e, d), l1: number[] = [];
+    for (let i = 0; i < after.length; i++) if (after[i] !== before[i] || alone[i] !== at[0][i]) l1.push(i);
+    return { event: e, l1, l2: [...new Set(eventPieces(d, e).flatMap((p) => pieceTiles(d, p)))] };
   };
 }
 const EXIT_SHORT = ['normal exit', 'secret exit 1', 'secret exit 2', 'secret exit 3'];

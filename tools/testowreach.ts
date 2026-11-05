@@ -133,8 +133,9 @@ function play(r: Rom, inp: ReachInput, i: number, d: number): number {
   const p = reachProblems(rom, { inp: none, r: reach(none) }, { inp: all, r: reach(all) }, at);
   console.log(p.map((q) => `     ${q.severity} ${q.text}`).join('\n'));
   const events = p.filter((q) => q.kind === 'event-reveals-nothing');
-  check(p.filter((q) => q.kind === 'unreached-level').length === 2 && !p.some((q) => q.kind === 'dead-end' || q.kind === 'exit-nowhere') && events.length === 1 && events[0].text.startsWith('Level 112'),
-    `the clean game: the two level tiles nothing leads to, the event of one of them, no dead end (${p.length} problems)`);
+  // (level 112's event 43 destroys its tile 078 as it is: it changes nothing, #391)
+  check(p.filter((q) => q.kind === 'unreached-level').length === 2 && !p.some((q) => q.kind === 'dead-end' || q.kind === 'exit-nowhere') && !events.length,
+    `the clean game: the two level tiles nothing leads to, no event revealing nothing reached, no dead end (${p.length} problems)`);
   // layer 1 at an event progress is the same whichever map is loaded (the search takes it from any)
   check([0, 0x20].every((n) => gameL1(loads.get(0, n)).every((t, i) => t === gameL1(loads.get(1, n))[i])), 'layer 1 the same with the main map or a submap loaded');
 }

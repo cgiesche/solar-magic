@@ -40,8 +40,10 @@ export function exitSentences(rom: Rom, tl: number, words: SentenceWords, telepo
     const opened = edges?.find((e) => e.tl === tl && e.exit === c.exit && e.event === c.event)?.opens ?? [];
     const opens: Clause[] = opened.map((o) => ({ kind: 'opens', text: `opens ${words.level(o.tl)}`, l1: [o.tile], l2: [] }));
     for (const o of opened) told.add(o.tile);
-    const r = eventReveal(rom, c.event);
-    if (r >= 0) {
+    // (a reveal or destroy leaving its tiles as they are changes nothing – eventChanges, #391: not told, nor taken away
+    // here – the event's timeline under the strip lists it)
+    const r = eventReveal(rom, c.event), changed = new Set(c.l1);
+    if (r >= 0 && changed.has(r)) {
       const into = revealedTile(rom, map[r]), remove = { kind: 'reveal' as const, tile: r };
       told.add(r);
       // (the revealed tile is the level tile of a level opened: told by that level's clause)
@@ -51,6 +53,7 @@ export function exitSentences(rom: Rom, tl: number, words: SentenceWords, telepo
     }
     for (const j of eventDestroys(rom, c.event)) {
       const cells = [j, ...destroyChanges(effects, map, j).map((c) => c.cell).filter((k) => k !== j)];
+      if (!cells.some((k) => changed.has(k))) continue;
       cells.forEach((k) => told.add(k));
       const level = cells.find((k) => tls[k]);
       destroys.push({ kind: 'destroy', text: level !== undefined ? `${words.level(tls[level])} crumbles` : `the tile at ${cellText(j)} is destroyed`,

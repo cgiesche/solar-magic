@@ -8,6 +8,7 @@
 import type { Rom } from './rom.ts';
 import {
   readL1, readL2, l1XY, l2Index, revealedTile, readDestroyList, destroyEffects, destroyChanges, NO_EVENT, OW_EVENTS,
+  type DestroyChange, type Destroy,
 } from './overworld.ts';
 import { readEvents, eventPieces, drawPiece, type EventData } from './owevents.ts';
 import { eventReveal } from './oweventtiles.ts';
@@ -26,24 +27,37 @@ export interface CellChange {
 // a cell's history: its layer 1 tile before events, the events changing it in number order
 export interface CellHistory { before: number; changes: CellChange[] }
 
+// event e's layer 1 writes on `map` (changed in place), in the game's order: its layer 1 changes, its reveal, its
+// destroys (destroys: the destroy list's entries of events); `set` takes each cell's new tile (told: a change also where
+// the tile stays – a reveal)
+type L1Set = (i: number, t: number, by: CellCause, told?: boolean) => void;
+function eventL1(rom: Rom, d: EventData, map: Uint16Array, e: number, effects: DestroyChange[][], destroys: readonly Destroy[], set: L1Set): void {
+  for (const s of d.silent[e]) if (s.layer === 1 && s.loc < 0x800) set(s.loc, s.tile, 'tiles');
+  const r = eventReveal(rom, e);
+  if (r >= 0) { const t = revealedTile(rom, map[r]); set(r, t >= 0 ? t : map[r], 'reveal', true); }
+  for (const x of destroys) if (x.event === e) for (const c of destroyChanges(effects, map, x.tile)) set(c.cell, c.tile, 'destroy');
+}
+
 // Layer 1 through the events: calls `each` after every event e with the cells changed (and how), the map as after it
 // (map: the map before events, changed in place)
 function walkL1(rom: Rom, d: EventData, map: Uint16Array, each: (e: number, changed: Map<number, CellCause[]>) => void): void {
   const effects = destroyEffects(rom), destroys = readDestroyList(rom).filter((x) => x.event !== NO_EVENT);
   for (let e = 0; e < OW_EVENTS; e++) {
     const changed = new Map<number, CellCause[]>();
-    // (told: a change also where the tile stays – a reveal)
-    const set = (i: number, t: number, by: CellCause, told = false) => {
+    eventL1(rom, d, map, e, effects, destroys, (i, t, by, told = false) => {
       if (map[i] === t && !told) return;
       map[i] = t;
       changed.set(i, [...(changed.get(i) ?? []).filter((c) => c !== by), by]);
-    };
-    for (const s of d.silent[e]) if (s.layer === 1 && s.loc < 0x800) set(s.loc, s.tile, 'tiles');
-    const r = eventReveal(rom, e);
-    if (r >= 0) { const t = revealedTile(rom, map[r]); set(r, t >= 0 ? t : map[r], 'reveal', true); }
-    for (const x of destroys) if (x.event === e) for (const c of destroyChanges(effects, map, x.tile)) set(c.cell, c.tile, 'destroy');
+    });
     each(e, changed);
   }
+}
+
+// layer 1 `map` with only event e's layer 1 writes applied (a copy), as walkL1 applies them
+export function layer1AfterEvent(rom: Rom, map: ArrayLike<number>, e: number, d: EventData = readEvents(rom)): Uint16Array {
+  const out = Uint16Array.from(map);
+  eventL1(rom, d, out, e, destroyEffects(rom), readDestroyList(rom).filter((x) => x.event !== NO_EVENT), (i, t) => { out[i] = t; });
+  return out;
 }
 
 // layer 1 as after events 0 … progress-1 passed, as the model above has it (what the test compares with the game's

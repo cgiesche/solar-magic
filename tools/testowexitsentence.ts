@@ -8,13 +8,13 @@
 // #380).
 // node tools/testowexitsentence.ts
 import { Rom } from '../src/core/rom.ts';
-import { l1Index, readTranslevels, OverworldEmulator, OverworldLoads } from '../src/core/overworld.ts';
-import { eventRunners, eventPieces, readEvents, submapViews, submapOf } from '../src/core/owevents.ts';
+import { l1Index, readTranslevels, OverworldEmulator, OverworldLoads, setRevealAt } from '../src/core/overworld.ts';
+import { eventRunners, eventChanges, submapViews, submapOf } from '../src/core/owevents.ts';
 import { exitEdges, passableEdgesJob, type ExitEdge } from '../src/core/owexitedges.ts';
 import { progressSaves, progressSearches, progressInput, progressMapsFromEvents } from '../src/core/owprogress.ts';
 import { ExitGraph } from '../src/core/exitgraph.ts';
 import { exitSentences, type ExitSentence } from '../src/core/owexitsentence.ts';
-import { addReveal, removeReveal, eventReveal } from '../src/core/oweventtiles.ts';
+import { addReveal, removeReveal } from '../src/core/oweventtiles.ts';
 import { RomEditSession } from '../src/core/romedit.ts';
 import { levelName } from '../src/core/levelnames.ts';
 import { OW_NORMAL, OW_SECRET, OW_END_TURN } from '../src/core/level.ts';
@@ -39,8 +39,9 @@ const iggy = levelName(rom, tls[castle]);
 {
   const s = exitSentences(rom, tlOf(YI4), words, [], edges), n = s.find((x) => x.event === YI4)!;
   const c = n.clauses.find((x) => x.kind === 'opens');
-  check(c?.text === `opens ${iggy}` && c.l1.join() === String(castle) && c.remove?.kind === 'reveal' && c.remove.tile === castle,
-    `Yoshi's Island 4's normal exit opens Iggy's castle, its level tile revealed (${say(s)})`);
+  // (its event reveals the castle's tile as it is – #391: nothing to take away)
+  check(c?.text === `opens ${iggy}` && c.l1.join() === String(castle) && !c.remove,
+    `Yoshi's Island 4's normal exit opens Iggy's castle, its tile revealed as it is not offered to take away (${say(s)})`);
   check(c === n.clauses[0], 'the level opened first');
 }
 {
@@ -72,9 +73,26 @@ const iggy = levelName(rom, tls[castle]);
   check(s.history.undoStack.length === 1 && !after.clauses.some((x) => x.kind === 'reveal'), `removed: one ROM edit, the clause gone (${say([after])})`);
 }
 {
-  // without the edges (learned) a revealed level tile is told as revealed
-  const n = exitSentences(rom, tlOf(YI4), words).find((x) => x.event === YI4)!;
-  check(n.clauses.some((x) => x.kind === 'reveal') && !n.clauses.some((x) => x.kind === 'opens'), 'the edges not known: the level tile told as a reveal');
+  // #391: an exit opening nothing yet whose event is made to reveal main 00,01 (tile 000, not in the reveal list: it
+  // stays) still opens nothing yet; made to reveal 04,04 as 66 it tells the reveal
+  const [tl, x] = [...new Set(tls)].filter((t) => t).flatMap((t) => exitSentences(rom, t, words, [], edges).map((x) => [t, x] as const))
+    .find(([, x]) => !x.clauses.length)!;
+  const r = new Rom(rom.data.slice());
+  setRevealAt(r, x.event, l1Index(0, 0, 1));
+  const n = exitSentences(r, tl, words, [], edges).find((y) => y.exit === x.exit)!;
+  check(!n.clauses.length, `event ${hx(x.event)} revealing main map 00,01 (tile 000 stays): opens nothing yet (${say([n])})`);
+  setRevealAt(r, x.event, 0);
+  addReveal(r, x.event, l1Index(0, 4, 4), 0x66);
+  const m = exitSentences(r, tl, words, [], edges).find((y) => y.exit === x.exit)!;
+  check(m.clauses.some((c) => c.kind === 'reveal'), `revealing 04,04 as 66 told (${say([m])})`);
+}
+{
+  // without the edges (learned) a revealed level tile is told as revealed (Yoshi's Island 2's 6E becoming 66; Iggy's
+  // castle's tile, which Yoshi's Island 4's event reveals as it is, not – #391)
+  const n = exitSentences(rom, tlOf(YI2), words).find((x) => x.event === YI2)!;
+  check(n.clauses.some((x) => x.kind === 'reveal' && x.l1.includes(bridge)) && !n.clauses.some((x) => x.kind === 'opens'), 'the edges not known: the level tile told as a reveal');
+  const c = exitSentences(rom, tlOf(YI4), words).find((x) => x.event === YI4)!;
+  check(!c.clauses.some((x) => x.kind === 'reveal' || x.kind === 'opens'), `nor Iggy's castle's tile revealed as it is (${say([c])})`);
 }
 {
   // teleports by the exit they pass the level with
@@ -89,7 +107,8 @@ const iggy = levelName(rom, tls[castle]);
   // every level: a sentence per exit whose event is the level's; those doing nothing have no clauses
   const all = [...new Set([...runners.values()].map((r) => r[0].tl))].map((tl) => exitSentences(rom, tl, words, [], edges));
   const none = all.flat().filter((x) => !x.clauses.length);
-  check(none.every((x) => !eventPieces(readEvents(rom), x.event).length && eventReveal(rom, x.event) < 0), 'those opening nothing yet: their events change nothing');
+  const changes = eventChanges(rom);
+  check(none.every((x) => !changes(x.event).l1.length && !changes(x.event).l2.length), 'those opening nothing yet: their events change nothing');
   check(all.flat().length > 0 && all.flat().every((x) => x.clauses.every((c) => c.text)), `every level's exits: ${all.flat().length} sentences, ${none.length} opening nothing yet${none.length ? ` (e.g. event ${hx(none[0].event)})` : ''}`);
 }
 
