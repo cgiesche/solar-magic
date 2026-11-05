@@ -21,8 +21,9 @@ const W = (a: number) => a - 0x7e0000; // a long WRAM address as an index of the
 const MANUAL = W(EXTRIGGER_RAM.manual);
 const eventSet = (w: Uint8Array, e: number) => !!(w[RAM.owEvents + (e >> 3)] & (0x80 >> (e & 7)));
 
-// event trigger t (01–08) in the console `wram` (after a load): the event its Manual byte names (null: none, it never
-// holds) and whether that event is passed, as the engine checks it each frame (kobo/exanimation.ts, ".overworld")
+// event trigger t (01–08) in the console `wram` (after a load): the event its Manual byte names (null: none, past the
+// overworld's events, it never holds; a byte no Trigger Init names keeps what was there before the load, #311) and
+// whether that event is passed, as the engine checks it each frame (kobo/exanimation.ts, ".overworld")
 export function eventTriggerState(wram: Uint8Array, t: number): { event: number | null; holds: boolean } {
   const e = wram[MANUAL + eventManual(t)];
   if (!isEventTrigger(t) || e >= OW_EVENTS) return { event: null, holds: false };

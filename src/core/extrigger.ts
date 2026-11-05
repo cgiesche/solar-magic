@@ -60,7 +60,7 @@ const addr = (a: number) => `$${hx(a, a > 0xffff ? 6 : 4)}`;
 // as in Lunar Magic's help; 8-bit A for a manual frame); null for those without RAM; ow: in an overworld list
 export function triggerRam(t: number, ow = false): { ram: string; what: string; asm?: string; off?: string } | null {
   if (ow && isEventTrigger(t)) {
-    return { ram: addr(EXTRIGGER_RAM.manual + eventManual(t)), what: `the event's number (Manual ${hx(eventManual(t), 1)}, set by Trigger Init – without it the trigger never holds); it holds while that event is passed (${addr(RAM.owEvents)}, a bit each)` };
+    return { ram: addr(EXTRIGGER_RAM.manual + eventManual(t)), what: `the event's number (Manual ${hx(eventManual(t), 1)}, set by Trigger Init when the overworld loads – without it what was there before the load, e.g. the last level's frame or your code's); it holds while that event is passed (${addr(RAM.owEvents)}, a bit each)` };
   }
   if (isManual(t)) {
     const a = addr(EXTRIGGER_RAM.manual + (t - MANUAL));

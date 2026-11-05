@@ -134,12 +134,17 @@ function walk(rom: Rom, frames: number, vram?: (v: Uint8Array, w: Uint8Array) =>
   return { shots, submap: w[RAM.submap], main: mainShots, first };
 }
 {
-  // (Manual 8-F set on the main map: the walk's setup gives them FF again, as the load, #261)
-  const M = EXTRIGGER_RAM.manual - 0x7e0000;
+  // (Manual 8-F set on the main map, Yoshi's Island's Trigger Init naming Manual 9: the walk's setup sets 9 and keeps
+  // the others, as the load and Lunar Magic's, #311)
+  const M = EXTRIGGER_RAM.manual - 0x7e0000, yi = readSubmapList(rom, 1)!, init = new Map(yi.manual);
+  yi.manual.set(9, 0x22);
+  writeSubmapList(rom, 1, yi);
   const wk = walk(rom, 24, (_, w) => w.fill(0x0b, M + 8, M + 16)), t = seen(wk.shots, T);
+  yi.manual = init;
+  writeSubmapList(rom, 1, yi);
   check(wk.submap === 1 && tiles(wk.main, T).size === 1 && t.has(0x11) && t.has(0x22), `walked from the main map (not animated there) onto Yoshi's Island: its tile animates (${[...t].map((v) => hx(v)).join(' ')})`);
   const m = wk.shots[0].wram.subarray(M + 8, M + 16);
-  check(m.every((v) => v === 0xff), `and Manual 8–F are FF there (${[...m].map((v) => hx(v)).join(' ')})`);
+  check(m.every((v, n) => v === (n === 1 ? 0x22 : 0x0b)), `and Manual 9 is its Trigger Init's there, 8 and A–F as left on the main map (${[...m].map((v) => hx(v)).join(' ')})`);
 }
 {
   // set up where the game loads the new submap's palette, the screen off, as at the load: once the window has closed
@@ -221,27 +226,33 @@ check(readSubmapList(rom, 3)?.slots.get(1)?.frames.length === 2, 'an overworld l
   check(a.has(0x55) && !a.has(0x66) && b.has(0x66) && !b.has(0x55), `Event Manual 8 = event ${hx(EV)}: the first set (${[...a].map((v) => hx(v)).join(' ')}), once passed the second (${[...b].map((v) => hx(v)).join(' ')})`);
   check(a2.has(0x77) && b2.has(0x88) && !b2.has(0x77), `trigger 06 (Event Manual D, the same event) alike on the overworld (${[...a2].map((v) => hx(v)).join(' ')} / ${[...b2].map((v) => hx(v)).join(' ')})`);
 }
-// Manual 8-F the overworld's Trigger Init doesn't set (#261): FF at the load, so the event triggers on them never
-// hold, whatever the last level left there (Lunar Magic keeps that: tools/lmowmanual.ts); manual 0-7 stay as left
+// Manual 8-F the overworld's Trigger Init doesn't set (#311, as Lunar Magic: tools/lmowmanual.ts): the load keeps
+// what was written there before (a level, or code before the load's hook), so the event trigger on such a byte waits
+// for that event; the one the Trigger Init names gets its event; manual 0-7 stay as left
 {
+  const LEFT = 0x0c; // the event left in Manual 8, not passed
   const l: ExList = emptyList();
   l.manual.set(9, EV);
   l.slots.set(0, { type: 0x01, trigger: 0x01, framesLess1: 0, dest: 0x8000 | T, frames: [0x80, 0xa0] }); // Event Manual 8: 55… / 66…
   l.slots.set(1, { type: 0x01, trigger: 0x02, framesLess1: 0, dest: 0x8000 | E, frames: [0xc0, 0xe0] }); // Event Manual 9: 77… / 88…
   writeSubmapList(rom, 3, l);
-  const emu = new LevelEmulator(rom), s = emu.snes, w = s.wram, M = EXTRIGGER_RAM.manual - 0x7e0000;
-  emu.startGame(0);
-  for (let n = 0; n < 16; n++) w[M + n] = EV; // as a level left them
-  const events = w.slice(RAM.owEvents, RAM.owEvents + 15);
-  events[EV >> 3] |= 0x80 >> (EV & 7);
-  w[RAM.submap] = w[RAM.submap + 1] = 3;
-  emu.reloadOverworld(events);
-  const manual = Array.from(w.subarray(M, M + 16));
-  const shots: Shot[] = [];
-  for (let f = 0; f < 24; f++) { s.runFrame(); shots.push({ vram: s.vram.slice(), cgram: s.cgram.slice(), wram: s.wram.slice() }); }
-  const a = seen(shots.slice(8), T), b = seen(shots.slice(8), E);
-  check(manual.every((v, n) => v === (n < 8 || n === 9 ? EV : 0xff)), `the load: Manual 8 and A–F FF, 9 the init's, 0–7 as left (${manual.map((v) => hx(v)).join(' ')})`);
-  check(a.has(0x55) && !a.has(0x66) && b.has(0x88) && !b.has(0x77), `event ${hx(EV)} passed: Event Manual 8 (no init) never holds (${[...a].map((v) => hx(v)).join(' ')}), Event Manual 9 (its init) does (${[...b].map((v) => hx(v)).join(' ')})`);
+  const load = (passed: number[]) => {
+    const emu = new LevelEmulator(rom), s = emu.snes, w = s.wram, M = EXTRIGGER_RAM.manual - 0x7e0000;
+    emu.startGame(0);
+    for (let n = 0; n < 16; n++) w[M + n] = n === 8 ? LEFT : 0x30 + n; // as a level left them
+    const events = w.slice(RAM.owEvents, RAM.owEvents + 15);
+    for (const e of passed) events[e >> 3] |= 0x80 >> (e & 7);
+    w[RAM.submap] = w[RAM.submap + 1] = 3;
+    emu.reloadOverworld(events);
+    const manual = Array.from(w.subarray(M, M + 16));
+    const shots: Shot[] = [];
+    for (let f = 0; f < 24; f++) { s.runFrame(); shots.push({ vram: s.vram.slice(), cgram: s.cgram.slice(), wram: s.wram.slice() }); }
+    return { manual, a: seen(shots.slice(8), T), b: seen(shots.slice(8), E) };
+  };
+  const evPassed = load([EV]), bothPassed = load([EV, LEFT]);
+  check(evPassed.manual.every((v, n) => v === (n === 9 ? EV : n === 8 ? LEFT : 0x30 + n)), `the load: Manual 9 the init's, 8 and A–F and 0–7 as left (${evPassed.manual.map((v) => hx(v)).join(' ')})`);
+  check(evPassed.a.has(0x55) && !evPassed.a.has(0x66) && evPassed.b.has(0x88) && !evPassed.b.has(0x77), `event ${hx(EV)} passed: Event Manual 8 (no init, event ${hx(LEFT)} left) doesn't hold (${[...evPassed.a].map((v) => hx(v)).join(' ')}), Event Manual 9 (its init) does (${[...evPassed.b].map((v) => hx(v)).join(' ')})`);
+  check(bothPassed.a.has(0x66) && !bothPassed.a.has(0x55), `event ${hx(LEFT)} passed too: Event Manual 8 holds by the event left there (${[...bothPassed.a].map((v) => hx(v)).join(' ')})`);
 }
 writeSubmapList(rom, 3, null);
 

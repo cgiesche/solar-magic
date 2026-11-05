@@ -870,8 +870,8 @@ condition:
     TAX
     SEP #$20
     LDA.l !Manual+8,x           ; the event
-    CMP #$78                    ; past the overworld's 78 events (FF: none
-    BCS .none                   ; set, ow_setup): never [Solar Magic]
+    CMP #$78                    ; past the overworld's 78 events (e.g. a
+    BCS .none                   ; level's frame FF): never [Solar Magic]
     PHA
     LSR A
     LSR A
@@ -1515,13 +1515,6 @@ ow_setup:
     SEP #$20
     LDA [!List],y
     STA.l !OwSettings
-    REP #$20                    ; Manual 8-F the Trigger Init doesn't set:
-    LDA #$FFFF                  ; no event, so that 01-08 never hold there,
-    LDX #$0006                  ; whatever the last level left (Lunar Magic
--   STA.l !Manual+8,x           ; keeps that) [Solar Magic]
-    DEX
-    DEX
-    BPL -
     JSR setup_lists
     JSR restore_scratch
     PLP

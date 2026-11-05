@@ -62,7 +62,7 @@ function triggerSelect(kind: 'tiles' | 'colors' | 'rotation', current: number, o
 }
 // what a trigger does for a slot, in a line
 function triggerHint(t: number, rotation: boolean, ow: boolean): string {
-  if (ow && isEventTrigger(t)) return `Holds once the overworld event whose number Manual ${hex(eventManual(t), 1)} has is passed (set it in the list's Trigger Init; without it the trigger never holds)${rotation ? '' : ': the second frame sequence shows then'}.`;
+  if (ow && isEventTrigger(t)) return `Holds once the overworld event whose number Manual ${hex(eventManual(t), 1)} has is passed (set it in the list's Trigger Init; without it the byte keeps what was there before the overworld loaded, e.g. the last level's frame or your code's)${rotation ? '' : ': the second frame sequence shows then'}.`;
   if (t === PRECISION) return `Always runs, with the frame counter of the first slot of its 8 (slots 0, 8, 10, 18)${rotation ? ': rotations of one group share their delay – for speeds between the steps' : ''}.`;
   if (isManual(t)) return 'Shows the frame your code sets and stays there; uploads only when it changes.';
   if (isCustom(t)) return 'Your code switches it on and off.';

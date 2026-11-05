@@ -9,6 +9,7 @@ import { writeSubmapList, writeAltFile, emptyList, setSubmapAnimSettings, setRot
 import { setSubmapLightning } from '../src/core/owoptions.ts';
 import { submapPalette } from '../src/core/submapgfx.ts';
 import { eventTriggerState, owTriggerRender, owGameColors } from '../src/core/owanimview.ts';
+import { RAM } from '../src/core/ram.ts';
 import { editorImage } from './fixture.ts';
 
 let bad = 0;
@@ -48,7 +49,8 @@ const GAME = [0x6d, 0x7d, 0x86, 0x87, 0x88, 0x89, 0x8a, 0x8b, 0x8c, 0x8d, 0x8e, 
 
 // ---- the event triggers ----
 // Anim graphic A: tile k all bytes 0x11 * (k + 1); a slot with trigger 01 (Event Manual 8): 11/22 normally, 33/44
-// while its event is passed; trigger 02 (Event Manual 9) without an event in the Trigger Init
+// while its event is passed; trigger 02 (Event Manual 9) without an event in the Trigger Init: the load keeps what
+// was there (#311, as Lunar Magic), after a reset 00 – it waits for event 00
 const alt = new Uint8Array(0x100);
 for (let k = 0; k < 8; k++) alt.fill(0x11 * (k + 1), k * 32, k * 32 + 32);
 writeAltFile(rom, 0, alt);
@@ -66,11 +68,12 @@ const second = (v: number) => v === 0x33 || v === 0x44, first = (v: number) => v
   const l = loads(), before = l.get(1, EVENT), after = l.get(1, EVENT + 1);
   const a = eventTriggerState(before.wram, 1), b = eventTriggerState(after.wram, 1), n = eventTriggerState(after.wram, 2);
   check(a.event === EVENT && !a.holds && b.event === EVENT && b.holds, `trigger 01 waits for event ${hx(EVENT)}: not passed at progress ${EVENT}, passed at ${EVENT + 1} (${a.event} ${a.holds}, ${b.event} ${b.holds})`);
-  check(n.event === null && !n.holds, 'trigger 02 without an event in the Trigger Init: none, never holds');
+  const noInit = eventTriggerState(before.wram, 2), event0 = (w: Uint8Array) => !!(w[RAM.owEvents] & 0x80);
+  check(n.event === 0 && noInit.event === 0 && n.holds === event0(after.wram) && noInit.holds === event0(before.wram), `trigger 02 without an event in the Trigger Init: the reset's 00, event 00 (${noInit.event} ${noInit.holds}, ${n.event} ${n.holds})`);
   check(first(shown(before, T)) && second(shown(after, T)), `the load shows the first frame set before, the second after (${hx(shown(before, T))}, ${hx(shown(after, T))})`);
 
   const on = owTriggerRender(l, 1, EVENT, false, [[1, true]]);
-  check(second(shown(on, T)) && first(shown(on, U)), `switched on at progress ${EVENT}: trigger 01's second set shows (${hx(shown(on, T))}), trigger 02's not (${hx(shown(on, U))})`);
+  check(second(shown(on, T)) && (noInit.holds ? second : first)(shown(on, U)), `switched on at progress ${EVENT}: trigger 01's second set shows (${hx(shown(on, T))}), trigger 02 as event 00 has it (${hx(shown(on, U))})`);
   check(gameL1(on).every((v, i) => v === gameL1(before)[i]), 'the map\'s layer 1 as at the load');
   const off = owTriggerRender(l, 1, EVENT + 1, false, [[1, false]]);
   check(first(shown(off, T)), `switched off at progress ${EVENT + 1}: its first set (${hx(shown(off, T))})`);

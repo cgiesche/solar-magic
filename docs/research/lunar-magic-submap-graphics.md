@@ -198,14 +198,33 @@ writes Manual 8 then (`$C28106` in *Journey to Kaizo*, `$CFA4C5` in *Bluerio's A
 whose manual frame the Trigger Init leaves out waits for whatever event number the level played before left there
 (in a new game `$00`, event 00).
 
-The editor does better: its load (`ow_setup`, also when Mario walks to another submap) sets Manual 8–F to `$FF` before
-the Trigger Init, and its event code takes `$78`–`$FF` for no event, so such a trigger never holds, whatever was played
-before; Manual 0–7 keep what was left, as in Lunar Magic. A level entered from the overworld finds `$FF` in Manual 8–F
-where its own Trigger Init sets nothing (the engine's "nothing shown yet": a manual trigger 18–1F shows no frame until
-code sets one). Code that sets an event number there for the overworld has to do it after the load's hook
-(`$048086`): what a level or code before it wrote is gone, where Lunar Magic keeps it. Only ROMs Lunar Magic 3.31 and
-3.40 saved were traced. Since 18–1F read the bytes of 01–08's events on the overworld, the Animations tab warns when an overworld
-list (the submap's or the global one) uses a manual trigger 18–1F and the event trigger of the same byte.
+Since #261 the editor's load (`ow_setup`, also when Mario walks to another submap) set Manual 8–F to `$FF` before the
+Trigger Init, so that such a trigger never held. That had two costs (issue #311): a level entered from the overworld
+found `$FF` in Manual 8–F where its own Trigger Init sets nothing (the engine's "nothing shown yet": a manual trigger
+18–1F showed no frame until code set one, where after a new game it showed frame 0 before and in Lunar Magic shows what
+the level before left), and code that wrote an event number there before the load's hook (`$048086`, e.g. a level's
+code or overworld code at game mode `$0C`) was overwritten, where Lunar Magic keeps it.
+
+Decided for issue #311 (2026-11-05): the editor behaves as Lunar Magic. Its load sets only the Manual 8–F bytes a
+list's Trigger Init names and keeps the others, Manual 0–7 too, so an event trigger whose byte the Trigger Init leaves
+out waits for the event number that was there before the load (what the level played before, or code before the
+hook, left; `$00`, event 00, after a reset); its event code still takes `$78`–`$FF` for no event (it read `$1F02` past
+its 15 bytes before). A level entered from the overworld finds Manual 8–F as the overworld's load left them: the
+Trigger Init's events where it names them, else what was there before – frame 0 after a new game again, as in Lunar
+Magic. So a level slot with a manual trigger 18–1F and no Trigger Init shows, in a level entered from the overworld
+(the game, and test play from the overworld: `playsession.ts`, the view's switched triggers set after the load), the
+frame the overworld's load left in its byte – frame 0 after a new game, or the event number an overworld Trigger Init
+put there – where since #261 it showed nothing. The editor's level views (the level loaded directly, Manual 0–F `$00`
+from the engine's reset) show frame 0, as before. The Animations tab's trigger panel says of such a trigger that its byte keeps what the level before left and
+shows the event the preview's load left there (after the editor's reset: event 00); `tools/testowexanim.ts` checks a
+byte the Trigger Init names getting its event and one it doesn't keeping the event written before the load (and
+holding by it), also on the walk to another submap; `tools/testowanimview.ts` the panel's state. Only ROMs Lunar Magic
+3.31 and 3.40 saved were traced; 3.71 is issue #312. Since 18–1F read the bytes of 01–08's events on the overworld,
+the Animations tab warns when an overworld list (the submap's or the global one) uses a manual trigger 18–1F and the
+event trigger of the same byte.
+
+- [x] Decided whether a level's Manual 8–F should be what they were before the overworld (e.g. kept aside and restored,
+  or 0 at the level load), or FF stays; the research note says so (#311: as Lunar Magic, no FF)
 
 ### `$7FC00B`
 
