@@ -21,7 +21,9 @@ import { reach, reachProblems, stuckProblems, exitTileFix, ANY_WAY_TILE, type Re
 import { hex3 } from './names.ts';
 import type { PathKind, PathShapes } from './owpaths.ts';
 import type { OwRefusalData } from './owrefusal.ts';
-import { checkContext, eventsNeverRun, stranded, untiledLevelsEntered, eventOrderProblems, starsWithoutTranslevelProblems } from './owchecks.ts';
+import { checkContext, eventsNeverRun, stranded, untiledLevelsEntered, eventOrderProblems, starsWithoutTranslevelProblems, misplacedLinkEnds } from './owchecks.ts';
+import { moveEnd, type MisplacedEnd } from './owlinkends.ts';
+import type { Rect } from './owevents.ts';
 
 export type CheckGroup = 'paths' | 'progress' | 'links' | 'look' | 'budget';
 // the groups in the panel's order (an empty one is not shown)
@@ -35,8 +37,11 @@ export const CHECK_GROUPS: readonly { id: CheckGroup; name: string; title: strin
 
 export type { CheckSeverity };
 
-// a fix of a problem: layer 1 tile `tile` (l1Index) of the map before events set to `to` – one ROM edit (applyFix)
-export interface WorldFix { label: string; title: string; tile: number; to: number }
+// a fix of a problem, one ROM edit (applyFix): layer 1 tile `tile` (l1Index) of the map before events set to `to`; or a
+// link's end at `tile` moved to the submap whose paths its tile is on (owlinkends.ts moveEnd)
+export type WorldFix = TileFix | LinkEndFix;
+export interface TileFix { label: string; title: string; tile: number; to: number }
+export interface LinkEndFix { label: string; title: string; tile: number; end: MisplacedEnd }
 
 export interface WorldProblem {
   key: string; // kind and place: the same while the problem stays
@@ -136,10 +141,12 @@ export function stuckAtEveryProgress(rom: Rom, at: (progress: number) => Checked
 export const isFoundAtEveryProgress = (p: WorldProblem): boolean => /^(dead-end|exit-nowhere|exit-off-path|path-late-look|path-no-look):/.test(p.key);
 
 // The checks of owchecks.ts with every event passed (`all`), the levels' exits in `graph`: events never run, links
-// stranding Mario, levels without level tile an exit leads into, events out of play order, stars without translevel
-export function worldChecks(rom: Rom, all: CheckedAt, place: (tile: number) => string, graph: ExitGraph): WorldProblem[] {
+// stranding Mario, levels without level tile an exit leads into, events out of play order, stars without translevel,
+// link ends on a submap whose paths their tile is not on (with the submaps' views: views)
+export function worldChecks(rom: Rom, all: CheckedAt, place: (tile: number) => string, graph: ExitGraph, views: readonly Rect[]): WorldProblem[] {
   const c = checkContext(rom, all, place);
-  return [...eventsNeverRun(c), ...stranded(c), ...untiledLevelsEntered(c, graph), ...eventOrderProblems(c), ...starsWithoutTranslevelProblems(c)];
+  return [...eventsNeverRun(c), ...stranded(c), ...untiledLevelsEntered(c, graph), ...eventOrderProblems(c), ...starsWithoutTranslevelProblems(c),
+    ...misplacedLinkEnds(c, views)];
 }
 
 // What the World check learns in the probe worker (worldCheckJob): the problems of worldChecks and the budgets' (found
@@ -166,7 +173,7 @@ export function* worldCheckJob(rom: Rom, loads: OverworldLoads, kinds: readonly 
   const graph = new ExitGraph(rom, open), place = (i: number) => tileText({ submap: submapOf(views, i), ...l1XY(i) });
   const inp = progressInput(rom, emulated, kinds, shapes, graph)(0);
   const all: CheckedAt = { inp, r: reach(inp), progress: OW_EVENTS };
-  const budgets = owBudgets(rom, fullestSubmap(rom), kinds), checks = [...worldChecks(rom, all, place, graph), ...budgetProblems(budgets)];
+  const budgets = owBudgets(rom, fullestSubmap(rom), kinds), checks = [...worldChecks(rom, all, place, graph, views), ...budgetProblems(budgets)];
   yield;
   const maps = progressMapsFromEvents(rom, saves.map((s) => s.levelFlags));
   const search = progressSearches(progressInput(rom, maps, kinds, shapes, graph));
@@ -236,6 +243,7 @@ export function stopTile(l1: ArrayLike<number>, kinds: readonly PathKind[]): num
 
 // the fix written (call it inside one ROM edit)
 export function applyFix(rom: Rom, fix: WorldFix): void {
+  if ('end' in fix) { moveEnd(rom, fix.end); return; }
   const l1 = readL1(rom);
   l1[fix.tile] = fix.to;
   writeL1(rom, l1);

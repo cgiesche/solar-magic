@@ -1,9 +1,10 @@
 // The World check's checks beyond the paths' problems (worldcheck.ts): events nothing runs, links Mario can't come
 // back from, levels without level tile an exit leads into, events a loaded save draws in another order than they
-// ran in play, and stars without a translevel of their own. Each a plain function of the ROM and the searches of owreach.ts with every event passed.
+// ran in play, stars without a translevel of their own and link ends on the other submap of an overlap. Each a plain
+// function of the ROM and the searches of owreach.ts with every event passed.
 
 import type { Rom } from './rom.ts';
-import { OW_EVENTS, MAX_TRANSLEVEL, translevelToLevel, readL1, readTranslevels, l1Index, isStarPipeTile } from './overworld.ts';
+import { OW_EVENTS, MAX_TRANSLEVEL, translevelToLevel, readL1, readTranslevels, l1Index, isStarPipeTile, MAP_NAMES } from './overworld.ts';
 import { readEvents, eventChanges, eventRunners, eventPieces, drawPiece, l2XY, type EventData, type EventChanges, type EventRunner } from './owevents.ts';
 import { reach, inputWithout, type Reach } from './owreach.ts';
 import { starsWithoutTranslevel, isStar } from './owstars.ts';
@@ -11,6 +12,9 @@ import { readSecondaryEntrance, mainTranslevel, OW_NORMAL, OW_SECRET } from './l
 import type { ExitGraph } from './exitgraph.ts';
 import { hex2, hex3 } from './names.ts';
 import type { CheckedAt, WorldProblem } from './worldcheck.ts';
+import { misplacedInRom, misplacedText, endTile } from './owlinkends.ts';
+import { tileText } from './owteleport.ts';
+import type { Rect } from './owevents.ts';
 
 const SECONDARY_ENTRANCES = 0x200;
 
@@ -98,6 +102,24 @@ export function stranded(c: CheckContext): WorldProblem[] {
       title: `Not even with every event passed does a path, star, pipe or exit path lead from ${place(l.to)} back to ${place(l.from)}: what he left behind there is lost to him.` });
   }
   return out;
+}
+
+// ---- link ends on the other submap of an overlap ----
+
+// The link ends stored on a submap whose paths their tile is not on, another's whose view shows it is (owlinkends.ts
+// misplacedEnds, on the map with every event passed; the submaps' `views`): likely written with the nearest view's
+// submap in an overlap (Forest of Illusion 05,14 for Vanilla Dome's entrance). A warning – the game takes Mario there,
+// on a submap where the tile isn't on his paths – with a fix moving the end to the submap the paths are of.
+export function misplacedLinkEnds(c: CheckContext, views: readonly Rect[]): WorldProblem[] {
+  const { inp } = c.all;
+  return misplacedInRom(c.rom, inp.l1, inp.kinds, views).map((m) => {
+    const t = m.link[m.end], tile = endTile(t), to = MAP_NAMES[m.to];
+    return { key: `link-submap:${m.link.kind}:${m.link.entries[0]}:${m.end}:${t.submap}:${tile}`, group: 'links', severity: 'warn', tile, progress: OW_EVENTS,
+      text: misplacedText(m), brief: `link end on ${tileText(t)}, not ${to}`,
+      title: `${MAP_NAMES[t.submap]}'s and ${to}'s views both show the cell; its paths lead to ${to}'s stop and level tiles. The game ${m.end === 'b' ? `puts Mario on ${MAP_NAMES[t.submap]} there` : `takes the link only with Mario on ${MAP_NAMES[t.submap]}`}.`,
+      fix: { label: `Move to ${to}`, tile, end: m,
+        title: `The link's ${m.end === 'b' ? 'target' : 'source'} on ${to} (${tileText({ ...t, submap: m.to })}) – one ROM edit` } };
+  });
 }
 
 // ---- levels without level tile an exit leads into ----

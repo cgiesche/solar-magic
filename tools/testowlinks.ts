@@ -8,11 +8,12 @@ import { LevelEmulator } from '../src/core/levelemu.ts';
 import { PlaySession } from '../src/core/playsession.ts';
 import { readExitPaths, readExitPath, writeExitPath, readTeleports, writeTeleport, tileText, EXIT_PATHS, EXIT_HOOK, FIND_HOOK, GAME_EXIT_TABLES, GAME_EXITS, sameTile as same, type OwTile, type OwPos } from '../src/core/owteleport.ts';
 import { readLinks, makeLink, removeLink, setBothWays, moveLocation, exitEntry, pathSide, koopaTeleport, setKoopaTeleport, opposite, sidesMatch, exitOut, exitOutText, SIDES, KOOPA_X, type LinkEnd, type OwLink } from '../src/core/owlinks.ts';
-import { l1Index, overworldDataRanges, readL1, OverworldEmulator, OverworldLoads } from '../src/core/overworld.ts';
+import { l1Index, overworldDataRanges, readL1, gameL1, OW_EVENTS, OverworldEmulator, OverworldLoads } from '../src/core/overworld.ts';
+import { submapsShowing, pathSubmap, endChoice, endChoiceText, linksEndingAt, clickedLinks, misplacedEnds, moveEnd } from '../src/core/owlinkends.ts';
 import { submapViews, submapOf, submapShown, inView } from '../src/core/owevents.ts';
 import { readSecondaryEntrance, writeSecondaryEntrance, newOverworldExit } from '../src/core/level.ts';
 import { GM, RAM, PAD, MARIO_DYING, get16, set16 } from '../src/core/ram.ts';
-import { editorImage, cleanImage, romDiff, pathShapes } from './fixture.ts';
+import { editorImage, cleanImage, romDiff, pathShapes, pathKinds } from './fixture.ts';
 
 let bad = 0;
 const check = (ok: boolean, what: string) => { console.log((ok ? 'ok   ' : 'FAIL ') + what); if (!ok) bad++; };
@@ -235,6 +236,42 @@ function warp(r: Rom, from: OwTile) {
   const l = makeLink(r, 'star', from, t, false), got = warp(r, from);
   check(tileText(l.b) === 'Vanilla Dome 05,14' && got.found === l.entries[0] && got.submap === 2 && got.x === 5 && got.y === 0x14,
     `a star link to ${tileText(l.b)}: Mario on submap ${got.submap} at ${hx(got.x)},${hx(got.y)}`);
+}
+{
+  // #404: a link end dropped in an overlap of views asks which submap, the one whose paths the tile is on preselected;
+  // a click there finds a link ending on any of them; an end on the other submap is found (the World check's warning)
+  // and moved where its paths are
+  const loads = new OverworldLoads(new OverworldEmulator(new Rom(rom.data.slice())), 6), views = submapViews(loads);
+  const kinds = pathKinds(rom), l1 = gameL1(loads.get(0, OW_EVENTS)).slice();
+  const vd = l1Index(1, 5, 0x14), foi = l1Index(1, 8, 0x15), yiTop = l1Index(1, 4, 0);
+  const choice = (i: number, shown: number) => endChoice(l1, kinds, views, i, shown).join();
+  check(submapsShowing(views, vd).join() === '2,3' && pathSubmap(l1, kinds, views, vd) === 2, 'Vanilla Dome 05,14: in the views of Vanilla Dome and Forest of Illusion, on Vanilla Dome\'s paths');
+  check(choice(vd, 1) === '2,3' && choice(vd, 3) === '2,3' && choice(vd, 0) === '2,3', `dropped there with Yoshi's Island, Forest of Illusion or the main map shown: Vanilla Dome first, then Forest of Illusion (${choice(vd, 1)})`);
+  check(choice(foi, 2) === '3,2', `Forest of Illusion 08,15 (its exit to Vanilla Dome's 05,14): Forest of Illusion first (${choice(foi, 2)})`);
+  // a tile in one view only, the main map: one submap, no menu; a tile in an overlap no paths decide: the shown one
+  const one = l1Index(1, 4, 4), blank = l1Index(1, 1, 0x13);
+  check(choice(one, 2) === '1' && choice(l1Index(0, 0x0c, 9), 2) === '0', `a tile in Yoshi's Island's view only: ${choice(one, 2)}; on the main map: ${choice(l1Index(0, 0x0c, 9), 2)}`);
+  check(kinds[l1[blank]] === 'none' && submapsShowing(views, blank).join() === '2,3' && choice(blank, 3) === '3,2' && choice(blank, 1) === `${submapOf(views, blank)},${5 - submapOf(views, blank)}`,
+    `a tile without paths in the overlap: the shown submap (${choice(blank, 3)}), else the nearest view's (${choice(blank, 1)})`);
+  check(endChoiceText([2, 3], vd) === '→ Vanilla Dome 05,14 · in an overlap, you\'ll be asked' && endChoiceText([1], yiTop) === '→ Yoshi\'s Island 04,00',
+    `the status bar while dragging: "${endChoiceText([2, 3], vd)}"`);
+  check(!misplacedEnds(links, l1, kinds, views).length, 'the clean game: no link end on the other submap of an overlap');
+  // a star stored as Forest of Illusion 05,14 (as submapOf wrote it before #403)
+  const r = new Rom(rom.data.slice()), from: OwTile = { submap: 0, x: 0x0c, y: 0x09 };
+  const l = makeLink(r, 'star', from, { submap: 3, x: 5, y: 0x14 }, false), rl = readLinks(r);
+  const found = (shown: number) => linksEndingAt(rl, vd, [shown, ...submapsShowing(views, vd).filter((s) => s !== shown)]).map((f) => `${show(f.link)} ${f.end}`);
+  check(found(2).length === 2 && found(2)[0].includes('2:5,14') && found(2)[1] === '0:C,9→3:5,14 b' && found(3)[0] === '0:C,9→3:5,14 b' && found(3).length === 2,
+    `a click on 05,14 finds the game's exit path and the star on Forest of Illusion: with Vanilla Dome shown ${found(2).join(', ')}; with Forest of Illusion ${found(3).join(', ')}`);
+  const clicked = (order: number[]) => clickedLinks(rl, vd, order).map(show).join(' ');
+  check(clicked([2, 3]) === show(rl.find((k) => k.kind === 'exit' && k.b.submap === 2 && k.b.x === 5)!) && clicked([3, 2]) === '0:C,9→3:5,14' && clicked([1, 2, 3]).split(' ').length === 2,
+    `a click selects the link on the submap acted on (${clicked([2, 3])}; ${clicked([3, 2])}), links on two others only: both to choose from (${clicked([1, 2, 3])})`);
+  const m = misplacedEnds(rl, l1, kinds, views);
+  check(m.length === 1 && m[0].end === 'b' && m[0].to === 2 && m[0].link.entries.join() === l.entries.join(), `found as on the other submap: ${m.map((x) => `${show(x.link)} ${x.end} → ${x.to}`)}`);
+  if (m.length) {
+    const moved = moveEnd(r, m[0]), got = warp(r, from);
+    check(tileText(moved.b) === 'Vanilla Dome 05,14' && got.found === moved.entries[0] && got.submap === 2 && got.x === 5 && got.y === 0x14 && !misplacedEnds(readLinks(r), l1, kinds, views).length,
+      `moved to ${tileText(moved.b)}: Mario on submap ${got.submap} at ${hx(got.x)},${hx(got.y)} (emulated)`);
+  }
 }
 {
   // #374: of two entries with a star's tile the game takes the last – the link read there, led elsewhere and moved there

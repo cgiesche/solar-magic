@@ -4,8 +4,10 @@
 // exit path tile by an exit path (the side its path goes on found from the path tiles around it, the target's the
 // opposite one), a tile Mario stops on by a star/pipe link, a Koopa Kid's tile by its place. Dragging an end of the
 // selected arrow, a location or a Koopa Kid's place moves it; a tile on the other map region is linked by choosing it
-// after the source ("…to a tile on another map"); Delete removes the selected link. Each change is one ROM edit
-// (owlinks.ts).
+// after the source ("…to a tile on another map", the map's cursor a crosshair while it is pending); Delete removes the
+// selected link. A link end dropped on a tile several submaps' views show asks which submap at the cursor, the one whose
+// paths the tile is on first (core/owlinkends.ts endChoice); a click there finds links ending on any of them. Each
+// change is one ROM edit (owlinks.ts).
 
 import type { OverworldView, PickCheck } from './overworld.ts';
 import { l1Hex } from '../core/owl1sheet.ts';
@@ -20,6 +22,8 @@ import {
 import { readTeleports, tileText, sameTile, type OwTile } from '../core/owteleport.ts';
 import { l1Index, l1XY, DIR_NAMES, DIR_ARROWS, MAP_NAMES } from '../core/overworld.ts';
 import { inView } from '../core/owevents.ts';
+import { endChoice, endChoiceText, clickedLinks, submapsShowing, endTile } from '../core/owlinkends.ts';
+import { contextMenu } from './menu.ts';
 import { isPathKind, PATH_KIND_NAMES } from '../core/owpaths.ts';
 import { ExitGraph } from '../core/exitgraph.ts';
 import { readSecondaryEntrance, levelTranslevel } from '../core/level.ts';
@@ -79,7 +83,7 @@ export class LinkLayer {
   }
 
   // ---- tiles ----
-  private index(t: OwTile): number { return l1Index(t.submap ? 1 : 0, t.x, t.y); }
+  private index(t: OwTile): number { return endTile(t); }
   // the tile at i where the user acts: on the submap shown when i shows in its view (OverworldView.submapHere)
   private tile(i: number): OwTile {
     const { x, y } = l1XY(i);
@@ -90,6 +94,29 @@ export class LinkLayer {
     return { submap: this.view.submapAt(i), ...l1XY(i) };
   }
   private shown(t: OwTile): boolean { return (t.submap ? 1 : 0) === this.view.region; }
+  // the submaps a link end at tile i can be on, the one preselected first (core/owlinkends.ts endChoice: the submap whose
+  // paths it is on – the map with every event passed, as searched – else the one shown, else the nearest view's)
+  private choice(i: number): number[] {
+    const views = this.view.views, kinds = this.view.pathKinds();
+    if (!views || !kinds) return [this.view.submapHere(i)];
+    return endChoice(this.view.reach.state()?.all.inp.l1 ?? this.view.shown.l1, kinds, views, i, this.view.map);
+  }
+  // the submaps whose views show tile i, the one the user acts on first: where links ending at i are looked for
+  private around(i: number): number[] {
+    const here = this.view.submapHere(i), views = this.view.views;
+    return [here, ...views ? submapsShowing(views, i).filter((s) => s !== here) : []];
+  }
+  // whether link end e is at tile i on one of the submaps whose views show it
+  private endsAt(e: OwTile, i: number): boolean { return this.index(e) === i && this.around(i).includes(e.submap); }
+  // the tile i as a link end goes there: on the submap chosen – asked at the cursor (cx, cy) when several views show it
+  // (a menu, the preselected first: Enter takes it; Esc or a click elsewhere: nothing done)
+  private ask(i: number, cx: number, cy: number, then: (t: OwTile) => void): void {
+    const choice = this.choice(i), { x, y } = l1XY(i);
+    if (choice.length < 2) { then({ submap: choice[0], x, y }); return; }
+    contextMenu(cx, cy, [{ heading: 'In an overlap of submaps' }, ...choice.map((s, k) => ({
+      label: tileText({ submap: s, x, y }), title: k ? undefined : 'Its paths are this submap\'s (Enter)', onClick: () => then({ submap: s, x, y }),
+    }))], true);
+  }
   // what tile i links by: an exit path from an exit path tile (or one an exit path already starts at, as the game's
   // cave), a star/pipe link from a tile Mario stops on, a Koopa Kid's place from its tile
   private source(i: number, t = this.tile(i)): Source {
@@ -205,14 +232,16 @@ export class LinkLayer {
   }
 
   // ---- interaction (cells of layer 1) ----
-  down(x: number, y: number): void {
+  // a press at map cell x, y (the cursor at cx, cy)
+  down(x: number, y: number, cx: number, cy: number): void {
     if (x < 0 || y < 0 || x >= 32 || y >= 32) return;
     const i = l1Index(this.view.region, x, y), t = this.tile(i), s = this.sel;
-    if (this.pending) { this.finishPending(t); return; }
+    if (this.pending) { this.finishPending(i, cx, cy); return; }
+    // (the selected link's end at the cell, whatever submap it is stored on)
     const end = (target: boolean): Moved | null => {
       if (s?.kind !== 'link') return null;
       const e = target ? s.link.b : s.link.a;
-      return this.shown(e) && sameTile(e, t) ? { sel: s, target } : null;
+      return this.shown(e) && this.index(e) === i ? { sel: s, target } : null;
     };
     // an end of the selected link, a location or a Koopa Kid's place where no link starts: moved
     let move = end(true) ?? end(false);
@@ -229,13 +258,26 @@ export class LinkLayer {
     if (!this.drag || x < 0 || y < 0 || x >= 32 || y >= 32) return;
     this.drag.to = l1Index(this.view.region, x, y);
     this.view.paint();
+    this.view.updateStatus();
   }
-  up(): void {
+  // the release (the cursor at cx, cy): a link end dropped in an overlap of submaps' views asks which submap
+  up(cx: number, cy: number): void {
     const d = this.drag;
     this.drag = null;
     if (!d) return;
-    if (d.to === d.from) { if (d.move?.sel.kind === 'link') this.view.paint(); else this.select(d.from); return; }
-    this.apply(() => (d.move ? this.moveTo(d.move, this.tile(d.to)) : this.make(this.tile(d.from), this.tile(d.to))));
+    if (d.to === d.from) { if (d.move?.sel.kind === 'link') this.view.paint(); else this.select(d.from, cx, cy); return; }
+    this.view.paint();
+    this.view.updateStatus();
+    const drop = (to: OwTile) => this.apply(() => (d.move ? this.moveTo(d.move, to) : this.make(this.tile(d.from), to)));
+    if (this.asks(d.move, d.from)) this.ask(d.to, cx, cy, drop);
+    else drop(this.tile(d.to));
+  }
+  // whether a drop of `move` (or of a new link from tile `from`) takes the submap asked in an overlap: a link's end or a
+  // location, not a Koopa Kid's place (on the submap of its tile) nor a tile no link starts at (refused at once)
+  private asks(move: Moved | null, from: number): boolean {
+    if (move) return move.sel.kind === 'link' || move.sel.kind === 'location';
+    const k = this.source(from).kind;
+    return k === 'star' || k === 'exit';
   }
   private apply(f: () => void): void {
     // (a link table full: the unused entries freed and the change made in one ROM edit)
@@ -243,11 +285,15 @@ export class LinkLayer {
     try { f(); } catch (e) { refusedToast(this.rom, e, 'Overworld link not changed: ', (r) => linkTableFix(app, r, f, done)); }
     done();
   }
-  // the next click on a map chooses the tile: of a link from `from`, or where `move` goes
-  private finishPending(t: OwTile): void {
+  // the next click on a map chooses the tile (i, the cursor at cx, cy): of a link from `from`, or where `move` goes –
+  // asked in an overlap of submaps' views (Esc there: nothing done, the pending choice ended)
+  private finishPending(i: number, cx: number, cy: number): void {
     const p = this.pending!;
     this.pending = null;
-    this.apply(() => ('from' in p ? this.make(p.from, t) : this.moveTo(p.move, t)));
+    this.view.updateStatus();
+    const finish = (t: OwTile) => this.apply(() => ('from' in p ? this.make(p.from, t) : this.moveTo(p.move, t)));
+    if ('from' in p ? this.asks(null, this.index(p.from)) : this.asks(p.move, -1)) this.ask(i, cx, cy, finish);
+    else finish(this.tile(i));
   }
   cancelPending(): boolean {
     if (!this.pending) return false;
@@ -255,17 +301,26 @@ export class LinkLayer {
     this.view.updateStatus();
     return true;
   }
+  // whether a link starts at tile t (its source, or its target both ways), on any submap whose view shows it
   private startsLink(t: OwTile): boolean {
-    return this.info().links.some((l) => (this.shown(l.a) && sameTile(l.a, t)) || (l.both && this.shown(l.b) && sameTile(l.b, t)));
+    const i = this.index(t);
+    return this.info().links.some((l) => this.endsAt(l.a, i) || (l.both && this.endsAt(l.b, i)));
   }
-  // a click: the link, location or Koopa Kid's place at tile i selected (a link's source first), else the tile
-  private select(i: number): void {
-    const { links } = this.info(), t = this.tile(i);
-    const l = links.find((k) => this.shown(k.a) && sameTile(k.a, t)) ?? links.find((k) => this.shown(k.b) && sameTile(k.b, t));
-    const loc = this.locationAt(t), place = this.koopaPlaceAt(i), koopa = place >= 0 ? place : this.koopaAt(i);
-    this.sel = l ? { kind: 'link', link: l } : loc >= 0 ? { kind: 'location', i: loc } : koopa >= 0 ? { kind: 'koopa', k: koopa } : { kind: 'tile', t };
-    this.view.paint();
-    this.view.buildProps();
+  // a click (the cursor at cx, cy): the link, location or Koopa Kid's place at tile i selected (a link's source first),
+  // else the tile. A link ending there on any submap whose view shows it (core/owlinkends.ts linksEndingAt): the one on
+  // the submap the user acts on first; links there on several other submaps only: a menu asks which
+  private select(i: number, cx: number, cy: number): void {
+    const t = this.tile(i), found = clickedLinks(this.info().links, i, this.around(i));
+    const pick = (l: OwLink | null) => {
+      const loc = this.locationAt(t), place = this.koopaPlaceAt(i), koopa = place >= 0 ? place : this.koopaAt(i);
+      this.sel = l ? { kind: 'link', link: l } : loc >= 0 ? { kind: 'location', i: loc } : koopa >= 0 ? { kind: 'koopa', k: koopa } : { kind: 'tile', t };
+      this.view.paint();
+      this.view.buildProps();
+    };
+    if (found.length < 2) { pick(found[0] ?? null); return; }
+    contextMenu(cx, cy, [{ heading: 'Overworld links here' }, ...found.map((l) => ({
+      label: `${tileText(l.a)} ${l.both ? '↔' : '→'} ${tileText(l.b)}`, onClick: () => pick(l),
+    }))], true);
   }
   private locationAt(t: OwTile): number {
     const all = readTeleports(this.rom);
@@ -330,8 +385,11 @@ export class LinkLayer {
     return true;
   }
 
-  // the status bar while a tile on another map is to be chosen
+  // the status bar while a link end is dragged (where it would go: "→ Vanilla Dome 05,14", "· in an overlap, you'll be
+  // asked" where a menu will ask) or a tile on another map is to be chosen
   status(): string | null {
+    const d = this.drag;
+    if (d && d.to !== d.from && this.asks(d.move, d.from)) return endChoiceText(this.choice(d.to), d.to);
     if (!this.pending) return null;
     return `Choose the map and click the tile ${'from' in this.pending ? `${tileText(this.pending.from)} leads to` : 'it goes to'} · Esc cancels`;
   }

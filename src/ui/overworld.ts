@@ -728,7 +728,7 @@ export class OverworldView {
     }
     // (links and moved starts are written with the submap of their tiles: not before the submaps' views are known)
     if ((this.mode === 'links' || this.mode === 'sprites') && !this.views) return;
-    if (this.mode === 'links') { if (e.button === 0) this.links.down(c.x, c.y); return; }
+    if (this.mode === 'links') { if (e.button === 0) this.links.down(c.x, c.y, e.clientX, e.clientY); return; }
     if (this.mode === 'sprites') { if (e.button === 0) { const p = this.point(e); this.sprites.down(p.x, p.y); } return; }
     // (a name being typed: the click closes it, written; a click on the selected level tile's name edits it)
     if (this.mode === 'l1' && e.button === 0 && this.nameEditor.down(this.point(e))) return;
@@ -812,7 +812,7 @@ export class OverworldView {
   }
 
   onUp(e: MouseEvent): void {
-    if (this.links.drag) { this.links.up(); return; }
+    if (this.links.drag) { this.links.up(e.clientX, e.clientY); return; }
     if (this.sprites.drag) { const p = this.point(e); this.sprites.up(p.x, p.y); return; }
     if (this.levelTiles.drag) { this.levelTiles.up(); return; }
     if (this.pathTool.drawing) {
@@ -995,7 +995,8 @@ export class OverworldView {
     this.statusStats.textContent = this.routeBrush ? 'Brush Path (auto)' : look >= 0 ? `Brush Level tile ${l1Hex(look)}` : b.kind === this.mode ? `Brush ${b.w}×${b.h}` : '';
     // (a pick pending: a cell it would refuse says why)
     const refused = this.pickRefusalAtMouse();
-    this.scroller.style.cursor = refused ? 'not-allowed' : '';
+    // (a link to a tile on another map pending: the next click on the map chooses it)
+    this.scroller.style.cursor = refused ? 'not-allowed' : this.mode === 'links' && this.links.pending ? 'crosshair' : '';
     if (refused) {
       this.scroller.title = refusalText(this.app.rom, refused);
       this.statusText.textContent = `Can't pick this tile: ${refusalWords(this.app.rom, refused).reason}`;
@@ -1426,6 +1427,7 @@ export class OverworldView {
     this.nameEditor.close(true);
     this.cellHistory.close();
     this.mode = m;
+    this.links.cancelPending(); // (the next click on the map no longer chooses a link's tile)
     this.levelTiles.cancel();
     this.pathTool.cancel();
     if (m !== 'l1' && (this.eventPick?.at ?? -1) >= 0) this.cancelEventPick(); // (the tile a reveal becomes is picked in the layer 1 sheet)
@@ -2271,6 +2273,7 @@ export class OverworldView {
     this.shownViews = null;
     this.check.reset(); // (edits made elsewhere are not said)
     this.pendingTile = -1;
+    this.links.pending = null; // (left for another tab: ended)
     void this.views; // (asked for now: the links, sprites and events need them)
     this.event = loadEvent(this.app.romName);
     // (the map drawn last may be another ROM's: not shown while this one's load is emulated)

@@ -129,8 +129,9 @@ export function menuButton(menu: Menu): HTMLElement {
   return dropdown(menu);
 }
 
-// a context menu at a viewport position (right click); closes on a choice, Esc or a click elsewhere
-export function contextMenu(x: number, y: number, items: MenuItem[]): void {
+// a context menu at a viewport position (right click); closes on a choice, Esc or a click elsewhere. focusFirst: its
+// first item focused (Enter takes it)
+export function contextMenu(x: number, y: number, items: MenuItem[], focusFirst = false): void {
   closeMenus();
   const list = h('div', { class: 'menu context-menu', role: 'menu', style: `position: fixed; left: ${x}px; top: ${y}px` });
   const entries: HTMLButtonElement[] = [];
@@ -163,6 +164,7 @@ export function contextMenu(x: number, y: number, items: MenuItem[]): void {
     ev.stopPropagation();
   };
   window.addEventListener('keydown', keys, true);
+  if (focusFirst) entries.find((b) => !b.disabled)?.focus();
   // the right click that opened the menu must not close it
   setTimeout(() => window.addEventListener('mousedown', outside, true), 0);
   current = {

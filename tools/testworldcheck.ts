@@ -20,14 +20,15 @@ import { ExitGraph } from '../src/core/exitgraph.ts';
 import type { Job } from '../src/core/jobrunner.ts';
 import { readStart } from '../src/core/owsprites.ts';
 import { RAM } from '../src/core/ram.ts';
-import { worldProblems, worldChecks, worldCheckJob, stuckAtEveryProgress, applyFix, errorCount, stopTile, diffProblems, diffText, checkAgainst, budgetProblems, budgetPlace, type CheckedAt, type WorldProblem } from '../src/core/worldcheck.ts';
+import { worldProblems, worldChecks, worldCheckJob, stuckAtEveryProgress, applyFix, errorCount, stopTile, diffProblems, diffText, checkAgainst, budgetProblems, budgetPlace, type CheckedAt, type WorldProblem, type WorldFix } from '../src/core/worldcheck.ts';
 import { owBudgets, fullestSubmap } from '../src/core/owbudget.ts';
 import { eventReveal } from '../src/core/oweventtiles.ts';
 import { readEvents, writeEvents, submapViews, submapOf } from '../src/core/owevents.ts';
 import { l1OwnLooks, lookProblems } from '../src/core/owlook.ts';
 import { tileText } from '../src/core/owteleport.ts';
 import { readCustomSprites, writeCustomSprites, OW_CUSTOM_MAX } from '../src/core/owcustom.ts';
-import { editorImage, pathKinds, pathShapes, loadedProgressMaps } from './fixture.ts';
+import { makeLink, readLinks } from '../src/core/owlinks.ts';
+import { editorImage, pathKinds, pathShapes, loadedProgressMaps, romDiff } from './fixture.ts';
 
 let bad = 0;
 const check = (ok: boolean, what: string) => { console.log((ok ? 'ok   ' : 'FAIL ') + what); if (!ok) bad++; };
@@ -50,6 +51,8 @@ function checkRom(r: Rom): { problems: WorldProblem[]; now: CheckedAt; all: Chec
 }
 const runJob = <T>(job: Job<T>): T => { let st = job.next(); while (!st.done) st = job.next(); return st.value; };
 const list = (ps: WorldProblem[]) => ps.map((p) => `     ${p.severity} [${p.group}] ${p.key} @${hx(p.progress)}: ${p.text}${p.fix ? ` – fix: ${p.fix.label}` : ''}`).join('\n');
+// the layer 1 tile a fix puts (none: a link end moved)
+const toOf = (f: WorldFix) => ('to' in f ? f.to : undefined);
 const keys = (ps: WorldProblem[]) => ps.map((p) => p.key).sort().join();
 
 // ---- the clean game ----
@@ -152,7 +155,7 @@ console.log(list(clean.problems));
   const undone = diffText(diffProblems(cutCheck.problems, clean.problems));
   check(!!undone && undone.text.startsWith(`Fixed: dead end at ${at(end)}; `) && !undone.text.includes('New') && !undone.show, `its undo says: "${undone?.text}"`);
   const stop = stopTile(readL1(rom), kinds);
-  check(!!dead?.fix && dead.fix.tile === end && dead.fix.to === stop && kinds[stop] === 'stop', `fixed by "${dead?.fix?.label}": stop tile ${hx(stop, 3)} at ${at(end)}`);
+  check(!!dead?.fix && dead.fix.tile === end && toOf(dead.fix) === stop && kinds[stop] === 'stop', `fixed by "${dead?.fix?.label}": stop tile ${hx(stop, 3)} at ${at(end)}`);
   if (dead?.fix) {
     const before = readL1(r);
     applyFix(r, dead.fix);
@@ -224,7 +227,7 @@ console.log(list(clean.problems));
   for (const [name, x] of [['the clean game', rom], [`the path tile at ${at(cut)} taken away`, r]] as [string, Rom][]) {
     const { got, steps, place, loads } = learned(x), shownX = checkRom(x), graph = new ExitGraph(x), budgets = owBudgets(x, fullestSubmap(x), kinds);
     const maps = progressMapsFromEvents(x, runJob(progressFlagsJob(loads))), search = progressSearches(progressInput(x, maps, kinds, shapes, graph));
-    const checks = [...worldChecks(x, shownX.all, place, graph), ...budgetProblems(budgets)];
+    const checks = [...worldChecks(x, shownX.all, place, graph, submapViews(loads)), ...budgetProblems(budgets)];
     const everyX = [...stuckAtEveryProgress(x, search, place), ...lookProblems({ rom: x, maps, ownLooks: l1OwnLooks(x, loads), kinds, views: submapViews(loads), search, place })];
     check(steps >= 3 && same(got.checks, checks) && JSON.stringify(got.budgets) === JSON.stringify(budgets) && same(got.every, everyX) && checks.length > 0,
       `${name}: worldCheckJob (${steps + 1} steps) finds the problems with every event passed (${got.checks.length}), the budgets and those at every progress (${got.every.map((p) => p.brief).join('; ') || 'none'}) as found on the main thread before`);
@@ -251,7 +254,7 @@ console.log(list(clean.problems));
     const ps = everyOf(r), p = ps.find((q) => q.key === `exit-off-path:${cell}`);
     check(!!p && p.severity === 'warn' && p.group === 'paths' && p.text === `Mario comes out of the exit at ${at(cell)} walking ${dir}, off the path (${why})`
       && !ps.some((q) => q.severity === 'error'), `${hx(t)} at ${at(cell)}: a warning of Paths, no error (${p?.text}, found after ${p && hx(p.progress)})`);
-    check(p?.fix?.tile === cell && p.fix.to === to, `its fix: ${p?.fix?.label} – tile ${p?.fix && hx(p.fix.to, 3)} (${p?.fix?.title})`);
+    check(p?.fix?.tile === cell && toOf(p.fix) === to, `its fix: ${p?.fix?.label} – tile ${p?.fix && hx(toOf(p.fix) ?? -1, 3)} (${p?.fix?.title})`);
     if (!p?.fix) continue;
     const before = readL1(r);
     applyFix(r, p.fix);
@@ -309,6 +312,28 @@ console.log(list(clean.problems));
   check(budgetPlace(rom, revealBudget, 5).event === 5 && (past >= OW_EVENTS || budgetPlace(rom, revealBudget, past).event === rv.event),
     `Show keeps the event chosen where it shows the gauge, not one past the reveal table (events 00–${hx(past - 1)})`);
   check(eventReveal(rom, rv.event!) >= 0 && readEvents(rom).steps[st.event!].length > 0, `Show: reveals at event ${rv.event?.toString(16)} (it reveals a tile), the tile storage at event ${st.event?.toString(16)} (it has steps)`);
+}
+
+// ---- a link end on the other submap of an overlap (#404) ----
+{
+  // a star led to Forest of Illusion 05,14 – Vanilla Dome's entrance, whose paths are Vanilla Dome's (both views show it)
+  const views = submapViews(new OverworldLoads(new OverworldEmulator(new Rom(rom.data.slice())), 4)), graph = new ExitGraph(rom);
+  const misplaced = (r: Rom) => worldChecks(r, checkRom(r).all, at, graph, views).filter((p) => p.key.startsWith('link-submap:'));
+  check(!misplaced(rom).length, 'the clean game: no link end on the other submap of an overlap');
+  const r = new Rom(rom.data.slice()), from = { submap: 0, x: 0x0c, y: 0x09 };
+  makeLink(r, 'star', from, { submap: 3, x: 5, y: 0x14 }, false);
+  const ps = misplaced(r), p = ps[0];
+  check(ps.length === 1 && p.severity === 'warn' && p.group === 'links' && p.tile === l1Index(1, 5, 0x14)
+    && p.text === 'The link from Main map 0C,09 leads to Forest of Illusion 05,14 – that cell\'s paths are Vanilla Dome\'s',
+    `a star to Forest of Illusion 05,14: a warning of Links (${p?.text})`);
+  check(p?.fix?.label === 'Move to Vanilla Dome', `its fix: "${p?.fix?.label}" (${p?.fix?.title})`);
+  if (p?.fix) {
+    const before = r.data.slice();
+    applyFix(r, p.fix);
+    const l = readLinks(r).find((k) => k.kind === 'star' && k.a.submap === 0 && k.a.x === 0x0c && k.a.y === 9);
+    check(!!l && tileText(l.b) === 'Vanilla Dome 05,14' && !misplaced(r).length && romDiff(before, r.data) === 1,
+      `fixed: the star leads to ${l && tileText(l.b)}, no warning (${romDiff(before, r.data)} bytes changed)`);
+  }
 }
 
 if (bad) { console.log(`${bad} failed`); process.exit(1); }

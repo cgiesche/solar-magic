@@ -186,7 +186,9 @@ export class WorldCheck {
   private fix(p: WorldProblem): void {
     const f = p.fix!;
     try {
-      this.view.app.romEdit(`World check: ${f.label.toLowerCase()} (${tileText({ submap: this.view.submapAt(f.tile), ...l1XY(f.tile) })})`, () => applyFix(this.view.app.rom, f));
+      // (a link end named as stored; a tile on its submap by submapAt)
+      const at = 'end' in f ? f.end.link[f.end.end] : { submap: this.view.submapAt(f.tile), ...l1XY(f.tile) };
+      this.view.app.romEdit(`World check: ${f.label.toLowerCase()} (${tileText(at)})`, () => applyFix(this.view.app.rom, f));
       this.view.showTile(p.tile);
     } catch (e) { refusedToast(this.view.app.rom, e, 'Not fixed: '); }
   }
