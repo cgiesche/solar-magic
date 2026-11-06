@@ -2,13 +2,22 @@
 // entries (owteleport.ts) and the Koopa Kids' teleports. Checked on the model – the clean game's entries read as
 // links (both ways where an entry leads back) and written again unchanged – and by emulation: Mario walking through
 // each of the game's exit paths arrives where he does in the clean game, through a link made in the editor (also in
-// the table's last entry) where it leads, stars by a star link made, and is put at a Koopa Kid's place set.
+// the table's last entry) where it leads, stars by a star link made, and is put at a Koopa Kid's place set. Put standing
+// on a tile by a star link or a level's teleport (#405) he walks off only as the tile's translevel's flags let him: stuck
+// on a path tile (Vanilla Dome 05,14) and on a pipe or stop painted there (no translevel), not on a star painted there,
+// a stop 82 or a level tile – the model (owreach.ts stuckOnArrival) the same.
 import { Rom, snesToPc } from '../src/core/rom.ts';
 import { LevelEmulator } from '../src/core/levelemu.ts';
 import { PlaySession } from '../src/core/playsession.ts';
 import { readExitPaths, readExitPath, writeExitPath, readTeleports, writeTeleport, tileText, EXIT_PATHS, EXIT_HOOK, FIND_HOOK, GAME_EXIT_TABLES, GAME_EXITS, sameTile as same, type OwTile, type OwPos } from '../src/core/owteleport.ts';
 import { readLinks, makeLink, removeLink, setBothWays, moveLocation, exitEntry, pathSide, koopaTeleport, setKoopaTeleport, opposite, sidesMatch, exitOut, exitOutText, SIDES, KOOPA_X, type LinkEnd, type OwLink } from '../src/core/owlinks.ts';
-import { l1Index, overworldDataRanges, readL1, gameL1, OW_EVENTS, OverworldEmulator, OverworldLoads } from '../src/core/overworld.ts';
+import { l1Index, overworldDataRanges, readL1, readL2, readTranslevels, initialFlags, gameL1, OW_EVENTS, MAX_TRANSLEVEL, OverworldEmulator, OverworldLoads } from '../src/core/overworld.ts';
+import { reachInput, reach, arrivals, stuckOnArrival, stuckOnArrivalText } from '../src/core/owreach.ts';
+import { OverworldStroke } from '../src/core/owstroke.ts';
+import { readStart } from '../src/core/owsprites.ts';
+import { ExitGraph } from '../src/core/exitgraph.ts';
+import { decodeSecondaryEntrance, OW_NOTHING } from '../src/core/level.ts';
+import { locationFor } from '../src/core/owteleport.ts';
 import { submapsShowing, pathSubmap, endChoice, endChoiceText, linksEndingAt, clickedLinks, misplacedEnds, moveEnd } from '../src/core/owlinkends.ts';
 import { submapViews, submapOf, submapShown, inView } from '../src/core/owevents.ts';
 import { readSecondaryEntrance, writeSecondaryEntrance, newOverworldExit } from '../src/core/level.ts';
@@ -194,7 +203,8 @@ function yiLink(): OwLink { return links.find((l) => l.kind === 'exit' && l.a.su
   const there = exitRoutine(r2, exitEntry(yi.a, made.b).from), home = exitRoutine(r2, exitEntry(made.b, yi.a).from);
   check(made.b.side === opposite(yi.a.side!) && leads(there, made.b) && leads(home, yi.a), `a link made both ways (entries ${made.entries}, ${show(made)}): there ${res(there)}, back ${res(home)}`);
 }
-// Mario on star tile `from`: the entry the patch's search finds, where the overworld loads
+// Mario on star tile `from`: the entry the patch's search finds, where the overworld loads (`emu`: the game then, Mario
+// standing)
 function warp(r: Rom, from: OwTile) {
   const e = new LevelEmulator(r);
   e.startGame(0);
@@ -205,7 +215,7 @@ function warp(r: Rom, from: OwTile) {
   const found = w[RAM.owWarpIndex];
   w[RAM.owWarp] = 1; w[RAM.gameMode] = GM.overworldLoad;
   for (let f = 0; f < 400 && w[RAM.gameMode] !== GM.overworld; f++) e.snes.runFrame();
-  return { found, submap: w[RAM.submap], x: get16(w, RAM.owPlayerTileX), y: get16(w, RAM.owPlayerTileY) };
+  return { found, submap: w[RAM.submap], x: get16(w, RAM.owPlayerTileX), y: get16(w, RAM.owPlayerTileY), emu: e };
 }
 {
   // a star made to warp: Mario on its tile, the patch's search finds the entry, the overworld loads at its target
@@ -272,6 +282,103 @@ function warp(r: Rom, from: OwTile) {
     check(tileText(moved.b) === 'Vanilla Dome 05,14' && got.found === moved.entries[0] && got.submap === 2 && got.x === 5 && got.y === 0x14 && !misplacedEnds(readLinks(r), l1, kinds, views).length,
       `moved to ${tileText(moved.b)}: Mario on submap ${got.submap} at ${hx(got.x)},${hx(got.y)} (emulated)`);
   }
+}
+{
+  // #405: put on a tile standing (a star/pipe link, a level's exit teleporting), Mario walks off only in the ways the
+  // level flags of the tile's translevel open ($049299: $7ED000, then $1EA2; tile 82 any way) – whatever the tile: on
+  // Vanilla Dome 05,14 (the exit path tile 48 where the main map's exit path arrives, translevel 0) he can't move, with
+  // translevel 0's flags opened he walks off it; on a stop tile he walks off. The model (stuckOnArrival) says the same.
+  const standing = (() => { const e = new LevelEmulator(rom); e.startGame(0); return e.snes.wram[RAM.owProcess]; })();
+  const PADS = [PAD.up, PAD.down, PAD.left, PAD.right];
+  // the pad pressed a few frames, until Mario stands again (or didn't go): the tile he stands on
+  const press = (e: LevelEmulator, pad: number) => {
+    const s = e.snes, w = s.wram;
+    let moved = false;
+    for (let f = 0; f < 1500; f++) {
+      s.joy1 = f < 4 ? pad : 0;
+      s.runFrame();
+      if (w[RAM.owProcess] !== standing || w[RAM.gameMode] !== GM.overworld) moved = true;
+      else if ((moved && f > 30) || (!moved && f > 40)) break;
+    }
+    s.joy1 = 0;
+    return `${w[RAM.submap]}:${hx(get16(w, RAM.owPlayerTileX))},${hx(get16(w, RAM.owPlayerTileY))}`;
+  };
+  // each direction pressed after a warp from `from` (opened: translevel 0's flags set first): where Mario stands
+  const pressed = (r: Rom, from: OwTile, open = 0) => PADS.map((pad) => {
+    const g = warp(r, from), e = g.emu;
+    for (let f = 0; f < 60; f++) e.snes.runFrame();
+    e.snes.wram[RAM.levelFlags] |= open;
+    return press(e, pad);
+  });
+  const loads = new OverworldLoads(new OverworldEmulator(new Rom(rom.data.slice())), 2), kinds = pathKinds(rom), shapes = pathShapes(rom);
+  const model = (r: Rom, open = 0) => {
+    const flags = new Uint8Array(MAX_TRANSLEVEL + 1); // (a new game's: the initial flags)
+    for (let tl = 0; tl <= MAX_TRANSLEVEL; tl++) flags[tl] = initialFlags(r, tl);
+    flags[0] |= open;
+    const l1 = readL1(r), every = gameL1(loads.get(0, OW_EVENTS)), game = readL1(rom);
+    for (let i = 0; i < l1.length; i++) if (l1[i] === game[i]) l1[i] = every[i]; // (cells painted kept)
+    return reachInput(r, l1, readTranslevels(r), flags, kinds, shapes, readStart(r, 0));
+  };
+  const from: OwTile = { submap: 1, x: 0x0c, y: 0x08 }, vd: OwTile = { submap: 2, x: 5, y: 0x14 }, vdi = l1Index(1, 5, 0x14);
+  const r = new Rom(rom.data.slice());
+  makeLink(r, 'star', from, vd, false);
+  const stuck = pressed(r, from), freed = pressed(r, from, 0x0f), inp = model(r), open = model(r, 0x0f);
+  check(stuck.every((p) => p === '2:5,14') && stuckOnArrival(inp, inp.flags, vdi),
+    `a star/pipe link from Yoshi's Island 0C,08 to Vanilla Dome 05,14 (the exit path's tile 48, translevel ${readTranslevels(rom)[vdi]}): each direction pressed, Mario stays (${stuck.join(' ')}); the model: stuck`);
+  check(freed[0] === '2:5,12' && !stuckOnArrival(open, open.flags, vdi),
+    `translevel 0's flags opened: he walks up off the path tile to ${freed[0]} – the translevel's flags decide, not the tile's kind; the model: not stuck`);
+  check(stuckOnArrivalText(inp, vdi, tileText(vd), 'star') === 'Mario arrives standing on a path tile at Vanilla Dome 05,14 and can\'t move – a star/pipe link must lead to a tile he stops on (a level, stop, star or pipe tile)',
+    `said: ${stuckOnArrivalText(inp, vdi, tileText(vd), 'star')}`);
+  // a stop tile of Vanilla Dome (82, Mario walks off it any way) and a level tile (A enters it)
+  const stop: OwTile = { submap: 2, x: 0x0a, y: 0x14 }, level: OwTile = { submap: 2, x: 5, y: 0x12 };
+  const r2 = new Rom(rom.data.slice());
+  makeLink(r2, 'star', from, stop, false);
+  const off = pressed(r2, from), i2 = model(r2);
+  check(off.some((p) => p !== '2:A,14') && !stuckOnArrival(i2, i2.flags, l1Index(1, 0x0a, 0x14)) && !stuckOnArrival(i2, i2.flags, l1Index(1, level.x, level.y)),
+    `to the stop tile at ${tileText(stop)}: he walks off (${off.join(' ')}); the model: not stuck there, nor on the level tile at ${tileText(level)}`);
+  // a level's exit to the overworld teleporting to 05,14 (level 105's, entrance free): the same
+  const IDX = new ExitGraph(rom).freeEntrance()!, TL = 0x29;
+  const teleported = PADS.map((pad) => {
+    const t = new Rom(rom.data.slice()), loc = locationFor(t, vd)!;
+    writeSecondaryEntrance(t, IDX, { ...decodeSecondaryEntrance([0, 0, 0, 0, 0, 0]), destLevel: 0x105, overworld: { ...newOverworldExit(), action: OW_NOTHING, teleport: 1, location: loc } });
+    const p = PlaySession.start(new LevelEmulator(t), 0x105, { until: 'settled', game: { translevel: TL } }), w = p.wram, scr = w[RAM.marioX + 1];
+    w[RAM.screenExitLo + scr] = IDX & 0xff; w[RAM.screenExitHi + scr] = 0x04 | 0x02 | (IDX >> 8);
+    w[RAM.marioAnim] = 6; w[RAM.pipeTimer] = 0; w[RAM.pipeAction] = 0;
+    if (p.follow() !== 'overworld') return 'no overworld';
+    for (let k = 0; k < 600; k++) p.frame();
+    const there = `${w[RAM.submap]}:${hx(get16(w, RAM.owPlayerTileX))},${hx(get16(w, RAM.owPlayerTileY))}`;
+    return there === '2:5,14' ? press(p.emu, pad) : `arrived at ${there}`;
+  });
+  const yi1 = readTranslevels(rom).findIndex((tl, i) => tl === TL && kinds[readL1(rom)[i]] === 'level');
+  const ti = { ...model(rom), start: yi1, levelWarps: (tl: number) => (tl === TL ? [vdi] : []) }, tr = reach(ti);
+  const arr = arrivals({ inp: ti, r: tr });
+  check(teleported.every((p) => p === '2:5,14') && arr.some((a) => a.how === 'teleport' && a.at === yi1 && a.to === vdi) && stuckOnArrival(ti, tr.flags, vdi),
+    `level 105's exit teleporting to ${tileText(vd)}: Mario stays there too (${teleported.join(' ')}); the model: an arrival from its level tile, stuck`);
+  // a pipe (5B) or stop tile (81) painted there gets no translevel (only a star does, #288): he can't move; a star painted
+  // there gets one with its paths' ways, an 82 lets him walk off any way
+  const isLevel = (t: number) => kinds[t] === 'level';
+  const painted = [0x5b, 0x81, 0x5f, 0x82].map((t) => {
+    const p = new Rom(rom.data.slice()), s = new OverworldStroke(p, 'l1', { l1: readL1(p), l2: readL2(p) }, isLevel, null, { kinds, shapes });
+    s.paint(1, 5, 0x14, t);
+    s.end().write!();
+    makeLink(p, 'star', from, vd, false);
+    const m = model(p), moves = pressed(p, from).some((q) => q !== '2:5,14');
+    return { t, tl: readTranslevels(p)[vdi], moves, stuck: stuckOnArrival(m, m.flags, vdi), text: stuckOnArrivalText(m, vdi, tileText(vd), 'star') };
+  });
+  const pt = (q: typeof painted[0]) => `${hx(q.t)} translevel ${hx(q.tl)}: ${q.moves ? 'walks off' : 'stays'}`;
+  check(painted.every((q) => q.moves === !q.stuck) && painted.map((q) => q.moves).join() === 'false,false,true,true' && painted[0].tl === 0 && painted[1].tl === 0 && painted[2].tl > 0,
+    `painted at ${tileText(vd)}: ${painted.map(pt).join(', ')} – the model agrees`);
+  check(painted[0].text === 'Mario arrives standing on the pipe at Vanilla Dome 05,14 and can\'t move: no way off it is open – it has no translevel of its own (translevel 00\'s flags, shared by every tile without one)',
+    `said: ${painted[0].text}`);
+  // a pipe linked both ways: A takes him back – not stuck (the menu and status bar of a link being made both ways)
+  const pb = new Rom(rom.data.slice()), ps = new OverworldStroke(pb, 'l1', { l1: readL1(pb), l2: readL2(pb) }, isLevel, null, { kinds, shapes });
+  ps.paint(1, 5, 0x14, 0x5b);
+  ps.end().write!();
+  const before = model(pb);
+  makeLink(pb, 'star', from, vd, true);
+  const back = model(pb);
+  check(stuckOnArrival(before, before.flags, vdi) && !stuckOnArrival(before, before.flags, vdi, true) && !stuckOnArrival(back, back.flags, vdi),
+    'a pipe linked both ways (or about to be): not stuck, A takes him back');
 }
 {
   // #374: of two entries with a star's tile the game takes the last – the link read there, led elsewhere and moved there

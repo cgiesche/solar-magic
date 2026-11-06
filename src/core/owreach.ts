@@ -13,7 +13,8 @@
 //   path's: across the path he comes out beside it, OffPath) and walks on from the tile it leads to; onto a stop or
 //   level tile he stops, and its translevel's flag of the way back opens;
 // - a star/pipe entry takes him from its tile (a star or pipe: 5B, 5F, 82) to its destination, a level's exit to the overworld that teleports
-//   (Lunar Magic's) from the level's tiles to its location;
+//   (Lunar Magic's) from the level's tiles to its location; put there he stands, walking off as from a stop tile – by
+//   the flags of the tile's translevel, a path tile's 0 (stuckOnArrival);
 // - with no tile next to him, the game's hardcoded paths ($049078: from a translevel, or a place of the main map,
 //   in a direction, the steps and tiles of the way) – the game's own, not tiles of the map (not editable).
 //
@@ -26,7 +27,7 @@ import { isStarPipeTile, l1Index, l1XY, DIR_FLAGS, DIR_NAMES, exitDirections, tr
 import { readEvents, eventRunners, exitChanges, eventTitle, type EventChanges, type EventRunner } from './owevents.ts';
 import { hex2, hex3 } from './names.ts';
 import type { Severity } from './problems.ts';
-import { readTeleports, readExitPaths, starEntryAt, type OwTile } from './owteleport.ts';
+import { readTeleports, readExitPaths, starEntryAt, tileText, type OwTile } from './owteleport.ts';
 import { DX, DY, PATH_TILES_END, dirOf, reverse, shapeVector, turnedAt, type PathKind, type PathShapes } from './owpaths.ts';
 
 // the tile next to layer 1 tile i in direction dir on its map, -1 off the map
@@ -72,6 +73,10 @@ export interface ReachInput {
   exitPaths: { from: { region: number; x: number; y: number }; to: { x: number; y: number }; tile: number }[];
   hard: HardPath[];
   levelWarps?: (tl: number) => number[]; // the tiles a level's exits to the overworld teleport to
+  // the tiles star/pipe entries and levels' exits lead to, as the entry stores them (its submap: in an overlap of
+  // views the tile alone doesn't tell it), to name them (reachInput fills it; a level's as its teleports are asked –
+  // arrivals asks them before they are named; two entries to one cell on different submaps: the last named)
+  targets?: Map<number, OwTile>;
   ends?: (tile: number) => boolean; // stop tiles Mario goes no further from (no walk, star or teleport): the search ends there
 }
 
@@ -238,6 +243,66 @@ export function waysFrom(inp: ReachInput, r: Reach, s: number): { path: number[]
   return out;
 }
 
+// ---- arriving standing ----
+
+// Whether Mario, put standing on tile i – by a star/pipe link or a level's exit teleporting there, not walking in – can't
+// do anything there (CONTEXT.md "Overworld link"; emulated in tools/testowlinks.ts): standing, the game lets him walk off
+// only in a direction the level flags of the tile's translevel open ($049299: $7ED000, then $1EA2 – tile 82 any way),
+// whatever the tile is; a path tile holds translevel 0, whose flags nothing opens in the clean game (with them opened
+// he walks off a path tile too). A on a level tile enters its level, on a star or pipe with an entry warps (`back`: a
+// link being made both ways gives it one). flags: the level flags (Reach.flags: once every tile he gets to is reached)
+export function stuckOnArrival(inp: ReachInput, flags: ArrayLike<number>, i: number, back = false): boolean {
+  const t = inp.l1[i];
+  if (inp.kinds[t] === 'level' || (isStarPipeTile(t) && (back || inp.stars.has(i)))) return false;
+  const open = lowByte(t) === ANY_WAY_TILE ? 0x0f : flags[inp.tls[i]] ?? 0;
+  return ![0, 1, 2, 3].some((d) => open & DIR_FLAGS[d] && walkFrom(inp, i, d));
+}
+
+// Why Mario can't move arriving at tile i (stuckOnArrival; name: the tile's name), put there by a star/pipe link or
+// a level's teleport (how): on a path tile (or one he doesn't walk on) – the link must lead to a tile he stops on –, or
+// on a stop, star or pipe whose translevel's flags open no way off it
+export function stuckOnArrivalText(inp: ReachInput, i: number, name: string, how: ArrivalHow): string {
+  const t = inp.l1[i], k = inp.kinds[t], tl = inp.tls[i];
+  if (k !== 'stop') {
+    return `Mario arrives standing on ${k === 'none' ? 'a tile he doesn\'t walk on' : 'a path tile'} at ${name} and can't move – ${how === 'star' ? 'a star/pipe link' : 'an exit to the overworld\'s location'} must lead to a tile he stops on (a level, stop, star or pipe tile)`;
+  }
+  const what = lowByte(t) === STAR_TILE ? 'star' : isStarPipeTile(t) ? 'pipe' : 'stop tile';
+  return `Mario arrives standing on the ${what} at ${name} and can't move: no way off it is open ${tl ? `(its translevel ${hex2(tl)}'s flags)` : '– it has no translevel of its own (translevel 00\'s flags, shared by every tile without one)'}`;
+}
+
+// how Mario is put somewhere standing: by a star/pipe link, by a level's exit to the overworld teleporting
+export type ArrivalHow = 'star' | 'teleport';
+// a tile a search takes Mario to standing (`at`: the star or pipe, or the level tile whose level's exit teleports)
+export interface Arrival { at: number; to: number; how: ArrivalHow }
+// why standing on a tile Mario can't move (the hover of the warnings)
+export const ARRIVAL_RULE = 'Standing, Mario walks off only in the ways the level flags of his tile\'s translevel open (tile 82: any way) – a path tile has translevel 00, whose flags nothing opens; walking in by a path or an exit path he would walk on.';
+const STAR_TILE = 0x5f; // (owstars.ts's, which imports this module)
+export function arrivals(s: Reached): Arrival[] {
+  const { inp, r } = s, out: Arrival[] = [];
+  for (const at of r.stops) {
+    const t = inp.l1[at], tl = inp.tls[at];
+    if (isStarPipeTile(t)) for (const to of inp.stars.get(at) ?? []) out.push({ at, to, how: 'star' });
+    if (tl && inp.kinds[t] === 'level') for (const to of inp.levelWarps?.(tl) ?? []) out.push({ at, to, how: 'teleport' });
+  }
+  return out;
+}
+
+// the problems of the tiles Mario arrives at standing and can't move on from (a warning, Links): one per tile, the
+// first way there named
+function arrivalProblems(s: Reached, place: (tile: number) => string): ReachProblem[] {
+  const out = new Map<number, ReachProblem>();
+  for (const a of arrivals(s)) {
+    if (out.has(a.to) || !stuckOnArrival(s.inp, s.r.flags, a.to)) continue;
+    const t = s.inp.targets?.get(a.to), name = t ? tileText(t) : place(a.to);
+    const by = a.how === 'star' ? `The star or pipe at ${place(a.at)}` : `An exit to the overworld of the level at ${place(a.at)}`;
+    out.set(a.to, { key: `arrival-stuck:${a.to}`, kind: 'arrival-stuck', severity: 'warn', tile: a.to, at: 'now',
+      text: stuckOnArrivalText(s.inp, a.to, name, a.how),
+      brief: `Mario stuck arriving at ${name}`,
+      title: `${by} puts him there standing. ${ARRIVAL_RULE} Lead it to a level tile, a star or a stop tile with a way off it open (a star painted or a stop put by the route brush gets a translevel with its paths' ways; a pipe or stop tile painted by hand has none).` });
+  }
+  return [...out.values()];
+}
+
 // ---- the input at an event progress ----
 
 // the input of the search for a ROM at an event progress: layer 1 and the translevels as the game has them there
@@ -245,9 +310,9 @@ export function waysFrom(inp: ReachInput, r: Reach, s: number): { path: number[]
 // kinds and Mario's start position; levelWarps: where the levels' exits to the overworld teleport (optional)
 export function reachInput(rom: Rom, l1: ArrayLike<number>, tls: ArrayLike<number>, flags: ArrayLike<number>, kinds: readonly PathKind[],
   shapes: PathShapes, start: OwTile, levelWarps?: (tl: number) => OwTile[]): ReachInput {
-  const stars = new Map<number, number[]>();
+  const stars = new Map<number, number[]>(), targets = new Map<number, OwTile>();
   readTeleports(rom).forEach((t, i, all) => {
-    if (t.from && t.to && starEntryAt(all, t.from) === i) stars.set(tileOf(t.from), [tileOf(t.to)]); // the entry the game finds
+    if (t.from && t.to && starEntryAt(all, t.from) === i) { stars.set(tileOf(t.from), [tileOf(t.to)]); targets.set(tileOf(t.to), t.to); } // the entry the game finds
   });
   const exitPaths = readExitPaths(rom).flatMap((e) => {
     if (!e) return [];
@@ -255,8 +320,8 @@ export function reachInput(rom: Rom, l1: ArrayLike<number>, tls: ArrayLike<numbe
     return [{ from: { region: e.from.submap ? 1 : 0, x: e.from.x, y: e.from.y }, to: { x: e.to.x, y: e.to.y }, tile }];
   });
   return {
-    l1, tls, flags, kinds, shapes, start: tileOf(start), stars, exitPaths, hard: hardPaths(rom),
-    levelWarps: levelWarps && ((tl) => levelWarps(tl).map(tileOf)),
+    l1, tls, flags, kinds, shapes, start: tileOf(start), stars, exitPaths, hard: hardPaths(rom), targets,
+    levelWarps: levelWarps && ((tl) => levelWarps(tl).map((t) => { targets.set(tileOf(t), t); return tileOf(t); })),
   };
 }
 
@@ -279,7 +344,7 @@ export function inputWithout(rom: Rom, all: ReachInput, changes: EventChanges, r
 // a problem of the overworld's paths, at a layer 1 tile: its kind, found at the event progress shown (`at` now) or
 // with every event passed (all); `key` its kind and place, the same while the problem stays (the World check compares
 // lists by it); `brief` the problem in a few words, to go on in a sentence ("dead end at Main map 0C,09")
-export type ReachKind = 'dead-end' | 'exit-nowhere' | 'exit-off-path' | 'unreached-level' | 'event-reveals-nothing';
+export type ReachKind = 'dead-end' | 'exit-nowhere' | 'exit-off-path' | 'arrival-stuck' | 'unreached-level' | 'event-reveals-nothing';
 export type CheckSeverity = Exclude<Severity, 'info'>;
 // way: the way it is found on (Reach.walks' key: stop tile * 4 + direction; an exit path tile Mario comes out of off
 // the path)
@@ -300,8 +365,9 @@ function offPathProblem(o: OffPath, k: number, place: (tile: number) => string):
 }
 
 // the ways of a search that end nowhere (at: 'now'): a path without a stop tile at its end (a dead end), an exit path
-// tile no exit path is taken from where Mario comes; and the exit path tiles Mario comes out of off the path (a
-// warning); a tile several ways get stuck on (come out of) once (the first way named)
+// tile no exit path is taken from where Mario comes; and the exit path tiles Mario comes out of off the path and the
+// tiles a star, pipe or level's teleport puts him on standing where he can't move (warnings); a tile several ways get
+// stuck on (come out of) once (the first way named)
 export function stuckProblems(s: Reached, place: (tile: number) => string): ReachProblem[] {
   const out = new Map<string, ReachProblem>();
   for (const [k, w] of s.r.walks) {
@@ -317,6 +383,7 @@ export function stuckProblems(s: Reached, place: (tile: number) => string): Reac
         title: w.stuck.why === 'loop' ? 'The path goes round in a circle without a level or stop tile.' : 'The path ends without a level or stop tile: Mario has no way on.' };
     if (!out.has(p.key)) out.set(p.key, p);
   }
+  for (const p of arrivalProblems(s, place)) out.set(p.key, p);
   return [...out.values()];
 }
 

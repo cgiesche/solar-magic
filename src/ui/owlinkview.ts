@@ -28,6 +28,7 @@ import { isPathKind, PATH_KIND_NAMES } from '../core/owpaths.ts';
 import { ExitGraph } from '../core/exitgraph.ts';
 import { readSecondaryEntrance, levelTranslevel } from '../core/level.ts';
 import { hex } from '../core/names.ts';
+import { stuckOnArrival, stuckOnArrivalText, ARRIVAL_RULE, type ArrivalHow } from '../core/owreach.ts';
 
 // what is selected: a link, a location (a star/pipe entry exits to the overworld teleport to), a Koopa Kid's place,
 // a tile no link starts at (to link it to a tile on another map)
@@ -108,13 +109,37 @@ export class LinkLayer {
   }
   // whether link end e is at tile i on one of the submaps whose views show it
   private endsAt(e: OwTile, i: number): boolean { return this.index(e) === i && this.around(i).includes(e.submap); }
+  // whether Mario, put on tile i standing by a star/pipe link or a teleport, can't move there (core/owreach.ts
+  // stuckOnArrival, the search at the event progress shown; false while it is learned); back: the tile gets an entry back
+  private stuck(i: number, back = false): boolean {
+    const now = this.view.reach.state()?.now;
+    return !!now && stuckOnArrival(now.inp, now.r.flags, i, back);
+  }
+  // the warning of tile t Mario arrives at standing (null: he can move there)
+  private stuckBox(t: OwTile, how: ArrivalHow): HTMLElement | null {
+    const now = this.view.reach.state()?.now, i = this.index(t);
+    if (!now || !this.stuck(i)) return null;
+    return h('div', { class: 'warn-box', title: `${ARRIVAL_RULE} At the event progress shown.` }, `${stuckOnArrivalText(now.inp, i, tileText(t), how)}.`);
+  }
+  // what the end of a drag or pending choice (`move`, else a new link from tile `from`) at tile i says when Mario would
+  // arrive there standing and can't move: a star/pipe link's target, a location
+  private stuckNote(move: Moved | null, from: number, i: number): string {
+    // (what is dropped: a link's target – its source is where Mario takes it –, a location, a new link's target)
+    const s = move?.sel;
+    let kind: string | null, back: boolean;
+    if (!s) { kind = this.source(from).kind; back = this.both; }
+    else if (s.kind === 'link') { kind = move!.target ? s.link.kind : null; back = s.link.both; }
+    else { kind = s.kind; back = false; }
+    return (kind === 'star' || kind === 'location') && this.stuck(i, back) ? ' · Mario can\'t move there' : '';
+  }
   // the tile i as a link end goes there: on the submap chosen – asked at the cursor (cx, cy) when several views show it
   // (a menu, the preselected first: Enter takes it; Esc or a click elsewhere: nothing done)
-  private ask(i: number, cx: number, cy: number, then: (t: OwTile) => void): void {
+  // (note: said beside each choice – " · Mario can't move there")
+  private ask(i: number, cx: number, cy: number, then: (t: OwTile) => void, note = ''): void {
     const choice = this.choice(i), { x, y } = l1XY(i);
     if (choice.length < 2) { then({ submap: choice[0], x, y }); return; }
     contextMenu(cx, cy, [{ heading: 'In an overlap of submaps' }, ...choice.map((s, k) => ({
-      label: tileText({ submap: s, x, y }), title: k ? undefined : 'Its paths are this submap\'s (Enter)', onClick: () => then({ submap: s, x, y }),
+      label: `${tileText({ submap: s, x, y })}${note}`, title: k ? undefined : 'Its paths are this submap\'s (Enter)', onClick: () => then({ submap: s, x, y }),
     }))], true);
   }
   // what tile i links by: an exit path from an exit path tile (or one an exit path already starts at, as the game's
@@ -269,7 +294,7 @@ export class LinkLayer {
     this.view.paint();
     this.view.updateStatus();
     const drop = (to: OwTile) => this.apply(() => (d.move ? this.moveTo(d.move, to) : this.make(this.tile(d.from), to)));
-    if (this.asks(d.move, d.from)) this.ask(d.to, cx, cy, drop);
+    if (this.asks(d.move, d.from)) this.ask(d.to, cx, cy, drop, this.stuckNote(d.move, d.from, d.to));
     else drop(this.tile(d.to));
   }
   // whether a drop of `move` (or of a new link from tile `from`) takes the submap asked in an overlap: a link's end or a
@@ -292,7 +317,8 @@ export class LinkLayer {
     this.pending = null;
     this.view.updateStatus();
     const finish = (t: OwTile) => this.apply(() => ('from' in p ? this.make(p.from, t) : this.moveTo(p.move, t)));
-    if ('from' in p ? this.asks(null, this.index(p.from)) : this.asks(p.move, -1)) this.ask(i, cx, cy, finish);
+    const move = 'from' in p ? null : p.move, from = 'from' in p ? this.index(p.from) : -1;
+    if (this.asks(move, from)) this.ask(i, cx, cy, finish, this.stuckNote(move, from, i));
     else finish(this.tile(i));
   }
   cancelPending(): boolean {
@@ -389,7 +415,7 @@ export class LinkLayer {
   // asked" where a menu will ask) or a tile on another map is to be chosen
   status(): string | null {
     const d = this.drag;
-    if (d && d.to !== d.from && this.asks(d.move, d.from)) return endChoiceText(this.choice(d.to), d.to);
+    if (d && d.to !== d.from && this.asks(d.move, d.from)) return endChoiceText(this.choice(d.to), d.to) + this.stuckNote(d.move, d.from, d.to);
     if (!this.pending) return null;
     return `Choose the map and click the tile ${'from' in this.pending ? `${tileText(this.pending.from)} leads to` : 'it goes to'} · Esc cancels`;
   }
@@ -413,6 +439,7 @@ export class LinkLayer {
       return h('div', { class: 'ow-info' },
         h('div', null, h('b', null, `Location ${hex(s.i, 2)}`), ` · ${to ? tileText(to) : 'not set up'}`),
         h('div', { class: 'hint' }, `Exits to the overworld of level${levels.length > 1 ? 's' : ''} ${levels.map((l) => hex(l, 3)).join(', ')} teleport here (set in the level's entrance) – drag it to move it.`),
+        to && levels.length ? this.stuckBox(to, 'teleport') : null,
         other('Move to another map…', 'Choose the tile on another map (the next click)', { move: { sel: s, target: true } }), both);
     }
     if (s.kind === 'koopa') {
@@ -445,6 +472,7 @@ export class LinkLayer {
       checkbox('Both ways', 'The target leads back to this tile', l.both, (on) => this.apply(() => this.edit(`${name}: ${on ? 'both ways' : 'one-way'}`, () => { this.sel = { kind: 'link', link: setBothWays(rom, l, on) }; }))),
       ...exitInfo,
       ...offView,
+      ...l.kind === 'star' ? [this.stuckBox(l.b, 'star'), l.both ? this.stuckBox(l.a, 'star') : null] : [],
       h('div', { class: 'row' },
         other('Target on another map…', 'Choose the tile it leads to on another map (the next click)', { move: { sel: s, target: true } }),
         h('button', { title: 'Remove the overworld link (Delete)', onclick: () => this.remove() }, 'Remove')),

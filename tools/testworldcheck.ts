@@ -11,7 +11,9 @@
 // sprites; where Show goes. Dead ends at every event progress (#377): none in the clean game; a path tile a late
 // event (the last) takes away gives one, found after that event, listed with the playthrough strip at progress 0; the searches at progress 0 from the maps at every progress
 // find the dead ends the World check's search there finds. The part learned in the probe worker (worldCheckJob, #387):
-// the same problems, budgets and problems at every progress as found from those searches, in steps, as sent.
+// the same problems, budgets and problems at every progress as found from those searches, in steps, as sent. A star led
+// to a tile Mario can't move on from standing (#405): a warning of Links at the progress the star is reached, none in
+// the clean game.
 import { Rom } from '../src/core/rom.ts';
 import { OverworldEmulator, OverworldLoads, gameL1, l1XY, l1Index, readL1, writeL1, readTranslevels, writeTranslevels, freeTranslevel, OW_EVENTS, readDestroyList, writeDestroyList, revealEventCount, NO_EVENT } from '../src/core/overworld.ts';
 import { reach, reachInput, stuckProblems } from '../src/core/owreach.ts';
@@ -334,6 +336,35 @@ console.log(list(clean.problems));
     check(!!l && tileText(l.b) === 'Vanilla Dome 05,14' && !misplaced(r).length && romDiff(before, r.data) === 1,
       `fixed: the star leads to ${l && tileText(l.b)}, no warning (${romDiff(before, r.data)} bytes changed)`);
   }
+}
+
+// ---- a link putting Mario standing where he can't move (#405) ----
+{
+  // the problems at every event progress (as worldCheckJob finds them)
+  const everyOf = (r: Rom) => {
+    const loads = new OverworldLoads(new OverworldEmulator(r), 4), views = submapViews(loads);
+    const maps = progressMapsFromEvents(r, runJob(progressFlagsJob(loads)));
+    return stuckAtEveryProgress(r, progressSearches(progressInput(r, maps, kinds, shapes, new ExitGraph(r))), at, (i) => submapOf(views, i));
+  };
+  const stuck = (ps: WorldProblem[]) => ps.filter((p) => p.key.startsWith('arrival-stuck:'));
+  check(!stuck(everyOf(rom)).length && !stuck(clean.problems).length, 'the clean game: no star, pipe or teleport puts Mario where he can\'t move, at any event progress');
+  // the star at main map 11,07 (to Vanilla Dome 0A,14 and back) led to Vanilla Dome 05,14: the exit path tile 48
+  const r = new Rom(rom.data.slice()), vdi = l1Index(1, 5, 0x14);
+  makeLink(r, 'star', { submap: 0, x: 0x11, y: 0x07 }, { submap: 2, x: 5, y: 0x14 }, false);
+  const ps = everyOf(r), p = stuck(ps)[0];
+  check(stuck(ps).length === 1 && p.severity === 'warn' && p.group === 'links' && p.tile === vdi && !p.fix
+    && p.text === 'Mario arrives standing on a path tile at Vanilla Dome 05,14 and can\'t move – a star/pipe link must lead to a tile he stops on (a level, stop, star or pipe tile)',
+    `the star at main 11,07 led to Vanilla Dome 05,14: a warning of Links, no fix, found after event ${p && hx(p.progress)}: ${p?.text}`);
+  check(!!p && p.progress < OW_EVENTS && !stuck(everyOf(rom)).length, `found at the first progress the star is reached (${p && hx(p.progress)}), Show: the target (${p && at(p.tile)})`);
+  const shown = checkRom(r), listed = worldProblems(r, shown.now, shown.all, at, [], ps);
+  check(listed.filter((q) => q.key === p?.key).length === 1, 'listed once with the problems at every progress');
+  // a stop tile without translevel there (81 on the map before events): Mario walking onto it by the main map's exit path
+  // opens the way back in translevel 0's flags – shared by every tile without one, so then he walks off it: no warning
+  const r2 = new Rom(r.data.slice()), l1 = readL1(r2);
+  l1[vdi] = 0x81;
+  writeL1(r2, l1);
+  const p2 = stuck(everyOf(r2));
+  check(!p2.length, `a stop tile 81 without translevel there, walked onto by the exit path first: no warning (${p2.map((q) => q.text).join('; ') || 'none'})`);
 }
 
 if (bad) { console.log(`${bad} failed`); process.exit(1); }

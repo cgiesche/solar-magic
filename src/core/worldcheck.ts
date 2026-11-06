@@ -62,7 +62,7 @@ export interface WorldProblem {
 export interface CheckedAt extends Reached { progress: number }
 
 const GROUP_OF: Record<ReachKind, CheckGroup> = {
-  'dead-end': 'paths', 'exit-nowhere': 'links', 'exit-off-path': 'paths', 'unreached-level': 'progress', 'event-reveals-nothing': 'progress',
+  'dead-end': 'paths', 'exit-nowhere': 'links', 'exit-off-path': 'paths', 'arrival-stuck': 'links', 'unreached-level': 'progress', 'event-reveals-nothing': 'progress',
 };
 
 // The World check's problems: those of the paths at the event progress shown (`now`) and with every event passed
@@ -124,8 +124,9 @@ function reachProblem(p: ReachProblem, at: CheckedAt, fx: FixContext): WorldProb
   return q;
 }
 
-// The dead ends, exit path tiles leading nowhere and exit path tiles Mario comes out of off the path at every event
-// progress 0 … OW_EVENTS (`at`: the searches there, owprogress.ts progressSearches), each once, found at the first
+// The dead ends, exit path tiles leading nowhere, exit path tiles Mario comes out of off the path and tiles a star, pipe
+// or level's teleport puts him on standing where he can't move (owreach.ts stuckProblems) at every event progress 0 …
+// OW_EVENTS (`at`: the searches there, owprogress.ts progressSearches), each once, found at the first
 // progress it is at: one only a late event brings is listed whatever progress is shown. submap: as worldProblems'
 export function stuckAtEveryProgress(rom: Rom, at: (progress: number) => CheckedAt, place: (tile: number) => string, submap: (tile: number) => number = regionOf): WorldProblem[] {
   const fixes = fixContext(rom, at(0).inp.kinds, submap), out = new Map<string, WorldProblem>();
@@ -138,7 +139,7 @@ export function stuckAtEveryProgress(rom: Rom, at: (progress: number) => Checked
 
 // whether a World check problem is found at every event progress at once (stuckAtEveryProgress, the Look group's
 // paths): learned later than the others, said apart from them
-export const isFoundAtEveryProgress = (p: WorldProblem): boolean => /^(dead-end|exit-nowhere|exit-off-path|path-late-look|path-no-look):/.test(p.key);
+export const isFoundAtEveryProgress = (p: WorldProblem): boolean => /^(dead-end|exit-nowhere|exit-off-path|arrival-stuck|path-late-look|path-no-look):/.test(p.key);
 
 // The checks of owchecks.ts with every event passed (`all`), the levels' exits in `graph`: events never run, links
 // stranding Mario, levels without level tile an exit leads into, events out of play order, stars without translevel,
