@@ -231,6 +231,42 @@ console.log(list(clean.problems));
   }
 }
 
+// ---- exit tiles across the path (#400) ----
+{
+  // the problems at every event progress of a ROM (as worldCheckJob finds them: places and submaps by the views)
+  const everyOf = (r: Rom) => {
+    const loads = new OverworldLoads(new OverworldEmulator(r), 4), views = submapViews(loads);
+    const maps = progressMapsFromEvents(r, runJob(progressFlagsJob(loads)));
+    return stuckAtEveryProgress(r, progressSearches(progressInput(r, maps, kinds, shapes, new ExitGraph(r))), at, (i) => submapOf(views, i));
+  };
+  const cases: [number, number, string, number, string][] = [
+    [l1Index(0, 0x19, 0x10), 0x4d, 'down', 0x42, 'the exit tile is vertical, the path into it horizontal'], // (the main map has no other 42: the lowest)
+    [l1Index(0, 0x19, 0x10), 0x43, 'down', 0x42, 'the exit tile is vertical, the path into it horizontal'],
+    [l1Index(0, 0x02, 0x14), 0x42, 'right', 0x4d, 'the exit tile is horizontal, the path into it vertical'], // (the main map's most used vertical one)
+  ];
+  for (const [cell, t, dir, to, why] of cases) {
+    const r = new Rom(rom.data.slice()), l1 = readL1(r);
+    l1[cell] = t;
+    writeL1(r, l1);
+    const ps = everyOf(r), p = ps.find((q) => q.key === `exit-off-path:${cell}`);
+    check(!!p && p.severity === 'warn' && p.group === 'paths' && p.text === `Mario comes out of the exit at ${at(cell)} walking ${dir}, off the path (${why})`
+      && !ps.some((q) => q.severity === 'error'), `${hx(t)} at ${at(cell)}: a warning of Paths, no error (${p?.text}, found after ${p && hx(p.progress)})`);
+    check(p?.fix?.tile === cell && p.fix.to === to, `its fix: ${p?.fix?.label} – tile ${p?.fix && hx(p.fix.to, 3)} (${p?.fix?.title})`);
+    if (!p?.fix) continue;
+    const before = readL1(r);
+    applyFix(r, p.fix);
+    const after = readL1(r), changed = [...after.keys()].filter((i) => after[i] !== before[i]), again = everyOf(r);
+    check(changed.join() === String(cell) && !again.some((q) => q.key.startsWith('exit-off-path:') || q.key.startsWith('exit-nowhere:')),
+      `fixed: one tile changed, Mario comes out on the path (${again.map((q) => q.brief).join('; ') || 'nothing at any progress'})`);
+  }
+  // shown with the problems at every progress at progress 0 (the exit isn't reached there): listed once
+  const r = new Rom(rom.data.slice()), l1 = readL1(r), cell = l1Index(0, 0x19, 0x10);
+  l1[cell] = 0x4d;
+  writeL1(r, l1);
+  const shown = checkRom(r), ps = worldProblems(r, shown.now, shown.all, at, [], everyOf(r));
+  check(ps.filter((p) => p.key === `exit-off-path:${cell}`).length === 1 && errorCount(ps) === 0, 'listed at progress 0, once, no error');
+}
+
 // ---- budgets ----
 {
   // the World check's budgets: those of owbudget.ts, the custom sprites of the submap with the most

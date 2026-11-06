@@ -11,7 +11,9 @@ import {
   OverworldEmulator, OverworldLoads, gameL1, translevelToLevel, l1Index, l1XY, OW_EVENTS, MAX_TRANSLEVEL, DIR_NAMES, readL1, writeL1, readTranslevels, writeTranslevels, setExitDirection, setBaseEvent, NO_EVENT,
 } from '../src/core/overworld.ts';
 import { progressSaves } from '../src/core/owprogress.ts';
-import { reach, reachInput, reachProblems, walkFrom, type ReachInput } from '../src/core/owreach.ts';
+import { reach, reachInput, reachProblems, stuckProblems, walkFrom, neighbor, type ReachInput } from '../src/core/owreach.ts';
+import { stopTile } from '../src/core/worldcheck.ts';
+import { makeLink } from '../src/core/owlinks.ts';
 import { readStart } from '../src/core/owsprites.ts';
 import { RAM, PAD, get16 } from '../src/core/ram.ts';
 import { ResultCache, RomFingerprint } from '../src/core/romdeps.ts';
@@ -64,6 +66,10 @@ const standing = (() => { const e = new LevelEmulator(rom); e.startGame(0); retu
 // Mario on tile i, the map and flags of the search's input in RAM, walking off in direction d: the tile he stands on
 // after (his own: he didn't go)
 function play(r: Rom, inp: ReachInput, i: number, d: number): number {
+  return playTo(r, inp, i, d).tile;
+}
+// the same, with Mario's pixel position after (beside his tile: off the path)
+function playTo(r: Rom, inp: ReachInput, i: number, d: number): { tile: number; x: number; y: number } {
   const emu = new LevelEmulator(r), s = emu.snes, w = s.wram;
   emu.startGameAt(i);
   w.set(Uint8Array.from(inp.l1), RAM.owLayer1);
@@ -77,7 +83,7 @@ function play(r: Rom, inp: ReachInput, i: number, d: number): number {
     else if (walked && f > 30) break;
     else if (!walked && f > 20) break;
   }
-  return l1Index(w[RAM.submap] ? 1 : 0, get16(w, RAM.owPlayerTileX), get16(w, RAM.owPlayerTileY));
+  return { tile: l1Index(w[RAM.submap] ? 1 : 0, get16(w, RAM.owPlayerTileX), get16(w, RAM.owPlayerTileY)), x: get16(w, RAM.owPlayerX), y: get16(w, RAM.owPlayerY) };
 }
 {
   const inp = { ...all, flags: reach(all).flags };
@@ -107,6 +113,63 @@ function play(r: Rom, inp: ReachInput, i: number, d: number): number {
   check(play(rom, closed, lv, d) === lv, `the flags closed: from ${at(lv)} ${DIR_NAMES[d]} Mario stays, as the search doesn't go`);
 }
 
+// ---- exit tiles: the exit tile's way after the warp, the step onto it (docs/research/overworld-submap-exit-tiles.md) ----
+{
+  const inp = { ...all, flags: reach(all).flags }, r = reach(inp);
+  // the clean game's ways through its exit path tiles: none off the path
+  const through = [...r.walks].filter(([, w]) => w.path.some((i) => kinds[inp.l1[i]] === 'exit'));
+  check(through.length > 0 && through.every(([, w]) => !w.stuck && !w.offPath), `the clean game: ${through.length} ways through exit path tiles, Mario on the path after each`);
+  // the way taken through a cell (the clean game's), the cell given tile t: the search and the game agree on where Mario
+  // stops and on whether he stands beside his tile (his pixel position on another: off the path)
+  const way = (cell: number) => (cell === foi ? l1Index(0, 0x16, 0x10) * 4 + 3 : l1Index(0, 0x02, 0x11) * 4 + 1);
+  const off = (p: { tile: number; x: number; y: number }) => { const { x, y } = l1XY(p.tile); return p.x >> 4 !== x || p.y >> 4 !== y; };
+  const tryTile = (cell: number, t: number, ok: (w: ReturnType<typeof walkFrom>) => boolean, what: string) => {
+    const k = way(cell), l1 = Uint16Array.from(inp.l1);
+    l1[cell] = t;
+    const i2 = { ...inp, l1 }, w = walkFrom(i2, k >> 2, k & 3), got = playTo(rom, i2, k >> 2, k & 3);
+    check(ok(w) && !!w && got.tile === w.to && off(got) === !!w.offPath,
+      `${hx(t)} at ${at(cell)} (${what}), from ${at(k >> 2)} ${DIR_NAMES[k & 3]}: stops at ${w && at(w.to)}${w?.offPath ? `, off the path walking ${DIR_NAMES[w.offPath.out]}` : ''} (the game: ${at(got.tile)} at ${hx(got.x, 3)},${hx(got.y, 3)})`);
+  };
+  const foi = l1Index(0, 0x19, 0x10), ladder = l1Index(0, 0x02, 0x14);
+  // the Forest of Illusion link: the horizontal 42 on a horizontal path; vertical ones there turn Mario down
+  tryTile(foi, 0x42, (w) => !w?.offPath, 'horizontal, the game\'s');
+  tryTile(foi, 0x142, (w) => !w?.offPath, 'horizontal, page 1');
+  for (const t of [0x4d, 0x43, 0x25]) tryTile(foi, t, (w) => w?.offPath?.at === foi && w.offPath.out === 1 && w.offPath.across, 'vertical on a horizontal path');
+  // the Yoshi's Island ladder: 40 (the game's) and the other vertical ones fine, 42 turns Mario right
+  tryTile(ladder, 0x40, (w) => !w?.offPath, 'vertical, the game\'s');
+  tryTile(ladder, 0x47, (w) => !w?.offPath, 'vertical');
+  tryTile(ladder, 0x42, (w) => w?.offPath?.at === ladder && w.offPath.out === 3 && w.offPath.across, 'horizontal on a vertical path');
+  // 4D right next to a stop: its first step misses every exit path entry, Mario walks back (the game: he stays);
+  // 42 there works
+  const k = way(foi), before = neighbor(foi, 2), stop = stopTile(readL1(rom), kinds), flags = Uint8Array.from(inp.flags);
+  flags[inp.tls[before]] |= 0x0f;
+  for (const t of [0x4d, 0x42]) {
+    const l1 = Uint16Array.from(inp.l1);
+    l1[before] = stop; l1[foi] = t;
+    const i2 = { ...inp, l1, flags, start: before }, w = walkFrom(i2, before, k & 3)!, got = play(rom, i2, before, k & 3);
+    const ps = stuckProblems({ inp: i2, r: reach(i2) }, at), nowhere = ps.find((p) => p.key === `exit-nowhere:${foi}`);
+    check(t === 0x4d ? w.stuck?.why === 'exit' && got === before && !!nowhere : !w.stuck && got === w.to && !nowhere,
+      `${hx(t)} at ${at(foi)} right off a stop: ${w.stuck ? `stuck (${w.stuck.why})` : `to ${at(w.to)}`} (the game: ${at(got)})${nowhere ? `; ${nowhere.text}` : ''}`);
+  }
+  // the ladder linked to Yoshi's Island 04,00 with a target side other than the one opposite to its source's: the
+  // tile fits, the link puts Mario beside the path
+  const kl = way(ladder);
+  for (const side of [0, 2, 3]) {
+    const r1 = new Rom(rom.data.slice());
+    makeLink(r1, 'exit', { submap: 0, x: 0x02, y: 0x14, side: 0 }, { submap: 1, x: 0x04, y: 0x00, side }, false);
+    const i2 = { ...reachInput(r1, inp.l1, inp.tls, inp.flags, kinds, shapes, readStart(r1, 0)) }, w = walkFrom(i2, kl >> 2, kl & 3)!, got = playTo(r1, i2, kl >> 2, kl & 3);
+    const p = stuckProblems({ inp: i2, r: { ...r, walks: new Map([[kl, w]]) } }, at).find((q) => q.kind === 'exit-off-path');
+    check(w.offPath?.at === ladder && !w.offPath.across && got.tile === w.to && off(got) && !!p,
+      `the ladder linked with the target's side ${DIR_NAMES[side]}: off the path (the game: ${at(got.tile)} at ${hx(got.x, 3)},${hx(got.y, 3)}); ${p?.text}`);
+  }
+  {
+    const r1 = new Rom(rom.data.slice());
+    makeLink(r1, 'exit', { submap: 0, x: 0x02, y: 0x14, side: 0 }, { submap: 1, x: 0x04, y: 0x00, side: 1 }, false);
+    const w = walkFrom(reachInput(r1, inp.l1, inp.tls, inp.flags, kinds, shapes, readStart(r1, 0)), kl >> 2, kl & 3)!;
+    check(!w.offPath && !w.stuck, 'the ladder linked with the target\'s side opposite to the source\'s: on the path');
+  }
+}
+
 // ---- a broken path ----
 {
   // no event passed: the way from Yoshi's house to Yoshi's Island 2 cut in its middle
@@ -134,8 +197,8 @@ function play(r: Rom, inp: ReachInput, i: number, d: number): number {
   console.log(p.map((q) => `     ${q.severity} ${q.text}`).join('\n'));
   const events = p.filter((q) => q.kind === 'event-reveals-nothing');
   // (level 112's event 43 destroys its tile 078 as it is: it changes nothing, #391)
-  check(p.filter((q) => q.kind === 'unreached-level').length === 2 && !p.some((q) => q.kind === 'dead-end' || q.kind === 'exit-nowhere') && !events.length,
-    `the clean game: the two level tiles nothing leads to, no event revealing nothing reached, no dead end (${p.length} problems)`);
+  check(p.filter((q) => q.kind === 'unreached-level').length === 2 && !p.some((q) => q.kind === 'dead-end' || q.kind === 'exit-nowhere' || q.kind === 'exit-off-path') && !events.length,
+    `the clean game: the two level tiles nothing leads to, no event revealing nothing reached, no dead end, every exit fits (${p.length} problems)`);
   // layer 1 at an event progress is the same whichever map is loaded (the search takes it from any)
   check([0, 0x20].every((n) => gameL1(loads.get(0, n)).every((t, i) => t === gameL1(loads.get(1, n))[i])), 'layer 1 the same with the main map or a submap loaded');
 }

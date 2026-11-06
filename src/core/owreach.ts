@@ -8,8 +8,10 @@
 // - stepping onto a path tile, its shape moves him and may turn him (owpaths.ts path shapes); from it he goes on
 //   that way where he can, else the first of right, left, down, up (never back) with a tile he walks onto; with
 //   none he is stuck (a dead end);
-// - onto an exit path tile he leaves for the exit path entry of where he is (owteleport.ts) and walks on from the
-//   tile it leads to; onto a stop or level tile he stops, and its translevel's flag of the way back opens;
+// - onto an exit path tile he leaves for the exit path entry of the pixel position his step onto it ends at
+//   (owteleport.ts; none: he is stuck), is moved from its destination by the exit tile's vector (its way, not the
+//   path's: across the path he comes out beside it, OffPath) and walks on from the tile it leads to; onto a stop or
+//   level tile he stops, and its translevel's flag of the way back opens;
 // - a star/pipe entry takes him from its tile (a star or pipe: 5B, 5F, 82) to its destination, a level's exit to the overworld that teleports
 //   (Lunar Magic's) from the level's tiles to its location;
 // - with no tile next to him, the game's hardcoded paths ($049078: from a translevel, or a place of the main map,
@@ -65,17 +67,25 @@ export interface ReachInput {
   shapes: PathShapes;
   start: number;
   stars: Map<number, number[]>; // star/pipe entries: from a tile to the tile it leads to (the entry the game finds)
-  // exit path entries: the pixel position Mario leaves at (the region: main map 0, submaps 1), the tile he comes to
-  // and the direction he walks onto it in (-1: on as before)
-  exitPaths: { from: { region: number; x: number; y: number }; to: { x: number; y: number }; tile: number; dir: number }[];
+  // exit path entries: the pixel position Mario leaves at (the region: main map 0, submaps 1), the pixel position and
+  // tile he comes to
+  exitPaths: { from: { region: number; x: number; y: number }; to: { x: number; y: number }; tile: number }[];
   hard: HardPath[];
   levelWarps?: (tl: number) => number[]; // the tiles a level's exits to the overworld teleport to
   ends?: (tile: number) => boolean; // stop tiles Mario goes no further from (no walk, star or teleport): the search ends there
 }
 
 // a way Mario takes from a stop tile in a direction: the tiles he walks over, where he stops (-1: stuck), coming in
-// direction `dir`; stuck: the tile he is stuck on and why
-export interface Walk { path: number[]; to: number; dir: number; stuck?: { at: number; why: 'end' | 'exit' | 'loop' } }
+// direction `dir`; stuck: the tile he is stuck on and why; offPath: the first exit path tile he comes out of off the
+// path
+export interface Walk { path: number[]; to: number; dir: number; stuck?: { at: number; why: 'end' | 'exit' | 'loop' }; offPath?: OffPath }
+// An exit path tile Mario comes out of beside the path (CONTEXT.md "Path shape": an exit tile's way): the exit tile's
+// vector moved him from the entry's destination to where no path tile leaves him – the tile's axis across the path into
+// it (`across`: a vertical exit tile at the end of a horizontal path), or the entry's destination on another side of
+// the tile it leads to than the one opposite to where he went in (a link's target side). The game warps him and he
+// walks on, his pixel position beside his tile. at: the exit path tile, to: the tile led to, into: the direction he
+// stepped onto it in, out: the one the exit tile's vector moves him in
+export interface OffPath { at: number; to: number; into: number; out: number; across: boolean }
 
 export interface Reach {
   tiles: Uint8Array; // per layer 1 tile: 1 Mario walks over it or stands on it
@@ -101,21 +111,28 @@ export function walkFrom(inp: ReachInput, from: number, d: number): Walk | null 
   const { x: sx, y: sy } = l1XY(from), [fx, fy] = shapeVector(shapes.first, l1[first], d, 8);
   let px = sx * 16 + 8 + fx, py = sy * 16 + 8 + fy;
   const path: number[] = [];
-  let cur = from, dir = d, n = first;
+  let cur = from, dir = d, n = first, offPath: OffPath | undefined;
   for (let k = 0; k < MAX_STEPS; k++) {
     const kind = kinds[l1[n]];
-    if (kind === 'level' || kind === 'stop') return { path, to: n, dir };
+    if (kind === 'level' || kind === 'stop') return { path, to: n, dir, offPath };
     path.push(n);
     if (kind === 'exit') {
-      // (where he is: half a tile before it)
-      const { x, y } = l1XY(n), ex = x * 16 + 8 - DX[dir] * 8, ey = y * 16 + 8 - DY[dir] * 8, r = n >> 10;
-      const e = last(inp.exitPaths, (p) => p.from.region === r && p.from.x === ex && p.from.y === ey);
-      if (!e) return { path, to: -1, dir, stuck: { at: n, why: 'exit' } };
+      // the exit path entry of where his step onto it ended ($049A24: his pixel position, not the tile's – 4D's first
+      // step off a stop ends where none is), then the exit tile's own vector from the entry's destination ($04971D, as
+      // for a path tile looked ahead onto), turned by where it ends
+      const r = n >> 10, e = last(inp.exitPaths, (p) => p.from.region === r && p.from.x === px && p.from.y === py);
+      if (!e) return { path, to: -1, dir, stuck: { at: n, why: 'exit' }, offPath };
+      const into = dir, [vx, vy] = shapeVector(shapes.walk, l1[n], dir, 16);
       cur = e.tile;
-      px = e.to.x; py = e.to.y;
-      if (e.dir >= 0) dir = e.dir;
+      px = (e.to.x + vx) & ~3; py = (e.to.y + vy) & ~3;
+      dir = turnedAt(px, py, vx, vy, dir);
       const k2 = kinds[l1[cur]];
-      if (k2 === 'level' || k2 === 'stop') return { path, to: cur, dir };
+      if (k2 === 'level' || k2 === 'stop') return { path, to: cur, dir, offPath };
+      // on the path where he ends at the edge of the tile led to that he goes on over, as a path tile leaves him
+      const { x: tx, y: ty } = l1XY(cur);
+      if (!offPath && (px !== tx * 16 + 8 + DX[dir] * 8 || py !== ty * 16 + 8 + DY[dir] * 8)) {
+        offPath = { at: n, to: cur, into, out: dirOf(vx, vy, vx !== 0), across: (vx !== 0) !== (into >= 2) };
+      }
       path.push(cur);
     } else {
       // moved by the tile's vector (the sum's low 2 bits cleared), turned by where it ends
@@ -127,11 +144,27 @@ export function walkFrom(inp: ReachInput, from: number, d: number): Walk | null 
     // the way he has first, else the first other one but back
     const ways = [dir, ...TURNS.filter((t) => t !== dir && t !== reverse(dir))];
     const w = ways.find((t) => walkable(next(cur, t)));
-    if (w === undefined) return { path, to: -1, dir, stuck: { at: cur, why: 'end' } };
+    if (w === undefined) return { path, to: -1, dir, stuck: { at: cur, why: 'end' }, offPath };
     dir = w;
     n = next(cur, w);
   }
-  return { path, to: -1, dir, stuck: { at: cur, why: 'loop' } };
+  return { path, to: -1, dir, stuck: { at: cur, why: 'loop' }, offPath };
+}
+
+// The exit tile to put at exit path tile `at` that Mario, on way k (Reach.walks' key), comes out of off the path: the
+// first exit tile (path kinds) with which he comes out on it – an exit tile of the path's axis, one where his step
+// onto it ends where the link is taken (not 4D right off a stop) – of `used` (the map's own, in the order given),
+// else the lowest tile number; -1 none (also where the link, not the tile, puts him beside the path)
+export function exitTileFix(inp: ReachInput, k: number, at: number, used: readonly number[]): number {
+  if (!walkFrom(inp, k >> 2, k & 3)?.offPath?.across) return -1;
+  const exits = inp.kinds.flatMap((kind, t) => (kind === 'exit' ? [t] : []));
+  const l1 = Array.from(inp.l1), was = l1[at];
+  const fits = (t: number) => {
+    l1[at] = t;
+    const w = walkFrom({ ...inp, l1 }, k >> 2, k & 3);
+    return !!w && w.path.includes(at) && w.offPath?.at !== at && !(w.stuck?.why === 'exit' && w.stuck.at === at);
+  };
+  return [...used.filter((t) => exits.includes(t)), ...exits].find((t) => t !== was && fits(t)) ?? -1;
 }
 
 // the game's hardcoded paths from tile `from` in direction d (none: null)
@@ -218,9 +251,8 @@ export function reachInput(rom: Rom, l1: ArrayLike<number>, tls: ArrayLike<numbe
   });
   const exitPaths = readExitPaths(rom).flatMap((e) => {
     if (!e) return [];
-    const tile = l1Index(e.to.submap ? 1 : 0, e.tile.x, e.tile.y), dx = e.tile.x * 16 + 8 - e.to.x, dy = e.tile.y * 16 + 8 - e.to.y;
-    const dir = dx || dy ? dirOf(dx, dy, Math.abs(dx) > Math.abs(dy)) : -1;
-    return [{ from: { region: e.from.submap ? 1 : 0, x: e.from.x, y: e.from.y }, to: { x: e.to.x, y: e.to.y }, tile, dir }];
+    const tile = l1Index(e.to.submap ? 1 : 0, e.tile.x, e.tile.y);
+    return [{ from: { region: e.from.submap ? 1 : 0, x: e.from.x, y: e.from.y }, to: { x: e.to.x, y: e.to.y }, tile }];
   });
   return {
     l1, tls, flags, kinds, shapes, start: tileOf(start), stars, exitPaths, hard: hardPaths(rom),
@@ -247,16 +279,33 @@ export function inputWithout(rom: Rom, all: ReachInput, changes: EventChanges, r
 // a problem of the overworld's paths, at a layer 1 tile: its kind, found at the event progress shown (`at` now) or
 // with every event passed (all); `key` its kind and place, the same while the problem stays (the World check compares
 // lists by it); `brief` the problem in a few words, to go on in a sentence ("dead end at Main map 0C,09")
-export type ReachKind = 'dead-end' | 'exit-nowhere' | 'unreached-level' | 'event-reveals-nothing';
+export type ReachKind = 'dead-end' | 'exit-nowhere' | 'exit-off-path' | 'unreached-level' | 'event-reveals-nothing';
 export type CheckSeverity = Exclude<Severity, 'info'>;
-export interface ReachProblem { key: string; kind: ReachKind; severity: CheckSeverity; text: string; brief: string; title?: string; tile: number; at: 'now' | 'all' }
+// way: the way it is found on (Reach.walks' key: stop tile * 4 + direction; an exit path tile Mario comes out of off
+// the path)
+export interface ReachProblem { key: string; kind: ReachKind; severity: CheckSeverity; text: string; brief: string; title?: string; tile: number; at: 'now' | 'all'; way?: number }
 export interface Reached { inp: ReachInput; r: Reach }
 
+const axisName = (alongX: boolean) => (alongX ? 'horizontal' : 'vertical');
+// the problem of an exit path tile Mario comes out of off the path (Walk.offPath), found on way k (Reach.walks' key)
+function offPathProblem(o: OffPath, k: number, place: (tile: number) => string): ReachProblem {
+  const along = o.out >= 2, into = o.into >= 2;
+  return { key: `exit-off-path:${o.at}`, kind: 'exit-off-path', severity: 'warn', tile: o.at, at: 'now', way: k,
+    text: `Mario comes out of the exit at ${place(o.at)} walking ${DIR_NAMES[o.out]}, off the path (${o.across
+      ? `the exit tile is ${axisName(along)}, the path into it ${axisName(into)}`
+      : `the link puts him on another side of ${place(o.to)} than the one opposite to where he goes in`})`,
+    brief: `exit at ${place(o.at)} leaving Mario off the path`,
+    title: `After the warp the game moves Mario on by the exit tile's own way, from where the link puts him: here he walks beside the path, his position no longer on his tile (walking ${DIR_NAMES[k & 3]} from ${place(k >> 2)}).${o.across
+      ? ' Use an exit tile of the path\'s axis (Fix).' : ' Link it with the target\'s side opposite to the source\'s (Links).'}` };
+}
+
 // the ways of a search that end nowhere (at: 'now'): a path without a stop tile at its end (a dead end), an exit path
-// tile no exit path is taken from where Mario comes; a tile several ways get stuck on once (the first way named)
+// tile no exit path is taken from where Mario comes; and the exit path tiles Mario comes out of off the path (a
+// warning); a tile several ways get stuck on (come out of) once (the first way named)
 export function stuckProblems(s: Reached, place: (tile: number) => string): ReachProblem[] {
   const out = new Map<string, ReachProblem>();
   for (const [k, w] of s.r.walks) {
+    if (w.offPath) { const p = offPathProblem(w.offPath, k, place); if (!out.has(p.key)) out.set(p.key, p); }
     if (!w.stuck) continue;
     const at = w.stuck.at, way = `walking ${DIR_NAMES[k & 3]} from ${place(k >> 2)}`;
     const p: ReachProblem = w.stuck.why === 'exit'

@@ -17,7 +17,7 @@ import type { ScreenExit } from './level.ts';
 import type { Job } from './jobrunner.ts';
 import { RAM } from './ram.ts';
 import type { OwMode } from './owlayers.ts';
-import { reach, reachProblems, stuckProblems, ANY_WAY_TILE, type Reached, type ReachKind, type ReachProblem, type CheckSeverity } from './owreach.ts';
+import { reach, reachProblems, stuckProblems, exitTileFix, ANY_WAY_TILE, type Reached, type ReachKind, type ReachProblem, type CheckSeverity } from './owreach.ts';
 import { hex3 } from './names.ts';
 import type { PathKind, PathShapes } from './owpaths.ts';
 import type { OwRefusalData } from './owrefusal.ts';
@@ -57,7 +57,7 @@ export interface WorldProblem {
 export interface CheckedAt extends Reached { progress: number }
 
 const GROUP_OF: Record<ReachKind, CheckGroup> = {
-  'dead-end': 'paths', 'exit-nowhere': 'links', 'unreached-level': 'progress', 'event-reveals-nothing': 'progress',
+  'dead-end': 'paths', 'exit-nowhere': 'links', 'exit-off-path': 'paths', 'unreached-level': 'progress', 'event-reveals-nothing': 'progress',
 };
 
 // The World check's problems: those of the paths at the event progress shown (`now`) and with every event passed
@@ -67,48 +67,73 @@ const GROUP_OF: Record<ReachKind, CheckGroup> = {
 // nowhere at the progress shown then listed once, with the first progress it is found at: everyProgress's where that
 // has its key, else the progress shown (those come from the emulated maps, everyProgress's from the maps built from
 // the events: on a hack whose overworld code differs a real one may be missing there). place: a tile's name ("Main
-// map 0C,09")
-export function worldProblems(rom: Rom, now: CheckedAt, all: CheckedAt, place: (tile: number) => string, checks: readonly WorldProblem[] = [], everyProgress: readonly WorldProblem[] | null = null): WorldProblem[] {
-  const l1 = readL1(rom), stop = stopTile(l1, now.inp.kinds), every = new Set(everyProgress?.map((p) => p.key));
+// map 0C,09"); submap: the submap a tile is on (for the exit tile a fix puts there; by default its region)
+export function worldProblems(rom: Rom, now: CheckedAt, all: CheckedAt, place: (tile: number) => string, checks: readonly WorldProblem[] = [], everyProgress: readonly WorldProblem[] | null = null,
+  submap: (tile: number) => number = regionOf): WorldProblem[] {
+  const fixes = fixContext(rom, now.inp.kinds, submap), every = new Set(everyProgress?.map((p) => p.key));
   const out = reachProblems(rom, now, all, place)
     .filter((p) => p.at !== 'now' || !every.has(p.key))
-    .map((p) => reachProblem(p, p.at === 'now' ? now : all, l1, stop));
+    .map((p) => reachProblem(p, p.at === 'now' ? now : all, fixes));
   out.push(...checks, ...everyProgress ?? []);
   const order = (p: WorldProblem) => (p.severity === 'error' ? 0 : 10) + CHECK_GROUPS.findIndex((g) => g.id === p.group);
   return out.sort((a, b) => order(a) - order(b));
 }
 
-// a problem of the paths (owreach.ts) found by search `at` (its progress), with its fix: a dead end a stop tile in
-// place of the path tile Mario is stuck on, where the map before events (`l1`) has the tile he is stuck on (an event
-// changing it would put its own back); stop: the stop tile a fix puts there (stopTile)
-function reachProblem(p: ReachProblem, at: CheckedAt, l1: ArrayLike<number>, stop: number): WorldProblem {
+// what the fixes of the paths' problems need: the map before events (`l1`), the stop tile a fix puts there
+// (stopTile), the exit tiles on each submap of it, the most used first
+interface FixContext { l1: ArrayLike<number>; stop: number; exitsOn: (tile: number) => number[] }
+const regionOf = (tile: number): number => (tile >= 0x400 ? 1 : 0);
+function fixContext(rom: Rom, kinds: readonly PathKind[], submap: (tile: number) => number): FixContext {
+  const l1 = readL1(rom), bySubmap = new Map<number, Map<number, number>>();
+  for (let i = 0; i < l1.length; i++) {
+    if (kinds[l1[i]] !== 'exit') continue;
+    const s = submap(i), n = bySubmap.get(s) ?? bySubmap.set(s, new Map()).get(s)!;
+    n.set(l1[i], (n.get(l1[i]) ?? 0) + 1);
+  }
+  const exitsOn = (tile: number) => [...bySubmap.get(submap(tile)) ?? []].sort((a, b) => b[1] - a[1] || a[0] - b[0]).map(([t]) => t);
+  return { l1, stop: stopTile(l1, kinds), exitsOn };
+}
+
+// a problem of the paths (owreach.ts) found by search `at` (its progress), with its fix where the map before events
+// has the tile (an event changing it would put its own back): a dead end a stop tile in place of the path tile Mario
+// is stuck on; an exit path tile Mario comes out of across the path another exit tile, of the path's axis (owreach.ts
+// exitTileFix: one on the submap where one fits)
+function reachProblem(p: ReachProblem, at: CheckedAt, fx: FixContext): WorldProblem {
   const q: WorldProblem = { key: p.key, group: GROUP_OF[p.kind], severity: p.severity, text: p.text, brief: p.brief, title: p.title, tile: p.tile, progress: at.progress };
   const kinds = at.inp.kinds, t = at.inp.l1[p.tile];
+  if (p.kind === 'exit-off-path' && p.way !== undefined && fx.l1[p.tile] === t) {
+    const to = exitTileFix(at.inp, p.way, p.tile, fx.exitsOn(p.tile));
+    if (to >= 0) {
+      q.fix = { label: 'Use a fitting exit tile', tile: p.tile, to,
+        title: `Tile ${hex3(to)} (an exit tile of the path's axis) in place of tile ${hex3(t)}, on the map before events: Mario comes out of the exit walking on along the path` };
+    }
+    return q;
+  }
   if (p.kind !== 'dead-end' || kinds[t] === 'stop' || kinds[t] === 'level') return q;
-  if (stop < 0) q.noFix = { kind: 'deadEndNoStopTile' };
-  else if (l1[p.tile] !== t) q.noFix = { kind: 'deadEndEventTile', cell: p.tile };
+  if (fx.stop < 0) q.noFix = { kind: 'deadEndNoStopTile' };
+  else if (fx.l1[p.tile] !== t) q.noFix = { kind: 'deadEndEventTile', cell: p.tile };
   else {
-    q.fix = { label: 'Add a stop tile here', tile: p.tile, to: stop,
-      title: `Tile ${hex3(stop)} (a stop tile) in place of the path tile Mario gets stuck on, on the map before events: he stops there and can walk back` };
+    q.fix = { label: 'Add a stop tile here', tile: p.tile, to: fx.stop,
+      title: `Tile ${hex3(fx.stop)} (a stop tile) in place of the path tile Mario gets stuck on, on the map before events: he stops there and can walk back` };
   }
   return q;
 }
 
-// The dead ends and exit path tiles leading nowhere at every event progress 0 … OW_EVENTS (`at`:
-// the searches there, owprogress.ts progressSearches), each once, found at the first progress it is at: one only a late event
-// brings is listed whatever progress is shown
-export function stuckAtEveryProgress(rom: Rom, at: (progress: number) => CheckedAt, place: (tile: number) => string): WorldProblem[] {
-  const l1 = readL1(rom), stop = stopTile(l1, at(0).inp.kinds), out = new Map<string, WorldProblem>();
+// The dead ends, exit path tiles leading nowhere and exit path tiles Mario comes out of off the path at every event
+// progress 0 … OW_EVENTS (`at`: the searches there, owprogress.ts progressSearches), each once, found at the first
+// progress it is at: one only a late event brings is listed whatever progress is shown. submap: as worldProblems'
+export function stuckAtEveryProgress(rom: Rom, at: (progress: number) => CheckedAt, place: (tile: number) => string, submap: (tile: number) => number = regionOf): WorldProblem[] {
+  const fixes = fixContext(rom, at(0).inp.kinds, submap), out = new Map<string, WorldProblem>();
   for (let p = 0; p <= OW_EVENTS; p++) {
     const s = at(p);
-    for (const q of stuckProblems(s, place)) if (!out.has(q.key)) out.set(q.key, reachProblem(q, s, l1, stop));
+    for (const q of stuckProblems(s, place)) if (!out.has(q.key)) out.set(q.key, reachProblem(q, s, fixes));
   }
   return [...out.values()];
 }
 
 // whether a World check problem is found at every event progress at once (stuckAtEveryProgress, the Look group's
 // paths): learned later than the others, said apart from them
-export const isFoundAtEveryProgress = (p: WorldProblem): boolean => /^(dead-end|exit-nowhere|path-late-look|path-no-look):/.test(p.key);
+export const isFoundAtEveryProgress = (p: WorldProblem): boolean => /^(dead-end|exit-nowhere|exit-off-path|path-late-look|path-no-look):/.test(p.key);
 
 // The checks of owchecks.ts with every event passed (`all`), the levels' exits in `graph`: events never run, links
 // stranding Mario, levels without level tile an exit leads into, events out of play order, stars without translevel
@@ -144,7 +169,7 @@ export function* worldCheckJob(rom: Rom, loads: OverworldLoads, kinds: readonly 
   yield;
   const maps = progressMapsFromEvents(rom, saves.map((s) => s.levelFlags));
   const search = progressSearches(progressInput(rom, maps, kinds, shapes, graph));
-  return { checks, budgets, every: [...stuckAtEveryProgress(rom, search, place), ...lookProblems({ rom, maps, ownLooks, kinds, views, search, place })] };
+  return { checks, budgets, every: [...stuckAtEveryProgress(rom, search, place, (i) => submapOf(views, i)), ...lookProblems({ rom, maps, ownLooks, kinds, views, search, place })] };
 }
 
 // ---- budgets (owbudget.ts) ----

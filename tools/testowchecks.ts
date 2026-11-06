@@ -2,7 +2,7 @@
 // level tile an exit leads into, events drawn by a loaded save in another order than in play. The clean game: only
 // the cases the game itself has (listed here); each check provoked by a ROM edit on the test ROM.
 import { Rom } from '../src/core/rom.ts';
-import { OverworldEmulator, OverworldLoads, gameL1, l1XY, l1Index, OW_EVENTS, readL1, readTranslevels, writeTranslevels, baseEvent, setBaseEvent, revealedTile, setRevealAt, readDestroyList, writeDestroyList, NO_EVENT } from '../src/core/overworld.ts';
+import { OverworldEmulator, OverworldLoads, gameL1, l1XY, l1Index, OW_EVENTS, readL1, writeL1, readTranslevels, writeTranslevels, baseEvent, setBaseEvent, revealedTile, setRevealAt, readDestroyList, writeDestroyList, NO_EVENT } from '../src/core/overworld.ts';
 import { readEvents, writeEvents, eventRunners } from '../src/core/owevents.ts';
 import { shownSecretExits } from '../src/core/secretexits.ts';
 import { readTeleport, writeTeleport, readExitPaths, writeExitPath } from '../src/core/owteleport.ts';
@@ -129,6 +129,17 @@ const [late, early] = clean.needed.flatMap((as, b) => as.filter((a) => a < b).ma
   console.log(list(p));
   check(!!s && s.severity === 'error' && s.text.includes('exit path tile') && s.tile >> 10 === 0,
     `exit path entry ${k} led to ${at(to)}: stranded at its exit path tile ${s && at(s.tile)} (${s?.text})`);
+}
+
+// ---- an exit tile across the path (#400): the warp still taken, nothing stranded ----
+{
+  // 42 (horizontal) on the Yoshi's Island ladder: Mario comes out off the path (the World check's warning,
+  // testworldcheck), but where the link leads – and walks back
+  const r = copy(), l1 = readL1(r), ladder = l1Index(0, 0x02, 0x14);
+  l1[ladder] = 0x42;
+  writeL1(r, l1);
+  const p = checks(r).stranded;
+  check(!p.length, `42 on the ladder at ${at(ladder)}: no link stranding Mario (${p.length})`);
 }
 
 // ---- a level without level tile an exit leads into ----
