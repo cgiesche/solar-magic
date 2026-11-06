@@ -248,6 +248,7 @@ input.invalid, input.invalid:focus { outline: 1px solid var(--danger); border-co
 .statusbar .status-warn.status-info { color: var(--muted); border-color: var(--border); }
 .statusbar .status-warn.status-error { color: var(--danger); border-color: var(--danger); }
 .world-check { flex: none; max-height: 45%; overflow-y: auto; border-bottom: 1px solid var(--border); }
+.world-check[hidden] { display: none; }
 .world-check .wc-section { font-weight: 600; margin-top: 4px; }
 .world-check .wc-section.problem-error { color: var(--danger); }
 .world-check .wc-section.problem-warn { color: #ffa020; }
