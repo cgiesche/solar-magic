@@ -97,12 +97,12 @@ export function refusalWords(rom: Rom, r: OwRefusalData): RefusalWords {
     case 'routeGap': return w('The route breaks here', 'this cell is not next to the one before', 'Drag from cell to cell.');
     case 'routeExitInside': return w('The route can\'t go on here', 'an exit tile takes Mario to another submap, so the route can only end there');
     case 'routeCrosses': return w('The route can\'t go on here', 'it crosses itself');
-    case 'starOnLevel': return w('No star can go here',
-      `this tile enters ${levelTitle(rom, r.tl)} at another point of the game, and a tile keeps one level all game long – a star there would walk and be named as that level`,
-      'Paint the star on another tile.');
-    case 'starNoTranslevel': return w('No star can go here',
-      `the game lets Mario walk off a star by the ways a level of its own opens, and shows its name, and each of the ${r.max} levels is held by a tile on the overworld${r.kept ? ` or keeps a name, base event or messages a star would erase (${r.kept} of them)` : ''}`,
-      `${r.kept ? 'Free a level listed under "Without level tile" you don\'t need (place it, press Reset settings, remove its tile), r' : 'R'}emove a level tile, stop or star you don't need.`);
+    case 'starOnLevel': { const t = r.pipe ? 'pipe' : 'star'; return w(`No ${t} can go here`,
+      `this tile enters ${levelTitle(rom, r.tl)} at another point of the game, and a tile keeps one level all game long – a ${t} there would walk and be named as that level`,
+      `Paint the ${t} on another tile.`); }
+    case 'starNoTranslevel': { const t = r.pipe ? 'pipe' : 'star'; return w(`No ${t} can go here`,
+      `the game lets Mario walk off a ${t} by the ways a level of its own opens, and shows its name, and each of the ${r.max} levels is held by a tile on the overworld${r.kept ? ` or keeps a name, base event or messages a ${t} would erase (${r.kept} of them)` : ''}`,
+      `${r.kept ? 'Free a level listed under "Without level tile" you don\'t need (place it, press Reset settings, remove its tile), r' : 'R'}emove a level tile, stop, star or pipe you don't need.`); }
     case 'routeNoTranslevel': return w('No stop tile can go here',
       `the game lets Mario walk off a stop by the ways a level of its own opens, and each of the ${r.max} levels has a tile on the overworld or goes to a stop before on the route${r.kept ? `, or keeps a name, base event or messages a stop would erase (${r.kept} of them)` : ''}`,
       `${r.kept ? 'Free a level listed under "Without level tile" you don\'t need (place it, press Reset settings, remove its tile), r' : 'R'}emove a level tile you don't need, or let the route end on a level or stop tile already there.`);

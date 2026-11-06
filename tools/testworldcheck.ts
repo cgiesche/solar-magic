@@ -367,5 +367,21 @@ console.log(list(clean.problems));
   check(!p2.length, `a stop tile 81 without translevel there, walked onto by the exit path first: no warning (${p2.map((q) => q.text).join('; ') || 'none'})`);
 }
 
+// ---- a star or pipe on translevel 0 (#288, #407) ----
+{
+  // the clean game's pipes are 82s on translevel 0 (Mario walks off them any way): no warning; a 5B there is warned
+  const noTl = (ps: WorldProblem[]) => ps.filter((p) => p.key.startsWith('star-no-translevel:'));
+  const l1 = readL1(rom), pipes = [...l1.keys()].filter((i) => (l1[i] & 0xff) === 0x82), tls = readTranslevels(rom);
+  const checksOf = (r: Rom) => worldChecks(r, checkRom(r).all, at, new ExitGraph(r), submapViews(new OverworldLoads(new OverworldEmulator(r), 2)));
+  check(!noTl(checksOf(rom)).length && pipes.length === 12 && pipes.every((i) => !tls[i]),
+    `the clean game: no star or pipe warned for translevel 0 – its ${pipes.length} pipes are 82s without translevel`);
+  const r = new Rom(rom.data.slice()), m = readL1(r), pipe = l1Index(0, 0x0a, 0x03);
+  m[pipe] = 0x5b;
+  writeL1(r, m);
+  const ps = noTl(checksOf(r));
+  check(ps.length === 1 && ps[0].tile === pipe && ps[0].severity === 'warn' && ps[0].progress === 0 && ps[0].text === 'Pipe at main 0A,03 has no translevel of its own',
+    `the pipe at main 0A,03 made a 5B: "${ps[0]?.text}"`);
+}
+
 if (bad) { console.log(`${bad} failed`); process.exit(1); }
 console.log('world check ok');

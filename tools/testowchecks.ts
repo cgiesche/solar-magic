@@ -11,7 +11,7 @@ import { reach, reachInput } from '../src/core/owreach.ts';
 import { readStart } from '../src/core/owsprites.ts';
 import { RAM } from '../src/core/ram.ts';
 import { ExitGraph } from '../src/core/exitgraph.ts';
-import { checkContext, eventsNeeded, eventsNeverRun, stranded, untiledLevelsEntered, eventOrderProblems } from '../src/core/owchecks.ts';
+import { checkContext, eventsNeeded, eventsNeverRun, stranded, untiledLevelsEntered, eventOrderProblems, starsWithoutTranslevelProblems, type CheckContext } from '../src/core/owchecks.ts';
 import type { CheckedAt, WorldProblem } from '../src/core/worldcheck.ts';
 import { editorImage, pathKinds, pathShapes } from './fixture.ts';
 
@@ -165,6 +165,17 @@ const [late, early] = clean.needed.flatMap((as, b) => as.filter((a) => a < b).ma
   console.log(list(p));
   check(!!o && o.severity === 'warn' && o.group === 'look' && o.tile === cell && o.progress === late + 1 && p.length === 1,
     `${hx(early)} and ${hx(late)} changing ${at(cell)} to tiles ${hx(none[0], 3)} and ${hx(none[1], 3)}: out of order (${o?.text})`);
+}
+
+// ---- a star or pipe without translevel (#288, #407) ----
+{
+  // the clean game's pipes are 82s on translevel 0 (walked off any way): none warned; a 5B there (a hack's) is, as a star
+  check(!starsWithoutTranslevelProblems({ rom, place: at } as CheckContext).length, 'the clean game: no star or pipe without translevel warned (its pipes are 82s)');
+  const r = copy(), l1 = readL1(r), pipe = l1Index(0, 0x0a, 0x03);
+  l1[pipe] = 0x5b; writeL1(r, l1);
+  const ps = starsWithoutTranslevelProblems({ rom: r, place: at } as CheckContext);
+  check(ps.length === 1 && ps[0].tile === pipe && ps[0].severity === 'warn' && ps[0].progress === 0 && ps[0].text === `Pipe at ${at(pipe)} has no translevel of its own`,
+    `the pipe 82 at ${at(pipe)} made a 5B on translevel 0: "${ps[0]?.text}"`);
 }
 
 if (bad) { console.log(`${bad} failed`); process.exit(1); }

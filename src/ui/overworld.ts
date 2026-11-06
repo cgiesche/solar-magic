@@ -34,7 +34,7 @@ import type { OwSpriteView } from '../core/owsprites.ts';
 import { LinkLayer } from './owlinkview.ts';
 import { LevelTileLayer, tilePlace } from './owlevelview.ts';
 import { LevelNameEditor } from './owlevelname.ts';
-import { isStar, starDirs, giveStarTranslevel, type StarPaths } from '../core/owstars.ts';
+import { ownsTranslevel, starOrPipe, starDirs, giveStarTranslevel, type StarPaths } from '../core/owstars.ts';
 import { levelsWithoutTile, type LevelTileEvent } from '../core/owleveltiles.ts';
 import {
   eventReveal, eventDestroys, revealRefusal, destroyRefusal, addReveal, removeReveal, addDestroy, removeDestroy, cellText, revealPickCheck, destroyPickCheck,
@@ -1828,27 +1828,29 @@ export class OverworldView {
   tileInfo(i: number): HTMLElement {
     const { x, y } = l1XY(i), t = this.levelL1()[i];
     const known = !!this.pathKinds(); // (whether it is a level tile: not known while the path tiles are learned)
-    const info = this.isLevelTile(t) ? this.levelInfo(i) : known && isStar(t) ? this.starInfo(i)
+    const info = this.isLevelTile(t) ? this.levelInfo(i) : known && ownsTranslevel(t) ? this.starInfo(i)
       : h('div', { class: 'ow-info' }, h('div', { class: 'hint' }, `Tile ${hex(x, 2)},${hex(y, 2)} · ${l1Hex(t)}${known ? ' (not a level tile)' : ''}`),
         known ? null : h('div', { class: 'hint' }, LEVEL_TILES_LEARNED));
     info.append(h('div', { class: 'row' }, h('button', { title: 'Edit which 8x8 tiles make this layer 1 tile, in the Map16 tab (M) – for every place of the tile on all maps', onclick: () => this.editTile(i) }, `Edit tile ${l1Hex(t)} in Map16 …`)),
       ...this.revealSettings(i), ...this.destroySettings(i));
     return info;
   }
-  // the star at i (owstars.ts): what the game uses its translevel for – the ways Mario walks off it (its initial flags,
-  // each a switch) and the status bar's name (typed in the box under the star on the map: LevelNameEditor); no level
-  // settings, it enters no level. Without a translevel of its own: said why that matters, one given by a button
+  // the star or pipe 5B at i (owstars.ts ownsTranslevel): what the game uses its translevel for – the ways Mario walks
+  // off it (its initial flags, each a switch) and the status bar's name (typed in the box under it on the map:
+  // LevelNameEditor); no level settings, it enters no level. Without a translevel of its own: said why that matters,
+  // one given by a button
   private starInfo(i: number): HTMLElement {
     const rom = this.app.rom, tl = this.tls[i], { x, y } = l1XY(i), t = this.levelL1()[i], paths = this.starPaths()!;
-    const head = h('div', { class: 'hint' }, `Star · tile ${hex(x, 2)},${hex(y, 2)} · ${l1Hex(t)}${tl ? ` · translevel ${hex(tl, 2)}` : ''} – A takes Mario where its link leads (Links), it enters no level`);
-    const gauge = budgetRow('Levels on the overworld (level tiles, stops and stars)', this.budget('translevels'));
+    const what = starOrPipe(t), What = what === 'star' ? 'Star' : 'Pipe';
+    const head = h('div', { class: 'hint' }, `${What} · tile ${hex(x, 2)},${hex(y, 2)} · ${l1Hex(t)}${tl ? ` · translevel ${hex(tl, 2)}` : ''} – A takes Mario where its link leads (Links), it enters no level`);
+    const gauge = budgetRow('Levels on the overworld (level tiles, stops, stars and pipes)', this.budget('translevels'));
     if (!tl) {
       return h('div', { class: 'ow-info' }, head,
         h('div', { class: 'hint warn-text' }, '⚠ No translevel of its own: Mario walks off it only in the ways translevel 00\'s flags open – shared with every tile without one – and the status bar shows a blank name.'),
         h('div', { class: 'row' }, h('button', {
-          title: 'A free translevel without name, base event or messages, its flags the ways the paths next to the star lead (as a star painted gets one)',
+          title: `A free translevel without name, base event or messages, its flags the ways the paths next to the ${what} lead (as a ${what} painted gets one)`,
           onclick: () => {
-            try { this.app.romEdit(`Star ${hex(x, 2)},${hex(y, 2)}: translevel`, () => giveStarTranslevel(rom, i, this.levelL1(), paths)); }
+            try { this.app.romEdit(`${What} ${hex(x, 2)},${hex(y, 2)}: translevel`, () => giveStarTranslevel(rom, i, this.levelL1(), paths)); }
             catch (e) { refusedToast(rom, e, 'No translevel given: '); }
           },
         }, 'Give it a translevel')), gauge);
@@ -1857,13 +1859,13 @@ export class OverworldView {
     const switches = DIR_NAMES.map((n, d) => checkbox(` ${DIR_ARROWS[d]}`,
       `${n}: ${flags & DIR_FLAGS[d] ? 'open' : 'closed'} from a new game on${ways.includes(d) ? '' : ' – no path leads that way'}${!(flags & DIR_FLAGS[d]) && ways.includes(d) ? ' (a path leads that way: Mario arriving by it opens it; until then the World check may call it a dead end)' : ''}`,
       (flags & DIR_FLAGS[d]) !== 0,
-      (on) => this.app.romEdit(`Star ${hex(x, 2)},${hex(y, 2)}: ways off`, () => setInitialFlags(rom, tl, on ? flags | DIR_FLAGS[d] : flags & ~DIR_FLAGS[d]))));
+      (on) => this.app.romEdit(`${What} ${hex(x, 2)},${hex(y, 2)}: ways off`, () => setInitialFlags(rom, tl, on ? flags | DIR_FLAGS[d] : flags & ~DIR_FLAGS[d]))));
     const others = [...this.tls.keys()].filter((k) => k !== i && this.tls[k] === tl);
     return h('div', { class: 'ow-info' }, head,
-      h('div', { class: 'prop' }, h('label', { title: 'The ways Mario walks off the star in a new game (its translevel\'s initial flags): arriving by a path opens the way back, the reveal walk of a level whose path leads here too' }, 'Mario walks off'), ...switches),
-      h('div', { class: 'prop' }, h('label', { title: 'The name the status bar shows while Mario stands on the star (its translevel\'s), drawn in the box under the star' }, 'Status bar'),
+      h('div', { class: 'prop' }, h('label', { title: `The ways Mario walks off the ${what} in a new game (its translevel's initial flags): arriving by a path opens the way back, the reveal walk of a level whose path leads here too` }, 'Mario walks off'), ...switches),
+      h('div', { class: 'prop' }, h('label', { title: `The name the status bar shows while Mario stands on the ${what} (its translevel's), drawn in the box under it` }, 'Status bar'),
         h('span', null, hasLevelName(rom, tl) ? levelName(rom, tl) : '(blank)'),
-        levelNamePatch(rom) ? h('button', { title: 'Type the name in the box under the star, in the map\'s font (Enter writes it, Esc drops it)', onclick: () => this.nameEditor.openStar() }, 'Edit…') : null),
+        levelNamePatch(rom) ? h('button', { title: `Type the name in the box under the ${what}, in the map's font (Enter writes it, Esc drops it)`, onclick: () => this.nameEditor.openStar() }, 'Edit…') : null),
       ...others.map((k) => h('div', { class: 'hint warn-text' }, `⚠ The tile at ${tilePlace(k)} has this translevel too: the ways and the name are both's.`)),
       gauge);
   }
@@ -2104,9 +2106,9 @@ export class OverworldView {
     return h('div', null,
       h('div', { class: 'row budget-row' }, h('span', { class: 'hint' }, route ? 'Path (auto)' : look >= 0 ? `Level tile ${l1Hex(look)}` : one ? `Tile ${l1Hex(b.entries[0])}` : b.kind === 'l1' ? `Block ${b.w}×${b.h}` : ''),
         budgetGauge(this.budget('l1Tiles'))),
-      // (a star painted takes a translevel of its own: owstars.ts; a stop a route puts too)
+      // (a star or pipe 5B painted takes a translevel of its own: owstars.ts; a stop a route puts too)
       route ? budgetRow('A stop tile a route puts takes a level of its own', this.budget('translevels'))
-        : b.kind === 'l1' && b.entries.some(isStar) ? budgetRow('A star takes a level of its own', this.budget('translevels')) : null,
+        : b.kind === 'l1' && b.entries.some(ownsTranslevel) ? budgetRow('A star or pipe takes a level of its own', this.budget('translevels')) : null,
       // (no free tile on either page: the button says why, with the way out)
       kinds && p0.firstFree < 0 && p1.firstFree < 0 ? h('div', { class: 'row' }, h('button', { title: 'No layer 1 tile is free for a new look: says why, with a way out where there is one', onclick: () => this.newTile() }, 'New tile…')) : null,
       // the route brush (owpathtool.ts): a row of its own above the sheet, framed while it is the brush

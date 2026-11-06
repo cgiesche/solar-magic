@@ -298,7 +298,7 @@ function arrivalProblems(s: Reached, place: (tile: number) => string): ReachProb
     out.set(a.to, { key: `arrival-stuck:${a.to}`, kind: 'arrival-stuck', severity: 'warn', tile: a.to, at: 'now',
       text: stuckOnArrivalText(s.inp, a.to, name, a.how),
       brief: `Mario stuck arriving at ${name}`,
-      title: `${by} puts him there standing. ${ARRIVAL_RULE} Lead it to a level tile, a star or a stop tile with a way off it open (a star painted or a stop put by the route brush gets a translevel with its paths' ways; a pipe or stop tile painted by hand has none).` });
+      title: `${by} puts him there standing. ${ARRIVAL_RULE} Lead it to a level tile, a star, pipe or stop tile with a way off it open (a star or pipe 5B painted or a stop put by the route brush gets a translevel with its paths' ways, a pipe 82 is walked off any way; a stop tile painted by hand has none).` });
   }
   return [...out.values()];
 }

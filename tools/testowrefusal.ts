@@ -48,8 +48,8 @@ const samples: { [K in OwRefusalKind]: Extract<OwRefusalData, { kind: K }> } = {
   routeCrosses: { kind: 'routeCrosses' },
   routeNoTile: { kind: 'routeNoTile', dir: 0, out: 2, where: 'pathBefore' },
   routeNoTranslevel: { kind: 'routeNoTranslevel', max: 0x5f, kept: 2 },
-  starNoTranslevel: { kind: 'starNoTranslevel', max: 0x5f, kept: 2 },
-  starOnLevel: { kind: 'starOnLevel', cell: l1Index(0, 4, 4), tl: 0x29 },
+  starNoTranslevel: { kind: 'starNoTranslevel', max: 0x5f, kept: 2, pipe: false },
+  starOnLevel: { kind: 'starOnLevel', cell: l1Index(0, 4, 4), tl: 0x29, pipe: true },
   pieceSame: { kind: 'pieceSame' },
   pieceNoneInside: { kind: 'pieceNoneInside' },
   pieceNotFound: { kind: 'pieceNotFound', selection: true },
@@ -79,6 +79,13 @@ for (const r of Object.values(samples) as OwRefusalData[]) {
   check(!!w.consequence && !!w.reason && !technical.test(w.consequence) && !technical.test(w.reason) && !technical.test(w.instead),
     `${r.kind}: "${w.consequence}: ${w.reason}." ${w.instead}`);
   check(w.details === refusalDetails(r) && !!w.details, `${r.kind}: details "${w.details}"`);
+}
+
+// a pipe's (#407) and a star's: named as the tile painted
+{
+  const pipe = refusalWords(rom, samples.starOnLevel), star = refusalWords(rom, { ...samples.starNoTranslevel, pipe: false });
+  check(pipe.consequence === 'No pipe can go here' && /a pipe there/.test(pipe.reason) && /a pipe there/.test(pipe.details) && star.consequence === 'No star can go here' && /a star needs/.test(star.details),
+    `a pipe refused: "${pipe.consequence}", a star: "${star.consequence}"`);
 }
 
 // events named by the level exit running them

@@ -99,3 +99,11 @@ separately, so that it lists only tiles that enter a level.
 check's starsWithoutTranslevel), the star's properties in the layer 1 mode, CONTEXT.md "Star". Checked by
 `tools/teststartiles.ts` (a star painted on a pipe: Mario walks off it in the ways it was given, emulated) and
 `tools/testeventpaint.ts` (painted as after an event).
+
+**Extended to pipes 5B (#407).** The game's star/pipe tiles are 5B, 5F and 82 (`$04915E`, by the tile's low byte).
+Standing on an 82 Mario walks off any way (`$049268`); on 5B, as on 5F, only the ways his tile's translevel's flags open:
+a 5B painted on Vanilla Dome 05,14 on translevel 0 leaves him stuck after a warp (#405), one given translevel 5D with
+its path's way up lets him walk up off it, and a 5B on the main map's 0A,03 given 5D with flags 01 he walks off right and
+no other way (`tools/testowlinks.ts`, `tools/teststartiles.ts`). So a pipe 5B takes a translevel as a star does
+(`owstars.ts` ownsTranslevel); an 82 takes none. The clean game has no 5B on any map: its 12 pipes are 82s, all on
+translevel 0, and no World check warning comes of them.

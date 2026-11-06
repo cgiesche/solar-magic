@@ -5,7 +5,8 @@
 import { Rom } from '../src/core/rom.ts';
 import { RomEditSession } from '../src/core/romedit.ts';
 import { owBudgets, budgetLevel, budgetText, type Budget, type BudgetKey } from '../src/core/owbudget.ts';
-import { l1Index } from '../src/core/overworld.ts';
+import { l1Index, readL1, readL2 } from '../src/core/overworld.ts';
+import { OverworldStroke } from '../src/core/owstroke.ts';
 import { addDestroy } from '../src/core/oweventtiles.ts';
 import { makeLink } from '../src/core/owlinks.ts';
 import { writeCustomSprites, readCustomSprites } from '../src/core/owcustom.ts';
@@ -58,6 +59,16 @@ const is = (l: Budget[], k: BudgetKey, used: number, max: number) => {
   s.undo(); s.undo(); s.undo(); s.undo();
   const l = owBudgets(rom, 2);
   check(of(l, 'destroys')!.used === 0x10 && of(l, 'stars')!.used === 27 && of(l, 'exitPaths')!.used === 14 && of(l, 'customSprites')!.used === 0, 'undone: the clean game\'s values');
+}
+
+// ---- a pipe 5B painted takes a level of its own (#407), as a star does ----
+{
+  const { rom } = fresh(), maps = { l1: readL1(rom), l2: readL2(rom) };
+  const st = new OverworldStroke(rom, 'l1', maps, (t) => kinds[t] === 'level', null, { kinds, shapes: null });
+  st.paint(0, 0x0a, 0x03, 0x5b); // (the clean game's pipe 82 at main 0A,03, translevel 0)
+  st.end().write!();
+  const b = of(owBudgets(rom, 0, kinds), 'translevels')!;
+  check(b.used === 0x5d && /pipe/.test(b.help), `a pipe painted at main 0A,03: levels on the overworld ${b.used} of ${b.max}, its help says so ("${b.help}")`);
 }
 
 // ---- levels ----

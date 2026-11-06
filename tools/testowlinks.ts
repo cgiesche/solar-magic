@@ -4,14 +4,14 @@
 // each of the game's exit paths arrives where he does in the clean game, through a link made in the editor (also in
 // the table's last entry) where it leads, stars by a star link made, and is put at a Koopa Kid's place set. Put standing
 // on a tile by a star link or a level's teleport (#405) he walks off only as the tile's translevel's flags let him: stuck
-// on a path tile (Vanilla Dome 05,14) and on a pipe or stop painted there (no translevel), not on a star painted there,
-// a stop 82 or a level tile – the model (owreach.ts stuckOnArrival) the same.
+// on a path tile (Vanilla Dome 05,14) and on a stop painted there (no translevel), not on a star or pipe 5B painted there
+// (each takes a translevel, #288/#407), a stop 82 or a level tile – the model (owreach.ts stuckOnArrival) the same.
 import { Rom, snesToPc } from '../src/core/rom.ts';
 import { LevelEmulator } from '../src/core/levelemu.ts';
 import { PlaySession } from '../src/core/playsession.ts';
 import { readExitPaths, readExitPath, writeExitPath, readTeleports, writeTeleport, tileText, EXIT_PATHS, EXIT_HOOK, FIND_HOOK, GAME_EXIT_TABLES, GAME_EXITS, sameTile as same, type OwTile, type OwPos } from '../src/core/owteleport.ts';
 import { readLinks, makeLink, removeLink, setBothWays, moveLocation, exitEntry, pathSide, koopaTeleport, setKoopaTeleport, opposite, sidesMatch, exitOut, exitOutText, SIDES, KOOPA_X, type LinkEnd, type OwLink } from '../src/core/owlinks.ts';
-import { l1Index, overworldDataRanges, readL1, readL2, readTranslevels, initialFlags, gameL1, OW_EVENTS, MAX_TRANSLEVEL, OverworldEmulator, OverworldLoads } from '../src/core/overworld.ts';
+import { l1Index, overworldDataRanges, readL1, readL2, readTranslevels, writeTranslevels, initialFlags, gameL1, OW_EVENTS, MAX_TRANSLEVEL, OverworldEmulator, OverworldLoads } from '../src/core/overworld.ts';
 import { reachInput, reach, arrivals, stuckOnArrival, stuckOnArrivalText } from '../src/core/owreach.ts';
 import { OverworldStroke } from '../src/core/owstroke.ts';
 import { readStart } from '../src/core/owsprites.ts';
@@ -354,31 +354,35 @@ function warp(r: Rom, from: OwTile) {
   const arr = arrivals({ inp: ti, r: tr });
   check(teleported.every((p) => p === '2:5,14') && arr.some((a) => a.how === 'teleport' && a.at === yi1 && a.to === vdi) && stuckOnArrival(ti, tr.flags, vdi),
     `level 105's exit teleporting to ${tileText(vd)}: Mario stays there too (${teleported.join(' ')}); the model: an arrival from its level tile, stuck`);
-  // a pipe (5B) or stop tile (81) painted there gets no translevel (only a star does, #288): he can't move; a star painted
-  // there gets one with its paths' ways, an 82 lets him walk off any way
+  // a stop tile (81) painted there gets no translevel: he can't move; a pipe 5B (#407) or star (#288) painted there gets
+  // one with its paths' ways – he walks off along the path, no warning –, an 82 lets him walk off any way
   const isLevel = (t: number) => kinds[t] === 'level';
   const painted = [0x5b, 0x81, 0x5f, 0x82].map((t) => {
     const p = new Rom(rom.data.slice()), s = new OverworldStroke(p, 'l1', { l1: readL1(p), l2: readL2(p) }, isLevel, null, { kinds, shapes });
     s.paint(1, 5, 0x14, t);
     s.end().write!();
     makeLink(p, 'star', from, vd, false);
-    const m = model(p), moves = pressed(p, from).some((q) => q !== '2:5,14');
-    return { t, tl: readTranslevels(p)[vdi], moves, stuck: stuckOnArrival(m, m.flags, vdi), text: stuckOnArrivalText(m, vdi, tileText(vd), 'star') };
+    const m = model(p), where = pressed(p, from), moves = where.some((q) => q !== '2:5,14');
+    return { t, tl: readTranslevels(p)[vdi], moves, where, stuck: stuckOnArrival(m, m.flags, vdi), text: stuckOnArrivalText(m, vdi, tileText(vd), 'star') };
   });
   const pt = (q: typeof painted[0]) => `${hx(q.t)} translevel ${hx(q.tl)}: ${q.moves ? 'walks off' : 'stays'}`;
-  check(painted.every((q) => q.moves === !q.stuck) && painted.map((q) => q.moves).join() === 'false,false,true,true' && painted[0].tl === 0 && painted[1].tl === 0 && painted[2].tl > 0,
+  check(painted.every((q) => q.moves === !q.stuck) && painted.map((q) => q.moves).join() === 'true,false,true,true' && painted[0].tl > 0 && painted[1].tl === 0 && painted[2].tl > 0 && painted[3].tl === 0,
     `painted at ${tileText(vd)}: ${painted.map(pt).join(', ')} – the model agrees`);
-  check(painted[0].text === 'Mario arrives standing on the pipe at Vanilla Dome 05,14 and can\'t move: no way off it is open – it has no translevel of its own (translevel 00\'s flags, shared by every tile without one)',
-    `said: ${painted[0].text}`);
+  check(painted[0].where.includes('2:5,12'), `off the pipe along its path: up to Vanilla Dome 05,12 (${painted[0].where.join(' ')})`);
+  check(painted[1].text === 'Mario arrives standing on the stop tile at Vanilla Dome 05,14 and can\'t move: no way off it is open – it has no translevel of its own (translevel 00\'s flags, shared by every tile without one)',
+    `said: ${painted[1].text}`);
   // a pipe linked both ways: A takes him back – not stuck (the menu and status bar of a link being made both ways)
   const pb = new Rom(rom.data.slice()), ps = new OverworldStroke(pb, 'l1', { l1: readL1(pb), l2: readL2(pb) }, isLevel, null, { kinds, shapes });
   ps.paint(1, 5, 0x14, 0x5b);
   ps.end().write!();
+  const pt0 = readTranslevels(pb); pt0[vdi] = 0; writeTranslevels(pb, pt0); // (a pipe on translevel 0: a hack's)
   const before = model(pb);
   makeLink(pb, 'star', from, vd, true);
   const back = model(pb);
   check(stuckOnArrival(before, before.flags, vdi) && !stuckOnArrival(before, before.flags, vdi, true) && !stuckOnArrival(back, back.flags, vdi),
     'a pipe linked both ways (or about to be): not stuck, A takes him back');
+  check(stuckOnArrivalText(before, vdi, tileText(vd), 'star') === 'Mario arrives standing on the pipe at Vanilla Dome 05,14 and can\'t move: no way off it is open – it has no translevel of its own (translevel 00\'s flags, shared by every tile without one)',
+    `a pipe on translevel 0, linked one way: ${stuckOnArrivalText(before, vdi, tileText(vd), 'star')}`);
 }
 {
   // #374: of two entries with a star's tile the game takes the last – the link read there, led elsewhere and moved there

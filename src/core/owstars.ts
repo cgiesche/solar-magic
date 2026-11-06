@@ -1,5 +1,6 @@
-// Stars (CONTEXT.md "Star", docs/research/star-tile-translevels.md): a star tile (5F) is a stop tile from which A takes
-// Mario to another place (the star/pipe table). Its translevel is used as a stop tile's: its level flags ($1EA2) are the
+// Stars and pipes (CONTEXT.md "Star", docs/research/star-tile-translevels.md): a star tile (5F) is a stop tile from
+// which A takes Mario to another place (the star/pipe table); so is a pipe 5B (#407: the same here, ownsTranslevel –
+// "star" below says both), not a pipe 82, which he walks off any way. Its translevel is used as a stop tile's: its level flags ($1EA2) are the
 // ways Mario walks off it, its name the status bar's while he stands there; it enters no level and runs no event
 // (owevents.ts eventRunners). So a star keeps a translevel of its own as a route's stop tiles do (owroute.ts): painted
 // on a cell without one it takes a free one without name, base event or messages (stopTranslevels; of them the one
@@ -8,18 +9,25 @@
 // another event progress), which the translevel table (per cell) holds it for. Pure on the ROM given: nothing drawn.
 
 import type { Rom } from './rom.ts';
-import { readTranslevels, writeTranslevels, resetTranslevel, MAX_TRANSLEVEL } from './overworld.ts';
+import { readTranslevels, writeTranslevels, resetTranslevel, MAX_TRANSLEVEL, isStarPipeTile } from './overworld.ts';
 import { cellsBecoming } from './owevents.ts';
 import { heldElsewhere } from './owleveltiles.ts';
-import { neighbor } from './owreach.ts';
+import { neighbor, ANY_WAY_TILE } from './owreach.ts';
 import { tileWays, WALKED_KINDS } from './owpathshape.ts';
 import { stopTranslevels, takeStopTranslevel, dirFlags } from './owroute.ts';
-import { OwRefusal, type OwRefusalData } from './owrefusal.ts';
+import { OwRefusal } from './owrefusal.ts';
 import type { PathKind, PathShapes } from './owpaths.ts';
 
 export const STAR_TILE = 0x5f;
 // whether layer 1 tile t is a star (the game compares the tile's low byte, $04915E: a tile 15F is one too)
 export const isStar = (t: number): boolean => (t & 0xff) === STAR_TILE;
+export const PIPE_TILE = 0x5b;
+// Whether layer 1 tile t keeps a translevel of its own as a star does (#407): a star or pipe tile (isStarPipeTile) Mario
+// walks off by its translevel's flags – 5F and 5B (15F, 15B), not the pipe 82, which he walks off any way ($049268,
+// ANY_WAY_TILE), as the clean game's pipes on translevel 0 do
+export const ownsTranslevel = (t: number): boolean => isStarPipeTile(t) && (t & 0xff) !== ANY_WAY_TILE;
+// what such a tile is called
+export const starOrPipe = (t: number): 'star' | 'pipe' => (isStar(t) ? 'star' : 'pipe');
 
 // the path kinds and shapes (owpaths.ts) the ways off a star are told by; shapes null while they are learned
 export interface StarPaths { kinds: readonly PathKind[]; shapes: PathShapes | null }
@@ -38,7 +46,6 @@ export function starDirs(l1: ArrayLike<number>, i: number, p: StarPaths): number
   }
   return out;
 }
-const noTranslevel = (kept: number): OwRefusalData => ({ kind: 'starNoTranslevel', max: MAX_TRANSLEVEL, kept });
 
 // The translevels after layer 1 cells `cells` were painted (before → after: their tiles as the stroke found and left
 // them, `after` the whole map they are on, for the stars' ways) into the map before events (event -1) or as after event
@@ -59,12 +66,12 @@ export function paintStars(rom: Rom, cells: Iterable<number>, before: ArrayLike<
   const aLevels = (tl: number) => (levels ??= new Set([...cellsBecoming(rom, isLevel)].map((k) => tls[k]))).has(tl);
   const need: number[] = [], free: number[] = [];
   for (const i of cells) {
-    if (isStar(after[i])) {
-      if (tls[i] && levelHeld(i)) throw new OwRefusal({ kind: 'starOnLevel', cell: i, tl: tls[i] });
+    if (ownsTranslevel(after[i])) {
+      if (tls[i] && levelHeld(i)) throw new OwRefusal({ kind: 'starOnLevel', cell: i, tl: tls[i], pipe: !isStar(after[i]) });
       if (!tls[i] || aLevels(tls[i])) need.push(i);
     } else if (tls[i] && isStop(before[i]) && !isStop(after[i]) && !stopHeld(i)) free.push(i);
   }
-  if (need.length > st.free.length) throw new OwRefusal(noTranslevel(st.kept));
+  if (need.length > st.free.length) throw new OwRefusal({ kind: 'starNoTranslevel', max: MAX_TRANSLEVEL, kept: st.kept, pipe: need.every((i) => !isStar(after[i])) }); // (a pipe: only pipes painted)
   const freed = free.map((i) => { const tl = tls[i]; tls[i] = 0; return tl; });
   // (one just freed is not taken: not in st.free)
   const taken = need.map((i) => takeStopTranslevel(rom, tls, st, i, dirFlags(starDirs(after, i, p))));
@@ -85,5 +92,5 @@ export function giveStarTranslevel(rom: Rom, i: number, l1: ArrayLike<number>, p
 // with every tile without one, and the status bar shows translevel 0's blank name
 export function starsWithoutTranslevel(rom: Rom): number[] {
   const tls = readTranslevels(rom);
-  return [...cellsBecoming(rom, isStar)].filter((i) => !tls[i]).sort((a, b) => a - b);
+  return [...cellsBecoming(rom, ownsTranslevel)].filter((i) => !tls[i]).sort((a, b) => a - b);
 }

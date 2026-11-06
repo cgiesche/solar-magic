@@ -5,9 +5,9 @@
 
 import type { Rom } from './rom.ts';
 import { OW_EVENTS, MAX_TRANSLEVEL, translevelToLevel, readL1, readTranslevels, l1Index, isStarPipeTile, MAP_NAMES } from './overworld.ts';
-import { readEvents, eventChanges, eventRunners, eventPieces, drawPiece, l2XY, type EventData, type EventChanges, type EventRunner } from './owevents.ts';
+import { readEvents, cellsBecoming, eventChanges, eventRunners, eventPieces, drawPiece, l2XY, type EventData, type EventChanges, type EventRunner } from './owevents.ts';
 import { reach, inputWithout, type Reach } from './owreach.ts';
-import { starsWithoutTranslevel, isStar } from './owstars.ts';
+import { starsWithoutTranslevel, ownsTranslevel, isStar } from './owstars.ts';
 import { readSecondaryEntrance, mainTranslevel, OW_NORMAL, OW_SECRET } from './level.ts';
 import type { ExitGraph } from './exitgraph.ts';
 import { hex2, hex3 } from './names.ts';
@@ -60,18 +60,25 @@ export function eventsNeverRun(c: CheckContext): WorldProblem[] {
   return out;
 }
 
-// ---- stars without a translevel ----
+// ---- stars and pipes without a translevel ----
 
-// The stars (owstars.ts) at any event progress that hold no translevel – a hack's, or one painted before the editor
-// gave stars one: Mario walks off them only in the ways translevel 0's flags open, shared with every tile without
-// one, and the status bar shows its blank name. Found at progress 0 when the star is on the map before events.
+// The stars and pipes 5B (owstars.ts ownsTranslevel) at any event progress that hold no translevel – a hack's, or one
+// painted before the editor gave them one (stars #288, pipes #407; the clean game's pipes are 82s, walked off any way):
+// Mario walks off them only in the ways translevel 0's flags open, shared with every tile without one, and the status
+// bar shows its blank name. Found at progress 0 when the star or pipe is on the map before events; one an event puts
+// there named by what it becomes.
 export function starsWithoutTranslevelProblems(c: CheckContext): WorldProblem[] {
   const l1 = readL1(c.rom);
-  return starsWithoutTranslevel(c.rom).map((i) => ({
-    key: `star-no-translevel:${i}`, group: 'paths', severity: 'warn', tile: i, progress: isStar(l1[i]) ? 0 : OW_EVENTS,
-    text: `Star at ${c.place(i)} has no translevel of its own`, brief: `star without translevel at ${c.place(i)}`,
-    title: 'Mario walks off it only in the ways translevel 00\'s flags open – shared with every tile without one – and the status bar shows a blank name. Select it in the layer 1 mode (Alt+click) and give it a translevel.',
-  }));
+  let stars: Set<number> | null = null;
+  const star = (i: number) => (ownsTranslevel(l1[i]) ? isStar(l1[i]) : (stars ??= cellsBecoming(c.rom, isStar)).has(i));
+  return starsWithoutTranslevel(c.rom).map((i) => {
+    const what = star(i) ? 'star' : 'pipe';
+    return {
+      key: `star-no-translevel:${i}`, group: 'paths', severity: 'warn', tile: i, progress: ownsTranslevel(l1[i]) ? 0 : OW_EVENTS,
+      text: `${what === 'star' ? 'Star' : 'Pipe'} at ${c.place(i)} has no translevel of its own`, brief: `${what} without translevel at ${c.place(i)}`,
+      title: 'Mario walks off it only in the ways translevel 00\'s flags open – shared with every tile without one – and the status bar shows a blank name. Select it in the layer 1 mode (Alt+click) and give it a translevel.',
+    };
+  });
 }
 
 // ---- stranded by a link ----

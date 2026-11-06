@@ -4,8 +4,9 @@
 // clean game's event painted as it is (its own map after it) and written back leaves the layer 2 of every event
 // progress as it was; a painted change is shown by the game – passing the level, the steps on its submap appear one
 // after the other in their order (VRAM, frame by frame), those on another submap at once in the tilemap (silent);
-// reordering the steps changes the order in the game. All by emulation. A star painted as after an event takes a
-// translevel of its own (owstars.ts, #288), the map before events unchanged; a path painted over it there frees it.
+// reordering the steps changes the order in the game. All by emulation. A star or pipe 5B painted as after an event
+// takes a translevel of its own (owstars.ts, #288, #407), the map before events unchanged; a path painted over it there
+// frees it.
 import { Rom } from '../src/core/rom.ts';
 import { LevelEmulator } from '../src/core/levelemu.ts';
 import { PlaySession } from '../src/core/playsession.ts';
@@ -20,7 +21,7 @@ import {
 } from '../src/core/owevents.ts';
 import { GM, RAM } from '../src/core/ram.ts';
 import { editorImage, romDiff, levelTiles, pathKinds, pathShapes } from './fixture.ts';
-import { STAR_TILE, starDirs } from '../src/core/owstars.ts';
+import { STAR_TILE, PIPE_TILE, starDirs } from '../src/core/owstars.ts';
 import { dirFlags } from '../src/core/owroute.ts';
 
 let bad = 0;
@@ -171,9 +172,10 @@ check(romDiff(image, rom.data) === 0, 'undone: the ROM as before');
   check(gameL1(em.load(0, e + 1))[i] === v && gameL1(em.load(0, e))[i] === game[i], `the game shows it at event progress ${hx(e + 1)}, at ${hx(e)} not`);
 }
 
-// a star painted as after level 105's normal exit: a translevel of its own, its flags the ways its paths open there;
-// a path painted over it in the event frees it
-{
+// a star (#288) or pipe 5B (#407) painted as after level 105's normal exit: a translevel of its own, its flags the ways
+// its paths open there; a path painted over it in the event frees it
+for (const TILE of [STAR_TILE, PIPE_TILE]) {
+  const what = TILE === STAR_TILE ? 'star' : 'pipe';
   const r4 = new Rom(image.slice()), isLevel = levelTiles(r4), paths = { kinds: pathKinds(r4), shapes: pathShapes(r4) }, em = new OverworldEmulator(r4);
   const game = gameL1(em.load(0, e + 1)), without = layer1Without(r4, e), tls = readTranslevels(r4), before = readL1(r4);
   const stopLike = (t: number) => paths.kinds[t] === 'stop' || paths.kinds[t] === 'level';
@@ -187,9 +189,9 @@ check(romDiff(image, rom.data) === 0, 'undone: the ROM as before');
     st.end().write!();
     return ev.l1!;
   };
-  const after = stroke(STAR_TILE, game), tl = readTranslevels(r4)[i];
-  check(!!tl && !tls.includes(tl) && initialFlags(r4, tl) === dirFlags(starDirs(after, i, paths)) && same(readL1(r4), before) && gameL1(em.load(0, e + 1))[i] === STAR_TILE,
-    `a star painted as after event ${hx(e)} at ${hx(i)}: translevel ${hx(tl)}, flags ${hx(initialFlags(r4, tl))}; the game shows it from the event on, the map before events unchanged`);
+  const after = stroke(TILE, game), tl = readTranslevels(r4)[i];
+  check(!!tl && !tls.includes(tl) && initialFlags(r4, tl) === dirFlags(starDirs(after, i, paths)) && same(readL1(r4), before) && gameL1(em.load(0, e + 1))[i] === TILE && gameL1(em.load(0, e))[i] === game[i],
+    `a ${what} (${hx(TILE)}) painted as after event ${hx(e)} at ${hx(i)}: translevel ${hx(tl)}, flags ${hx(initialFlags(r4, tl))}; the game shows it from the event on (not before), the map before events unchanged`);
   stroke(game[i], after);
   check(readTranslevels(r4)[i] === 0, `a path painted over it in the event frees it (${hx(readTranslevels(r4)[i])})`);
 }

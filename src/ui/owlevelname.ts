@@ -4,7 +4,7 @@
 // character the font lacks refused while typing, said why; Enter or a click outside the popover writes it (one ROM
 // edit), Esc drops it. Beside it the translevel's switches as the level tile's properties have them (no entry once
 // passed, save prompt) and the other level tiles entering the level ("Also used by the tile on Vanilla Dome",
-// owleveltiles.ts alsoUsedBy). A star selected (owstars.ts) has its name drawn so too – the status bar's while Mario
+// owleveltiles.ts alsoUsedBy). A star or pipe 5B selected (owstars.ts) has its name drawn so too – the status bar's while Mario
 // stands on it –, the popover opened by its properties' button (a click on the map paints there), without the switches
 // (it enters no level).
 
@@ -15,7 +15,7 @@ import { nameFont } from './levelnamefield.ts';
 import { l1XY, owShownAt, translevelToLevel, levelTilesOf, initialFlags, setInitialFlags, FLAG, type OwRender } from '../core/overworld.ts';
 import { levelNameTiles, setLevelNameTiles, levelNamePatch, trimName, typeNameChar, nameKey, NAME_LEN, type NameCaret } from '../core/levelnames.ts';
 import { alsoUsedBy } from '../core/owleveltiles.ts';
-import { isStar } from '../core/owstars.ts';
+import { ownsTranslevel, starOrPipe } from '../core/owstars.ts';
 import { blit8 } from '../core/render.ts';
 import { hex2, hex3 } from '../core/names.ts';
 
@@ -57,8 +57,10 @@ export class LevelNameEditor {
     const tl = v.tls[i], t = v.levelL1()[i];
     if (!tl) return null;
     if (v.isLevelTile(t)) return { i, tl, star: false };
-    return v.pathKinds() && isStar(t) ? { i, tl, star: true } : null;
+    return v.pathKinds() && ownsTranslevel(t) ? { i, tl, star: true } : null;
   }
+  // what the selected tile without level is called (owstars.ts ownsTranslevel: a star or a pipe 5B)
+  private what(i: number): 'star' | 'pipe' { return starOrPipe(this.view.levelL1()[i]); }
   // the name shown: as typed while edited, else as in the ROM
   private tiles(tl: number): number[] {
     return this.pop?.tl === tl ? this.pop.name.tiles : trimName(levelNameTiles(this.view.app.rom, tl));
@@ -151,7 +153,7 @@ export class LevelNameEditor {
     p.root.remove();
     const rom = this.view.app.rom;
     if (commit && p.dirty && trimName(levelNameTiles(rom, p.tl)).join() !== p.name.tiles.join())
-      this.view.app.romEdit(p.star ? `Star name (translevel ${hex2(p.tl)})` : `Level name ${hex3(translevelToLevel(p.tl))}`, () => setLevelNameTiles(rom, p.tl, p.name.tiles));
+      this.view.app.romEdit(p.star ? `${this.what(p.i) === 'star' ? 'Star' : 'Pipe'} name (translevel ${hex2(p.tl)})` : `Level name ${hex3(translevelToLevel(p.tl))}`, () => setLevelNameTiles(rom, p.tl, p.name.tiles));
     this.view.paint();
   }
   // the popover under the name's box where the view paints it (its screen pixels per map pixel, its scroll: paint);
@@ -176,7 +178,7 @@ export class LevelNameEditor {
     const views = v.views, others = (p.star ? [...v.tls.keys()].filter((k) => v.tls[k] === p.tl) : levelTilesOf(v.levelL1(), v.tls, p.tl, v.isLevelTile)).filter((k) => k !== p.i);
     const shared = !others.length ? '' : views ? alsoUsedBy(others, views) : `Also used by ${others.length} other tile${others.length > 1 ? 's' : ''}`;
     // (a star: no switches – it enters no level)
-    const rest = p.star ? { note: 'The status bar shows it while Mario stands on the star', owner: 'name and ways are the translevel\'s' }
+    const rest = p.star ? { note: `The status bar shows it while Mario stands on the ${this.what(p.i)}`, owner: 'name and ways are the translevel\'s' }
       : { note: '', owner: 'name and switches are the level\'s' };
     p.rest.replaceChildren(
       ...(rest.note ? [h('div', { class: 'hint' }, rest.note)] : SWITCHES.map(([label, bit, title]) => checkbox(` ${label}`, title, (flags & bit) !== 0, (on) => {

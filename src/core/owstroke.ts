@@ -3,8 +3,8 @@
 // (layer 1 where it changed, layer 2 in place when it fits) and the event's steps (layer 2: paintEvent; layer 1:
 // paintEventL1 against the map after it without its layer 1 changes). Layer 1 strokes leave level tiles alone: they
 // neither paint over one nor paint one (level tiles are objects on top of layer 1, placed, moved and removed as such,
-// ADR 0012). A star painted takes a translevel of its own, a star or stop painted over with a path frees its
-// (owstars.ts paintStars).
+// ADR 0012). A star or pipe 5B painted takes a translevel of its own, a star, pipe or stop painted over with a path
+// frees its (owstars.ts paintStars).
 
 import type { Rom } from './rom.ts';
 import {
