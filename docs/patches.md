@@ -458,7 +458,12 @@ With the patch, the layer 1/2 tilemaps in levels are 64×32 at `$3000`/`$3800` i
   vertical scrolling rows are reloaded from the shadow.
 - **Vertical levels:** they load row by row anyway; there the game prebuilds only 1 block above and 15 blocks
   below the camera instead of 8 and 23.
-- **Individual tile changes** (coins, blocks …) go into the shadow and, if visible, into VRAM.
+- **Individual tile changes** (coins, blocks … – the game's stripes) go into the shadow and, if visible, into VRAM.
+  In the NMI the patch handles them entry by entry: each entry is cut where its tiles stop lying side by side in
+  the moved tilemap (the end of a tile row, of a 32×32 screen's column), and what lies inside the window goes to
+  VRAM by one DMA at the moved address; the shadow is written after the screen is turned on (hook `$0082B6`). Word
+  by word, as before, the NMI ran past V-blank: black lines at the top of the screen, e.g. on a Yoshi coin
+  (#406, `tools/testblanklines.ts`).
 - **Overworld, title screen and credits** stay unchanged.
 
 This is verified by playing every level with and without the patch using the same inputs: with the same
@@ -467,7 +472,8 @@ patch costs some CPU time. In frames that are already at the limit in the origin
 one extra lag frame – in the test about 0.1 % of frames. If another patch occupies RAM in the `$7F0000` range (via
 `ram` in the `patch.json`), the editor rejects it; if it only writes there, there is a warning (see
 [Free RAM](#applying-patches)). Patches that use the range anyway or modify the tilemap uploads themselves
-are not compatible with it.
+are not compatible with it. A ROM the editor made with an older version of the patch gets the current one when it is
+opened (the patch is applied anew if its source differs from the registry's hash).
 
 ### FastROM
 
@@ -1031,7 +1037,7 @@ not compatible with the respective feature.
 | `$05D915`, `$00F79D`, table `$06FA00` | Layer 2 scroll rates; RAM `$7F3660–$7F3665` |
 | `$00F713`, `$00F728`, `$00F7F4`, `$00F80C` | Sprite scroll fix; RAM `$7F3683–$7F3686` |
 | `$05D928`, `$0586BB`, entrance options and screen exit flags `$009708`, `$0DA532`, `$0DA536`, the slanted pipe to the left `$00D2B2`, the midway entrance `$05D9B8`, `$05D9DE` (also by a screen exit, its flags `$05D7C5`), new-style exits `$05D7CE`, `$05D836`, `$0DA963`, `$0DA9D6`, `$0DA9EF`, `$058091`, ext. object table `$0DA118` (entry `$03`, the swapped screen jump), tables `$06CA00`, `$05DE00`, `$06FC00`, `$06FE00`, `$06CC00`, `$06CE00`, `$07E800`, `$07EA00`, `$07EC00`, `$07EE00`; finding a block `$00F478`, `$00F492`, `$00F49A`, `$0194D6`, `$019500`, `$019512`, `$01D97B`, `$01D981`, `$0292D9`, `$0292F9`, `$02930A`, `$0295C0`, `$0295EC`, `$0295FD`, `$02A6BA`, `$02A6CB`, `$02BA50`, `$02BA71`, `$02BA82`, `$02D15A`, `$02D18C`, `$02D19D`, `$03D793`; changing a tile `$00BEEC`, `$00BF41`, `$00C079`, `$00C0C6`, `$00C1B1`, `$00C3D3`; mode tables `$00BDA8`, `$00BDE8`, `$00BE28`, `$00BE68`; sprites `$02A82E`, `$02A968`, `$02AA5F`, `$02AB54`, `$02ABD0`, `$02AF3D`, `$02AFA7`, `$01AC3E`, `$02D038`, `$03B86A`; camera `$00F70D`; entrances `$05D7E0`, `$05DA17`; secondary entrances to the overworld `$05D836` | Level heights (Lunar Magic 3.00's entrances, their options); RAM `$7F3666–$7F3677`, `$7F3679`, Lunar Magic's `$13D7`, `$0BF6–$0CF5` |
-| `$008A7F`, `$0087AD`, `$0085E3`, `$0580B0`, `$0580B4`, `$0580BF`, `$0580C3`, `$058730`, `$058770`, `$0587D4`, `$0587DB`, `$05880B`, `$058812`, `$0586F7`, `$058A3A` | VRAM patch (SMWV): tilemaps relocated, taller levels' rows; RAM `$7F0000–$7F3654` |
+| `$008A7F`, `$0087AD`, `$0085E3`, `$0082B6`, `$0580B0`, `$0580B4`, `$0580BF`, `$0580C3`, `$058730`, `$058770`, `$0587D4`, `$0587DB`, `$05880B`, `$058812`, `$0586F7`, `$058A3A` | VRAM patch (SMWV): tilemaps relocated, taller levels' rows; RAM `$7F0000–$7F3654` |
 | Header `$00FFD5`, vectors `$00FFEA`, `$00FFEE`, `$00FFFC`, stubs `$00BA4E–$00BA59` (the rewritten bank bytes of long jumps are not hooks) | FastROM (SMWR) |
 | `$048509`, `$048543` | Overworld teleports (the star/pipe table with 0x100 entries) |
 | `$04D7F2–$04D85C` | Translevels per level tile and the layer 1 tiles' high bytes (Lunar Magic's tables) |

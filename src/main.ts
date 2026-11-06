@@ -82,9 +82,12 @@ function setProjectPath(path: string | null): void {
 // false if the ROM cannot be opened
 async function startWith(rom: Rom, name: string): Promise<boolean> {
   log(`ROM “${name}” loaded (${Math.round(rom.size / 1024)} KB${rom.smcHeader ? ', with header' : ''}${rom.extra.size ? `, editor data ${Math.round(rom.extraSize / 1024)} KB` : ''})`);
-  // a clean ROM gets the editor's patches; anything but it and the editor's own ROMs is refused
+  // a clean ROM gets the editor's patches, an editor ROM's older VRAM patch is updated; anything but the clean game
+  // and the editor's own ROMs is refused
   try {
-    if (await prepareRom(rom)) { saveRom(name, rom).catch(() => {}); log('Editor patches installed.'); }
+    const done = await prepareRom(rom);
+    if (done?.failed) toast(done.note, 'error');
+    else if (done) { saveRom(name, rom).catch(() => {}); log(done.note); }
   } catch (e) {
     toast(`Could not open “${name}”: ${e instanceof Error ? e.message : e}`, 'error');
     return false;

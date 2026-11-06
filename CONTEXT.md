@@ -7,7 +7,7 @@ A browser-based editor for Super Mario World ROMs: levels, graphics and third-pa
 ### The editor's own patches
 
 **Editor patches**:
-The editor's own ASM in the ROM (SMWE, SMWV, SMWG, SMWP, SMWB, SMWU, SMWX, SMWH, SMWS, the ExAnimation engine, the layer 2 scroll rates, the level heights, SMWL's layer 3 graphics per level, the sprite scroll fix, SMWM's two messages per level, the level names and the submap palettes in Lunar Magic's layout, FastROM), installed into the clean ROM when it is opened; the editor relies on them and opens no other ROMs than the clean game and its own (ADR 0004). Not third-party content and never part of a package.
+The editor's own ASM in the ROM (SMWE, SMWV, SMWG, SMWP, SMWB, SMWU, SMWX, SMWH, SMWS, the ExAnimation engine, the layer 2 scroll rates, the level heights, SMWL's layer 3 graphics per level, the sprite scroll fix, SMWM's two messages per level, the level names and the submap palettes in Lunar Magic's layout, FastROM), installed into the clean ROM when it is opened (an editor ROM's SMWV from an older source is updated then); the editor relies on them and opens no other ROMs than the clean game and its own (ADR 0004). Not third-party content and never part of a package.
 _Avoid_: Lunar Magic hacks, built-in patches
 
 **FastROM**:

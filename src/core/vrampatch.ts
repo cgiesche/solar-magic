@@ -19,7 +19,7 @@
 // with its screen pointers moved down, so any hook in it, like the Map16 extension's, still applies).
 
 import { Rom } from './rom.ts';
-import { applyPatch, type ApplyResult } from './patchapply.ts';
+import { applyPatch, reapplyPatch, sourceHash, type ApplyResult, type PatchSource } from './patchapply.ts';
 import { listPatches } from './patchreg.ts';
 import { setVramPatchCheck } from './patches.ts';
 import { LEVEL_HEIGHT } from './ram.ts';
@@ -45,20 +45,21 @@ lorom
 !CW   = $7F361E
 !RB   = $7F3620      ; row upload: VRAM base of the layer, shadow base
 !RS   = $7F3622
-!SP   = $7F3630      ; stripes: pointer (3 bytes), then 2-byte values
-!SY   = $7F3634
-!SA   = $7F3636
-!SF   = $7F3638
-!SN   = $7F363A
-!SW   = $7F363C
-!SK   = $7F363E
-!SV   = $7F3640
-!TW   = $7F3642      ; PutWord: tile word, relative address, tilemap base, window, row, offset
-!TA   = $7F3644
+!SP   = $7F3630      ; stripes: the buffer's pointer (3 bytes)
+!S0   = $7F3633      ; its first byte
+!SY   = $7F3634      ; the next entry (OwnUp, OwnShadow)
+!SQ   = $7F3603      ; 1: the shadow pass of this NMI's stripes is due
+!PS   = $7F3604      ; per layer (2 words each): the window's first tile row, its rows, the row limit, the shadow
+!PL   = $7F3608
+!PM   = $7F360C
+!PH   = $7F3624
+!SC   = $7F3628      ; a column segment starting outside the window: its first word's row in the window (SegShadow:
+!SE   = $7F362A      ; the shadow offset), the rows before the limit (SegShadow: words left), the first word inside,
+!SL   = $7F362C      ; the words inside
+!SX   = $7F362E
+!TA   = $7F3644      ; ColUp, TallCol, TallRows: temporaries
 !TB   = $7F3646
 !TC   = $7F3648
-!TD   = $7F364A
-!TE   = $7F364C
 !TT   = $7F364E      ; Stream: target row, map row
 !TM   = $7F3650
 !TW0  = $7F3652      ; ColUp: window
@@ -89,6 +90,11 @@ org $0087AD
 org $0085E3
   JSL Stripe
   NOP
+
+; NMI, the screen just turned on: the stripes into the shadow (LDA $0D9F : STA $420C)
+org $0082B6
+  JSL Tail
+  NOP #2
 
 ; column builders: copy the built column into the shadow
 org $058730
@@ -139,12 +145,12 @@ SetSC:
   LDA #$39 : STA $2108
   LDA #$01 : STA.l !Act
   LDA #$FF : STA.l !Win1 : STA.l !Win2
-  LDA #$00 : STA.l !Tall
+  LDA #$00 : STA.l !Tall : STA.l !SQ
   RTL
 .van
   LDA #$23 : STA $2107
   LDA #$33 : STA $2108
-  LDA #$00 : STA.l !Act : STA.l !Tall
+  LDA #$00 : STA.l !Act : STA.l !Tall : STA.l !SQ
   RTL
 
 ; ---------------------------------------------------------------- vertical look-ahead
@@ -593,151 +599,358 @@ TallRows:
   RTS
 
 ; ---------------------------------------------------------------- stripes
-; Entries for the layer 1/2 tilemaps ($2000-$3FFF) are written word by word: always to the shadow
-; (horizontal layers), and to VRAM at the mapped address if inside the window. Other entries are
-; uploaded by the game's routine, with a temporary end mark after each (RAM stripes only).
+; The NMI's V-blank is short: the stripes are handled entry by entry, not word by word (#406). An entry for the
+; layer 1/2 tilemaps ($2000-$3FFF) is cut into segments – a +1 entry at the end of each tile row, a +32 entry at
+; the end of each 32x32 screen's column – so that the words of a segment lie side by side (or one below the
+; other) in the remapped layout too and are inside the window in one run at most. In the NMI (force blank) the
+; run goes to VRAM by one DMA at the mapped address; once the screen is on (Tail) the segments go into the
+; shadow (horizontal layers). Entries for other VRAM are uploaded as the game's routine does it. Stripes in ROM
+; are uploaded by the game's routine, unchanged.
 Stripe:
-  PHA
   LDA.l !Act : BEQ .van
-  LDA $02 : CMP #$7E : BCS .own                ; stripes in ROM: unchanged
+  LDA $02 : CMP #$7E : BCS .own
 .van
-  PLA
+  LDA $02                                       ; (the game's routine takes the bank in A)
   PHK : PEA.w .ret-1 : PEA.w $84CF-1
   JML $80871E
 .ret
   SEP #$30 : LDA $12 : RTL
 .own
-  PLA
+  LDA [$00] : BMI .none                         ; empty
+  STA.l !S0                                     ; the game puts its end mark there after the upload
   REP #$30
   LDA $00 : STA.l !SP : SEP #$20 : LDA $02 : STA.l !SP+2 : REP #$20
-  LDA #$0000 : STA.l !SY
-.entry
-  REP #$30
-  LDA.l !SP : STA $00 : SEP #$20 : LDA.l !SP+2 : STA $02 : REP #$20
-  LDA.l !SY : TAY
-  SEP #$20
-  LDA [$00],y : BMI .done
-  CMP #$20 : BCC .other
-  CMP #$40 : BCS .other
-  JSR OwnEntry
-  BRA .entry
-.other
-  JSR EntrySize                                 ; → !SN = size (16 bit)
-  REP #$20
-  LDA.l !SY : CLC : ADC $00 : STA $00           ; pointer to this entry
-  LDA.l !SN : TAY
-  SEP #$20
-  LDA [$00],y : STA.l !SV                       ; temporary end mark
-  LDA #$FF : STA [$00],y
-  PHK : PEA.w .back-1 : PEA.w $84CF-1
-  LDA $02
-  JML $80871E
-.back
-  REP #$30
-  LDA.l !SP : STA $00 : SEP #$20 : LDA.l !SP+2 : STA $02 : REP #$20
-  LDA.l !SY : CLC : ADC.l !SN : STA.l !SY : TAY
-  SEP #$20
-  LDA.l !SV : STA [$00],y
-  BRA .entry
-.done
+  JSR Params
+  JSR WalkUp
+  SEP #$30
+  LDA #$01 : STA.l !SQ
+.none
   SEP #$30 : LDA $12 : RTL
 
-; entry at [$00]+!SY → !SN = 4 + data bytes (M=8, X=16)
-EntrySize:
-  REP #$20
-  LDA.l !SY : TAY : INY #2
-  LDA [$00],y : XBA : AND #$3FFF : INC : STA.l !SN   ; length
-  SEP #$20
-  LDA [$00],y : AND #$40 : BEQ +
-  REP #$20 : LDA #$0002 : STA.l !SN : SEP #$20
-+ REP #$20
-  LDA.l !SN : CLC : ADC #$0004 : STA.l !SN
-  SEP #$20
-  RTS
-
-OwnEntry:
-  JSR EntrySize
+; NMI with the screen on (replaces LDA $0D9F : STA $420C): this NMI's stripes into the shadow. The buffer is as
+; it was uploaded but for its first byte (the game's end mark); the game's code waits for this NMI to end
+Tail:
+  LDA $0D9F : STA $420C
+  LDA.l !SQ : BEQ .r
+  LDA #$00 : STA.l !SQ
   REP #$30
-  LDA.l !SY : TAY
-  LDA [$00],y : XBA : STA.l !SA                 ; VRAM address (big endian in the stripe)
-  INY #2
-  LDA [$00],y : STA.l !SF                       ; flags: bit 7 = +32, bit 6 = RLE
-  XBA : AND #$3FFF : INC : INC : LSR : STA.l !SW  ; words
-  LDA #$0000 : STA.l !SK
-.w
-  LDA.l !SY : CLC : ADC #$0004 : TAY
-  LDA.l !SF : AND #$0040 : BNE +                ; RLE: always the first word
-  TYA : CLC : ADC.l !SK : ADC.l !SK : TAY
-+ LDA [$00],y : STA.l !TW                       ; tile word
-  JSR PutWord
-  LDA.l !SF : AND #$0080 : BEQ +
-  LDA.l !SA : CLC : ADC #$001F : STA.l !SA
-+ LDA.l !SA : INC : STA.l !SA
-  LDA.l !SK : INC : STA.l !SK
-  CMP.l !SW : BCC .w
-  LDA.l !SY : CLC : ADC.l !SN : STA.l !SY
+  LDA.l !SP : STA $00 : SEP #$20 : LDA.l !SP+2 : STA $02
+  LDA [$00] : PHA : LDA.l !S0 : STA [$00]
+  REP #$20
+  JSR WalkShadow
   SEP #$20
+  PLA : STA [$00]
+.r
+  RTL
+
+; per layer (X = 0: layer 1, 2: layer 2) where its words go, from the window this NMI set (A/X/Y 16):
+; !PS the window's first tile row (0-63), !PL its rows from there (modulo 64; 0: no window yet), !PM the rows
+; from which on a word goes nowhere, !PH the layer's shadow ($FFFF: none). Horizontal: the window's 32 rows,
+; rows from 54 on nowhere (a tall layer 1: no limit, no shadow). Vertical: the camera's block rows c..c+14 (the
+; slot of any other may be one on screen; it is built when it comes into view), no shadow
+Params:
+  LDA $5B : LSR : BCS .v1
+  LDA.l !Win1 : AND #$00FF : STA.l !PS
+  CMP #$00FF : LDA #$0020 : BCC +
+  LDA #$0000
++ STA.l !PL
+  LDA.l !Tall : LSR : LDA #$0036 : LDX #$0000 : BCC +
+  LDA #$0040 : LDX #$FFFF
++ STA.l !PM : TXA : STA.l !PH
+  BRA .l2
+.v1
+  LDA $1C : LSR #3 : AND #$003E : STA.l !PS
+  LDA #$001E : STA.l !PL
+  LDA #$0040 : STA.l !PM
+  LDA #$FFFF : STA.l !PH
+.l2
+  LDA $5B : AND #$0002 : BNE .v2
+  LDA.l !Win2 : AND #$00FF : STA.l !PS+2
+  CMP #$00FF : LDA #$0020 : BCC +
+  LDA #$0000
++ STA.l !PL+2
+  LDA #$0036 : STA.l !PM+2
+  LDA #$1B00 : STA.l !PH+2
+  RTS
+.v2
+  LDA $20 : LSR #3 : AND #$003E : STA.l !PS+2
+  LDA #$001E : STA.l !PL+2
+  LDA #$0040 : STA.l !PM+2
+  LDA #$FFFF : STA.l !PH+2
   RTS
 
-; tile word !TW for the game's (64x64) VRAM address !SA (A/X/Y 16 bit)
-PutWord:
-  LDA.l !SA : CMP #$3000 : BCS .l2
-  AND #$0FFF : STA.l !TA                         ; address relative to the tilemap
-  SEP #$20 : LDA $5B : AND #$01 : REP #$20 : BNE .v1
-  LDA #$3000 : STA.l !TB
-  LDA.l !Win1 : AND #$00FF : STA.l !TC
-  LDX #$0000                                     ; shadow of layer 1
-  JMP .horz
-.v1
-  LDA #$3000 : STA.l !TB
-  LDA $1C : BRA .vert
-.l2
-  AND #$0FFF : STA.l !TA
-  SEP #$20 : LDA $5B : AND #$02 : REP #$20 : BNE .v2
-  LDA #$3800 : STA.l !TB
-  LDA.l !Win2 : AND #$00FF : STA.l !TC
-  LDX #$1B00                                     ; shadow of layer 2
-  BRA .horz
-.v2
-  LDA #$3800 : STA.l !TB
-  LDA $20
-.vert                                            ; vertical layer (A = its camera Y): rows modulo 32, only
-  LSR #4 : STA.l !TD                             ; the camera's block rows c..c+14 (the slot of any other
-  LDA.l !TA : LSR #6 : AND #$000F : STA.l !TE    ; may be one on screen; it is built when it comes into view)
-  LDA.l !TA : AND #$0800 : BEQ +
-  LDA.l !TE : ORA #$0010 : STA.l !TE
-+ LDA.l !TE : SEC : SBC.l !TD : AND #$001F : CMP #$000F : BCC +
-  JMP .r
-+ LDA.l !TA : AND #$07FF : ORA.l !TB
-  JMP .vram
-.horz
-  ; row y = (a >> 5 & 31) + (a & $800 ? 32 : 0), column byte offset = (a & 31) * 2 + (a & $400 ? 64 : 0)
-  LDA.l !TA : LSR #5 : AND #$001F : STA.l !TD
-  LDA.l !TA : AND #$0800 : BEQ +
-  LDA.l !TD : ORA #$0020 : STA.l !TD
-+ CPX #$0000 : BNE +                             ; layer 1 of a tall level: no shadow, rows modulo 64
-  LDA.l !Tall : AND #$00FF : BNE .win
-+ LDA.l !TD : CMP #$0036 : BCC +                  ; beyond row 53
-  JMP .r
-+
-  XBA : LSR : STA.l !TE                           ; y * 128
-  LDA.l !TA : AND #$001F : ASL : ORA.l !TE : STA.l !TE
-  LDA.l !TA : AND #$0400 : LSR #4 : ORA.l !TE : STA.l !TE
-  TXA : CLC : ADC.l !TE : TAX
-  LDA.l !TW : STA.l !Sh1,x
-.win
-  LDA.l !TC : CMP #$00FF : BNE +                  ; no window yet
-  JMP .r
-+ LDA.l !TD : SEC : SBC.l !TC : AND #$003F : CMP #$0020 : BCC +   ; outside the window
-  JMP .r
-+
-  LDA.l !TD : AND #$001F : ASL #5 : STA.l !TE
-  LDA.l !TA : AND #$041F : ORA.l !TE : ORA.l !TB
-.vram
-  STA $2116
-  SEP #$20 : LDA #$80 : STA $2115 : REP #$20
-  LDA.l !TW : STA $2118
+; NMI: the entries of the stripe buffer at [$00] to VRAM (A/X/Y 16; uses $03-$0F). An entry for the layer 1/2
+; tilemaps within one tile row (+1, not RLE: a changed block's row) is done here, the others by OwnUp; an entry
+; for other VRAM as the game's routine ($00871E) does it
+WalkUp:
+  JSR Defaults
+  LDY #$0000
+.entry
+  LDA [$00],y : BIT #$0080 : BEQ +
+  RTS
++ XBA : STA $08                                 ; VRAM address (big endian in the stripe)
+  AND #$E000 : CMP #$2000 : BEQ +
+  JMP .other
++ INY #2
+  LDA [$00],y : XBA : STA $0E
+  INY #2
+  BIT #$C000 : BEQ +
+  BIT #$4000 : BNE .gen
+  JMP .col
++ INC : STA $06                                 ; data bytes
+  INC : LSR : STA $04                           ; words
+  LDA $08 : ORA #$FFE0 : CLC : ADC $04 : DEC : BPL .gen   ; beyond the tile row's end
+  TYA : CLC : ADC $06 : STA $0A                 ; the next entry
+  LDA $08 : CMP #$3000 : LDX #$0000 : BCC +     ; (as SegUp, inline: the most frequent entry)
+  LDX #$0002
++ AND #$0BE0 : ASL #3 : XBA : CMP #$0040 : BCC +
+  SBC #$0020
++ CMP.l !PM,x : BCS .next
+  SEC : SBC.l !PS,x : AND #$003F : CMP.l !PL,x : BCS .next
+  LDA $08 : AND #$07FF : ORA.l Base,x : STA $2116
+  TYA : CLC : ADC $00 : STA $4312
+  LDA $04 : ASL : STA $4315
+  SEP #$20 : LDA #$02 : STA $420B : REP #$20
+.next
+  LDY $0A
+  JMP .entry
+.gen
+  DEY #4
+  JSR OwnUp
+  JMP .entry
+.col                                             ; +32, not RLE, within the 32x32 screen's column: by SegUp
+  AND #$3FFF : INC : STA $06
+  INC : LSR : STA $04
+  LDA $08 : LSR #5 : ORA #$FFE0 : CLC : ADC $04 : DEC : BPL .gen
+  TYA : STA $0C : CLC : ADC $06 : STA $0A
+  JSR SegUp
+  LDY $0A
+  JMP .entry
+.other
+  INY #2
+  LDA [$00],y : XBA : STA $0E
+  INY #2
+  LDA $08 : STA $2116
+  TYA : CLC : ADC $00 : STA $4312
+  LDA $0E : AND #$3FFF : INC : TAX : STX $4315   ; bytes
+  BIT $0E : BVS .orle
+  STX $06 : TYA : CLC : ADC $06 : TAY
+  SEP #$20
+  LDA $0F : BMI +
+  LDA #$02 : STA $420B
+  REP #$20
+  JMP .entry
++ LDA #$81 : STA $2115                          ; +32
+  LDA #$02 : STA $420B
+  LDA #$80 : STA $2115
+  REP #$20
+  JMP .entry
+.orle                                            ; the game's RLE: the low byte to $2118/$2119 (+1/+32 after
+  SEP #$20                                       ; $2118), then the high byte to $2119/$211A (after $2119)
+  LDA #$09 : STA $4310
+  LDA $0F : ASL : LDA #$00 : ROL : STA $03 : STA $2115
+  LDA #$02 : STA $420B
+  LDA #$19 : STA $4311
+  REP #$21
+  LDA $08 : STA $2116
+  TYA : ADC $00 : INC : STA $4312
+  STX $4315
+  INY #2
+  SEP #$20
+  LDA $03 : ORA #$80 : STA $2115
+  LDA #$02 : STA $420B
+  REP #$20
+  JSR Defaults
+  JMP .entry
+
+; the DMA settings of WalkUp: channel 1 to $2118/$2119 from the buffer's bank, +1 after the high byte
+Defaults:
+  LDA #$1801 : STA $4310
+  SEP #$20
+  LDA #$80 : STA $2115
+  LDA $02 : STA $4314
+  REP #$20
+  RTS
+
+; screen on: the entries for the layer 1/2 tilemaps into the shadow (A/X/Y 16; uses $03-$0F)
+WalkShadow:
+  LDY #$0000
+.entry
+  LDA [$00],y : BIT #$0080 : BNE .done
+  AND #$00E0 : CMP #$0020 : BNE .other
+  JSR OwnShadow
+  BRA .entry
+.other                                           ; the next entry: + 4 + 2 (RLE) or + 4 + length
+  INY #2
+  LDA [$00],y : XBA : BIT #$4000 : BEQ +
+  LDA #$0001
++ AND #$3FFF : STA $06
+  TYA : SEC : ADC $06 : INC #2 : TAY
+  BRA .entry
+.done
+  RTS
+
+; Y = an entry for the layer 1/2 tilemaps, segment by segment → Y = the next entry (A/X/Y 16), each segment by
+; <seg>.
+; $08: the game's (64x64) VRAM address of the segment, $0A: words left, $0C: their data (offset in the buffer),
+; $0E: byte 2 << 8 | byte 3 of the entry (bit 15: +32, bit 14: RLE, length - 1), $04: the segment's words
+macro own(name, seg)
+<name>:
+  LDA [$00],y : XBA : STA $08                   ; (big endian in the stripe)
+  INY #2
+  LDA [$00],y : XBA : STA $0E
+  INY #2 : STY $0C
+  AND #$3FFF : INC : STA $06                    ; data bytes
+  INC : LSR : STA $0A                           ; words
+  BIT $0E : BVC +
+  LDA #$0002 : STA $06
++ TYA : CLC : ADC $06 : STA.l !SY
+.seg
+  ; words to the end of the tile row (+1) or of the screen's column (+32)
+  LDA $08 : BIT $0E : BPL +
+  LSR #5
++ AND #$001F : EOR #$001F : INC
+  CMP $0A : BCC +
+  LDA $0A
++ STA $04
+  JSR <seg>
+  LDA $04 : BIT $0E : BPL +
+  ASL #5
++ CLC : ADC $08 : STA $08
+  BIT $0E : BVS +
+  LDA $04 : ASL : ADC $0C : STA $0C
++ LDA $0A : SEC : SBC $04 : STA $0A
+  BNE .seg
+  LDA.l !SY : TAY
+  RTS
+endmacro
+%own(OwnUp, SegUp)
+%own(OwnShadow, SegShadow)
+
+; the layer's tilemap in VRAM
+Base:
+  dw $3000, $3800
+
+; NMI: the segment's words inside the window to VRAM. A row segment is one tile row y (rows mod 64:
+; (a >> 5 & 31) + (a & $800 ? 32 : 0)); a column segment's rows y, y+1 ... (one screen's) are inside the window
+; at most in one run. Mapped: the address within the 32x32 screens side by side (a & $7FF) on the layer's tilemap
+SegUp:
+  LDA $08 : CMP #$3000 : LDX #$0000 : BCC +
+  LDX #$0002
++ AND #$0BE0 : ASL #3 : XBA : CMP #$0040 : BCC +
+  SBC #$0020
++ STA $06                                       ; y
+  CMP.l !PM,x : BCS .r
+  SEC : SBC.l !PS,x : AND #$003F                ; its row in the window
+  BIT $0E : BMI .col
+  CMP.l !PL,x : BCS .r
+  LDA $08 : AND #$07FF : ORA.l Base,x : STA $06
+  LDY $0C : LDX $04
+  JMP Put
 .r
+  RTS
+.col
+  CMP.l !PL,x : BCS .late
+  EOR #$FFFF : SEC : ADC.l !PL,x                ; inside from the first word to the window's end
+  CMP $04 : BCC +
+  LDA $04
++ TAY
+  LDA.l !PM,x : SEC : SBC $06 : STA $06         ; rows before the limit
+  CPY $06 : BCC +
+  LDY $06
++ LDA $08 : AND #$07FF : ORA.l Base,x : STA $06
+  TYX
+  LDY $0C
+  JMP Put
+.late
+  STA.l !SC
+  LDA.l !PM,x : SEC : SBC $06 : STA.l !SE       ; rows before the limit
+  LDA #$0040 : SEC : SBC.l !SC : STA.l !SL      ; inside from the word at the window's start
+  CLC : ADC.l !PL,x                             ; to the window's end
+  CMP $04 : BCC +
+  LDA $04
++ CMP.l !SE : BCC +
+  LDA.l !SE
++ SEC : SBC.l !SL : BEQ .r : BCC .r
+  STA.l !SX                                     ; words of the run
+  LDA.l !SL : ASL #5 : CLC : ADC $08 : AND #$07FF : ORA.l Base,x : STA $06
+  LDA.l !SL : ASL : BIT $0E : BVC +
+  LDA #$0000
++ CLC : ADC $0C : TAY
+  LDA.l !SX : TAX
+  ; (falls through)
+
+; X words from the buffer at offset Y to VRAM $06, +1 or +32 as the entry (A/X/Y 16; WalkUp's DMA settings, kept).
+; RLE: the word's low bytes, then its high bytes, the run's words only (the game's RLE also writes the high byte
+; after the run)
+Put:
+  LDA $06 : STA $2116
+  TYA : CLC : ADC $00 : STA $4312
+  BIT $0E : BVS .rle
+  TXA : ASL : STA $4315
+  SEP #$20
+  BIT $0F : BMI .d
+  LDA #$02 : STA $420B
+  REP #$20
+  RTS
+.d
+  LDA #$81 : STA $2115                          ; +32
+  LDA #$02 : STA $420B
+  LDA #$80 : STA $2115
+  REP #$20
+  RTS
+.rle
+  SEP #$20
+  LDA $0F : ASL : LDA #$00 : ROL : STA $03      ; +1 or +32
+  STA $2115                                     ; after the low byte
+  REP #$20
+  LDA #$1808 : STA $4310                        ; fixed source, $2118
+  STX $4315
+  SEP #$20 : LDA #$02 : STA $420B
+  LDA $03 : ORA #$80 : STA $2115                ; after the high byte
+  LDA #$19 : STA $4311
+  REP #$20
+  LDA $06 : STA $2116
+  TYA : SEC : ADC $00 : STA $4312
+  STX $4315
+  SEP #$20 : LDA #$02 : STA $420B
+  LDA #$80 : STA $2115
+  REP #$20
+  LDA #$1801 : STA $4310
+  RTS
+
+; screen on: the segment's words into the shadow of a horizontal layer, rows 0-53 (shadow offset
+; y * 128 + (a & 31) * 2 + (a & $400 ? 64 : 0))
+SegShadow:
+  LDA $08 : CMP #$3000 : LDX #$0000 : BCC +
+  LDX #$0002
++ LDA.l !PH,x : BMI .r
+  STA.l !SC
+  LDA $08 : AND #$0BE0 : ASL #3 : XBA : CMP #$0040 : BCC +
+  SBC #$0020
++ STA $06                                       ; y
+  CMP #$0036 : BCS .r
+  XBA : LSR : ADC.l !SC : STA.l !SC
+  LDA $08 : AND #$001F : ASL : ADC.l !SC : STA.l !SC
+  LDA $08 : AND #$0400 : LSR #4 : ADC.l !SC : TAX
+  LDY $0C
+  LDA $04 : STA.l !SE
+  BIT $0E : BMI .col
+.row
+  LDA [$00],y : STA.l !Sh1,x
+  INX #2
+  BIT $0E : BVS +
+  INY #2
++ LDA.l !SE : DEC : STA.l !SE : BNE .row
+.r
+  RTS
+.col
+  LDA [$00],y : STA.l !Sh1,x
+  TXA : CLC : ADC #$0080 : TAX
+  BIT $0E : BVS +
+  INY #2
++ INC $06 : LDA $06 : CMP #$0036 : BCS .r
+  LDA.l !SE : DEC : STA.l !SE : BNE .col
   RTS
 `;
 
@@ -745,11 +958,41 @@ export function vramPatchEntry(rom: Rom) {
   return listPatches(rom).find((p) => p.kind === 'vram') ?? null;
 }
 
+// the patch as it is applied (asm: another version of it, for tests)
+export const vramSource = (asm = VRAM_ASM): PatchSource => ({ name: VRAM_PATCH_NAME, main: 'vram.asm', files: new Map([['vram.asm', asm]]), kind: 'vram', ram: [[0x7f0000, 0x3655]] });
+
 // needs Asar (loadAsar) to be loaded
 export function installVramPatch(rom: Rom): ApplyResult {
   const e = vramPatchEntry(rom);
   if (e) return { ok: true, errors: [], warnings: [], prints: [], entry: e };
-  return applyPatch(rom, { name: VRAM_PATCH_NAME, main: 'vram.asm', files: new Map([['vram.asm', VRAM_ASM]]), kind: 'vram', ram: [[0x7f0000, 0x3655]] });
+  return applyPatch(rom, vramSource());
+}
+
+// whether the ROM's VRAM patch (if any) is from this source
+export function vramPatchUpToDate(rom: Rom): boolean {
+  const e = vramPatchEntry(rom);
+  return !e || e.hash === sourceHash(vramSource());
+}
+
+// A ROM the editor made keeps the VRAM patch it was made with, unless its source (the registry's hash) is not this
+// one's: then the patch is removed and applied anew, so that the ROM gets fixes of the patch's code (#406: stripes
+// per entry). False if it is up to date; throws, with the ROM unchanged, if it can't be applied (e.g. another
+// patch took a hook it has now). Needs Asar
+export function updateVramPatch(rom: Rom): boolean {
+  const e = vramPatchEntry(rom);
+  if (!e || vramPatchUpToDate(rom)) return false;
+  const before = rom.snapshot();
+  let r: ApplyResult;
+  try {
+    r = reapplyPatch(rom, e.id, vramSource());
+  } catch (err) {
+    r = { ok: false, errors: [err instanceof Error ? err.message : String(err)], warnings: [], prints: [] };
+  }
+  if (!r.ok) {
+    rom.restore(before);
+    throw new Error(`The VRAM layout patch could not be updated: ${r.errors.join(' ')}`);
+  }
+  return true;
 }
 
 setVramPatchCheck((rom) => vramPatchEntry(rom) !== null);

@@ -4,7 +4,9 @@ import { Rom } from '../src/core/rom.ts';
 import { LevelEmulator } from '../src/core/levelemu.ts';
 import { prepareRom } from '../src/core/editorpatches.ts';
 import { editorPatch, customPalettePatch, bgPatch, musicPatch, extGfxPatch } from '../src/core/patches.ts';
-import { vramPatchEntry } from '../src/core/vrampatch.ts';
+import { vramPatchEntry, vramPatchUpToDate, vramSource, VRAM_ASM } from '../src/core/vrampatch.ts';
+import { reapplyPatch } from '../src/core/patchapply.ts';
+import { listPatches } from '../src/core/patchreg.ts';
 import { exanimEntry, exanimInstalled } from '../src/core/exanim.ts';
 import { map16Ext } from '../src/core/map16ext.ts';
 import { bgMap16Ext } from '../src/core/bgmap16.ts';
@@ -19,7 +21,7 @@ const refused = async (rom: Rom) => { try { await prepareRom(rom); return ''; } 
 const vanilla = new Rom(cleanImage());
 const rom = new Rom(cleanImage());
 
-check(await prepareRom(rom), 'clean ROM: patches installed');
+check((await prepareRom(rom))?.note === 'Editor patches installed.', 'clean ROM: patches installed');
 check(!!editorPatch(rom), 'SMWE');
 check(!!vramPatchEntry(rom), 'SMWV');
 check(!!extGfxPatch(rom), 'SMWG');
@@ -37,6 +39,20 @@ check(!!messagePatch(rom), 'SMWM (messages per level)');
 const data = rom.data.slice();
 check(!(await prepareRom(rom)) && data.every((b, i) => rom.data[i] === b), "the editor's own ROM: opened unchanged");
 check(!(await refused(Rom.fromFile(rom.output(true)))), "the editor's exported ROM (with header): opened");
+
+// a ROM the editor made with an older VRAM patch (another source): the patch is applied anew when it is opened (#406)
+{
+  const old = new Rom(rom.data.slice());
+  const e = vramPatchEntry(old)!;
+  const older = VRAM_ASM.replace('org $0082B6\n  JSL Tail\n  NOP #2\n', '');
+  const r = reapplyPatch(old, e.id, vramSource(older));
+  check(older !== VRAM_ASM && r.ok && !vramPatchUpToDate(old) && old.r8(0x0082b6) === 0xad, 'an older VRAM patch (without the hook at $0082B6) in an editor ROM');
+  check((await prepareRom(old))?.note === 'VRAM layout patch updated.' && vramPatchUpToDate(old) && old.r8(0x0082b6) === 0x22, 'opened: the VRAM patch is updated (JSL at $0082B6)');
+  check(listPatches(old).length === listPatches(rom).length, `the patch registry has as many entries as before (${listPatches(old).length})`);
+  const tiles = (img: Rom) => { const em = new LevelEmulator(img); em.boot(); const l = em.load(0x105); return l.ok ? Array.from(l.wram.subarray(0xc800, 0xd000)).join() : ''; };
+  check(tiles(old) !== '' && tiles(old) === tiles(rom), 'level 105 loads as in a new editor ROM');
+  check(await prepareRom(old) === null, 'opened again: unchanged');
+}
 
 // every level: same map and colors (VRAM differs: the VRAM patch moves the tilemaps)
 const e0 = new LevelEmulator(vanilla); e0.boot();

@@ -4,7 +4,7 @@
 import type { Rom } from './rom.ts';
 import { loadAsar } from './asar.ts';
 import { editorPatch, madeByEditor, installEditorPatch, installCustomPalettePatch, installBgPatch, installMusicPatch, installExtGfxPatch } from './patches.ts';
-import { installVramPatch } from './vrampatch.ts';
+import { installVramPatch, updateVramPatch, vramPatchUpToDate } from './vrampatch.ts';
 import { installExAnim } from './exanim.ts';
 import { installL2ScrollPatch } from './l2scroll.ts';
 import { installLevelHeightPatch } from './levelheight.ts';
@@ -28,11 +28,23 @@ import { blankTile } from './render.ts';
 import type { ApplyResult } from './patchapply.ts';
 
 
-// makes a ROM ready to edit: a clean one gets the patches (true), one made by the editor stays as it is
-// (false); any other ROM throws
-export async function prepareRom(rom: Rom): Promise<boolean> {
-  if (isCleanRom(rom)) { await installEditorPatches(rom); return true; }
-  if (editorPatch(rom) && madeByEditor(rom)) return false;
+// what opening a ROM did to it: patches installed or updated (save it), or a VRAM patch update that failed
+export interface Prepared { note: string; failed?: true }
+
+// makes a ROM ready to edit: a clean one gets the patches, one made by the editor stays as it is but for a VRAM
+// layout patch from an older source (updateVramPatch; if that fails, the ROM is opened with it); any other ROM
+// throws. Null if the ROM is unchanged
+export async function prepareRom(rom: Rom): Promise<Prepared | null> {
+  if (isCleanRom(rom)) { await installEditorPatches(rom); return { note: 'Editor patches installed.' }; }
+  if (editorPatch(rom) && madeByEditor(rom)) {
+    if (vramPatchUpToDate(rom)) return null;
+    await loadAsar();
+    try {
+      return updateVramPatch(rom) ? { note: 'VRAM layout patch updated.' } : null;
+    } catch (e) {
+      return { note: `${e instanceof Error ? e.message : e} – the ROM keeps its older one.`, failed: true };
+    }
+  }
   if (madeByEditor(rom)) throw new Error('This ROM was made with an older version of Solar Magic, whose patches this version does not read. Open a clean Super Mario World (U) ROM.');
   throw new Error('Only a clean Super Mario World (U) ROM or a ROM made with Solar Magic can be opened.');
 }
