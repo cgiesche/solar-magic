@@ -111,9 +111,12 @@ function probe(emu: LevelEmulator, t: number, tx: number, dx: number, pad: numbe
 // first step ends and where the look-ahead onto t sends him give t's vectors. The result depends on the game's code
 // only.
 // first, walk: per tile * 4 + the way he steps onto it (DIR_NAMES order: up, down, left, right) the vector (x, y at
-// index * 2, * 2 + 1); NO_SHAPE where he doesn't step onto it (tiles 00, 56 and up, an exit, no path; on page 1
-// 100, 156 and up)
-export interface PathShapes { first: number[]; walk: number[] }
+// index * 2, * 2 + 1); NO_SHAPE where he doesn't step onto it (tiles 00, 56 and up, no path; on page 1 100, 156 and
+// up). An exit tile has vectors too: its walk vector is the one he walks on by from where the exit path table puts him
+// on the other submap ($04971D after $049A24) – its axis is the exit's (owpathshape.ts exitAxis).
+// pose: per tile * 4 + the way, the pose the look-ahead gives him (RAM owPose: bit 3 swimming, bit 4 climbing), -1
+// where he doesn't step onto it
+export interface PathShapes { first: number[]; walk: number[]; pose: number[] }
 export const NO_SHAPE = -0x8000;
 export const DX = [0, 0, -1, 1], DY = [-1, 1, 0, 0];
 const SHAPE_FRAMES = 40; // until the overworld looked ahead onto the tile (Mario walked half a tile)
@@ -144,7 +147,9 @@ function* probeShapes(emu: LevelEmulator, end: () => void): Generator<string | v
     const standing = w[RAM.owProcess], start = s.saveState();
     const px = get16(w, RAM.owPlayerX), py = get16(w, RAM.owPlayerY);
     const target = () => [getS16(w, RAM.owTarget), getS16(w, RAM.owTarget + 2)];
-    const out: PathShapes = { first: new Array(OW_L1_TILES * 8).fill(NO_SHAPE), walk: new Array(OW_L1_TILES * 8).fill(NO_SHAPE) };
+    const out: PathShapes = {
+      first: new Array(OW_L1_TILES * 8).fill(NO_SHAPE), walk: new Array(OW_L1_TILES * 8).fill(NO_SHAPE), pose: new Array(OW_L1_TILES * 4).fill(-1),
+    };
     const tiles = [0, 0x100].flatMap((page) => Array.from({ length: PATH_TILES_END - 1 }, (_, k) => page + 1 + k));
     for (const t of tiles) {
       for (let d = 0; d < 4; d++) {
@@ -161,6 +166,7 @@ function* probeShapes(emu: LevelEmulator, end: () => void): Generator<string | v
           if (first && get16(w, RAM.owPlayerTileX) === x1 && get16(w, RAM.owPlayerTileY) === y1) {
             const [x, y] = target();
             out.walk[k * 2] = x - first[0]; out.walk[k * 2 + 1] = y - first[1];
+            out.pose[k] = w[RAM.owPose];
             break;
           }
         }

@@ -1128,7 +1128,7 @@ export class App {
   // worker once and kept in the result cache while the game's code is unchanged; null while that runs, then `done` is
   // called
   pathShapes(done: () => void): PathShapes | null {
-    return this.probes.learn<PathShapes>('owsh1', { kind: 'pathShapes' }, { lane: 'owsh', label: 'Path shapes', done }) ?? null;
+    return this.probes.learn<PathShapes>('owsh2', { kind: 'pathShapes' }, { lane: 'owsh', label: 'Path shapes', done }) ?? null;
   }
   // the overworld with every event passed (path validation, owreach.ts: what Mario can ever reach), learned in the probe
   // worker in a lane of its own (the map shown keeps its) and kept in memory while the ROM bytes it read are unchanged:

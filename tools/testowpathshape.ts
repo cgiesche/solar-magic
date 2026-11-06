@@ -1,13 +1,13 @@
-// A path tile's shape shown (owpathshape.ts pathWays, pathWaysText, pathTileText): the ways Mario takes over a tile – the
-// lines the overlay and the layer 1 sheet draw, the words the popup and the status bar say – derived from the path
-// shapes learned on the editor's test ROM. The expected ways are the ones the game takes on its own map (where Mario
-// steps onto the tile and where it moves him, as owreach.ts follows him): a straight tile, a bend, a stair, a tile with
-// two ways through it.
+// A path tile's shape shown (owpathshape.ts pathWays, pathWaysText, pathTileText, pathTileLines): the ways Mario takes
+// over a tile – the lines the overlay and the layer 1 sheet draw, the words the popup and the status bar say – derived
+// from the path shapes learned on the editor's test ROM. The expected ways are the ones the game takes on its own map
+// (where Mario steps onto the tile and where it moves him, as owreach.ts follows him): a straight tile, a bend, a
+// stair, a tile with two ways through it; an exit tile's axis, the way he comes out on, on the other submap.
 // node tools/testowpathshape.ts
 import { Rom } from '../src/core/rom.ts';
 import { readL1 } from '../src/core/overworld.ts';
 import { PATH_KIND_NAMES, PATH_TILES_END } from '../src/core/owpaths.ts';
-import { pathWays, pathWaysText, pathTileText, SHAPES_LEARNING, SHAPED_KINDS, type PathWay } from '../src/core/owpathshape.ts';
+import { pathWays, pathWaysText, pathTileText, pathTileLines, exitAxis, exitFirstStepMisses, climbedOnto, EXIT_FIRST_STEP_MISSES, CLIMBED_ONTO, SHAPES_LEARNING, SHAPED_KINDS, type PathWay } from '../src/core/owpathshape.ts';
 import { editorImage, pathKinds, pathShapes } from './fixture.ts';
 
 let bad = 0;
@@ -46,13 +46,40 @@ check(shaped.every((t) => ways(t).every((w) => edge(w.from) && edge(w.to) && way
 // every path tile the game's map has shows a shape
 const onMaps = new Set(readL1(rom));
 const shapeless = shaped.filter((t) => onMaps.has(t) && !ways(t).length);
-check(!shapeless.length, `every walk/climb/swim tile on the game's maps has a way (none: ${shapeless.map(hx).join(' ') || '–'})`);
+check(!shapeless.length, `every walk/climb/swim/exit tile on the game's maps has a way (none: ${shapeless.map(hx).join(' ') || '–'})`);
 // page 1 acts as page 0
 check(shaped.every((t) => lines(0x100 + t) === lines(t)), 'page 1: the ways of the tile of page 0 it acts like');
-// an exit, a stop or level tile: no line, its kind's name
-const exit = kinds.findIndex((k) => k === 'exit'), stop = kinds.findIndex((k) => k === 'stop');
-check(!ways(exit).length && !pathWays(0x07, 'walk', null).length && pathTileText(exit, 'exit', shapes) === PATH_KIND_NAMES.exit, `an exit tile (${hx(exit)}): no line (nor any tile while the shapes are learned), "${PATH_KIND_NAMES.exit}"`);
+// a stop or level tile: no line, its kind's name; no tile while the shapes are learned
+const stop = kinds.findIndex((k) => k === 'stop');
 check(!ways(stop).length && pathTileText(stop, 'stop', shapes) === PATH_KIND_NAMES.stop, `a stop tile (${hx(stop)}): no line`);
+check(!pathWays(0x07, 'walk', null).length && !pathWays(0x42, 'exit', null).length, 'no line while the shapes are learned');
+
+// exit tiles (docs/research/overworld-submap-exit-tiles.md): their axis, the way Mario comes out on on the other submap – 42
+// horizontal, the other nine vertical; 4D's first step off a stop misses the exit; 40 is climbed onto
+const exits = kinds.map((k, t) => (k === 'exit' ? t : -1)).filter((t) => t >= 0);
+check(exits.map(hx).join(' ') === '25 40 42 43 44 45 46 47 48 4D 125 140 142 143 144 145 146 147 148 14D', `the exit tiles: ${exits.map(hx).join(' ')}`);
+const VERT = '8,0–8,16', HORIZ = '0,8–16,8';
+check(exits.every((t) => lines(t) === ((t & 0xff) === 0x42 ? HORIZ : VERT)), `42 a horizontal line through the middle, the other nine a vertical one (${exits.map((t) => `${hx(t)}: ${lines(t)}`).join(', ')})`);
+check(exits.every((t) => exitAxis(t, shapes) === ((t & 0xff) === 0x42 ? 'horizontal' : 'vertical')), 'exitAxis: 42 horizontal, the others vertical');
+const lines42 = pathTileLines(0x42, 'exit', shapes);
+check(lines42.join('|') === `${PATH_KIND_NAMES.exit} · from the left or right (Mario comes out going on that way)`, `42: "${lines42.join(' | ')}"`);
+check(pathTileLines(0x25, 'exit', shapes).join('|') === `${PATH_KIND_NAMES.exit} · from above or below (Mario comes out going on that way)`, `25: "${pathTileLines(0x25, 'exit', shapes).join(' | ')}"`);
+const lines4d = pathTileLines(0x4d, 'exit', shapes), lines40 = pathTileLines(0x40, 'exit', shapes);
+check(lines4d.join('|') === `${PATH_KIND_NAMES.exit} · from above or below (Mario comes out going on that way)|${EXIT_FIRST_STEP_MISSES}`, `4D: its first step misses, "${lines4d.join(' | ')}"`);
+check(lines40.join('|') === `${PATH_KIND_NAMES.exit} · from above or below (Mario comes out going on that way)|${CLIMBED_ONTO}`, `40: climbed onto, "${lines40.join(' | ')}"`);
+check(exits.filter((t) => exitFirstStepMisses(t, shapes)).map(hx).join(' ') === '4D 14D' && exits.filter((t) => climbedOnto(t, shapes)).map(hx).join(' ') === '40 140',
+  'only 4D (and 14D) miss with the first step, only 40 (and 140) are climbed onto');
+check(pathTileText(0x4d, 'exit', shapes) === lines4d.join(' · '), `the status bar: one line, "${pathTileText(0x4d, 'exit', shapes)}"`);
+check(pathTileText(0x42, 'exit', null) === `${PATH_KIND_NAMES.exit} · ${SHAPES_LEARNING}`, 'an exit tile while the shapes are learned');
+// from the learned data, not the tile number: an exit tile given 42's vectors (as a hack's code may) shows 42's way
+const swapped = { ...shapes, walk: shapes.walk.slice() };
+for (let k = 0; k < 8; k++) swapped.walk[0x25 * 8 + k] = shapes.walk[0x42 * 8 + k];
+check(pathWays(0x25, 'exit', swapped).every((w) => [w.from.join(), w.to.join()].sort().join('–') === HORIZ) && pathWays(0x25, 'exit', swapped).length === 2 && pathTileLines(0x25, 'exit', swapped)[0].includes('from the left or right'),
+  'an exit tile with horizontal vectors shows the horizontal way, whatever its number');
+// mixed vectors: no axis, the kind's name alone
+const mixed = { ...shapes, walk: shapes.walk.slice() };
+mixed.walk[0x25 * 8 + 4] = -16; mixed.walk[0x25 * 8 + 5] = 0;
+check(!pathWays(0x25, 'exit', mixed).length && pathTileLines(0x25, 'exit', mixed)[0] === PATH_KIND_NAMES.exit, 'an exit tile whose vectors share no axis: no line, its kind\'s name');
 // the popup's and the status bar's words
 check(pathTileText(0x07, 'walk', shapes) === 'Path: walk · from below to the right, from the right down', `07: "${pathTileText(0x07, 'walk', shapes)}"`);
 check(pathTileText(0x3f, kinds[0x3f], shapes) === 'Path: climb · from below up, from above down', `3F: "${pathTileText(0x3f, kinds[0x3f], shapes)}"`);

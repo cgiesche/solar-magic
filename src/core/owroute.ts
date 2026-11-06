@@ -22,7 +22,7 @@
 
 import { DX, DY, PATH_TILES_END, reverse, shapeVector, type PathKind, type PathShapes } from './owpaths.ts';
 import { neighbor } from './owreach.ts';
-import { tileWays, SHAPED_KINDS, type PathWay } from './owpathshape.ts';
+import { tileWays, WALKED_KINDS, type PathWay } from './owpathshape.ts';
 import { stopTile, levelsWithoutTile, type LevelTileEvent } from './owleveltiles.ts';
 import type { Rom } from './rom.ts';
 import { OwRefusal, type OwRefusalData } from './owrefusal.ts';
@@ -75,7 +75,7 @@ type Role = 'keep' | 'stop' | 'path';
 
 // the kind of path a route prefers: the kind at its start – of the first path tile on it, else walking
 export function routeKind(route: readonly number[], l1: ArrayLike<number>, kinds: readonly PathKind[]): PathKind {
-  return route.map((c) => kinds[l1[c]]).find((k) => SHAPED_KINDS.includes(k)) ?? 'walk';
+  return route.map((c) => kinds[l1[c]]).find((k) => WALKED_KINDS.includes(k)) ?? 'walk';
 }
 
 // the direction from cell a to cell b next to it (undefined: not next to it)
@@ -110,7 +110,7 @@ function solve(route: readonly number[], inp: RouteInput, askAlternatives: boole
     if (kind === 'level' || kind === 'stop' || (kind === 'exit' && end)) return 'keep';
     if (end || inp.stops?.has(k)) return 'stop';
     if (kind === 'exit') return 'path'; // (refused below)
-    return SHAPED_KINDS.includes(kind) && joins(c, route[k - 1], route[k + 1], inp) ? 'stop' : 'path';
+    return WALKED_KINDS.includes(kind) && joins(c, route[k - 1], route[k + 1], inp) ? 'stop' : 'path';
   });
   for (let k = 1; k < route.length - 1; k++) {
     if (kinds[l1[route[k]]] === 'exit' && roles[k] === 'path') return refuse(k, { kind: 'routeExitInside' });
@@ -204,7 +204,7 @@ function solveStretch(sv: Solving, a: number, b: number): { at: number; why: OwR
   for (let k = a + 1; k < b; k++) {
     const d = dirs[k - 1], o = dirs[k], first = k === a + 1, last = k === b - 1, here = l1[route[k]];
     // (the tile already on the cell too, where it is no candidate: a tile of page 1)
-    const cands = sv.cands.some((c) => c.tile === here) || !SHAPED_KINDS.includes(kinds[here]) ? sv.cands
+    const cands = sv.cands.some((c) => c.tile === here) || !WALKED_KINDS.includes(kinds[here]) ? sv.cands
       : [...sv.cands, { tile: here, ways: tileWays(here, kinds[here], shapes), cost: 0 }];
     // (where Mario steps onto the cell's tile: off the stop before, or where the tile before left him)
     const steppedOn = (c: Candidate, w: PathWay) => (first ? key(firstStep(a, c.tile, d)) === key(w.from) : layer.has(key(w.from)));
@@ -248,7 +248,7 @@ function fill(s: Step | null, k: number, tiles: (number | null)[]): void {
 function candidates(inp: RouteInput, map: number): Candidate[] {
   const uses = new Map<number, number>();
   for (let i = map * 0x400; i < (map + 1) * 0x400 && i < inp.l1.length; i++) uses.set(inp.l1[i], (uses.get(inp.l1[i]) ?? 0) + 1);
-  const tiles = Array.from({ length: PATH_TILES_END - 1 }, (_, k) => k + 1).filter((t) => SHAPED_KINDS.includes(inp.kinds[t]));
+  const tiles = Array.from({ length: PATH_TILES_END - 1 }, (_, k) => k + 1).filter((t) => WALKED_KINDS.includes(inp.kinds[t]));
   const rank = new Map([...tiles].sort((x, y) => (uses.get(y) ?? 0) - (uses.get(x) ?? 0) || x - y).map((t, k) => [t, k]));
   return tiles.map((t) => ({ tile: t, ways: tileWays(t, inp.kinds[t], inp.shapes), cost: (inp.kinds[t] === inp.prefer ? 0 : 0x10000) + 1 + rank.get(t)! }))
     .filter((c) => c.ways.length);

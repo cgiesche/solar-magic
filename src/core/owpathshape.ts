@@ -3,9 +3,12 @@
 // say – derived from the path shapes learned by emulation (owpaths.ts). Pure: nothing drawn.
 import { DX, DY, NO_SHAPE, PATH_KIND_NAMES, reverse, turnedAt, type PathKind, type PathShapes } from './owpaths.ts';
 
-// the kinds whose tiles move Mario by their shape (an exit takes him to another submap, its vector unused; a stop or
-// level tile stops him)
-export const SHAPED_KINDS: readonly PathKind[] = ['walk', 'climb', 'swim'];
+// the kinds whose tiles Mario walks over by their shape, on the map they are on (the route solver's, owroute.ts; a
+// stop or level tile stops him)
+export const WALKED_KINDS: readonly PathKind[] = ['walk', 'climb', 'swim'];
+// the kinds whose tiles show a shape: those walked over, and an exit, whose vector moves him on from where the exit
+// path takes him on the other submap – shown as its axis (exitAxis)
+export const SHAPED_KINDS: readonly PathKind[] = [...WALKED_KINDS, 'exit'];
 
 // A way over a path tile: Mario steps onto it in direction `dir` (DIR_NAMES order) at `from` on the side behind him
 // (pixels in the tile); the shape's vector moves him to `to` on another side (the low 2 bits cleared) and turns him
@@ -18,9 +21,11 @@ const ALONG = [4, 8, 12]; // where along a side he may step on (not at a corner)
 // tile at the middle of the side, a stair higher or lower) –, so it is the point of the side (4, 8 or 12 along it)
 // from which the vector leads to another side of the tile, the line most centred in the tile. A way counts where the
 // way back is one too: from `to` in the opposite direction the tile's vector leads back to `from`, turning him back (a
-// tile's vector for another direction moves him somewhere he never comes from).
+// tile's vector for another direction moves him somewhere he never comes from). An exit tile's ways are the straight
+// line along its axis, both ways (exitAxis; the way back isn't tested: its vector acts on the other submap).
 export function pathWays(t: number, kind: PathKind | undefined, shapes: PathShapes | null): PathWay[] {
   if (!shapes || !kind || !SHAPED_KINDS.includes(kind)) return [];
+  if (kind === 'exit') return exitWays(t, shapes);
   const all = waysOver(t, shapes);
   const ways: PathWay[] = [], taken = (dir: number) => ways.some((w) => w.dir === dir);
   for (let dir = 0; dir < 4; dir++) {
@@ -42,13 +47,51 @@ export function pathWays(t: number, kind: PathKind | undefined, shapes: PathShap
 // pathWays shows: a stair leaves him higher or lower, and the tile after takes him on from there (the route solver,
 // owroute.ts). Each way's way back is in the list too.
 export function tileWays(t: number, kind: PathKind | undefined, shapes: PathShapes | null): PathWay[] {
-  if (!shapes || !kind || !SHAPED_KINDS.includes(kind)) return [];
+  if (!shapes || !kind || !WALKED_KINDS.includes(kind)) return [];
   const out: PathWay[] = [], key = (w: PathWay) => `${w.dir} ${w.from}`;
   for (const w of waysOver(t, shapes)) for (const v of [w, back(w)]) if (!out.some((o) => key(o) === key(v))) out.push(v);
   return out;
 }
 
 const back = (w: PathWay): PathWay => ({ dir: reverse(w.out), out: reverse(w.dir), from: w.to, to: w.from });
+
+// An exit tile's axis: the game moves Mario on by the exit tile's "walk" vector from where the exit path table put
+// him on the other submap ($04971D), so he comes out going on along it – up or down ('vertical'), left or right
+// ('horizontal'); entered across it he is turned by 90°, off the path (docs/research/overworld-submap-exit-tiles.md).
+// From the learned vectors of the four ways onto it; null where none is known or they don't share one axis.
+export type ExitAxis = 'vertical' | 'horizontal';
+export function exitAxis(t: number, shapes: PathShapes): ExitAxis | null {
+  const vs = learnedVectors(shapes.walk, t);
+  if (!vs.length) return null;
+  if (vs.every(([x, y]) => x === 0 && y !== 0)) return 'vertical';
+  if (vs.every(([x, y]) => y === 0 && x !== 0)) return 'horizontal';
+  return null;
+}
+// tile t's learned vectors (v: PathShapes' first or walk) for the ways onto it that have one: x, y, the way
+const learnedVectors = (v: readonly number[], t: number): [number, number, number][] =>
+  [0, 1, 2, 3].flatMap((d) => {
+    const k = (t * 4 + d) * 2;
+    return v[k] === undefined || v[k] === NO_SHAPE ? [] : [[v[k], v[k + 1], d] as [number, number, number]];
+  });
+// the straight line through an exit tile along its axis, both ways (up then down, or left then right)
+function exitWays(t: number, shapes: PathShapes): PathWay[] {
+  const axis = exitAxis(t, shapes);
+  if (!axis) return [];
+  const w: PathWay = axis === 'vertical' ? { dir: 0, out: 0, from: [8, 16], to: [8, 0] } : { dir: 2, out: 2, from: [16, 8], to: [0, 8] };
+  return [w, back(w)];
+}
+// whether Mario's first step off a stop or level tile onto exit tile t misses the exit: it doesn't end half a tile on,
+// in the middle of the side between the tiles, where the exit path table expects him (4D: +4, −8 in every direction;
+// the exit matches no entry and he walks back) – from the learned "first" vectors, any way onto it
+export function exitFirstStepMisses(t: number, shapes: PathShapes): boolean {
+  return learnedVectors(shapes.first, t).some(([x, y, d]) => x !== DX[d] * 8 || y !== DY[d] * 8);
+}
+// whether stepping onto tile t gives Mario the climbing pose (owpaths.ts PathShapes pose, bit 4), any way onto it
+const POSE_CLIMB = 0x10;
+export const climbedOnto = (t: number, shapes: PathShapes): boolean => [0, 1, 2, 3].some((d) => {
+  const p = shapes.pose[t * 4 + d] ?? -1;
+  return p >= 0 && (p & POSE_CLIMB) !== 0;
+});
 
 // the ways over tile t whose way back leads back (by direction, then the point along the side, ALONG order)
 function waysOver(t: number, shapes: PathShapes): PathWay[] {
@@ -84,10 +127,29 @@ const FROM_SIDE = ['from below', 'from above', 'from the right', 'from the left'
 export const wayText = (dir: number, out: number): string => `${FROM_SIDE[dir]} ${GOES_ON[out]}`;
 export const pathWaysText = (ways: readonly PathWay[]): string => ways.map((w) => wayText(w.dir, w.out)).join(', ');
 export const SHAPES_LEARNING = 'its shape is being learned…';
-// what a path tile (owpaths.ts isPathKind) is called with its shape: "Path: walk · from below to the right, …"
-// (shapes: null while they are learned)
-export function pathTileText(t: number, kind: PathKind, shapes: PathShapes | null): string {
-  if (!SHAPED_KINDS.includes(kind)) return PATH_KIND_NAMES[kind];
-  const ways = shapes ? pathWaysText(pathWays(t, kind, shapes)) : SHAPES_LEARNING;
-  return ways ? `${PATH_KIND_NAMES[kind]} · ${ways}` : PATH_KIND_NAMES[kind];
+// what an exit tile's axis says (exitAxis)
+export const EXIT_AXIS_TEXT: Record<ExitAxis, string> = {
+  vertical: 'from above or below (Mario comes out going on that way)',
+  horizontal: 'from the left or right (Mario comes out going on that way)',
+};
+export const EXIT_FIRST_STEP_MISSES = 'Not next to a stop or level tile: Mario\'s first step off it misses the exit';
+export const CLIMBED_ONTO = 'Climbed onto';
+// what a path tile (owpaths.ts isPathKind) is called with its shape, a line each: "Path: walk · from below to the
+// right, …"; an exit tile's axis ("Path: exit to another submap · from above or below …") and where its first step
+// misses or it is climbed onto, a line each (shapes: null while they are learned)
+export function pathTileLines(t: number, kind: PathKind, shapes: PathShapes | null): string[] {
+  if (!SHAPED_KINDS.includes(kind)) return [PATH_KIND_NAMES[kind]];
+  if (!shapes) return [`${PATH_KIND_NAMES[kind]} · ${SHAPES_LEARNING}`];
+  if (kind === 'exit') {
+    const axis = exitAxis(t, shapes);
+    return [
+      axis ? `${PATH_KIND_NAMES.exit} · ${EXIT_AXIS_TEXT[axis]}` : PATH_KIND_NAMES.exit,
+      exitFirstStepMisses(t, shapes) ? EXIT_FIRST_STEP_MISSES : '',
+      climbedOnto(t, shapes) ? CLIMBED_ONTO : '',
+    ].filter(Boolean);
+  }
+  const ways = pathWaysText(pathWays(t, kind, shapes));
+  return [ways ? `${PATH_KIND_NAMES[kind]} · ${ways}` : PATH_KIND_NAMES[kind]];
 }
+// pathTileLines in one line (the status bar's)
+export const pathTileText = (t: number, kind: PathKind, shapes: PathShapes | null): string => pathTileLines(t, kind, shapes).join(' · ');

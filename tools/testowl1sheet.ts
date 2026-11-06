@@ -71,11 +71,14 @@ check(p1.folded === range(0x100, 0x200).filter((t) => free[t]).length && p1.hidd
 // ---- the popup's lines ----
 const kindOf = (k: string) => range(0, 0x100).find((t) => kinds[t] === k)!;
 const walk = kindOf('walk'), level = kindOf('level'), none = kindOf('none'), exit = kindOf('exit');
-// (a path tile's shape in words: owpathshape.ts pathTileText, tools/testowpathshape.ts)
+// (a path tile's shape in words: owpathshape.ts pathTileLines, tools/testowpathshape.ts)
 const walkLine = l1TileLines(walk, kinds, false, shapes)[0];
 check(/^Path: walk · from .+, from /.test(walkLine), `a walk tile (${hx(walk)}): its function and shape, "${walkLine}"`);
 check(l1TileLines(walk, kinds, false, null)[0] === `Path: walk · ${SHAPES_LEARNING}`, 'shapes not known: "Path: walk · its shape is being learned…"');
-check(l1TileLines(exit, kinds, false, shapes)[0] === PATH_KIND_NAMES.exit, `an exit tile (${hx(exit)}): its function`);
+check(l1TileLines(exit, kinds, false, shapes)[0].startsWith(`${PATH_KIND_NAMES.exit} · from `), `an exit tile (${hx(exit)}): its function and axis, "${l1TileLines(exit, kinds, false, shapes)[0]}"`);
+// (an exit tile's notes a line each: 4D's first step, on page 1 too; owpathshape.ts pathTileLines)
+const p14d = l1TileLines(0x14d, kinds, free[0x14d], shapes);
+check(p14d.length === 3 && p14d[1].startsWith('Not next to a stop or level tile') && p14d[2] === 'Acts like tile 4D where Mario walks', `14D: ${p14d.join(' / ')}`);
 check(l1TileLines(level, kinds, false, shapes)[0] === LEVEL_TILE_LINE, `a level tile (${hx(level)}): "${LEVEL_TILE_LINE}"`);
 check(!/mode/i.test(LEVEL_TILE_LINE) && /layer 1/i.test(LEVEL_TILE_LINE) && /Levels/.test(LEVEL_TILE_LINE), 'the level tile line names no Levels mode (#396): the layer 1 mode and its picker\'s "Levels"');
 check(/^No path/.test(l1TileLines(none, kinds, false, shapes)[0]), `a tile Mario doesn't go on (${hx(none)}): no path`);

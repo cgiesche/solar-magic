@@ -14,7 +14,7 @@ import { readStart } from '../src/core/owsprites.ts';
 import { submapViews, submapOf } from '../src/core/owevents.ts';
 import { RAM } from '../src/core/ram.ts';
 import { DX, DY, PATH_TILES_END, reverse, type PathKind } from '../src/core/owpaths.ts';
-import { tileWays, SHAPED_KINDS } from '../src/core/owpathshape.ts';
+import { tileWays, WALKED_KINDS } from '../src/core/owpathshape.ts';
 import { routeTiles, type RouteInput } from '../src/core/owroute.ts';
 import { stopTile } from '../src/core/owleveltiles.ts';
 import { refusalDetails } from '../src/core/owrefusal.ts';
@@ -31,7 +31,7 @@ const loads = new OverworldLoads(new OverworldEmulator(rom), 4), saves = progres
 const r = loads.get(0, OW_EVENTS);
 const all = reachInput(rom, gameL1(r).slice(), r.wram.slice(RAM.owTranslevels, RAM.owTranslevelsEnd), saves[OW_EVENTS].levelFlags, kinds, shapes, readStart(rom, 0));
 const game = all.l1, views = submapViews(loads), STOP = stopTile(kinds);
-const shaped = (t: number) => SHAPED_KINDS.includes(kinds[t]);
+const shaped = (t: number) => WALKED_KINDS.includes(kinds[t]);
 const stepDir = (a: number, b: number) => [0, 1, 2, 3].find((d) => { const p = l1XY(a), q = l1XY(b); return a >> 10 === b >> 10 && p.x + DX[d] === q.x && p.y + DY[d] === q.y; }) ?? -1;
 const solveInput = (l1: ArrayLike<number>, prefer: PathKind): RouteInput => ({ l1, kinds, shapes, prefer });
 // the way a tile takes Mario from cell `a` over cell c to cell b (null: it doesn't)
@@ -179,7 +179,7 @@ const CX = 16, CY = 16;
 // ---- refused ----
 // a turn no tile makes: a ROM whose path tiles make no bend (the bends' kinds 'none'): the cell, why, what would work
 {
-  const straight = kinds.map((k, t) => (SHAPED_KINDS.includes(k) && t < 0x100 && tileWays(t, k, shapes).some((w) => w.dir !== w.out) ? 'none' : k));
+  const straight = kinds.map((k, t) => (WALKED_KINDS.includes(k) && t < 0x100 && tileWays(t, k, shapes).some((w) => w.dir !== w.out) ? 'none' : k));
   const l1 = empty(CX, CY), cell = (x: number, y: number) => l1Index(0, x, y);
   const route = [cell(CX - 2, CY), cell(CX - 1, CY), cell(CX, CY), cell(CX, CY - 1), cell(CX, CY - 2)];
   const res = routeTiles(route, { l1, kinds: straight, shapes, prefer: 'walk' });

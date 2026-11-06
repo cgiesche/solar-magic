@@ -12,7 +12,7 @@ import type { Rom } from './rom.ts';
 import { OW_L1_TILES, owTileWords, readL1, revealedTile } from './overworld.ts';
 import { readEvents } from './owevents.ts';
 import type { PathKind, PathShapes, LevelTileTest } from './owpaths.ts';
-import { pathTileText } from './owpathshape.ts';
+import { pathTileLines } from './owpathshape.ts';
 import { hex } from './names.ts';
 
 export const SHEET_COLS = 16;
@@ -66,14 +66,14 @@ export function l1BrushEntries(tiles: readonly number[], isLevelTile: LevelTileT
   return out.some((t) => t !== NO_TILE) ? out : null;
 }
 // what the popup says about layer 1 tile t below its number: what it does (kinds: the path kinds, null while
-// learned; a path tile's shape in words, owpathshape.ts pathTileText: shapes null while learned), on page 1 the tile of
-// page 0 it acts like, whether it is free
+// learned; a path tile's shape in words, owpathshape.ts pathTileLines: shapes null while learned), on page 1 the tile
+// of page 0 it acts like, whether it is free
 export function l1TileLines(t: number, kinds: readonly PathKind[] | null, free: boolean, shapes: PathShapes | null): string[] {
   const k = kinds?.[t];
   return [
-    !kinds || !k ? KINDS_LEARNING
-      : k === 'level' ? LEVEL_TILE_LINE
-        : k === 'none' ? 'No path: Mario doesn\'t go there' : pathTileText(t, k, shapes),
+    ...(!kinds || !k ? [KINDS_LEARNING]
+      : k === 'level' ? [LEVEL_TILE_LINE]
+        : k === 'none' ? ['No path: Mario doesn\'t go there'] : pathTileLines(t, k, shapes)),
     t >= PAGE_TILES ? `Acts like tile ${l1Hex(t & 0xff)} where Mario walks` : '',
     free ? `Free: drawn as tile ${l1Hex(0)}, on no map` : '',
   ].filter(Boolean);

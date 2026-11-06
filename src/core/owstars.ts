@@ -12,7 +12,7 @@ import { readTranslevels, writeTranslevels, resetTranslevel, MAX_TRANSLEVEL } fr
 import { cellsBecoming } from './owevents.ts';
 import { heldElsewhere } from './owleveltiles.ts';
 import { neighbor } from './owreach.ts';
-import { tileWays, SHAPED_KINDS } from './owpathshape.ts';
+import { tileWays, WALKED_KINDS } from './owpathshape.ts';
 import { stopTranslevels, takeStopTranslevel, dirFlags } from './owroute.ts';
 import { OwRefusal, type OwRefusalData } from './owrefusal.ts';
 import type { PathKind, PathShapes } from './owpaths.ts';
@@ -33,7 +33,7 @@ export function starDirs(l1: ArrayLike<number>, i: number, p: StarPaths): number
     if (n < 0) continue;
     const t = l1[n], k = p.kinds[t];
     const leads = k === 'level' || k === 'stop' || k === 'exit'
-      || (SHAPED_KINDS.includes(k) && (!p.shapes || tileWays(t, k, p.shapes).some((w) => w.dir === d)));
+      || (WALKED_KINDS.includes(k) && (!p.shapes || tileWays(t, k, p.shapes).some((w) => w.dir === d)));
     if (leads) out.push(d);
   }
   return out;
