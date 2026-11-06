@@ -251,7 +251,7 @@ A layer 1 star tile (5F): a stop tile from which A takes Mario where its overwor
 _Avoid_: star road (that is the submap), warp star
 
 **Overworld link**:
-A star, pipe or exit path tile leading to another place of the overworld (one-way or both ways: an entry leading back), a location that an exit to the overworld teleports to, or the place a Koopa Kid puts Mario; an entry of the star/pipe table (0x100) or the exit path table (0x80), as in Lunar Magic; of two entries with the same tile the game finds the last (it searches from the last entry down), an edit changes that one. Made by dragging from the tile, drawn as an arrow.
+A star, pipe or exit path tile leading to another place of the overworld (one-way or both ways: an entry leading back), a location that an exit to the overworld teleports to, or the place a Koopa Kid puts Mario; an entry of the star/pipe table (0x100) or the exit path table (0x80), as in Lunar Magic; of two entries with the same tile the game finds the last (it searches from the last entry down), an edit changes that one. Made by dragging from the tile, drawn as an arrow. An exit path link's ends each have the side their path goes on; the target's side follows the source's (the opposite one, never chosen): the game moves Mario on by the source exit tile's own way, whatever the target's side, so only the opposite one puts him on the path. The links panel says where he comes out and which way he walks ("Mario comes out above Yoshi's Island 04,00, walking down"); a ROM's pair of other sides is kept as it is and the World check warns of it.
 _Avoid_: link (that is a part's), warp, teleport (for the tile)
 
 **Overworld sprite**:

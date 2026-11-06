@@ -552,7 +552,7 @@ export class OverworldView {
   // how the path tiles move Mario (owpaths.ts path shapes: the lines of their marks, the popup's words; null while they
   // are learned)
   private shapes: { gen: number; shapes: PathShapes } | null = null;
-  private shapesLearned = () => { if (!this.root.isConnected) return; this.paint(); this.updateStatus(); if (this.mode === 'l1') this.buildSide(); };
+  private shapesLearned = () => { if (!this.root.isConnected) return; this.paint(); this.updateStatus(); if (this.mode === 'l1') this.buildSide(); else if (this.mode === 'links') this.buildProps(); };
   pathShapes(): PathShapes | null {
     const gen = this.app.rom.gen;
     if (this.shapes?.gen !== gen) {

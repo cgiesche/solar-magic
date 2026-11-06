@@ -6,12 +6,12 @@
 import { Rom, snesToPc } from '../src/core/rom.ts';
 import { LevelEmulator } from '../src/core/levelemu.ts';
 import { PlaySession } from '../src/core/playsession.ts';
-import { readExitPaths, readExitPath, writeExitPath, readTeleports, writeTeleport, EXIT_PATHS, EXIT_HOOK, FIND_HOOK, GAME_EXIT_TABLES, GAME_EXITS, sameTile as same, type OwTile, type OwPos } from '../src/core/owteleport.ts';
-import { readLinks, makeLink, removeLink, setBothWays, moveLocation, exitEntry, pathSide, koopaTeleport, setKoopaTeleport, opposite, SIDES, KOOPA_X, type LinkEnd, type OwLink } from '../src/core/owlinks.ts';
-import { l1Index, overworldDataRanges } from '../src/core/overworld.ts';
+import { readExitPaths, readExitPath, writeExitPath, readTeleports, writeTeleport, tileText, EXIT_PATHS, EXIT_HOOK, FIND_HOOK, GAME_EXIT_TABLES, GAME_EXITS, sameTile as same, type OwTile, type OwPos } from '../src/core/owteleport.ts';
+import { readLinks, makeLink, removeLink, setBothWays, moveLocation, exitEntry, pathSide, koopaTeleport, setKoopaTeleport, opposite, sidesMatch, exitOut, exitOutText, SIDES, KOOPA_X, type LinkEnd, type OwLink } from '../src/core/owlinks.ts';
+import { l1Index, overworldDataRanges, readL1 } from '../src/core/overworld.ts';
 import { readSecondaryEntrance, writeSecondaryEntrance, newOverworldExit } from '../src/core/level.ts';
 import { GM, RAM, PAD, MARIO_DYING, get16, set16 } from '../src/core/ram.ts';
-import { editorImage, cleanImage, romDiff } from './fixture.ts';
+import { editorImage, cleanImage, romDiff, pathShapes } from './fixture.ts';
 
 let bad = 0;
 const check = (ok: boolean, what: string) => { console.log((ok ? 'ok   ' : 'FAIL ') + what); if (!ok) bad++; };
@@ -90,6 +90,38 @@ const links = readLinks(rom);
     'the side of a path: toward a path tile, else away from the map\'s edge');
 }
 
+// ---- the target's side follows the source's (#401) ----
+{
+  const shapes = pathShapes(rom), tileAt = (t: OwTile) => readL1(rom)[l1Index(t.submap ? 1 : 0, t.x, t.y)];
+  // made with any target side: the opposite one, in the entries and read back; linkCheck takes the same
+  const r = new Rom(rom.data.slice()), a: LinkEnd = { submap: 0, x: 4, y: 4, side: 2 };
+  const made = [0, 1, 2, 3].map((side) => { const k = new Rom(r.data.slice()); return { k, l: makeLink(k, 'exit', a, { submap: 3, x: 6, y: 7, side }, true) }; });
+  check(made.every(({ l }) => l.b.side === 3 && sidesMatch(l)) && made.every(({ k }) => romDiff(made[0].k.data, k.data) === 0),
+    `an exit path made with any target side: the source's opposite (${made.map(({ l }) => show(l)).join(' ')}), the same entries`);
+  const back = readLinks(made[0].k).find((l) => l.kind === 'exit' && same(l.a, a));
+  check(!!back && back.both && back.b.side === 3 && back.a.side === 2, `read back: ${back && show(back)}`);
+  // the game's links all have it so
+  check(links.filter((l) => l.kind === 'exit').every(sidesMatch), 'the game\'s exit paths: every target side opposite to its source\'s');
+  // which way Mario comes out: from the source exit tile's learned vector
+  const yi = yiLink(), foi = links.find((l) => l.kind === 'exit' && tileAt(l.a) === 0x42)!;
+  const says = (from: LinkEnd, to: LinkEnd, tile = tileAt(from)) => exitOutText(exitOut(from, to, tile, shapes), tileText(to));
+  const want: [string, string][] = [
+    [says(yi.a, yi.b), 'Mario comes out above Yoshi\'s Island 04,00, walking down'],
+    [says(yi.b, yi.a), 'Mario comes out below Main map 02,14, walking up'],
+    [says(foi.a, foi.b), `Mario comes out ${foi.a.side === 2 ? 'left of' : 'right of'} ${tileText(foi.b)}, walking ${foi.a.side === 2 ? 'right' : 'left'}`],
+    // the ladder's tile replaced by 42 (horizontal): turned by 90°
+    [says(yi.a, yi.b, 0x42), 'Mario comes out above Yoshi\'s Island 04,00, walking right'],
+    [exitOutText(exitOut(yi.a, yi.b, 0x40, null), tileText(yi.b)), 'Mario comes out above Yoshi\'s Island 04,00'],
+  ];
+  for (const [got, w] of want) check(got === w, `${got} (${w})`);
+  // a ROM's pair of other sides (Lunar Magic's) is read as it is, not rewritten (the World check warns: testowreach)
+  const m = new Rom(rom.data.slice()), e = exitEntry(yi.a, { ...yi.b, side: 3 });
+  writeExitPath(m, yi.entries[0], e);
+  const before = m.data.slice(), mis = readLinks(m).find((l) => l.kind === 'exit' && same(l.a, yi.a));
+  check(!!mis && mis.b.side === 3 && !sidesMatch(mis) && romDiff(before, m.data) === 0, `a mismatched pair read unchanged: ${mis && show(mis)}`);
+  check(says(mis!.a, mis!.b) === 'Mario comes out left of Yoshi\'s Island 04,00, walking down', `and said so: ${says(mis!.a, mis!.b)}`);
+}
+
 // ---- by emulation ----
 // the game's exit path routine ($049A24, which the patch hooks) run with Mario at `at` on its submap: where it puts him
 const EXIT_ROUTINE = 0x049a24;
@@ -156,8 +188,9 @@ function yiLink(): OwLink { return links.find((l) => l.kind === 'exit' && l.a.su
   const r2 = new Rom(rom.data.slice());
   removeLink(r2, yi);
   const made = makeLink(r2, 'exit', yi.a, vdEnd, true);
-  const there = exitRoutine(r2, exitEntry(yi.a, vdEnd).from), home = exitRoutine(r2, exitEntry(vdEnd, yi.a).from);
-  check(leads(there, vdEnd) && leads(home, yi.a), `a link made both ways (entries ${made.entries}): there ${res(there)}, back ${res(home)}`);
+  // (the target's side derived: opposite to the source's, not Vanilla Dome 05,14's path above)
+  const there = exitRoutine(r2, exitEntry(yi.a, made.b).from), home = exitRoutine(r2, exitEntry(made.b, yi.a).from);
+  check(made.b.side === opposite(yi.a.side!) && leads(there, made.b) && leads(home, yi.a), `a link made both ways (entries ${made.entries}, ${show(made)}): there ${res(there)}, back ${res(home)}`);
 }
 // Mario on star tile `from`: the entry the patch's search finds, where the overworld loads
 function warp(r: Rom, from: OwTile) {

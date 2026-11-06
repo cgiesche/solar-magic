@@ -7,7 +7,11 @@
 //
 // Exit paths, as the game's 14 show (checked by emulation, tools/testowlinks.ts): Mario standing on a tile is at its
 // 16x16 block's +8,+8; walking onto an exit path tile he leaves when he is half a tile before it (on the side its
-// path goes on), and comes out half a tile outside the tile he goes to (on the side away from its path), walking on.
+// path goes on), and comes out half a tile outside the tile he goes to (on the side away from its path). The game then
+// moves him on by the source exit tile's own vector ($04971D), never by the target's side: only the side opposite to
+// the source's puts him on his tile (docs/research/overworld-submap-exit-tiles.md), so a link made here has the
+// target's side derived from the source's (linkedTarget), not chosen. A ROM's own pair of other sides is read as it is
+// (the World check's exit-off-path warning tells it).
 //
 // The Koopa Kids (Lunar Magic's "Koopa teleports"): Mario meeting one on tile 49, 4A or 4B and losing to it is put
 // at one of 3 places of his submap afterwards (pixel X words at $048E49, Y words at $048E4F, the game's code at
@@ -19,6 +23,8 @@ import {
 } from './owteleport.ts';
 import { readSecondaryEntrance, levelTranslevel } from './level.ts';
 import type { ExitGraph } from './exitgraph.ts';
+import { NO_SHAPE, dirOf, type PathShapes } from './owpaths.ts';
+import { DIR_NAMES } from './overworld.ts';
 import { OwRefusal, type OwRefusalData } from './owrefusal.ts';
 
 const SECONDARY_ENTRANCES = 0x200;
@@ -31,6 +37,26 @@ export interface OwLink { kind: LinkKind; a: LinkEnd; b: LinkEnd; both: boolean;
 
 export const SIDES = [[0, -1], [0, 1], [-1, 0], [1, 0]] as const;
 export const opposite = (side: number): number => side ^ 1;
+// an exit path link's target with its side derived from the source's: the opposite one (the only one putting Mario on
+// his tile – the game moves him on by the source tile's vector, whatever the target's side)
+export const linkedTarget = (a: LinkEnd, b: LinkEnd): LinkEnd => ({ ...b, side: opposite(a.side ?? 0) });
+// whether an exit path link's target side is the one derived from its source's (linkedTarget); a ROM's own may not be
+export const sidesMatch = (l: OwLink): boolean => l.kind !== 'exit' || (l.b.side ?? 0) === opposite(l.a.side ?? 0);
+
+// Where Mario comes out of exit path tile `from` (the tile number `tile`, stepped onto from the side its path goes on)
+// on the tile it leads to: the side of `to` he appears at (away from its path, DIR_NAMES order) and the direction the
+// tile's learned "walk" vector moves him on in (null: not learned – shapes null, or no vector for that way)
+export interface ExitOut { side: number; walk: number | null }
+export function exitOut(from: LinkEnd, to: LinkEnd, tile: number, shapes: PathShapes | null): ExitOut {
+  const into = opposite(from.side ?? 0), k = (tile * 4 + into) * 2, vx = shapes?.walk[k], vy = shapes?.walk[k + 1];
+  const walk = vx === undefined || vy === undefined || vx === NO_SHAPE || (vx === 0 && vy === 0) ? null : dirOf(vx, vy, vx !== 0);
+  return { side: opposite(to.side ?? 0), walk };
+}
+// the side words of DIR_NAMES order, of a tile: "above Yoshi's Island 04,00"
+const SIDE_WORDS = ['above', 'below', 'left of', 'right of'];
+// exitOut in words: "Mario comes out above Yoshi's Island 04,00, walking down" (`toText`: the target's name)
+export const exitOutText = (o: ExitOut, toText: string): string =>
+  `Mario comes out ${SIDE_WORDS[o.side]} ${toText}${o.walk === null ? '' : `, walking ${DIR_NAMES[o.walk]}`}`;
 
 // ---- exit path entries ↔ tiles ----
 const stand = (t: OwTile, side: number, d: number): OwPos => ({ submap: t.submap, x: t.x * 16 + 8 + SIDES[side][0] * d, y: t.y * 16 + 8 + SIDES[side][1] * d });
@@ -101,11 +127,13 @@ export function locationUses(rom: Rom): Map<number, number[]> {
   return out;
 }
 
-// Links a to b (both: also b to a), replacing what a led to (and b, both ways): the entries a (and b) are taken from,
-// else unused ones. A star/pipe entry entrances teleport to (locationUses) stays their location where it was: the
-// tile gets another entry. Returns the link; throws when the table is full.
-export function makeLink(rom: Rom, kind: LinkKind, a: LinkEnd, b: LinkEnd, both: boolean): OwLink {
-  const why = linkCheck(rom, kind, both)(a, b);
+// Links a to tile `to` (both: also back), replacing what a led to (and `to`, both ways): the entries a (and `to`) are
+// taken from, else unused ones; an exit path's target with its side derived from a's (linkedTarget: `to`'s own side
+// is not read). A star/pipe entry entrances teleport to (locationUses) stays their location where it was: the tile
+// gets another entry. Returns the link (its target as linked); throws when the table is full.
+export function makeLink(rom: Rom, kind: LinkKind, a: LinkEnd, to: LinkEnd, both: boolean): OwLink {
+  const why = linkCheck(rom, kind, both)(a, to);
+  const b = kind === 'exit' ? linkedTarget(a, to) : to;
   if (why) throw new OwRefusal(why);
   const entries = kind === 'star' ? linkStars(rom, a, b, both) : linkExits(rom, a, b, both);
   return { kind, a: { ...a }, b: { ...b }, both, entries };
@@ -114,10 +142,11 @@ export function makeLink(rom: Rom, kind: LinkKind, a: LinkEnd, b: LinkEnd, both:
 const NOT_ITSELF: OwRefusalData = { kind: 'linkToItself' };
 const starsFull: OwRefusalData = { kind: 'teleportsFull', max: TELEPORTS };
 const exitsFull: OwRefusalData = { kind: 'exitPathsFull', max: EXIT_PATHS };
-// why a link of `kind` (both: also back) can't lead from a to b (null: it can, as makeLink makes it): b is another
-// tile, and the entries it needs are free – a's and b's own reused (a star's that a location keeps leading elsewhere
-// not); replacing: the link it replaces, removed first (removeLink: its entries free again, a location's kept). The ROM
-// read once (#348: the tiles hatched while a link's end is dragged).
+// why a link of `kind` (both: also back) can't lead from a to b (null: it can, as makeLink makes it, an exit path's
+// target side derived: linkedTarget): b is another tile, and the entries it needs are free – a's and b's own reused
+// (a star's that a location keeps leading elsewhere not); replacing: the link it replaces, removed first (removeLink:
+// its entries free again, a location's kept). The ROM read once (#348: the tiles hatched while a link's end is
+// dragged).
 export function linkCheck(rom: Rom, kind: LinkKind, both: boolean, replacing: OwLink | null = null): (a: LinkEnd, b: LinkEnd) => OwRefusalData | null {
   let free: number, needs: (from: LinkEnd, to: LinkEnd) => number, full: OwRefusalData;
   const gone = new Set(replacing?.kind === kind ? replacing.entries : []);
@@ -132,7 +161,10 @@ export function linkCheck(rom: Rom, kind: LinkKind, both: boolean, replacing: Ow
     needs = (from, to) => (exitEntryAt(all, exitEntry(from, to).from) >= 0 ? 0 : 1);
     full = exitsFull;
   }
-  return (a, b) => (same(a, b) ? NOT_ITSELF : needs(a, b) + (both ? needs(b, a) : 0) > free ? full : null);
+  return (a, to) => {
+    const b = kind === 'exit' ? linkedTarget(a, to) : to;
+    return same(a, b) ? NOT_ITSELF : needs(a, b) + (both ? needs(b, a) : 0) > free ? full : null;
+  };
 }
 // why a Koopa Kid on tile `from` can't put Mario at tile `to` (null: it can): a place of the submap of its tile
 export function koopaPlaceRefusal(from: OwTile, to: OwTile): OwRefusalData | null {

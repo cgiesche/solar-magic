@@ -1,10 +1,11 @@
 // The overworld links on the map (the overworld view's "Overworld links" mode): every star/pipe and exit path link
 // drawn as an arrow (one head one-way, two heads both ways), the locations exits to the overworld teleport to and the
 // Koopa Kids' places as dashed arrows from the tiles they belong to. Dragging from a tile to another links them: an
-// exit path tile by an exit path (the side its path goes on found from the path tiles around it), a tile Mario stops
-// on by a star/pipe link, a Koopa Kid's tile by its place. Dragging an end of the selected arrow, a location or a
-// Koopa Kid's place moves it; a tile on the other map region is linked by choosing it after the source ("…to a tile
-// on another map"); Delete removes the selected link. Each change is one ROM edit (owlinks.ts).
+// exit path tile by an exit path (the side its path goes on found from the path tiles around it, the target's the
+// opposite one), a tile Mario stops on by a star/pipe link, a Koopa Kid's tile by its place. Dragging an end of the
+// selected arrow, a location or a Koopa Kid's place moves it; a tile on the other map region is linked by choosing it
+// after the source ("…to a tile on another map"); Delete removes the selected link. Each change is one ROM edit
+// (owlinks.ts).
 
 import type { OverworldView, PickCheck } from './overworld.ts';
 import { l1Hex } from '../core/owl1sheet.ts';
@@ -13,7 +14,7 @@ import { refusedToast, refusalWords } from './owrefusal.ts';
 import { OwRefusal, type OwRefusalData } from '../core/owrefusal.ts';
 import { linkTableFix } from './owfixes.ts';
 import {
-  readLinks, makeLink, removeLink, setBothWays, moveLocation, locationUses, pathSide, koopaTeleport, setKoopaTeleport, opposite,
+  readLinks, makeLink, removeLink, setBothWays, moveLocation, locationUses, pathSide, koopaTeleport, setKoopaTeleport, sidesMatch, exitOut, exitOutText,
   KOOPAS, KOOPA_TILE, koopaOfTile, koopaPlaceRefusal, linkCheck, locationMoveRefusal, type OwLink, type LinkEnd, type LinkKind,
 } from '../core/owlinks.ts';
 import { readTeleports, tileText, sameTile, type OwTile } from '../core/owteleport.ts';
@@ -357,18 +358,24 @@ export class LinkLayer {
         h('div', { class: 'row' }, h('button', { onclick: () => this.remove() }, 'No place')), both);
     }
     const l = s.link, name = l.kind === 'exit' ? 'Exit path' : 'Star/pipe';
-    const side = (end: 'a' | 'b') => {
-      const e = l[end];
-      return h('div', { class: 'prop' }, h('label', { title: 'The side of the tile its path goes on: Mario leaves the tile walking from there and comes out on the other side' }, `Path at ${tileText(e)}`),
-        select(DIR_NAMES.map((n, d) => [d, `${DIR_ARROWS[d]} ${n}`] as [number, string]), e.side ?? 0, (v) => this.apply(() =>
-          this.edit(`${name}: path side`, () => { removeLink(rom, l); this.sel = { kind: 'link', link: makeLink(rom, l.kind, end === 'a' ? { ...l.a, side: v } : l.a, end === 'b' ? { ...l.b, side: v } : l.b, l.both) }; }))));
-    };
+    // the source's side chosen; the target's derived from it (owlinks.ts linkedTarget), shown – one a ROM has
+    // otherwise said so (the World check warns of it)
+    const relink = (a: LinkEnd) => this.apply(() => this.edit(`${name}: path side`, () => { removeLink(rom, l); this.sel = { kind: 'link', link: makeLink(rom, l.kind, a, l.b, l.both) }; }));
+    const sourceSide = () => h('div', { class: 'prop' }, h('label', { title: 'The side of the tile its path goes on: Mario leaves the tile walking from there; the target\'s side is the opposite one' }, `Path at ${tileText(l.a)}`),
+      select(DIR_NAMES.map((n, d) => [d, `${DIR_ARROWS[d]} ${n}`] as [number, string]), l.a.side ?? 0, (v) => relink({ ...l.a, side: v })));
+    const tb = l.b.side ?? 0, targetSide = () => h('div', { class: 'prop' }, h('label', { title: 'Follows the source\'s side: the opposite one, the only one putting Mario on the path (the game moves him on by the source exit tile\'s way, not by this side)' }, `Path at ${tileText(l.b)}`),
+      h('span', null, `${DIR_ARROWS[tb]} ${DIR_NAMES[tb]}${sidesMatch(l) ? ' (opposite the source\'s)' : ''}`));
+    const shapes = this.view.pathShapes(), tileOf = (t: OwTile) => this.view.shown.l1[this.index(t)];
+    const out = (from: LinkEnd, to: LinkEnd) => `${exitOutText(exitOut(from, to, tileOf(from), shapes), tileText(to))}.`;
+    const exitInfo = l.kind !== 'exit' ? [] : [sourceSide(), targetSide(),
+      sidesMatch(l) ? null : h('div', { class: 'warn-box' }, `The ROM has the target's path ${DIR_NAMES[tb]}, not opposite the source's – the World check warns where Mario comes out off the path. `,
+        h('button', { title: 'Set the target\'s side opposite to the source\'s (one ROM edit)', onclick: () => relink(l.a) }, 'Put it opposite')),
+      h('div', { class: 'hint' }, out(l.a, l.b), l.both ? ` Back: ${out(l.b, l.a)}` : '')];
     return h('div', { class: 'ow-info' },
       h('div', null, h('b', null, name), ` · ${tileText(l.a)} ${l.both ? '↔' : '→'} ${tileText(l.b)}`),
       h('div', { class: 'hint' }, `Entr${l.entries.length > 1 ? 'ies' : 'y'} ${l.entries.map((i) => hex(i, 2)).join(', ')} of the ${l.kind === 'exit' ? 'exit path' : 'star/pipe'} table`),
       checkbox('Both ways', 'The target leads back to this tile', l.both, (on) => this.apply(() => this.edit(`${name}: ${on ? 'both ways' : 'one-way'}`, () => { this.sel = { kind: 'link', link: setBothWays(rom, l, on) }; }))),
-      l.kind === 'exit' ? side('a') : null, l.kind === 'exit' ? side('b') : null,
-      l.kind === 'exit' ? h('div', { class: 'hint' }, `Mario comes out ${DIR_NAMES[opposite(l.b.side ?? 0)]} of the target, walking on.`) : null,
+      ...exitInfo,
       h('div', { class: 'row' },
         other('Target on another map…', 'Choose the tile it leads to on another map (the next click)', { move: { sel: s, target: true } }),
         h('button', { title: 'Remove the overworld link (Delete)', onclick: () => this.remove() }, 'Remove')),

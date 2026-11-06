@@ -13,7 +13,8 @@ import {
 import { progressSaves } from '../src/core/owprogress.ts';
 import { reach, reachInput, reachProblems, stuckProblems, walkFrom, neighbor, type ReachInput } from '../src/core/owreach.ts';
 import { stopTile } from '../src/core/worldcheck.ts';
-import { makeLink } from '../src/core/owlinks.ts';
+import { makeLink, exitEntry, readLinks, sidesMatch } from '../src/core/owlinks.ts';
+import { readExitPaths, writeExitPath, exitEntryAt } from '../src/core/owteleport.ts';
 import { readStart } from '../src/core/owsprites.ts';
 import { RAM, PAD, get16 } from '../src/core/ram.ts';
 import { ResultCache, RomFingerprint } from '../src/core/romdeps.ts';
@@ -156,7 +157,11 @@ function playTo(r: Rom, inp: ReachInput, i: number, d: number): { tile: number; 
   const kl = way(ladder);
   for (const side of [0, 2, 3]) {
     const r1 = new Rom(rom.data.slice());
-    makeLink(r1, 'exit', { submap: 0, x: 0x02, y: 0x14, side: 0 }, { submap: 1, x: 0x04, y: 0x00, side }, false);
+    // (as a ROM may have it, from Lunar Magic: the editor derives the target's side, makeLink)
+    const e = exitEntry({ submap: 0, x: 0x02, y: 0x14, side: 0 }, { submap: 1, x: 0x04, y: 0x00, side });
+    writeExitPath(r1, exitEntryAt(readExitPaths(r1), e.from), e);
+    const read = readLinks(r1).find((l) => l.kind === 'exit' && l.a.submap === 0 && l.a.x === 2 && l.a.y === 0x14);
+    check(!!read && read.b.side === side && !sidesMatch(read), `read as the ROM has it: the target's side ${DIR_NAMES[side]}, not the source's opposite`);
     const i2 = { ...reachInput(r1, inp.l1, inp.tls, inp.flags, kinds, shapes, readStart(r1, 0)) }, w = walkFrom(i2, kl >> 2, kl & 3)!, got = playTo(r1, i2, kl >> 2, kl & 3);
     const p = stuckProblems({ inp: i2, r: { ...r, walks: new Map([[kl, w]]) } }, at).find((q) => q.kind === 'exit-off-path');
     check(w.offPath?.at === ladder && !w.offPath.across && got.tile === w.to && off(got) && !!p,
