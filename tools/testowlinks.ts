@@ -8,7 +8,8 @@ import { LevelEmulator } from '../src/core/levelemu.ts';
 import { PlaySession } from '../src/core/playsession.ts';
 import { readExitPaths, readExitPath, writeExitPath, readTeleports, writeTeleport, tileText, EXIT_PATHS, EXIT_HOOK, FIND_HOOK, GAME_EXIT_TABLES, GAME_EXITS, sameTile as same, type OwTile, type OwPos } from '../src/core/owteleport.ts';
 import { readLinks, makeLink, removeLink, setBothWays, moveLocation, exitEntry, pathSide, koopaTeleport, setKoopaTeleport, opposite, sidesMatch, exitOut, exitOutText, SIDES, KOOPA_X, type LinkEnd, type OwLink } from '../src/core/owlinks.ts';
-import { l1Index, overworldDataRanges, readL1 } from '../src/core/overworld.ts';
+import { l1Index, overworldDataRanges, readL1, OverworldEmulator, OverworldLoads } from '../src/core/overworld.ts';
+import { submapViews, submapOf, submapShown, inView } from '../src/core/owevents.ts';
 import { readSecondaryEntrance, writeSecondaryEntrance, newOverworldExit } from '../src/core/level.ts';
 import { GM, RAM, PAD, MARIO_DYING, get16, set16 } from '../src/core/ram.ts';
 import { editorImage, cleanImage, romDiff, pathShapes } from './fixture.ts';
@@ -212,6 +213,28 @@ function warp(r: Rom, from: OwTile) {
   const l = makeLink(r, 'star', from, to, false), got = warp(r, from);
   check(got.found === l.entries[0] && got.submap === 4 && got.x === 7 && got.y === 8,
     `a star link stars: entry ${got.found}, Mario on submap ${got.submap} at ${got.x},${got.y}`);
+}
+{
+  // #403: a link end set in an overlap of two submaps' views takes the submap shown – Vanilla Dome 05,14 lies in Forest
+  // of Illusion's view too, nearer its center (submapOf alone: Forest of Illusion)
+  const views = submapViews(new OverworldLoads(new OverworldEmulator(new Rom(rom.data.slice())), 6)), vd = l1Index(1, 5, 0x14);
+  const at = (shown: number) => submapShown(views, vd, shown);
+  check(submapOf(views, vd) === 3 && inView(views[2], vd) && inView(views[3], vd), `Vanilla Dome 05,14 in the views of Vanilla Dome and Forest of Illusion, nearest the latter's center`);
+  check(at(2) === 2 && at(3) === 3, `with Vanilla Dome shown on submap ${at(2)}, with Forest of Illusion shown on ${at(3)}`);
+  const yiTop = l1Index(1, 4, 0);
+  check(submapShown(views, yiTop, 2) === 1 && submapShown(views, vd, 0) === 3 && submapShown(views, vd, 1) === 3, `a tile outside the shown submap's view (or the main map shown): submapOf`);
+  check(inView(views[1], l1Index(1, 0x1f, 5)) && !inView(views[1], l1Index(1, 0x1e, 5)), `Yoshi's Island's view wraps around the region's left edge (x 1F shows, 1E doesn't)`);
+  // (the links panel warns of an end its submap's view doesn't show: none of the game's)
+  const off = links.flatMap((l) => [l.a, l.b]).filter((t) => t.submap > 0 && !inView(views[t.submap], l1Index(1, t.x, t.y)));
+  check(!off.length && !inView(views[3], l1Index(1, 5, 0x0e)), `every end of the game's links shows in its submap's view (not: ${off.map((t) => tileText(t)).join(' ')}); Forest of Illusion 05,0E would not`);
+  // the game's exit path to Vanilla Dome 05,14 is the link at the tile clicked there with Vanilla Dome shown
+  const t: OwTile = { submap: at(2), x: 5, y: 0x14 };
+  check(links.some((l) => l.kind === 'exit' && (same(l.b, t) || same(l.a, t))), `the game's exit path found at ${tileText(t)} (${links.filter((l) => same(l.b, t)).map(show).join(' ')})`);
+  // a star link made there leads Mario to Vanilla Dome (emulated)
+  const r = new Rom(rom.data.slice()), from: OwTile = { submap: 0, x: 0x0c, y: 0x09 };
+  const l = makeLink(r, 'star', from, t, false), got = warp(r, from);
+  check(tileText(l.b) === 'Vanilla Dome 05,14' && got.found === l.entries[0] && got.submap === 2 && got.x === 5 && got.y === 0x14,
+    `a star link to ${tileText(l.b)}: Mario on submap ${got.submap} at ${hx(got.x)},${hx(got.y)}`);
 }
 {
   // #374: of two entries with a star's tile the game takes the last – the link read there, led elsewhere and moved there

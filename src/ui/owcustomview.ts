@@ -91,7 +91,7 @@ export class CustomSpriteLayer {
   }
   // the submap a custom sprite at (x, y) (8px steps) is on in the region shown
   private submapAt(x: number, y: number): number {
-    return this.view.region ? this.view.submapAt(l1Index(1, Math.min(31, x >> 1), Math.min(31, y >> 1))) : 0;
+    return this.view.region ? this.view.submapHere(l1Index(1, Math.min(31, x >> 1), Math.min(31, y >> 1))) : 0;
   }
   // a custom sprite added (a new one, a copy) at its position on the region shown, selected
   private place(s: CustomOwSprite, what: string): void {

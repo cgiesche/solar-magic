@@ -83,6 +83,7 @@ export class ExitArrowLayer {
         continue;
       }
       for (const o of e.opens) {
+        // (the level tile opened named on its submap by submapAt: only the tile known)
         const via = o.end !== o.tile ? ` – on ${MAP_NAMES[this.view.submapAt(o.tile)]}, by way of this link` : '';
         const text = `${exit} opens ${levelText(o.tl)}${via}`, color = dashed ? COLORS.secret : COLORS.normal;
         if (o.end >> 10 === region) out.push({ p, q: center(o.end), color, dashed, head: true, text });

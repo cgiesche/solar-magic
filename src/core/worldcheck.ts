@@ -162,6 +162,7 @@ export function* worldCheckJob(rom: Rom, loads: OverworldLoads, kinds: readonly 
   const every = loads.get(0, OW_EVENTS);
   const emulated = [{ l1: gameL1(every).slice(), tls: every.wram.slice(RAM.owTranslevels, RAM.owTranslevelsEnd), flags: saves[OW_EVENTS].levelFlags }];
   yield;
+  // (a problem's tile named on its submap by submapOf: only the tile known, ambiguous in an overlap of views)
   const graph = new ExitGraph(rom, open), place = (i: number) => tileText({ submap: submapOf(views, i), ...l1XY(i) });
   const inp = progressInput(rom, emulated, kinds, shapes, graph)(0);
   const all: CheckedAt = { inp, r: reach(inp), progress: OW_EVENTS };

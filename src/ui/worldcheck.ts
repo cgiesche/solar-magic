@@ -62,6 +62,7 @@ export class WorldCheck {
     if (!st || !learned) return null;
     const views = !!v.views;
     if (this.found?.from === st && this.found.views === views && this.found.learned === learned) return this.found.problems;
+    // (a problem's tile on its submap by submapAt: only the tile known, ambiguous in an overlap of views)
     const place = (i: number) => tileText({ submap: v.submapAt(i), ...l1XY(i) });
     const problems = worldProblems(v.app.rom, { ...st.now, progress: v.progress }, { ...st.all, progress: OW_EVENTS }, place, learned.checks, learned.every, (i) => v.submapAt(i));
     this.found = { from: st, views, learned, problems };

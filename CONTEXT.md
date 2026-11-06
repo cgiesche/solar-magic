@@ -150,7 +150,7 @@ _Avoid_: camera box, screen preview
 ### Overworld
 
 **Submap**:
-One of the overworld's 7 maps: the main map (0) on the first 512x512 map, and Yoshi's Island, Vanilla Dome, Forest of Illusion, Valley of Bowser, Special World and Star World (1–6) sharing the second, each a fixed camera window there. Graphics, palettes, music and UberASM are per submap.
+One of the overworld's 7 maps: the main map (0) on the first 512x512 map, and Yoshi's Island, Vanilla Dome, Forest of Illusion, Valley of Bowser, Special World and Star World (1–6) sharing the second, each a fixed camera window there. Graphics, palettes, music and UberASM are per submap. The windows (**views**, as the game sets the camera; core/owevents.ts submapViews) overlap: Vanilla Dome's lower rows lie in Forest of Illusion's view too (in the clean game Vanilla Dome 05,14, its entrance), so a tile of the shared map alone doesn't tell its submap. Where the user acts on a shown submap a tile in its view is on it; where an entry stores its submap (a link end) that one counts; only where the tile alone is known it is the submap whose view's center is nearest. Mario walking stays on his submap; only a link takes him to another.
 _Avoid_: world (that is the player's notion), map (alone, where the 512x512 map could be meant)
 
 **Level tile**:

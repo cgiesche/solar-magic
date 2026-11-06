@@ -18,7 +18,8 @@ import {
   KOOPAS, KOOPA_TILE, koopaOfTile, koopaPlaceRefusal, linkCheck, locationMoveRefusal, type OwLink, type LinkEnd, type LinkKind,
 } from '../core/owlinks.ts';
 import { readTeleports, tileText, sameTile, type OwTile } from '../core/owteleport.ts';
-import { l1Index, l1XY, DIR_NAMES, DIR_ARROWS } from '../core/overworld.ts';
+import { l1Index, l1XY, DIR_NAMES, DIR_ARROWS, MAP_NAMES } from '../core/overworld.ts';
+import { inView } from '../core/owevents.ts';
 import { isPathKind, PATH_KIND_NAMES } from '../core/owpaths.ts';
 import { ExitGraph } from '../core/exitgraph.ts';
 import { readSecondaryEntrance, levelTranslevel } from '../core/level.ts';
@@ -79,16 +80,20 @@ export class LinkLayer {
 
   // ---- tiles ----
   private index(t: OwTile): number { return l1Index(t.submap ? 1 : 0, t.x, t.y); }
+  // the tile at i where the user acts: on the submap shown when i shows in its view (OverworldView.submapHere)
   private tile(i: number): OwTile {
     const { x, y } = l1XY(i);
-    return { submap: this.view.submapAt(i), x, y };
+    return { submap: this.view.submapHere(i), x, y };
+  }
+  // the tile at i the ROM has (a Koopa Kid's tile): only the tile known, on the submap submapOf gives
+  private romTile(i: number): OwTile {
+    return { submap: this.view.submapAt(i), ...l1XY(i) };
   }
   private shown(t: OwTile): boolean { return (t.submap ? 1 : 0) === this.view.region; }
   // what tile i links by: an exit path from an exit path tile (or one an exit path already starts at, as the game's
   // cave), a star/pipe link from a tile Mario stops on, a Koopa Kid's place from its tile
-  private source(i: number): Source {
+  private source(i: number, t = this.tile(i)): Source {
     if (this.koopaAt(i) >= 0) return { kind: 'koopa' };
-    const t = this.tile(i);
     if (this.info().links.some((l) => l.kind === 'exit' && (sameTile(l.a, t) || (l.both && sameTile(l.b, t))))) return { kind: 'exit' };
     const kinds = this.view.pathKinds();
     if (!kinds) return { kind: null, why: 'the path tiles are still being learned – try again in a moment' };
@@ -167,7 +172,8 @@ export class LinkLayer {
     const d = this.drag, p = this.pending, rom = this.rom, dep = this.view.shown.l1;
     if (d && d.to === d.from) return null;
     const move = d ? d.move : p && 'move' in p ? p.move : null;
-    const key = (what: object) => JSON.stringify({ ...what, both: this.both });
+    // (tile(i) takes the submap shown: the key has the map)
+    const key = (what: object) => JSON.stringify({ ...what, both: this.both, map: this.view.map });
     if (move) {
       const s = move.sel;
       if (s.kind === 'link') {
@@ -181,11 +187,12 @@ export class LinkLayer {
       if (s.kind !== 'koopa') return null;
       const from = this.koopaTiles(s.k)[0];
       if (from === undefined) return null;
-      return { key: key({ koopa: s.k, from }), dep, make: () => (i) => koopaPlaceRefusal(this.tile(from), this.tile(i)) };
+      return { key: key({ koopa: s.k, from }), dep, make: () => (i) => koopaPlaceRefusal(this.romTile(from), this.tile(i)) };
     }
-    const from = d ? d.from : p && 'from' in p ? this.index(p.from) : -1;
+    // (a pending link's source as chosen, on the map shown then)
+    const chosen = !d && p && 'from' in p ? p.from : null, from = d ? d.from : chosen ? this.index(chosen) : -1;
     if (from < 0) return null;
-    const src = this.source(from), a = this.tile(from);
+    const a = chosen ?? this.tile(from), src = this.source(from, a);
     if (src.kind === 'koopa') return { key: key({ koopaFrom: from }), dep, make: () => (i) => koopaPlaceRefusal(a, this.tile(i)) };
     const kind = src.kind;
     if (!kind) return null;
@@ -276,7 +283,7 @@ export class LinkLayer {
 
   // a new link from tile a to tile b
   private make(a: OwTile, b: OwTile): void {
-    const src = this.source(this.index(a));
+    const src = this.source(this.index(a), a);
     if (!src.kind) throw src.refusal ? new OwRefusal(src.refusal) : new Error(src.why);
     if (src.kind === 'koopa') { this.setKoopa(this.koopaAt(this.index(a)), a, b); return; }
     const kind = src.kind, end = this.endOf(kind), ea = end(a), eb = end(b);
@@ -298,7 +305,7 @@ export class LinkLayer {
     if (s.kind === 'koopa') {
       const from = this.koopaTiles(s.k)[0];
       if (from === undefined) throw new Error(`Koopa Kid ${s.k + 1}'s tile is on the other map`);
-      this.setKoopa(s.k, this.tile(from), to);
+      this.setKoopa(s.k, this.romTile(from), to);
       return;
     }
     if (s.kind !== 'link') return;
@@ -337,7 +344,7 @@ export class LinkLayer {
       h('button', { title, onclick: () => { this.pending = p; this.view.updateStatus(); } }, label);
     if (!s) return h('div', { class: 'ow-info' }, both, emptyState('Drag from a star, pipe or exit path tile (or a Koopa Kid\'s tile 49–4B) to where it leads. Click a tile to select its overworld link, drag its ends to move them, Delete removes it.'));
     if (s.kind === 'tile') {
-      const src = this.source(this.index(s.t));
+      const src = this.source(this.index(s.t), s.t);
       return h('div', { class: 'ow-info' },
         h('div', null, h('b', null, `Tile ${tileText(s.t)}`), ' · no overworld link'),
         src.kind ? other('Link to a tile on another map…', 'Choose the tile it leads to on another map (the next click)', { from: s.t }) : h('div', { class: 'hint' }, `Not a tile to link: ${src.why}.`),
@@ -371,11 +378,15 @@ export class LinkLayer {
       sidesMatch(l) ? null : h('div', { class: 'warn-box' }, `The ROM has the target's path ${DIR_NAMES[tb]}, not opposite the source's – the World check warns where Mario comes out off the path. `,
         h('button', { title: 'Set the target\'s side opposite to the source\'s (one ROM edit)', onclick: () => relink(l.a) }, 'Put it opposite')),
       h('div', { class: 'hint' }, out(l.a, l.b), l.both ? ` Back: ${out(l.b, l.a)}` : '')];
+    // (#403) an end on a submap whose view doesn't show its tile: likely meant for another submap sharing the region
+    const views = this.view.views, offView = [l.a, l.b].filter((t) => t.submap > 0 && views && !inView(views[t.submap], this.index(t)))
+      .map((t) => h('div', { class: 'warn-box' }, `${tileText(t)} lies outside ${MAP_NAMES[t.submap]}'s view (the part of the map the game shows there): Mario would be where the player can't see him – likely meant for another submap.`));
     return h('div', { class: 'ow-info' },
       h('div', null, h('b', null, name), ` · ${tileText(l.a)} ${l.both ? '↔' : '→'} ${tileText(l.b)}`),
       h('div', { class: 'hint' }, `Entr${l.entries.length > 1 ? 'ies' : 'y'} ${l.entries.map((i) => hex(i, 2)).join(', ')} of the ${l.kind === 'exit' ? 'exit path' : 'star/pipe'} table`),
       checkbox('Both ways', 'The target leads back to this tile', l.both, (on) => this.apply(() => this.edit(`${name}: ${on ? 'both ways' : 'one-way'}`, () => { this.sel = { kind: 'link', link: setBothWays(rom, l, on) }; }))),
       ...exitInfo,
+      ...offView,
       h('div', { class: 'row' },
         other('Target on another map…', 'Choose the tile it leads to on another map (the next click)', { move: { sel: s, target: true } }),
         h('button', { title: 'Remove the overworld link (Delete)', onclick: () => this.remove() }, 'Remove')),

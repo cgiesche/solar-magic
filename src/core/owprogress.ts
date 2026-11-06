@@ -146,7 +146,8 @@ function* learnSaves(loads: OverworldLoads): Generator<void, ProgressSave[]> {
   const standing = w[RAM.owProcess];
   yield; // (the load a step of its own)
   const out: ProgressSave[] = [];
-  // Mario on the runner's tile (on its submap), as he stands there when he enters its level
+  // Mario on the runner's tile (on its submap: only the tile known, submapOf – the clean game's level tiles running
+  // events in an overlap of views are on the nearest center's), as he stands there when he enters its level
   const onTile = (r: EventRunner) => {
     const { x, y } = l1XY(r.tile), sub = submapOf(views, r.tile);
     for (const o of [0, RAM.owPlayerStride]) {

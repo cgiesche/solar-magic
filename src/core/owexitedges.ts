@@ -11,7 +11,7 @@ import type { Rom } from './rom.ts';
 import { OW_EVENTS, DIR_FLAGS, exitDirections, readL1, readDestroyList, destroyEffects, destroyedCells, type OverworldLoads } from './overworld.ts';
 import { eventChanges, eventRunners, exitChanges, readEvents, submapViewsJob, submapOf, type EventChanges, type EventRunner, type ExitChanges } from './owevents.ts';
 import { progressSavesJob, progressSearches, progressInput, progressMapsFromEvents } from './owprogress.ts';
-import { inputWithout, reach, waysFrom, type Reach, type Reached, type ReachInput } from './owreach.ts';
+import { inputWithout, reach, waysFrom, neighbor, type Reach, type Reached, type ReachInput } from './owreach.ts';
 import { ExitGraph } from './exitgraph.ts';
 import type { PathKind, PathShapes } from './owpaths.ts';
 import type { Job } from './jobrunner.ts';
@@ -180,13 +180,15 @@ function route(inp: ReachInput, r: Reach, from: number): Map<number, Way> {
 }
 
 // where an arrow from tile `from` to tile `to` ends: on the way there the last tile on from's submap before one on
-// another (the link leading there), else `to` (also when no way from `from` leads there)
+// another (the link leading there), else `to` (also when no way from `from` leads there). Walking Mario stays on his
+// submap – only a link (a step to a tile not beside the last) takes him to another, its target's submap by submapAt (the
+// search keeps no submaps: ambiguous where the views overlap, #403)
 function arrowEnd(ways: Map<number, Way>, from: number, to: number, submapAt: (tile: number) => number): number {
   if (!ways.has(to)) return to;
   const seq: number[] = [];
   // (from, the tiles passed, the stop they lead to, …, to)
   for (let s = to; s >= 0; s = ways.get(s)!.prev) seq.unshift(...ways.get(s)!.path, s);
-  const sub = submapAt(from), k = seq.findIndex((i) => submapAt(i) !== sub);
+  const sub = submapAt(from), k = seq.findIndex((i, n) => n > 0 && ![0, 1, 2, 3].some((d) => neighbor(seq[n - 1], d) === i) && submapAt(i) !== sub);
   return k < 0 ? to : seq[k - 1];
 }
 

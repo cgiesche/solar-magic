@@ -161,7 +161,7 @@ export class SpriteLayer {
       this.edit(`Koopa Kid ${it.k + 1}: jumps out elsewhere`, () => setKoopaKidPos(rom, it.k, { x: (p.x + d.dx) & 0xffff, y: (p.y + d.dy) & 0xffff }));
     } else {
       const s = readStart(rom, it.player), x = Math.max(0, Math.min(31, s.x + d.dx / 16)), y = Math.max(0, Math.min(31, s.y + d.dy / 16));
-      const submap = this.view.submapAt(l1Index(this.view.region, x, y));
+      const submap = this.view.submapHere(l1Index(this.view.region, x, y));
       this.edit(`${PLAYERS[it.player]}'s start: moved`, () => writeStart(rom, it.player, { submap, x, y }));
     }
   }

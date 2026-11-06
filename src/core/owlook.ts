@@ -67,6 +67,8 @@ function l2Under(cell: number): number[] {
 // The Look group's path problems (rules A and B above)
 export function lookProblems(inp: LookInput): WorldProblem[] {
   const { rom, maps, ownLooks, kinds, views, place } = inp, d = readEvents(rom), runners = eventRunners(rom);
+  // (only the cell known: submapOf, ambiguous in an overlap of views – the clean game's walk and climb tiles have the
+  // same own look on every submap)
   const submap = (c: number) => submapOf(views, c);
   // a walk or climb path tile without a look of its own
   const lookless = (c: number, t: number) => (kinds[t] === 'walk' || kinds[t] === 'climb') && !ownLooks[submap(c)]?.[t];

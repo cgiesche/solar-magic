@@ -521,7 +521,10 @@ export function submapViewsJob(loads: OverworldLoads): Generator<void, Rect[]> {
     return views;
   }, '', owTilemapRanges);
 }
-// the submap a layer 1 tile is on: 0 on the main map, else the one whose view's center is nearest (as LevelEmulator's)
+// The submap a layer 1 tile is on when only the tile is known: 0 on the main map, else the one whose view's center is
+// nearest (as LevelEmulator's). Ambiguous where views overlap (CONTEXT.md "Submap"): Vanilla Dome 05,14 lies in Forest
+// of Illusion's view too, nearer its center. Where the user acts on a shown submap take submapShown; where an entry
+// stores its submap (a link end), that one.
 export function submapOf(views: readonly Rect[], tile: number): number {
   if (tile < 0x400) return 0;
   const { x, y } = l1XY(tile), cx = x * 2 + 1, cy = y * 2 + 1;
@@ -532,8 +535,18 @@ export function submapOf(views: readonly Rect[], tile: number): number {
   }
   return best;
 }
-// where event e is shown: on the submap of the level tile running it (else `submap`, the one being edited), its
-// path starting at that tile
+// whether a submaps' layer 1 tile shows in view v (any of its 8x8 halves; the region wraps around as the camera shows it)
+export function inView(v: Rect, tile: number): boolean {
+  const { x, y } = l1XY(tile), on = (p: number, o: number, n: number) => ((p - o) & 63) < n || ((p + 1 - o) & 63) < n;
+  return on(x * 2, v.x, v.w) && on(y * 2, v.y, v.h);
+}
+// the submap a layer 1 tile is on where the user acts on submap `shown` (the overworld view's map; 0 the main map):
+// `shown` when the tile shows in its view, else submapOf
+export function submapShown(views: readonly Rect[], tile: number, shown: number): number {
+  return tile >= 0x400 && shown > 0 && views[shown] && inView(views[shown], tile) ? shown : submapOf(views, tile);
+}
+// where event e is shown: on the submap of the level tile running it (submapOf: only the tile known; else `submap`,
+// the one being edited), its path starting at that tile
 export function eventPlace(runners: Map<number, EventRunner[]>, views: Rect[], e: number, submap: number): EventPlace {
   const r = runners.get(e)?.[0];
   const sub = r ? submapOf(views, r.tile) : submap;

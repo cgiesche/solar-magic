@@ -19,7 +19,7 @@ import { messageRoutineNote, messageRoutineUnknown, MESSAGE_ROUTINE_CHECKING } f
 import { levelName, hasLevelName, levelNamePatch } from '../core/levelnames.ts';
 import { levelNameField } from './levelnamefield.ts';
 import {
-  readEvents, writeEvents, applyEvents, reorderSteps, eventRunners, exitEvent, eventTitle, eventWords, playthroughStrip, stepEvent, eventPlace, submapOf, pieceTiles, isBig, l2XY,
+  readEvents, writeEvents, applyEvents, reorderSteps, eventRunners, exitEvent, eventTitle, eventWords, playthroughStrip, stepEvent, eventPlace, submapOf, submapShown, pieceTiles, isBig, l2XY,
   eventL1Tiles, exitChanges, type EventData, type EventRunner, type Rect, type ExitChanges, type StripEntry,
 } from '../core/owevents.ts';
 import { OverworldStroke, shownMaps } from '../core/owstroke.ts';
@@ -338,11 +338,18 @@ export class OverworldView {
     this.paint();
     if (this.pendingTile >= 0) { const i = this.pendingTile; this.pendingTile = -1; this.showTile(i); }
   };
-  // the submap layer 1 tile i is on; while the submaps' views are learned the first of its region (0 or 1): only for
-  // what is drawn, edits wait for the views (onDown)
+  // the submap layer 1 tile i is on when only the tile is known (submapOf: ambiguous where the submaps' views overlap);
+  // while the submaps' views are learned the first of its region (0 or 1): only for what is drawn, edits wait for the
+  // views (onDown)
   submapAt(i: number): number {
     const v = this.views;
     return v ? submapOf(v, i) : i >= 0x400 ? 1 : 0;
+  }
+  // the submap of layer 1 tile i where the user acts on the map: the one shown when i shows in its view (submapShown),
+  // else as submapAt
+  submapHere(i: number): number {
+    const v = this.views;
+    return v ? submapShown(v, i, this.map) : this.submapAt(i);
   }
   // the sprites' images at the map and event progress (owsprites.ts), undefined while they are emulated
   owSprites(): OwSpriteView[] | undefined {
@@ -953,7 +960,8 @@ export class OverworldView {
     this.selectTile(l1Index(this.region, x, y), false);
   }
 
-  // shows layer 1 tile i (l1Index) selected, on the submap it is on
+  // shows layer 1 tile i (l1Index) selected, on the submap it is on (only the tile known: submapOf, as the World
+  // check's problems name it)
   showTile(i: number): void {
     const views = this.views;
     if (!views) { this.pendingTile = i; return; } // (shown when they come)

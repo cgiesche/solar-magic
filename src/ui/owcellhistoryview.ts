@@ -204,7 +204,7 @@ export class CellHistoryPopup {
   }
   // the move of m's change to `to` (single: Alt held)
   private ask(m: Moving, to: number, single: boolean): MoveAsk {
-    return { cell: m.cell, from: m.from, to, single, submap: (i) => this.view.submapAt(i) };
+    return { cell: m.cell, from: m.from, to, single, submap: (i) => this.view.submapHere(i) };
   }
   // what moving to `to` does (kept per target and Alt)
   private plan(m: Moving, to: number): MovePlan {

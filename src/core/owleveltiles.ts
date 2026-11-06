@@ -59,7 +59,8 @@ export function levelsWithoutTile(tls: ArrayLike<number>): number[] {
 }
 
 // "Also used by the tile on Vanilla Dome": the other level tiles entering a level (l1Index), by the map each is on
-// (views: the submaps' views), "" when none
+// (views: the submaps' views; only the tiles known: submapOf, a tile in an overlap of views by the nearest center), ""
+// when none
 export function alsoUsedBy(others: number[], views: Rect[]): string {
   if (!others.length) return '';
   const n = new Map<number, number>();

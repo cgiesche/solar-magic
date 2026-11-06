@@ -2,13 +2,14 @@
 // with every event but E's – or at the event progress after E's event and not at the one before – the first levels
 // on the way only. On the test ROM (the clean game): Yoshi's Island's edges as the game has them, Forest of Illusion's
 // and Chocolate Island's (events out of number order there), a castle opening the level behind it (not the exit
-// before it), an arrow to another submap ending at the link leaving the exit's submap, the maps built from the events
+// before it), an arrow to another submap ending at the link leaving the exit's submap (not where the way passes a
+// row of the submap another submap's view shows too, #403), the maps built from the events
 // (#384) those the game loads at every progress. With the events still passable without an exit's event
 // (passableEdgesJob, the probe worker's, #380): the Valley of Bowser and Chocolate Island exits Mario reaches back
 // through Star Road get their arrows, the Star World ones a star revealed by another exit makes needless lose theirs,
 // Yoshi's Island's the same.
 import { Rom } from '../src/core/rom.ts';
-import { OverworldEmulator, OverworldLoads, translevelToLevel, l1XY, gameL1, OW_EVENTS, EXIT_NAMES } from '../src/core/overworld.ts';
+import { OverworldEmulator, OverworldLoads, translevelToLevel, l1XY, l1Index, gameL1, OW_EVENTS, EXIT_NAMES } from '../src/core/overworld.ts';
 import { progressSaves, progressSearches, progressMapsFromEvents, type ProgressMap } from '../src/core/owprogress.ts';
 import { reachInput } from '../src/core/owreach.ts';
 import { readStart } from '../src/core/owsprites.ts';
@@ -103,6 +104,11 @@ check(yi.filter((e) => e.opens.length).length === want.length, `no other exit on
     `101's arrow to ${o && at(o.tile)} (main map) ends at ${o && at(o.end)}, an exit path tile of Yoshi's Island (tile ${hx(end, 3)}: ${kinds[end]})`);
   const same = yi.find((x) => lv(x.tl) === '106')?.opens[0];
   check(!!same && same.end === same.tile, `106's arrow on the same submap ends at the level tile (${same && at(same.end)})`);
+  // (#403) 11C (Vanilla Dome 0C,12): Mario walks 0C,14 – 0A,14 to the star leaving Vanilla Dome; the row lies
+  // in Forest of Illusion's view too, nearer its center, but walking never changes the submap – only a link does
+  const vd = edges.find((x) => x.from === l1Index(1, 0x0c, 0x12) && x.exit === 0), v = vd?.opens[0];
+  check(!!v && sub(v.tile) === 0 && v.end === l1Index(1, 0x0a, 0x14) && kinds[maps[vd!.event + 1].l1[v.end]] === 'stop',
+    `${vd && lv(vd.tl)}'s arrow to ${v && at(v.tile)} (main map) ends at ${v && at(v.end)}, the star of Vanilla Dome (not at ${at(l1Index(1, 0x0c, 0x14))})`);
 }
 
 // ---- an exit opening nothing: a stub ----
