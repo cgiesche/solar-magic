@@ -64,7 +64,7 @@ const direct = new BlockProber(new Rom(file));
 
 // each job's result under the prober's key
 check(jobKey({ kind: 'block', ts: 2, tile: 0x130 }) === blockKey(2, 0x130) && jobKey({ kind: 'collision', ts: 2, tile: 0x130 }) === collisionKey(2, 0x130)
-  && jobKey({ kind: 'sprite', ts: 2, num: 0x20d }) === spriteKey(2, 0x20d) && jobKey({ kind: 'runs', ts: 2 }) === runsKey(2)
+  && jobKey({ kind: 'sprite', ts: 2, num: 0x20d }) === spriteKey(0x20d) && jobKey({ kind: 'runs', ts: 2 }) === runsKey(2)
   && jobKey({ kind: 'bands', ts: 2, mode: 0x0a, vscroll: 2 }) === cameraKey(2, 0x0a, 2), 'job keys: the prober\'s result cache keys');
 // @ts-expect-error only the scan can be cancelled
 const cancelKinds: ProbeMessage = { type: 'cancel', task: 'kinds' };
@@ -85,7 +85,7 @@ check(done.every((d) => d.gen === 1 && !d.failed && d.put.some(([k]) => k === jo
 const cache = new ResultCache(new RomFingerprint(rom));
 for (const d of done) for (const [k, e] of d.put) cache.set(k, e.data, e.deps);
 check(JSON.stringify(cache.get(blockKey(0, 0x11f))) === JSON.stringify(direct.probe(0x11f)), 'block 11F as probed directly');
-check(JSON.stringify(cache.get(spriteKey(0, 0x0d))) === JSON.stringify(direct.probeSprite(0x0d)), 'sprite 0D as probed directly');
+check(JSON.stringify(cache.get(spriteKey(0x0d))) === JSON.stringify(direct.probeSprite(0x0d)), 'sprite 0D as probed directly');
 
 // a ROM change drops the queue; results carry the new generation
 host.ask([{ kind: 'block', ts: 0, tile: 0x2b }]);
@@ -176,7 +176,7 @@ check(host.pending === 0, 'new ROM: tasks dropped');
   while (h.pending) { const d = keep(h.next()); if (d?.type === 'scan') sc = d; }
   check(h.started === started, 'overworld edit: the scan was not restarted');
   check(sc?.type === 'scan' && sc.gen === 2 && JSON.stringify(sc.result) === JSON.stringify(scanned), 'overworld edit: the scan as played directly');
-  const held = [blockKey(0, 0x130), spriteKey(0, 0x0d), kindsKey(1), 'scan-ow'].filter((k) => ed.get(k) !== undefined);
+  const held = [blockKey(0, 0x130), spriteKey(0x0d), kindsKey(1), 'scan-ow'].filter((k) => ed.get(k) !== undefined);
   check(held.length === 4, `overworld edit: block, sprite, kinds and scan results still hold (${held.join(', ')})`);
 
   // painting on the overworld as the editor writes it: layer 1, layer 2 in place, layer 2 moved to free space
@@ -196,7 +196,7 @@ check(host.pending === 0, 'new ROM: tasks dropped');
   check(h.pending === 1, 'painting: the scan still runs');
   while (h.pending) keep(h.next());
   check(h.started === started2, 'painting: the scan was not restarted');
-  const held2 = [blockKey(0, 0x130), spriteKey(0, 0x0d), kindsKey(1), 'scan-ow', 'scan-paint'].filter((k) => ed.get(k) !== undefined);
+  const held2 = [blockKey(0, 0x130), spriteKey(0x0d), kindsKey(1), 'scan-ow', 'scan-paint'].filter((k) => ed.get(k) !== undefined);
   check(held2.length === 5, `painting: block, sprite, kinds and scan results still hold (${held2.join(', ')})`);
 
   // the same scan asked for again: its stored result at once
@@ -299,7 +299,7 @@ check(host.pending === 0, 'new ROM: tasks dropped');
   const jobs: ProbeJob[] = [...tiles.flatMap((t): ProbeJob[] => [{ kind: 'block', ts: 0, tile: t }, { kind: 'collision', ts: 0, tile: t }]), ...sprites.map((num): ProbeJob => ({ kind: 'sprite', ts: 0, num })), { kind: 'runs', ts: 0 }];
   h.ask(jobs);
   while (h.pending) keep(h.next());
-  const keys = [...tiles.flatMap((t) => [blockKey(0, t), collisionKey(0, t)]), ...sprites.map((n) => spriteKey(0, n)), runsKey(0)];
+  const keys = [...tiles.flatMap((t) => [blockKey(0, t), collisionKey(0, t)]), ...sprites.map((n) => spriteKey(n)), runsKey(0)];
   const ptrs = tilesetPointers(ptrEmu, 0).result;
   let gen = 1;
   const send = (change: () => void) => {
@@ -334,7 +334,7 @@ check(host.pending === 0, 'new ROM: tasks dropped');
 
   send(() => draw(0x00b000));
   const faded = keys.filter((k) => ed.get(k) === undefined);
-  check(faded.join() === [spriteKey(0, 0x4a), spriteKey(0, 0x7b)].join(), `the palette fade's code changed: the goal sphere and tape dropped only (${faded.join(', ')})`);
+  check(faded.join() === [spriteKey(0x4a), spriteKey(0x7b)].join(), `the palette fade's code changed: the goal sphere and tape dropped only (${faded.join(', ')})`);
   send(() => setActsLike(r, 0x025, 0x130));
   check(ed.get(blockKey(0, 0x025)) === undefined && ed.get(collisionKey(0, 0x025)) === undefined, 'acts-like of 025 changed: its results dropped');
 }

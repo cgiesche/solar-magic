@@ -363,7 +363,7 @@ _Avoid_: event, flag (those are Conditional Direct Map16's)
 ### Emulated results
 
 **Probe**:
-Finding out how something behaves in the game by running the game's own code on it in an emulator: what a Map16 block does when Mario touches it, how Mario collides with it, what a sprite does when hit from below, how fast Mario runs in a tileset. A probe is always for one tileset. What blocks look like (Map16 quarters, colors, graphics files) is not among the bytes a probe has read: drawing keeps it (ADR 0008).
+Finding out how something behaves in the game by running the game's own code on it in an emulator: what a Map16 block does when Mario touches it, how Mario collides with it, what a sprite does when hit from below, how fast Mario runs in a tileset. A probe is always for one tileset, but a sprite's is kept for all of them: it is probed again per tileset only when it read the tileset from code that doesn't read it in the probe level without the sprite (vanilla: only the unused sprite 36). What blocks look like (Map16 quarters, colors, graphics files) is not among the bytes a probe has read: drawing keeps it (ADR 0008).
 _Avoid_: Test, check, lookup table
 
 **Switch state**:

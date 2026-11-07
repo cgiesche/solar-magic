@@ -2,7 +2,7 @@
 // the probe jobs with their ids and result cache keys, the messages the editor sends and the replies.
 
 import type { CacheEntry } from './romdeps.ts';
-import { blockKey, collisionKey, spriteKey, runsKey, cameraKey } from './blockprobe.ts';
+import { type ResultGet, blockKey, collisionKey, spriteKey, spriteTsKey, runsKey, cameraKey, spriteProbeIn } from './blockprobe.ts';
 import type { KindLevel, ObjKind } from './objkinds.ts';
 import type { ScanLevel, ScanResult } from './levelscan.ts';
 import type { CameraAt } from './camerareach.ts';
@@ -36,13 +36,18 @@ export function jobKey(j: ProbeJob): string {
   switch (j.kind) {
     case 'block': return blockKey(j.ts, j.tile);
     case 'collision': return collisionKey(j.ts, j.tile);
-    case 'sprite': return spriteKey(j.ts, j.num);
+    case 'sprite': return spriteKey(j.num); // (for all tilesets, or saying it is kept per tileset: jobResult)
     case 'runs': return runsKey(j.ts);
     case 'bands': return cameraKey(j.ts, j.mode, j.vscroll);
   }
 }
-// the job's id in a queue: its result cache key (one per job)
-export const jobId = jobKey;
+// the job's id in a queue: its result cache key (one per job); a sprite's names its tileset too (its result may be kept
+// per tileset, and a failure is one in that tileset)
+export const jobId = (j: ProbeJob): string => j.kind === 'sprite' ? spriteTsKey(j.ts, j.num) : jobKey(j);
+// the job's result among results (a sprite's is kept once for all tilesets unless it read the tileset)
+export function jobResult<T>(results: ResultGet, j: ProbeJob): T | undefined {
+  return (j.kind === 'sprite' ? spriteProbeIn(results, j.ts, j.num) : results.get(jobKey(j))) as T | undefined;
+}
 
 export interface ProbeDone {
   type: 'probe';

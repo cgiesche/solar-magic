@@ -9,7 +9,7 @@
 // bytes they read are unchanged.
 
 import { ProbeHost, pumpProbes } from './probehost.ts';
-import { jobId, jobKey, learnKeep, learnRetargets, learnParts, EDIT_STATES, type ProbeJob, type ProbeMessage, type ProbeDone, type ProbeReply, type KindsDone, type KindsShown, type ScanDone, type CameraDone, type LearnJob, type LearnMessage, type Learned, type Learning, type LearnLane, type ProbeBusyKey } from './probeprotocol.ts';
+import { jobId, jobResult, learnKeep, learnRetargets, learnParts, EDIT_STATES, type ProbeJob, type ProbeMessage, type ProbeDone, type ProbeReply, type KindsDone, type KindsShown, type ScanDone, type CameraDone, type LearnJob, type LearnMessage, type Learned, type Learning, type LearnLane, type ProbeBusyKey } from './probeprotocol.ts';
 import { Lanes, laneId, type LaneLabel } from './lanes.ts';
 import { inputHash } from './inputs.ts';
 import { partKey, memoryResults, type MemoryResults, type Keep } from './jobrunner.ts';
@@ -121,7 +121,7 @@ export class ProbeClient {
   }
 
   private probed<T>(job: ProbeJob): T | undefined {
-    const p = this.d.results.get<T>(jobKey(job));
+    const p = jobResult<T>(this.d.results, job);
     if (p === undefined) this.ask(job);
     return p;
   }
@@ -135,14 +135,14 @@ export class ProbeClient {
     this.busy();
     // (stored results first: the job may be known by then)
     this.d.cacheReady.then(() => {
-      if (this.d.results.get(jobKey(job)) === undefined) this.send?.({ type: 'ask', jobs: [job] });
+      if (jobResult(this.d.results, job) === undefined) this.send?.({ type: 'ask', jobs: [job] });
       else this.probeDone({ type: 'probe', gen: this.gen, job, put: [], failed: false });
     });
   }
 
   // Probes everything the palette tabs can show (Map16 tiles 000-1FF plus `tiles`, all sprites; how
   // Mario collides with `tiles`) in the background, after what is asked for directly; results go to
-  // the cache, so this runs once per tileset and ROM state.
+  // the cache, so this runs once per tileset and ROM state (the sprites once per ROM state, blockprobe.ts).
   prefetch(tiles: Iterable<number> = []): void {
     this.d.cacheReady.then(() => {
       this.sync();
@@ -151,7 +151,7 @@ export class ProbeClient {
       const jobs = new Map([...this.prefetched].filter(([, j]) => j.ts === ts));
       const add = (job: ProbeJob) => {
         const id = jobId(job);
-        if (!this.failed.has(id) && !this.asked.has(id) && this.d.results.get(jobKey(job)) === undefined) jobs.set(id, job);
+        if (!this.failed.has(id) && !this.asked.has(id) && jobResult(this.d.results, job) === undefined) jobs.set(id, job);
       };
       for (const tile of tiles) { add({ kind: 'block', ts, tile }); add({ kind: 'collision', ts, tile }); }
       for (let tile = 0; tile < 0x200; tile++) add({ kind: 'block', ts, tile });
@@ -473,7 +473,7 @@ export class ProbeClient {
   private probeDone(d: ProbeDone): void {
     this.take(d);
     const id = jobId(d.job);
-    if (d.gen !== this.gen && this.d.results.get(jobKey(d.job)) === undefined) {
+    if (d.gen !== this.gen && jobResult(this.d.results, d.job) === undefined) {
       if (this.asked.has(id)) this.send?.({ type: 'ask', jobs: [d.job] });
       return;
     }

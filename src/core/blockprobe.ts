@@ -24,14 +24,16 @@
 // from him running on a long floor of the probe level.
 // Some tiles behave differently per tileset (vanilla: the boss door tile 9C can only be entered in
 // castle tilesets), so the probe level gets the tileset of the edited level and results are kept
-// per tileset.
+// per tileset. A sprite's probe is kept once for all tilesets unless the tileset ($1931) was read by code
+// that doesn't read it in the probe level without the sprite (every frame the game's tile animation reads it,
+// only for the display): then it may act otherwise in another tileset, and it is kept per tileset.
 // Results are kept in a ResultCache (see romdeps.ts) with the ROM pages they read, including those
 // read by booting and by preparing the probe level, so they survive ROM changes elsewhere.
 
 import { LevelEmulator, MAP_BASE } from './levelemu.ts';
 import { Rom } from './rom.ts';
-import type { SnesState } from './snes.ts';
-import { ResultCache, RomFingerprint, type RomDeps, type RomReads } from './romdeps.ts';
+import { joinHooks, type SnesState, type MemHook } from './snes.ts';
+import { ResultCache, RomFingerprint, RomReads, type RomDeps } from './romdeps.ts';
 import { spriteName, hex3 } from './names.ts';
 import { measureCameraBands, type CameraBands } from './camerabands.ts';
 import { applyTriggers, emptyTriggerView } from './extrigger.ts';
@@ -57,7 +59,9 @@ const ENTER_DX = [-8, -4, 0, 4, 8]; // pipes only let Mario in within a few pixe
 // result cache keys (see ResultCache) of the probes in tileset ts
 export const blockKey = (ts: number, tile: number) => `b${ts}:${tile}`;
 export const collisionKey = (ts: number, tile: number) => `c${COLLISION_VERSION}.${ts}:${tile}`;
-export const spriteKey = (ts: number, num: number) => `s2.${ts}:${num}`;
+// a sprite's probe in any tileset; one that read the tileset (byTileset) only says its result is kept per tileset
+export const spriteKey = (num: number) => `s3:${num}`;
+export const spriteTsKey = (ts: number, num: number) => `s3.${ts}:${num}`;
 export const runsKey = (ts: number) => `r1.${ts}`;
 export const pressKey = (ts: number, tile: number) => `sw1.${ts}:${tile}`;
 export const cameraKey = (ts: number, mode: number, vscroll: number) => `cam2.${ts}:${mode}.${vscroll}`;
@@ -141,6 +145,14 @@ export interface SpriteProbe {
   pos: PosProbe[]; // by variant
   summary: string | null; // all variants; null: no effect
   solid: boolean;
+  byTileset?: true; // its probe read the tileset (see above): kept per tileset
+}
+
+// sprite num's probe in tileset ts among results (undefined: not known)
+export type ResultGet = Pick<ResultCache, 'get'>;
+export function spriteProbeIn(results: ResultGet, ts: number, num: number): SpriteProbe | undefined {
+  const p = results.get<SpriteProbe>(spriteKey(num));
+  return p?.byTileset ? results.get<SpriteProbe>(spriteTsKey(ts, num)) : p;
 }
 
 export function variantOf(v: SpriteVariants, x: number, y: number): number {
@@ -177,7 +189,12 @@ interface TilesetProbes {
   floorTile: number; // a tile Mario can stand on (found by trying), -1 = not searched yet, -2 = none found
   switchFloor: Partial<Record<SwitchState, number>>; // the same in a switch state (the floor may depend on it)
   climbTile: number; // a tile Mario climbs in (vines, nets), the same way
+  // code (bank and address) that reads the tileset in the probe level without a sprite, with the ROM that run read (for
+  // the sprite probes only: the other probes don't depend on it)
+  tilesetReaders: { pcs: Set<number>; reads: RomReads; deps: RomDeps } | null;
 }
+
+const freshTileset = (): TilesetProbes => ({ ready: null, reads: null, deps: null, by: 0, floorTile: -1, switchFloor: {}, climbTile: -1, tilesetReaders: null });
 
 export class BlockProber {
   rom: Rom;
@@ -201,7 +218,7 @@ export class BlockProber {
   // probe (and look up cached results) in tileset ts from now on
   use(ts: number): void {
     let t = this.sets.get(ts);
-    if (!t) this.sets.set(ts, (t = { ready: null, reads: null, deps: null, by: 0, floorTile: -1, switchFloor: {}, climbTile: -1 }));
+    if (!t) this.sets.set(ts, (t = freshTileset()));
     this.tileset = ts;
     this.cur = t;
   }
@@ -210,7 +227,8 @@ export class BlockProber {
   // again; results are checked when used
   reset(): void {
     for (const t of this.sets.values()) {
-      if (t.deps && !this.results.fp.valid(t.deps)) Object.assign(t, { ready: null, reads: null, deps: null, by: 0, floorTile: -1, switchFloor: {}, climbTile: -1 });
+      if (t.deps && !this.results.fp.valid(t.deps)) Object.assign(t, freshTileset());
+      else if (t.tilesetReaders && !this.results.fp.valid(t.tilesetReaders.deps)) t.tilesetReaders = null;
     }
   }
 
@@ -343,30 +361,68 @@ export class BlockProber {
   }
 
   cachedSprite(num: number): SpriteProbe | undefined {
-    return this.results.get(spriteKey(this.tileset, num));
+    return spriteProbeIn(this.results, this.tileset, num);
   }
 
+  // Probed in the current tileset; kept for all tilesets unless it read the tileset (SpriteProbe byTileset) or
+  // another tileset's did
   probeSprite(num: number): SpriteProbe {
-    return this.cachedSprite(num) ?? this.computed(spriteKey(this.tileset, num), (): SpriteProbe => {
-      const at = ({ x, y }: { x: number; y: number }): PosProbe => {
-        const base0 = this.hitSprite(num, 0, x, y, 'none');
-        // (the run without Mario is the same for small and big Mario: he stays away from the sprite)
-        const small = this.spriteEffect(num, 0, x, y, 'below', base0), big = this.spriteEffect(num, 1, x, y, 'below', base0);
-        const stomp = this.spriteEffect(num, 0, x, y, 'stomp', base0);
-        return { small, big, stomp, summary: summarizeSprite(small, big, stomp) };
-      };
-      let variants = this.spriteVariants(num), pos = variants.reps.map(at);
-      // a message box: which message it opens may depend on where it is, not on its tables (the game's reads its
-      // X position when hit) – the X positions split by the message hitting it there opens
-      const how = pos.some((q) => q.small.message) ? 'below' : pos.some((q) => q.stomp?.message) ? 'stomp' : null;
-      if (how) {
-        const y = variants.reps[0].y;
-        const msgs = Array.from({ length: 16 }, (_, x) => this.spriteEffect(num, 0, x, y, how).message ?? 0);
-        const split = splitX(variants, msgs);
-        if (split.nx !== variants.nx) { variants = split; pos = variants.reps.map(at); }
-      }
-      return { num, variants, pos, summary: byVariant(variants, pos), solid: pos.some((q) => q.small.solid || q.big.solid) };
-    });
+    const known = this.cachedSprite(num);
+    if (known) return known;
+    if (!this.cur.ready) this.prepare();
+    const base = this.tilesetReaders();
+    const before = new RomReads(this.rom, this.cur.reads);
+    before.add(base.reads);
+    let byTileset = false;
+    const cpu = this.emu.snes.cpu, hook: MemHook = { onWramRead: (a) => { if (a === RAM.tileset && !base.pcs.has(cpu.opPc)) byTileset = true; } };
+    const { result, reads } = this.emu.tracked(() => this.withHook(hook, () => this.spriteProbe(num)), before);
+    const deps = this.results.fp.deps(reads), shared = this.results.get<SpriteProbe>(spriteKey(num));
+    if (byTileset || shared?.byTileset) this.results.set(spriteTsKey(this.tileset, num), result, deps);
+    if (!shared) this.results.set(spriteKey(num), byTileset ? { ...result, byTileset: true } : result, deps);
+    return result;
+  }
+
+  // fn() with hook on the emulator too
+  private withHook<T>(hook: MemHook, fn: () => T): T {
+    const s = this.emu.snes, was = s.hook;
+    s.hook = was ? joinHooks(was, hook) : hook;
+    try { return fn(); } finally { s.hook = was; }
+  }
+
+  // the code reading the tileset in the probe level without a sprite, Mario jumping as for a sprite's probe (once per
+  // tileset and ROM state)
+  private tilesetReaders(): { pcs: Set<number>; reads: RomReads } {
+    const c = this.cur;
+    if (c.tilesetReaders) return c.tilesetReaders;
+    const pcs = new Set<number>(), s = this.emu.snes;
+    const { reads } = this.emu.tracked(() => this.withHook({ onWramRead: (a) => { if (a === RAM.tileset) pcs.add(s.cpu.opPc); } }, () => {
+      this.start(16, 0, SPRITE_ROW);
+      this.placeMario(16 * 16, SPRITE_ROW * 16, 24, -0x60);
+      try { for (let f = 0; f < PROBE_FRAMES + TIMER_FRAMES; f++) s.runFrame(); } catch { /* the code seen until the emulation stopped */ }
+    }), null, false);
+    c.tilesetReaders = { pcs, reads, deps: this.results.fp.deps(reads) };
+    return c.tilesetReaders;
+  }
+
+  private spriteProbe(num: number): SpriteProbe {
+    const at = ({ x, y }: { x: number; y: number }): PosProbe => {
+      const base0 = this.hitSprite(num, 0, x, y, 'none');
+      // (the run without Mario is the same for small and big Mario: he stays away from the sprite)
+      const small = this.spriteEffect(num, 0, x, y, 'below', base0), big = this.spriteEffect(num, 1, x, y, 'below', base0);
+      const stomp = this.spriteEffect(num, 0, x, y, 'stomp', base0);
+      return { small, big, stomp, summary: summarizeSprite(small, big, stomp) };
+    };
+    let variants = this.spriteVariants(num), pos = variants.reps.map(at);
+    // a message box: which message it opens may depend on where it is, not on its tables (the game's reads its
+    // X position when hit) – the X positions split by the message hitting it there opens
+    const how = pos.some((q) => q.small.message) ? 'below' : pos.some((q) => q.stomp?.message) ? 'stomp' : null;
+    if (how) {
+      const y = variants.reps[0].y;
+      const msgs = Array.from({ length: 16 }, (_, x) => this.spriteEffect(num, 0, x, y, how).message ?? 0);
+      const split = splitX(variants, msgs);
+      if (split.nx !== variants.nx) { variants = split; pos = variants.reps.map(at); }
+    }
+    return { num, variants, pos, summary: byVariant(variants, pos), solid: pos.some((q) => q.small.solid || q.big.solid) };
   }
 
   // Positions within a 16 px step whose sprite tables differ after the init (X at a fixed Y, Y at

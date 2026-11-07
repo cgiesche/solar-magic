@@ -138,6 +138,8 @@ export type PasteHintAt = PasteHint & { level: number; layer: 'l1' | 'l2'; objec
 // IndexedDB keys of the result cache: its name and version (bump when result formats change or old results may be
 // wrong: 4 keeps several inputs per key)
 const CACHE_NAME = 'rc', CACHE_VERSION = 4, CACHE_PREFIX = `${CACHE_NAME}${CACHE_VERSION}:`;
+// stored results whose keys are no longer used (s2.: sprite probes per tileset, now once for all, blockprobe.ts spriteKey)
+const retiredKey = (stored: string) => stored.startsWith(`${CACHE_PREFIX}s2.`);
 const SWEEP_SLICE = 64; // stored results checked against the ROM per background slice (ResultCache.sweep)
 
 
@@ -274,10 +276,10 @@ export class App {
     this.edits = this.suggestions.edits;
     this.entrances = new SecondaryEntrances(this.edits);
     this.cacheReady = kvEntries<CacheEntry | string[]>(CACHE_PREFIX)
-      .then((e) => this.results.load(e.map(([k, v]) => [k.slice(CACHE_PREFIX.length), v])))
+      .then((e) => this.results.load(e.filter(([k]) => !retiredKey(k)).map(([k, v]) => [k.slice(CACHE_PREFIX.length), v])))
       .catch((e) => console.error(e));
-    // the rows of earlier versions of the result cache go; the loaded results are checked in the background
-    kvKeys(CACHE_NAME).then((k) => kvWrite([], oldStoreKeys(k, CACHE_NAME, CACHE_VERSION))).catch((e) => console.error(e));
+    // the rows of earlier versions of the result cache and the retired keys go; the loaded results are checked in the background
+    kvKeys(CACHE_NAME).then((k) => kvWrite([], [...oldStoreKeys(k, CACHE_NAME, CACHE_VERSION), ...k.filter(retiredKey)])).catch((e) => console.error(e));
     void this.cacheReady.then(() => this.sweepResults());
     this.learner = new ResultLearner({ rom, results: this.results, main: this.emu });
     this.probes = new ProbeClient({
