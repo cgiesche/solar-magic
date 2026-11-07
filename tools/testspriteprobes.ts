@@ -54,7 +54,7 @@ const prefetched = async (ts: number) => {
     connect: () => (m) => sent.push(m),
     later: () => {}, setBusy: () => {}, ready: () => {}, kindsReady: () => {},
   });
-  client.prefetch();
+  client.wantPrefetch('picker', { sprites: true });
   await new Promise((r) => setTimeout(r, 0));
   return sent.flatMap((m) => (m.type === 'prefetch' ? m.jobs : [])).filter((j) => j.kind === 'sprite').map((j) => j.num);
 };

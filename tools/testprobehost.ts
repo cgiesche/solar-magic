@@ -8,7 +8,7 @@
 // can be cancelled. Learn jobs (the sprite images, the levels' uses, the sprite memory check, the animated tiles, the layer 3
 // kinds, the tiles of the level as edited, the object thumbnails, the placement preview, the jump arcs, the layer 2
 // motions, the path kinds, the prefab suggestions, the object boxes) as learned directly, with the entries the job runner on
-// the main thread makes (its jobs learned there at once), in lanes; prefetched probes take turns with the tasks. The open level's work
+// the main thread makes (its jobs learned there at once), in lanes; prefetched probes only when nothing else is pending. The open level's work
 // (the object boxes, the loads of the sprite set with its sprites) goes before asked probes, the prefetch and the other lanes.
 import { readFileSync } from 'node:fs';
 import { Rom, snesToPc } from '../src/core/rom.ts';
@@ -80,6 +80,31 @@ const done: ProbeDone[] = [];
 while (host.pending) { const d = host.next(); if (d?.type === 'probe') done.push(d); }
 check(done.map((d) => jobId(d.job)).join(',') === [...asked, ...prefetched].map(jobId).join(','), 'asked jobs first, then prefetched');
 check(done.every((d) => d.gen === 1 && !d.failed && d.put.some(([k]) => k === jobKey(d.job))), 'every job gives its result entry');
+
+// the prefetch last: the asked probes, then the lanes and tasks (taking turns among them), the prefetched probes only
+// when nothing else is pending; an asked probe coming while they run goes first again
+{
+  const h = new ProbeHost();
+  h.setRom(1, rom.data.slice());
+  h.setPrefetch([{ kind: 'block', ts: 0, tile: 0x131 }, { kind: 'sprite', ts: 0, num: 0x0d }]);
+  h.ask([{ kind: 'block', ts: 0, tile: 0x130 }]);
+  h.handle({ type: 'learn', lane: 'uses', key: 'uses', job: { kind: 'uses', levels: [0x106, 0x107] }, replace: false });
+  h.handle({ type: 'learn', lane: 'slippery', key: 'slip', job: { kind: 'slippery' }, replace: false });
+  const what = (d: ProbeReply) => (d.type === 'probe' ? `probe ${jobId(d.job)}` : d.type === 'learning' || d.type === 'learned' ? `${d.type} ${d.lane}` : d.type);
+  const order: string[] = [];
+  let askedLate = false;
+  while (h.pending) {
+    const d = h.next();
+    if (d) order.push(what(d));
+    // (while the lanes run: an asked probe goes before their next step)
+    if (!askedLate && order.length === 3) { askedLate = true; h.ask([{ kind: 'block', ts: 0, tile: 0x132 }]); }
+  }
+  const at = (s: string) => order.findIndex((x) => x.startsWith(s)), lastLane = Math.max(order.lastIndexOf('learned uses'), order.lastIndexOf('learned slippery'));
+  check(at('probe') === 0 && order[0] === `probe ${jobId({ kind: 'block', ts: 0, tile: 0x130 })}` && order[3] === `probe ${jobId({ kind: 'block', ts: 0, tile: 0x132 })}`,
+    `prefetch last: the asked probes first, also one asked while the lanes run (${order.join(', ')})`);
+  check(lastLane > 0 && at(`probe ${jobId({ kind: 'block', ts: 0, tile: 0x131 })}`) > lastLane && at(`probe ${jobId({ kind: 'sprite', ts: 0, num: 0x0d })}`) > lastLane,
+    `prefetch last: the prefetched probes only after the lanes are done (${order.join(', ')})`);
+}
 
 // the entries hold in the editor's cache (same ROM) and equal the prober's results
 const cache = new ResultCache(new RomFingerprint(rom));
@@ -223,14 +248,14 @@ check(host.pending === 0, 'new ROM: tasks dropped');
   // the same scan asked for again (the same key): the running one answers it
   h.handle({ type: 'scan', id: 5, key: 'scan-re', level: scanLevel });
   check(h.started === started, 'the same scan asked for again while it runs: not restarted');
-  // (a prefetched probe first: they take turns with the tasks)
+  // (the scan's turn next: the prefetched probes wait until the tasks are done)
   const replies: ProbeReply[] = [];
   const first = h.next();
   if (first) replies.push(first);
-  check(first?.type === 'probe' && h.started === started, 'a prefetched probe takes its turn after the tasks\' steps');
-  h.next();
-  check(h.started === started + 1, 'the scan started over before its next step');
+  check(first?.type !== 'probe' && h.started === started + 1, 'the scan started over before its next step (the prefetch waits for the tasks)');
   while (h.pending) { const d = h.next(); if (d) replies.push(d); }
+  const firstProbe = replies.findIndex((d) => d.type === 'probe');
+  check(firstProbe > replies.findIndex((d) => d.type === 'scan') && firstProbe > replies.findIndex((d) => d.type === 'kinds'), 'the prefetched probes after the tasks are done');
   const sc = replies.find((d) => d.type === 'scan');
   check(sc?.type === 'scan' && sc.id === 5 && JSON.stringify(sc.result) === JSON.stringify(scanned), 'restarted scan as played directly, answering the latest request');
   check(replies.some((d) => d.type === 'kinds' && !d.failed) && replies.filter((d) => d.type === 'probe').length === 2, 'the kinds and the queued probes done');
@@ -792,8 +817,8 @@ for (const changeRead of [false, true]) {
   const plain = drain(host());
   const withFirst = drain(host([0x3e, 0x0d]));
   const order = withFirst.map(what);
-  check(order[0] === 'd f 11' && order[1] === '3e' && order[2] === 'probe 130' && order.indexOf('probe 131') > 2,
-    `sprite set: the loads of the level's sprites (0d, 3e) before the asked probe, the rest after it, taking turns with the prefetch (${order.join(', ')})`);
+  check(order[0] === 'd f 11' && order[1] === '3e' && order[2] === 'probe 130' && order.indexOf('probe 131') === order.length - 1,
+    `sprite set: the loads of the level's sprites (0d, 3e) before the asked probe, the rest after it, the prefetch last (${order.join(', ')})`);
   check(result(withFirst) === result(plain) && result(plain) !== '' && parts(withFirst) === parts(plain), 'sprite set with the level\'s sprites first: the result and the parts\' entries as without');
   check(plain.map(what)[0] === 'probe 130', `sprite set without the level's sprites: after the asked probe, as before (${plain.map(what).join(', ')})`);
 

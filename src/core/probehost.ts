@@ -11,7 +11,8 @@
 // prefab suggestions, the object boxes for resizing, the overworld's maps, submap views, sprite images and exit edges,
 // the World check, the levels' game BGs, a prefab's places, the loads comparing a broken up prefab, the slippery entrance actions, the object
 // tables) run here too, in lanes (one job at a time, a request replacing the lane's others drops them), taking turns
-// with the tasks; they choose whether the display data counts for them (pictures: it does; the probes and tasks: it
+// with the tasks, after the asked probes; the prefetched probes run only when nothing else is pending (CONTEXT.md
+// "Prefetch"). They choose whether the display data counts for them (pictures: it does; the probes and tasks: it
 // doesn't, ADR 0008).
 // The open level's work goes first (CONTEXT.md "Open level's work", #393): the images of its sprites (their loads of the
 // sprite set first), the kinds of its objects (their loads of the object kinds first) and the object boxes for
@@ -183,7 +184,6 @@ export class ProbeHost {
   // cancelled tasks, not run: taken up again when the same result is asked for before another task of their type
   // (which would use their emulator)
   private cancelled = new Map<TaskType, Task>();
-  private turned = false; // the last job run was a turn's (prefetched probes take turns with them)
   private states = new Map<string, EditState>(); // the levels as edited sent whole, the latest EDIT_STATES (kept over ROMs)
 
   // tasks' jobs (re)started
@@ -438,14 +438,12 @@ export class ProbeHost {
   get pending(): number { return this.asked.size + this.turns.size + this.prefetch.size; }
 
   // Runs the next job: a turn of the open level's work (CONTEXT.md "Open level's work": the tasks and lanes whose job is
-  // ahead, taking turns among them), else the asked probes, else a step of a longer task or a learn job taking turns
-  // with a prefetched probe (so a long one, as the levels' uses, doesn't hold up what the palettes show); null when
-  // nothing finished (a learn job's step gives its progress, the object kinds' the kinds of the open level's objects
-  // once known)
+  // ahead, taking turns among them), else the asked probes, else a step of a longer task or a learn job (taking turns),
+  // else a prefetched probe: the prefetch only when nothing else is pending (CONTEXT.md "Prefetch"); null when nothing
+  // finished (a learn job's step gives its progress, the object kinds' the kinds of the open level's objects once known)
   next(): ProbeReply | null {
-    const ahead = this.ahead();
-    this.turned = !!ahead || (!this.asked.size && this.turns.size > 0 && !(this.turned && this.prefetch.size));
-    if (this.turned) return this.turn(ahead ?? this.turns.values().next().value!);
+    const turn = this.ahead() ?? (this.asked.size ? undefined : this.turns.values().next().value);
+    if (turn) return this.turn(turn);
     const p = this.prober;
     const q = this.asked.size ? this.asked : this.prefetch;
     const [id, job] = q.entries().next().value ?? [];

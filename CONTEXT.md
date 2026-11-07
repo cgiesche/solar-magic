@@ -391,7 +391,7 @@ A queue of the result learner's background jobs: one runs at a time, in the orde
 _Avoid_: queue (for the probes' asked and prefetched jobs)
 
 **Open level's work**:
-What the background worker does first because the open level needs it to be shown and edited: the images of its sprites, the kinds of its objects and the boxes of its objects at sizes (resizing). It runs before the probes asked directly (the overlays, the status bar), the other lanes and tasks and the prefetch, taking turns among itself. The sprite images of the set and the kinds of the tileset's objects are learned the level's sprites and objects first, and only that part is the open level's work; the rest (for the pickers, for objects added later) then takes turns with the others as before. Another level opened while they run has its sprites and objects taken next. The order changes nothing learned; an object whose kind is not known yet is plain.
+What the background worker does first because the open level needs it to be shown and edited: the images of its sprites, the kinds of its objects and the boxes of its objects at sizes (resizing). It runs before the probes asked directly (the overlays, the status bar), the other lanes and tasks and the prefetch (which waits for all of them), taking turns among itself. The sprite images of the set and the kinds of the tileset's objects are learned the level's sprites and objects first, and only that part is the open level's work; the rest (for the pickers, for objects added later) then takes turns with the others as before. Another level opened while they run has its sprites and objects taken next. The order changes nothing learned; an object whose kind is not known yet is plain.
 _Avoid_: urgent (a job that runs while a dialog is open), priority
 
 **Watch**:
@@ -443,7 +443,8 @@ Where Mario died in a recent test play of a level, drawn over it (View → Death
 _Avoid_: death point, skull
 
 **Prefetch**:
-Probing what the palettes could show before anyone asks for it, after the open level's work and everything asked for directly; it takes turns with the lanes and tasks.
+Probing what a view shows before anyone asks for it (the picker's Objects tab: its objects' Map16 tiles; its Map16 tab and the Map16 editor: tiles 000–1FF; its Sprites tab: the sprites), only while such a view is shown, in the open level's tileset; after a ROM change only what a view shown then wants is probed again. It runs last, only when nothing else is pending – the open level's work, the probes asked directly, the lanes and tasks – and quietly: the busy indicator counts the probes asked directly only. The views themselves show what is known and don't ask; a search, a hover or an overlay asks.
+_Avoid_: background probes (the probes asked directly also run in the background worker)
 
 **Scroll bands**:
 Where Mario is on the game's screen while the camera scrolls in a direction, or follows him after L/R looked ahead; learned by moving him in the probe level with the open level's mode and vertical scroll setting (an emulated result); a setting that keeps the camera still has no band that way.

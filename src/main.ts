@@ -140,6 +140,8 @@ function buildUi(app: App): { start: (at: NavLoc | null) => Promise<void> } {
   });
 
   let workspace: 'level' | 'ow' | 'gfx' | 'game' = 'level';
+  // the picker is shown in the level editor unless the message panel takes its place (it prefetches only then)
+  const updatePickerShown = () => picker.setShown(workspace === 'level' && !app.messages);
   let ow: OverworldView | null = null;
   let game: GameView | null = null;
   let gameBorder: number | null = null; // the overworld map whose border the Game workspace shows when switched to
@@ -342,6 +344,7 @@ function buildUi(app: App): { start: (at: NavLoc | null) => Promise<void> } {
       showLayout(levelBar, left, center, right);
       view.layout();
     }
+    updatePickerShown();
     updateToolbar();
     nav?.mark();
     return true;
@@ -390,9 +393,12 @@ function buildUi(app: App): { start: (at: NavLoc | null) => Promise<void> } {
   // the message panel takes the picker's place while it is open
   const messagePanel = new MessagePanel(app);
   app.on('messages', () => {
-    if (!app.messages) { right.replaceChildren(picker.root, props.root); return; }
-    if (workspace !== 'level') void setWorkspace('level');
-    if (messagePanel.root.parentElement !== right) { right.replaceChildren(messagePanel.root); messagePanel.focus(); }
+    if (!app.messages) right.replaceChildren(picker.root, props.root);
+    else {
+      if (workspace !== 'level') void setWorkspace('level');
+      if (messagePanel.root.parentElement !== right) { right.replaceChildren(messagePanel.root); messagePanel.focus(); }
+    }
+    updatePickerShown();
   });
 
   // ---- browser back/forward through the places (navhistory.ts)

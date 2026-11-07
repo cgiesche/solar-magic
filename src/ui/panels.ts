@@ -38,12 +38,12 @@ import { contextMenu } from './menu.ts';
 import { collisionMarks, markCanvas, switchMarks, switchCanvas, MARK_TEXT, type CollisionMark } from './collisionmarks.ts';
 
 // behaviour of the given Map16 tiles when hit from below or entered (only tiles with an effect);
-// undefined while probes are still pending
-export function blockSummary(app: App, tiles: number[], all = false): string[] | undefined {
+// undefined while probes are still pending (asked for; without ask only those known: a view's come with its prefetch)
+export function blockSummary(app: App, tiles: number[], all = false, ask = true): string[] | undefined {
   const out: string[] = [];
   let pending = false;
   for (const t of tiles.slice(0, 16)) {
-    const p = app.probes.block(t);
+    const p = ask ? app.probes.block(t) : app.cachedBlock(t);
     if (!p) { pending = true; continue; }
     if (p.summary || p.enter || all) out.push(tiles.length > 1 || all ? `${hex3(t)}: ${probeText(p)}` : p.summary ? p.summary + enterSuffix(p) : enterText(p.enter));
   }
@@ -559,8 +559,24 @@ export class Picker {
       animateTiles(this.app, c, t.cells, { alive: () => this.thumbsFrom === thumbs });
       this.thumbTiles.set(t.key, t.m16);
     }
-    if (thumbs) this.app.probes.prefetch([...this.thumbTiles.values()].flat());
+    this.wantPrefetch();
     return true;
+  }
+
+  // Shown (the level editor's right side, not the message panel there) or hidden: what it wants prefetched follows
+  private shown = true;
+  setShown(shown: boolean): void {
+    this.shown = shown;
+    this.wantPrefetch();
+  }
+
+  // what the picker shown wants prefetched (ProbeClient.wantPrefetch), the probes its tab shows: the Objects tab its
+  // objects' Map16 tiles, the Map16 tab tiles 000-1FF, the Sprites tab the sprites; nothing while it is hidden or shows
+  // a brush mode's sheet
+  wantPrefetch(): void {
+    const app = this.app, tab = this.shown && !isBrushMode(app.model.mode) ? this.tab : null;
+    app.probes.wantPrefetch('picker', tab === 'obj' ? { tiles: [...new Set([...this.thumbTiles.values()].flat())] }
+      : tab === 'm16' ? { blocks: true } : tab === 'spr' ? { sprites: true } : null);
   }
 
   // the standard objects (with their types), the extended objects or object 2D's custom numbers as listed in the
@@ -568,7 +584,8 @@ export class Picker {
   // entered (emulated, see blockprobe.ts), which tells apart objects that look the same, like pipes with and
   // without an entrance, and the tooltip – a package's (Lunar Magic's .osc, objtext.ts), else for an object that
   // draws nothing what its load changes. Such an object's thumbnail is its box of the level view (objbox.ts).
-  objectEntries(section: ObjSection) {
+  // ask: the block probes not known yet are asked for (the search); the tab's own come with its prefetch
+  objectEntries(section: ObjSection, ask = true) {
     const app = this.app;
     const out = [];
     for (const s of this.specs()) {
@@ -578,7 +595,7 @@ export class Picker {
       const name = (s.extension ? `Custom object ${hex2(s.extension[0])}` : app.objectName(s.num, s.ext)) + (typeHex ? ` – type ${typeHex}` : '');
       const label = (s.extension ? `${hex2(s.num)}.${hex2(s.extension[0])}` : s.num ? hex2(s.num) : hex2(s.ext)) + (typeHex ? `.${typeHex}` : '');
       const tiles = this.thumbTiles.get(key) ?? [];
-      const sum = tiles.length ? blockSummary(app, tiles) : [];
+      const sum = tiles.length ? blockSummary(app, tiles, false, ask) : [];
       const effect = this.effects.get(key), unhandled = this.unhandled.has(key);
       const tip = objectTooltip(app.rom, s.num, s.extension?.[0] ?? s.ext);
       const marks = blockMarks(app, tiles), switches = blockSwitches(app, tiles);
@@ -600,14 +617,15 @@ export class Picker {
   }
 
   // original sprites 00-E6, then the custom sprites of the ROM (PIXI, ids $2xx/$3xx); `text` for the search
-  // includes what the sprite gives when hit from below or jumped on (emulated, see blockprobe.ts)
-  spriteEntries() {
+  // includes what the sprite gives when hit from below or jumped on (emulated, see blockprobe.ts); ask: the probes not
+  // known yet are asked for (the search), the tab's own come with its prefetch
+  spriteEntries(ask = true) {
     const app = this.app;
     const custom = app.customSprites().filter((c) => c.listed);
     return [...Array.from({ length: 0xe7 }, (_, i) => i), ...custom.map((c) => c.id)].map((id) => {
       const n = id & 0xff, extra = id >> 8;
       const name = app.spriteLabel(id);
-      const p = app.probes.sprite(id);
+      const p = ask ? app.probes.sprite(id) : app.probes.spriteKnown(id);
       const info = p?.summary ?? '';
       const num = id >= 0x200 ? `C${hex2(n)}` : hex2(n);
       return {
@@ -754,6 +772,7 @@ export class Picker {
     // the list being left keeps its scroll position (read here: the scroll event may still be pending)
     if (this.builtTab) this.scrolls[this.builtTab] = this.body.scrollTop;
     this.builtTab = brush ? undefined : this.tab;
+    this.wantPrefetch();
     if (app.model.mode === 'bg') { clear(this.body); this.buildBg(); return; }
     if (app.model.mode === 'l3') { clear(this.body); this.buildL3(); return; }
     const tabDefs: [typeof this.tab, string][] = [['obj', 'Objects'], ['m16', 'Map16'], ['spr', 'Sprites']];
@@ -768,7 +787,7 @@ export class Picker {
     const app = this.app;
     const cur = app.model.pickedItem;
     let grid = this.body.appendChild(h('div', { class: 'picker-grid' }));
-    for (const e of this.spriteEntries()) {
+    for (const e of this.spriteEntries(false)) {
       if (e.id >= 0x200 && !grid.dataset.custom) {
         this.body.append(h('div', { class: 'picker-head' }, 'Custom sprites (PIXI)'));
         grid = this.body.appendChild(h('div', { class: 'picker-grid', 'data-custom': '1' }));
@@ -813,7 +832,7 @@ export class Picker {
     this.buildPrefabs();
     for (const [section, title] of [['obj', 'Resizable'], ['ext', 'Fixed size'], ['custom', 'Custom']] as const) {
       const grid = h('div', { class: 'picker-grid' });
-      for (const e of this.objectEntries(section)) {
+      for (const e of this.objectEntries(section, false)) {
         const { s, vt } = e;
         const sel = cur?.kind === 'obj' && cur.num === s.num && (s.num !== 0 || cur.ext === s.ext)
           && (!s.extension || cur.extension?.[0] === s.extension[0]) && objectVariant(e.kind, sizedByte(e.kind, cur)) === vt;

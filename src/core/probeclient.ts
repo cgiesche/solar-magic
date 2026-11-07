@@ -1,6 +1,6 @@
 // The editor's side of the probes (probehost.ts): asks for block, collision and sprite probes, Mario's
-// run speeds and the game view's scroll bands in the current tileset, prefetches what the palettes can
-// show, and runs the object kinds, the level scan, the camera at a place and the result learner's jobs (CONTEXT.md;
+// run speeds and the game view's scroll bands in the current tileset, prefetches what the views shown
+// want (last, quietly), and runs the object kinds, the level scan, the camera at a place and the result learner's jobs (CONTEXT.md;
 // probeprotocol.ts LearnJob), all in the probe worker. It sends the ROM once, then the ranges each change
 // wrote (the worker keeps its queue and restarts only tasks
 // that read a changed byte; the whole ROM again, with everything still wanted, when the ROM's log of changes
@@ -62,12 +62,20 @@ export interface LearnOptions<T> {
 // (resent: the ROM generation it was last sent again for, a reply from an older one coming: once per generation)
 interface LearnWant { msg: LearnMessage; opts: LearnOptions<unknown>; done: ((r: unknown) => void)[]; failed: (() => void)[]; dropped: (() => void)[]; resent: number }
 
+// what a view shown wants prefetched (ProbeClient.wantPrefetch) in the current tileset: blocks, the block probes of
+// Map16 tiles 000-1FF; tiles, the block and collision probes of these; sprites, the probes of all sprites
+export interface PrefetchWant { blocks?: boolean; tiles?: readonly number[]; sprites?: boolean }
+// the views that want a prefetch: the level editor's picker, the graphics workspace's Map16 editor
+export type PrefetchOwner = 'picker' | 'map16tab';
+
 export class ProbeClient {
   private send: Send | null = null;
   private gen = -1; // ROM generation the worker probes on
   private size = -1; // and the ROM's size
   private asked = new Map<string, ProbeJob>(); // asked for and not done yet
-  private prefetched = new Map<string, ProbeJob>(); // the same, probed after the asked ones
+  private prefetched = new Map<string, ProbeJob>(); // the same, probed when nothing else is pending
+  private prefetchWants = new Map<PrefetchOwner, PrefetchWant>(); // by the view wanting it (only those shown)
+  private prefetchSent = false; // the worker may have a prefetch queue (one was sent with jobs)
   // probes and tilesets whose object kinds failed, forgotten whenever the ROM changes: a deliberate exception
   // to emulated results holding by the bytes they read (a failure is rare and cheap to try again)
   private failed = new Set<string>();
@@ -97,6 +105,10 @@ export class ProbeClient {
   collision(tile: number): CollisionProbe | undefined { return this.probed({ kind: 'collision', ts: this.d.tileset(), tile }); }
   sprite(num: number): SpriteProbe | undefined {
     return probeable(num) ? this.probed({ kind: 'sprite', ts: this.d.tileset(), num }) : undefined;
+  }
+  // as sprite, without asking for it (a view's: its prefetch brings it, wantPrefetch)
+  spriteKnown(num: number): SpriteProbe | undefined {
+    return probeable(num) ? jobResult<SpriteProbe>(this.d.results, { kind: 'sprite', ts: this.d.tileset(), num }) : undefined;
   }
   // a sprite's probe in tileset ts (not only the current one); null when it failed or the probes don't tell it
   spriteIn(num: number, ts: number): SpriteProbe | null | undefined {
@@ -140,26 +152,37 @@ export class ProbeClient {
     });
   }
 
-  // Probes everything the palette tabs can show (Map16 tiles 000-1FF plus `tiles`, all sprites; how
-  // Mario collides with `tiles`) in the background, after what is asked for directly; results go to
-  // the cache, so this runs once per tileset and ROM state (the sprites once per ROM state, blockprobe.ts).
-  prefetch(tiles: Iterable<number> = []): void {
+  // A view that shows probe results (a picker tab, the Map16 editor) is shown (want: what it shows, PrefetchWant) or hidden (null), named by owner:
+  // the probes the shown views want are prefetched (CONTEXT.md "Prefetch"), in the worker only when nothing else is
+  // pending and not counted as busy; nothing is prefetched that no view shown wants. The same want again changes
+  // nothing.
+  wantPrefetch(owner: PrefetchOwner, want: PrefetchWant | null): void {
+    const was = this.prefetchWants.get(owner);
+    if (sameWant(was, want ?? undefined)) return;
+    if (want) this.prefetchWants.set(owner, want); else this.prefetchWants.delete(owner);
+    this.refreshPrefetch();
+  }
+
+  // Makes the prefetch queue anew: what the shown views want (wantPrefetch) in the current tileset (the queue of
+  // another tileset dropped) and not known yet; results go to the cache, so each is probed once per tileset and ROM state (the sprites once per ROM state, blockprobe.ts)
+  refreshPrefetch(): void {
     this.d.cacheReady.then(() => {
       this.sync();
       const ts = this.d.tileset();
-      // (the queue of another tileset is dropped)
-      const jobs = new Map([...this.prefetched].filter(([, j]) => j.ts === ts));
+      const jobs = new Map<string, ProbeJob>();
       const add = (job: ProbeJob) => {
         const id = jobId(job);
         if (!this.failed.has(id) && !this.asked.has(id) && jobResult(this.d.results, job) === undefined) jobs.set(id, job);
       };
-      for (const tile of tiles) { add({ kind: 'block', ts, tile }); add({ kind: 'collision', ts, tile }); }
-      for (let tile = 0; tile < 0x200; tile++) add({ kind: 'block', ts, tile });
-      for (let num = 0; num < SPRITE_PROBE_END; num++) add({ kind: 'sprite', ts, num });
-      if (!jobs.size && !this.prefetched.size) return;
+      const wants = [...this.prefetchWants.values()];
+      for (const w of wants) for (const tile of w.tiles ?? []) { add({ kind: 'block', ts, tile }); add({ kind: 'collision', ts, tile }); }
+      if (wants.some((w) => w.blocks)) for (let tile = 0; tile < 0x200; tile++) add({ kind: 'block', ts, tile });
+      if (wants.some((w) => w.sprites)) for (let num = 0; num < SPRITE_PROBE_END; num++) add({ kind: 'sprite', ts, num });
+      // (a queue the worker may have is replaced, also by none)
+      if (!jobs.size && !this.prefetchSent) return;
       this.prefetched = jobs;
+      this.prefetchSent = jobs.size > 0;
       this.send?.({ type: 'prefetch', jobs: [...jobs.values()] });
-      this.busy();
     });
   }
 
@@ -342,13 +365,15 @@ export class ProbeClient {
       this.send({ type: 'edit', gen: this.gen, size: this.size, edits });
     } else {
       this.send({ type: 'rom', gen: this.gen, data: rom.data.slice() });
+      this.prefetchSent = false; // (the worker dropped its queue)
       this.levelKinds = null; // (a new ROM: shown again for it)
       if (this.asked.size) this.send({ type: 'ask', jobs: [...this.asked.values()] });
       if (this.kindsWant) this.send(this.kindsWant);
       for (const w of this.playWant.values()) this.send(w.msg);
       for (const lane of this.lanes.values()) for (const w of lane.jobs) { w.resent = this.gen; this.post(this.withParts(w.msg)); }
     }
-    this.d.later('probe-prefetch', () => this.prefetch()); // results that read changed ROM data are redone
+    // (what the views shown want: results that read changed ROM data are redone)
+    this.d.later('probe-prefetch', () => this.refreshPrefetch());
   }
 
   // the worker; without one (it failed to start or broke down) the jobs run here in slices
@@ -479,6 +504,7 @@ export class ProbeClient {
     }
     if (d.failed && d.gen === this.gen) this.failed.add(id);
     const asked = this.asked.delete(id), prefetched = this.prefetched.delete(id);
+    if (prefetched && !this.prefetched.size) this.prefetchSent = false; // (the worker's queue is done too)
     this.busy();
     if (asked || prefetched) this.d.progress?.();
     if ((asked && !this.asked.size) || (prefetched && !this.prefetched.size)) this.d.ready();
@@ -521,10 +547,18 @@ export class ProbeClient {
     this.d.results.setAll(d.put, d.gen === this.d.rom().gen);
   }
 
+  // the probes asked for directly (the prefetch runs quietly)
   private busy(): void {
-    const n = this.asked.size + this.prefetched.size;
+    const n = this.asked.size;
     this.d.setBusy('probe', n ? `Block behavior (${n})` : null);
   }
 }
 
 type Played = 'scan' | 'camera'; // tasks that play a level
+
+// (the same tiles in the same order: a view asks with the same list again)
+function sameWant(a: PrefetchWant | undefined, b: PrefetchWant | undefined): boolean {
+  if (!a || !b) return a === b;
+  const at = a.tiles ?? [], bt = b.tiles ?? [];
+  return !!a.blocks === !!b.blocks && !!a.sprites === !!b.sprites && at.length === bt.length && at.every((t, i) => t === bt[i]);
+}

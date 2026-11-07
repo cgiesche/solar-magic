@@ -211,13 +211,15 @@ export class Map16Tab implements WsPanel {
     else this.retarget();
   }
 
+  // (while shown, the behavior of tiles 000-1FF is prefetched: the tiles' tooltips and the search show it)
   show(): void {
     this.visible = true;
+    this.app.probes.wantPrefetch('map16tab', { blocks: true });
     this.buildBar();
     this.redraw();
     if (this.scrollPending) requestAnimationFrame(() => this.scrollToSel());
   }
-  hide(): void { this.visible = false; this.watch.stop(); }
+  hide(): void { this.visible = false; this.watch.stop(); this.app.probes.wantPrefetch('map16tab', null); }
 
   get selected(): { tile: number; target: Map16Target } { return { tile: this.sel, target: this.t.id }; }
 
