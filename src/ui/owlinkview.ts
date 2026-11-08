@@ -16,7 +16,7 @@ import { refusedToast, refusalWords } from './owrefusal.ts';
 import { OwRefusal, type OwRefusalData } from '../core/owrefusal.ts';
 import { linkTableFix } from './owfixes.ts';
 import {
-  readLinks, makeLink, removeLink, setBothWays, moveLocation, locationUses, pathSide, koopaTeleport, setKoopaTeleport, sidesMatch, exitOut, exitOutText,
+  readLinks, linkEndCells, makeLink, removeLink, setBothWays, moveLocation, locationUses, pathSide, koopaTeleport, setKoopaTeleport, sidesMatch, exitOut, exitOutText,
   KOOPAS, KOOPA_TILE, koopaOfTile, koopaPlaceRefusal, linkCheck, locationMoveRefusal, type OwLink, type LinkEnd, type LinkKind,
 } from '../core/owlinks.ts';
 import { readTeleports, tileText, sameTile, type OwTile } from '../core/owteleport.ts';
@@ -81,6 +81,14 @@ export class LinkLayer {
       }))]]));
     }
     return d.levels.get(i) ?? [];
+  }
+
+  // the layer 1 cells link ends are at on the map shown (owlinks.ts linkEndCells): objects there, left alone by painting
+  private cellsOf: { gen: number; l1: ArrayLike<number>; cells: Set<number> } | null = null;
+  cells(): Set<number> {
+    const gen = this.rom.gen, l1 = this.view.shown.l1;
+    if (this.cellsOf?.gen !== gen || this.cellsOf.l1 !== l1) this.cellsOf = { gen, l1, cells: linkEndCells(this.rom, l1, this.info().links) };
+    return this.cellsOf.cells;
   }
 
   // ---- tiles ----

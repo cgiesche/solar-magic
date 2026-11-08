@@ -114,10 +114,11 @@ export class PathTool {
   // chooses them (solved), on layer 1 as shown (after the event chosen)
   private solve(dragged: readonly number[]): void {
     const v = this.view, kinds = v.pathKinds()!, shapes = v.pathShapes()!, l1 = v.levelL1(), rom = v.app.rom;
-    // (a stop tile whose translevel brings something along is kept: a name, base event or messages)
-    const ends = routeEnds(dragged, l1, kinds, shapes, (c) => !!v.tls[c] && hasNameEventOrMessages(rom, v.tls[c]));
+    // (a stop tile whose translevel brings something along is kept: a name, base event or messages; so is a link end)
+    const fixed = v.links.cells();
+    const ends = routeEnds(dragged, l1, kinds, shapes, (c) => fixed.has(c) || (!!v.tls[c] && hasNameEventOrMessages(rom, v.tls[c])));
     const r = this.cells = ends.cells;
-    this.solved = routeTiles(r, { l1, kinds, shapes, prefer: routeKind(r, l1, kinds), through: new Set(ends.through), stopTranslevels: this.stopTls ?? stopTranslevels(rom, v.tls) });
+    this.solved = routeTiles(r, { l1, kinds, shapes, prefer: routeKind(r, l1, kinds), through: new Set(ends.through), stopTranslevels: this.stopTls ?? stopTranslevels(rom, v.tls), fixed });
   }
   private shown(): void {
     this.view.paint();

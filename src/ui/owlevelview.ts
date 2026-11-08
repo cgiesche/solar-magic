@@ -18,6 +18,7 @@ import {
   l1Index, l1XY, translevelToLevel, freeTranslevel, translevelUse, enterableLevels, levelTilesOf, baseEvent, readTranslevels, NO_EVENT, DIR_NAMES,
 } from '../core/overworld.ts';
 import { moveLevelTileWithPaths, type KeptPath, type KeptWhy } from '../core/owlevelmove.ts';
+import { moveLinkEnds } from '../core/owlinks.ts';
 import {
   levelTileLooks, invisibleLevelTile, defaultLook, stopTile, moveLevelTile, removeLevelTile, placeLevelTile, levelsWithoutTile, moveLevelTileCheck, placeLevelTileCheck,
   type LevelTileEvent,
@@ -143,7 +144,8 @@ export class LevelTileLayer {
     d.to = to;
   }
   // dropped: the level tile swaps with the tile there, its paths drawn again to it (owlevelmove.ts: the paths of the
-  // progress shown; one that can't be is kept where it was, said); with Alt held (bare) the tile alone
+  // progress shown; one that can't be is kept where it was, said) and the link ends of the two cells swapped with them
+  // (owlinks.ts moveLinkEnds, #413); with Alt held (bare) the tile alone
   up(bare = false): void {
     const d = this.drag;
     this.drag = null;
@@ -152,12 +154,14 @@ export class LevelTileLayer {
     if (!d || d.to === d.from) return;
     const { x, y } = l1XY(d.to), v = this.view, kinds = v.pathKinds(), shapes = v.pathShapes();
     const label = `${this.label(d.from)}: moved to ${hex(x, 2)},${hex(y, 2)}`;
+    const links = bare ? null : v.links.info().links;
+    const moveLinks = () => { if (links) moveLinkEnds(this.rom, d.from, d.to, links); };
     if (bare || !kinds || !shapes) {
-      this.edit(label, () => moveLevelTile(this.rom, d.from, d.to, this.event()), d.to);
+      this.edit(label, () => { moveLevelTile(this.rom, d.from, d.to, this.event()); moveLinks(); }, d.to);
       return;
     }
     let kept: KeptPath[] = [];
-    if (!this.edit(`${label} with its paths`, () => { kept = moveLevelTileWithPaths(this.rom, d.from, d.to, this.event(), kinds, shapes).kept; }, d.to)) return;
+    if (!this.edit(`${label} with its paths`, () => { kept = moveLevelTileWithPaths(this.rom, d.from, d.to, this.event(), kinds, shapes).kept; moveLinks(); }, d.to)) return;
     if (kept.length) {
       toast(`${kept.length === 1 ? 'A path' : `${kept.length} paths`} of the level kept where ${kept.length === 1 ? 'it was' : 'they were'}: ${kept.map((k) => `${DIR_NAMES[k.path.dir]} (${KEPT_WHY[k.why]})`).join(', ')}. Draw ${kept.length === 1 ? 'it' : 'them'} with Path (auto).`);
     }

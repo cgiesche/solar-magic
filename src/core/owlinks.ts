@@ -24,7 +24,7 @@ import {
 import { readSecondaryEntrance, levelTranslevel } from './level.ts';
 import type { ExitGraph } from './exitgraph.ts';
 import { NO_SHAPE, dirOf, type PathShapes } from './owpaths.ts';
-import { DIR_NAMES } from './overworld.ts';
+import { DIR_NAMES, readL1, l1Index, l1XY } from './overworld.ts';
 import { OwRefusal, type OwRefusalData } from './owrefusal.ts';
 
 const SECONDARY_ENTRANCES = 0x200;
@@ -305,4 +305,60 @@ export function koopaTeleport(rom: Rom, k: number): { x: number; y: number } | n
 export function setKoopaTeleport(rom: Rom, k: number, t: { x: number; y: number } | null): void {
   rom.w16(KOOPA_X + k * 2, t ? t.x * 16 + 8 : 0);
   rom.w16(KOOPA_Y + k * 2, t ? t.y * 16 + 8 : 0);
+}
+
+// ---- link ends as objects on layer 1 (#413) ----
+// The layer 1 cells (l1Index) a link ends at: both ends of every star/pipe and exit path link, the tile of a Koopa Kid
+// with a place on `l1` and that place, the locations exits to the overworld teleport to. Painting and the route brush
+// leave them alone; a level tile moved takes them along (moveLinkEnds).
+export function linkEndCells(rom: Rom, l1: ArrayLike<number>, links: readonly OwLink[] = readLinks(rom)): Set<number> {
+  const out = new Set<number>(), cell = (t: OwTile) => l1Index(t.submap ? 1 : 0, t.x, t.y);
+  for (const l of links) { out.add(cell(l.a)); out.add(cell(l.b)); }
+  const all = readTeleports(rom);
+  for (const [k] of locationUses(rom)) { const to = all[k].to; if (to) out.add(cell(to)); }
+  for (let i = 0; i < 0x800; i++) {
+    const k = koopaOfTile(l1[i]), p = k >= 0 ? koopaTeleport(rom, k) : null;
+    if (p) { out.add(i); out.add(l1Index(i >> 10, p.x, p.y)); }
+  }
+  return out;
+}
+
+// The link ends at layer 1 cells `from` and `to` (l1Index, one region) swapped, as a level tile moved there swaps with
+// the tile there: every star/pipe entry's and location's tile, exit path entry's position (Mario half a tile off its
+// tile) and Koopa Kid's place at one cell put at the other, on the same submap. `links`: as readLinks reads them (the
+// sources of exit paths). One ROM edit's work.
+export function moveLinkEnds(rom: Rom, from: number, to: number, links: readonly OwLink[] = readLinks(rom)): void {
+  if (from === to || (from & 0x400) !== (to & 0x400)) return;
+  const A = l1XY(from), B = l1XY(to);
+  const other = (t: { x: number; y: number }): { x: number; y: number } | null =>
+    t.x === A.x && t.y === A.y ? B : t.x === B.x && t.y === B.y ? A : null;
+  const region = (s: number) => (s ? 0x400 : 0) === (from & 0x400);
+  // star/pipe entries and locations: their tiles
+  readTeleports(rom).forEach((e, i) => {
+    const f = e.from && region(e.from.submap) ? other(e.from) : null, t = e.to && region(e.to.submap) ? other(e.to) : null;
+    if (f || t) writeTeleport(rom, i, { from: e.from && (f ? { ...e.from, ...f } : e.from), to: e.to && (t ? { ...e.to, ...t } : e.to) });
+  });
+  // exit path entries: shifted with the tile they leave from or lead to
+  const exits = readExitPaths(rom), shift = (p: OwPos, n: { x: number; y: number }, o: OwTile): OwPos => ({ ...p, x: p.x + (n.x - o.x) * 16, y: p.y + (n.y - o.y) * 16 });
+  const moved = new Map<number, ExitPath>();
+  for (const l of links) {
+    if (l.kind !== 'exit') continue;
+    l.entries.forEach((i, k) => {
+      const e = moved.get(i) ?? exits[i];
+      if (!e) return;
+      const src = k ? l.b : l.a, dst = k ? l.a : l.b;
+      const ns = region(src.submap) ? other(src) : null, nd = region(dst.submap) ? other(dst) : null;
+      if (!ns && !nd) return;
+      moved.set(i, { from: ns ? shift(e.from, ns, src) : e.from, to: nd ? shift(e.to, nd, dst) : e.to, tile: nd ?? e.tile });
+    });
+  }
+  for (const [i, e] of moved) writeExitPath(rom, i, e);
+  // the Koopa Kids' places (on the region of their tiles)
+  const l1 = readL1(rom), base = from & 0x400;
+  for (let k = 0; k < KOOPAS; k++) {
+    let ours = false;
+    for (let i = base; i < base + 0x400 && !ours; i++) ours = koopaOfTile(l1[i]) === k;
+    const p = ours ? koopaTeleport(rom, k) : null, n = p && other(p);
+    if (n) setKoopaTeleport(rom, k, n);
+  }
 }

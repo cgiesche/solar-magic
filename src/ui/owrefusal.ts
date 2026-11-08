@@ -96,6 +96,7 @@ export function refusalWords(rom: Rom, r: OwRefusalData): RefusalWords {
     case 'submapsLoading': return w('Not painted', 'the submaps are still being loaded', 'Try again in a moment.');
     case 'routeGap': return w('The route breaks here', 'this cell is not next to the one before', 'Drag from cell to cell.');
     case 'routeExitInside': return w('The route can\'t go on here', 'an exit tile takes Mario to another submap, so the route can only end there');
+    case 'routeLinkEnd': return w('The route can\'t go through here', 'an overworld link ends on this tile, so it stays as it is', 'Remove the link first (its menu), or draw around it.');
     case 'routeCrosses': return w('The route can\'t go on here', 'it crosses itself');
     case 'starOnLevel': { const t = r.pipe ? 'pipe' : 'star'; return w(`No ${t} can go here`,
       `this tile enters ${levelTitle(rom, r.tl)} at another point of the game, and a tile keeps one level all game long – a ${t} there would walk and be named as that level`,

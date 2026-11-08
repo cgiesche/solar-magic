@@ -40,6 +40,7 @@ export type OwRefusalData =
   // ---- a route drawn with the route brush, "Path (auto)" (owroute.ts; told in the status bar) ----
   | { kind: 'routeGap' } // a cell not next to the one before
   | { kind: 'routeExitInside' } // an exit tile not at the route's end
+  | { kind: 'routeLinkEnd' } // a cell an overworld link, a Koopa Kid's place or a location ends at (#413)
   | { kind: 'routeCrosses' }
   // no path tile leads Mario in direction dir and out toward out (where: at all, from where his first step off the stop
   // or the path before leaves him, to where his first step off the stop after it leaves him walking back)
@@ -109,6 +110,7 @@ export function refusalDetails(r: OwRefusalData): string {
     case 'submapsLoading': return 'The submaps\' views are not known yet.';
     case 'routeGap': return 'Not next to the cell before.';
     case 'routeExitInside': return 'An exit tile takes Mario to another submap: the route can only end there.';
+    case 'routeLinkEnd': return 'An overworld link ends here: its tile stays as it is.';
     case 'routeCrosses': return 'The route crosses itself here.';
     case 'routeNoTile': return `${routeNoTileText(r)}.`;
     case 'starOnLevel': return `Tile ${cellText(r.cell)} enters level ${hex(translevelToLevel(r.tl), 3)} at another event progress (translevel table: one translevel per tile): a ${r.pipe ? 'pipe' : 'star'} there would share it.`;

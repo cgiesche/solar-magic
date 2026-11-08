@@ -45,6 +45,7 @@ const samples: { [K in OwRefusalKind]: Extract<OwRefusalData, { kind: K }> } = {
   submapsLoading: { kind: 'submapsLoading' },
   routeGap: { kind: 'routeGap' },
   routeExitInside: { kind: 'routeExitInside' },
+  routeLinkEnd: { kind: 'routeLinkEnd' },
   routeCrosses: { kind: 'routeCrosses' },
   routeNoTile: { kind: 'routeNoTile', dir: 0, out: 2, where: 'pathBefore' },
   routeNoTranslevel: { kind: 'routeNoTranslevel', max: 0x5f, kept: 2 },

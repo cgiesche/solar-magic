@@ -47,10 +47,13 @@ export class OverworldStroke {
   private readonly ev: OwEventMaps | null;
   private readonly began: Uint16Array[]; // what it paints in place, as when it began (cancel)
   private readonly paths: StarPaths | null;
+  private readonly fixed: (i: number) => boolean;
   // `maps` (and an event's `ev.after`/`ev.l1`) are painted in place: the view shows them while the stroke goes on;
-  // paths: the path kinds and shapes the stars' translevels follow (null: layer 2, or the translevels left alone)
-  constructor(rom: Rom, layer: StrokeLayer, maps: OwMaps, isLevelTile: LevelTileTest, ev: OwEventMaps | null = null, paths: StarPaths | null = null) {
-    this.rom = rom; this.layer = layer; this.maps = maps; this.isLevelTile = isLevelTile; this.ev = ev; this.paths = paths;
+  // paths: the path kinds and shapes the stars' translevels follow (null: layer 2, or the translevels left alone);
+  // fixed: the layer 1 cells (l1Index) left alone besides level tiles – link ends (owlinks.ts linkEndCells, #413)
+  constructor(rom: Rom, layer: StrokeLayer, maps: OwMaps, isLevelTile: LevelTileTest, ev: OwEventMaps | null = null, paths: StarPaths | null = null,
+    fixed: (i: number) => boolean = () => false) {
+    this.rom = rom; this.layer = layer; this.maps = maps; this.isLevelTile = isLevelTile; this.ev = ev; this.paths = paths; this.fixed = fixed;
     this.began = this.painted().map((a) => a.slice());
   }
   // the arrays the stroke paints in place
@@ -67,8 +70,8 @@ export class OverworldStroke {
   get event(): number { return this.ev?.event ?? -1; }
 
   // tile or tilemap entry v painted at cell (x, y) of a region (0 the main map, 1 the submaps; layer 1's 32x32 cells,
-  // layer 2's 64x64). On layer 1 a level tile is neither painted nor painted over, NO_TILE (owl1sheet.ts) paints nothing. Whether the
-  // cell changed
+  // layer 2's 64x64). On layer 1 a level tile is neither painted nor painted over, nor a fixed cell (a link end), NO_TILE
+  // (owl1sheet.ts) paints nothing. Whether the cell changed
   paint(region: number, x: number, y: number, v: number): boolean {
     const { maps, ev } = this;
     if (this.layer === 'l2') {
@@ -78,7 +81,7 @@ export class OverworldStroke {
       return true;
     }
     const i = l1Index(region, x, y), into = ev ? ev.l1 : maps.l1;
-    if (!into || v < 0 || into[i] === v || this.isLevelTile(v) || this.isLevelTile(into[i])) return false;
+    if (!into || v < 0 || into[i] === v || this.isLevelTile(v) || this.isLevelTile(into[i]) || this.fixed(i)) return false;
     into[i] = v;
     return true;
   }

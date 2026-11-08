@@ -544,7 +544,11 @@ export class OverworldView {
   // the level tiles of layer 1 `levels` on the map shown lightly hatched
   private hatchLevelTiles(ctx: CanvasRenderingContext2D, levels: ArrayLike<number>, lw: number): void {
     const at: { x: number; y: number }[] = [];
-    for (let y = 0; y < 32; y++) for (let x = 0; x < 32; x++) if (this.isLevelTile(levels[l1Index(this.region, x, y)])) at.push({ x: x * 16, y: y * 16 });
+    const links = this.links.cells(); // (link ends too: objects as well, #413)
+    for (let y = 0; y < 32; y++) for (let x = 0; x < 32; x++) {
+      const i = l1Index(this.region, x, y);
+      if (this.isLevelTile(levels[i]) || links.has(i)) at.push({ x: x * 16, y: y * 16 });
+    }
     hatchCells(ctx, at, 16, lw);
   }
 
@@ -851,7 +855,7 @@ export class OverworldView {
   private newStroke(layer: 'l1' | 'l2'): OverworldStroke {
     return new OverworldStroke(this.app.rom, layer, this, this.isLevelTile,
       this.ev && { event: this.event, after: this.ev.after, l1: this.ev.l1, game: this.ev.game, without: this.ev.without, place: () => this.place(this.event) },
-      layer === 'l1' ? this.starPaths() : null);
+      layer === 'l1' ? this.starPaths() : null, layer === 'l1' ? (i) => this.links.cells().has(i) : undefined);
   }
 
   // the layer 2 a stroke paints: as after the event chosen in the playthrough strip, or the map before events

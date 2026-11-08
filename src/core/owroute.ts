@@ -46,6 +46,7 @@ export interface RouteInput {
   stops?: ReadonlySet<number>;
   through?: ReadonlySet<number>; // route cells (indices) whose stop tile becomes a path tile (routeEnds' through)
   stopTranslevels?: StopTranslevels;
+  fixed?: ReadonlySet<number>; // cells (l1Index) a link ends at (owlinks.ts linkEndCells, #413): a level or stop tile kept, others refused
 }
 
 // each layer 1 tile's translevel (tls) and those a new stop tile may take (free): no tile holds them and they have
@@ -211,6 +212,7 @@ function solve(route: readonly number[], inp: RouteInput, askAlternatives: boole
   for (let k = 1; k < route.length - 1; k++) {
     if (kinds[l1[route[k]]] === 'exit' && roles[k] === 'path') return refuse(k, { kind: 'routeExitInside' });
   }
+  for (let k = 0; k < route.length; k++) if (inp.fixed?.has(route[k]) && roles[k] !== 'keep') return refuse(k, { kind: 'routeLinkEnd' });
   const seen = new Map<number, number>();
   for (let k = 0; k < route.length; k++) {
     const j = seen.get(route[k]);
