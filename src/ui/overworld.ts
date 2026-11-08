@@ -822,7 +822,7 @@ export class OverworldView {
   onUp(e: MouseEvent): void {
     if (this.links.drag) { this.links.up(e.clientX, e.clientY); return; }
     if (this.sprites.drag) { const p = this.point(e); this.sprites.up(p.x, p.y); return; }
-    if (this.levelTiles.drag) { this.levelTiles.up(); return; }
+    if (this.levelTiles.drag) { this.levelTiles.up(e.altKey); return; }
     if (this.pathTool.drawing) {
       this.pathTool.up();
       const m = this.menuAt;

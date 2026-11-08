@@ -15,8 +15,9 @@ import { eventRunners } from '../core/owevents.ts';
 import { contextMenu } from './menu.ts';
 import { levelPicker } from './levelpicker.ts';
 import {
-  l1Index, l1XY, translevelToLevel, freeTranslevel, translevelUse, enterableLevels, levelTilesOf, baseEvent, readTranslevels, NO_EVENT,
+  l1Index, l1XY, translevelToLevel, freeTranslevel, translevelUse, enterableLevels, levelTilesOf, baseEvent, readTranslevels, NO_EVENT, DIR_NAMES,
 } from '../core/overworld.ts';
+import { moveLevelTileWithPaths, type KeptPath, type KeptWhy } from '../core/owlevelmove.ts';
 import {
   levelTileLooks, invisibleLevelTile, defaultLook, stopTile, moveLevelTile, removeLevelTile, placeLevelTile, levelsWithoutTile, moveLevelTileCheck, placeLevelTileCheck,
   type LevelTileEvent,
@@ -37,6 +38,15 @@ function freeNote(rom: Rom, tl: number): string {
 // where layer 1 tile k (l1Index) is: its map region and cell
 export const tilePlace = cellText;
 const levelHex = (tl: number) => hex(translevelToLevel(tl), 3);
+
+// why a path of a level tile moved is kept where it was (owlevelmove.ts)
+const KEPT_WHY: Record<KeptWhy, string> = {
+  progress: 'part of it is painted at another event progress',
+  fork: 'it forks or loops on the way',
+  far: 'it leads to the tile swapped with: it stays between the two',
+  noWay: 'no free way leads to the new place',
+  noTiles: 'no path tiles fit the way',
+};
 
 export class LevelTileLayer {
   // a level tile being dragged (l1Index) to the cell under the mouse
@@ -132,15 +142,25 @@ export class LevelTileLayer {
     const to = l1Index(this.view.region, Math.max(0, Math.min(31, x)), Math.max(0, Math.min(31, y)));
     d.to = to;
   }
-  // dropped: the level tile swaps with the tile there
-  up(): void {
+  // dropped: the level tile swaps with the tile there, its paths drawn again to it (owlevelmove.ts: the paths of the
+  // progress shown; one that can't be is kept where it was, said); with Alt held (bare) the tile alone
+  up(bare = false): void {
     const d = this.drag;
     this.drag = null;
     this.view.paint();
     this.view.updateStatus();
     if (!d || d.to === d.from) return;
-    const { x, y } = l1XY(d.to);
-    this.edit(`${this.label(d.from)}: moved to ${hex(x, 2)},${hex(y, 2)}`, () => moveLevelTile(this.rom, d.from, d.to, this.event()), d.to);
+    const { x, y } = l1XY(d.to), v = this.view, kinds = v.pathKinds(), shapes = v.pathShapes();
+    const label = `${this.label(d.from)}: moved to ${hex(x, 2)},${hex(y, 2)}`;
+    if (bare || !kinds || !shapes) {
+      this.edit(label, () => moveLevelTile(this.rom, d.from, d.to, this.event()), d.to);
+      return;
+    }
+    let kept: KeptPath[] = [];
+    if (!this.edit(`${label} with its paths`, () => { kept = moveLevelTileWithPaths(this.rom, d.from, d.to, this.event(), kinds, shapes).kept; }, d.to)) return;
+    if (kept.length) {
+      toast(`${kept.length === 1 ? 'A path' : `${kept.length} paths`} of the level kept where ${kept.length === 1 ? 'it was' : 'they were'}: ${kept.map((k) => `${DIR_NAMES[k.path.dir]} (${KEPT_WHY[k.why]})`).join(', ')}. Draw ${kept.length === 1 ? 'it' : 'them'} with Path (auto).`);
+    }
   }
   // Esc: the drag dropped, nothing changed; false: none
   cancel(): boolean {
@@ -301,7 +321,7 @@ export class LevelTileLayer {
     const v = this.view, d = this.drag;
     if (!d || d.to === d.from) return null;
     const { x, y } = l1XY(d.to), there = this.isLevelAt(d.to) && v.tls[d.to] ? `level ${levelHex(v.tls[d.to])}` : `tile ${l1Hex(v.levelL1()[d.to])}`;
-    return `Drop: ${this.label(d.from, true)} to ${hex(x, 2)},${hex(y, 2)}, swapping with ${there} · Esc cancels`;
+    return `Drop: ${this.label(d.from, true)} to ${hex(x, 2)},${hex(y, 2)}, swapping with ${there}, its paths drawn again to it · Alt held: the tile alone · Esc cancels`;
   }
 
   // the list's levels without a level tile (translevels no tile on any map holds), each dragged onto the map in the

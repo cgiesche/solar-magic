@@ -80,27 +80,21 @@ export function routeKind(route: readonly number[], l1: ArrayLike<number>, kinds
   return route.map((c) => kinds[l1[c]]).find((k) => WALKED_KINDS.includes(k)) ?? 'walk';
 }
 
-// The route as solved and written: the route as drawn, its ends taken on (CONTEXT.md "Route"):
-// - an end on a cell without a path (kind "none") goes on to a level or stop tile beside it, or to the last tile of a
-//   path beside it (see below; with the way back along that path): the one straight on (the way the route leaves or
-//   arrives at that end), else the only one beside it – with several and none straight on, or the route a single cell,
-//   it stays (a stop tile goes there): a route drawn from beside one level to beside another means those levels, not
-//   new stop tiles beside them;
-// - an end on the last tile of a path – a path tile linked to one cell besides the route, or a plain stop tile linked
-//   to one (not a star, pipe or level tile, nor one `kept`: its translevel brings something along) – goes on back
-//   along that path to the first level, stop or exit tile on it: the route draws the path on from its end, its tiles
-//   kept where they fit, a stop tile at the end becoming a path tile (`through`: its index in the cells, for the
-//   solver's RouteInput). Where the path forks or ends on nothing on the way back the end stays (a junction there).
-// Linked: the tiles of two cells side by side lead into each other – a path tile's ways (tileWays) reach that side, a
-// level, stop or exit tile leads every way.
-export interface RouteEnds { cells: number[]; through: number[] }
-export function routeEnds(route: readonly number[], l1: ArrayLike<number>, kinds: readonly PathKind[], shapes: PathShapes,
-  kept: (cell: number) => boolean = () => false): RouteEnds {
-  if (route.length < 2) return { cells: route.slice(), through: [] };
+// The paths of a map as cells linked to each other: the tiles of two cells side by side lead into each other – a path
+// tile's ways (tileWays) reach that side, a level, stop or exit tile leads every way. backAlong(c, from, taken): from c
+// (reached from `from`) along the path to the first level, stop or exit tile – the cells after c, outwards; null where
+// the way forks or ends on nothing (taken: cells it may not use).
+export interface PathGraph {
+  kind: (c: number) => PathKind;
+  walked: (c: number) => boolean;
+  isStop: (c: number) => boolean;
+  sides: (c: number) => number[];
+  linked: (c: number, d: number) => boolean;
+  backAlong: (c: number, from: number, taken: ReadonlySet<number>) => number[] | null;
+}
+export function pathGraph(l1: ArrayLike<number>, kinds: readonly PathKind[], shapes: PathShapes): PathGraph {
   const kind = (c: number) => kinds[l1[c]], walked = (c: number) => WALKED_KINDS.includes(kind(c));
   const isStop = (c: number) => kind(c) === 'level' || kind(c) === 'stop' || kind(c) === 'exit';
-  // (a stop tile a path may be drawn on through: a plain stop, its translevel not kept)
-  const passable = (c: number) => kind(c) === 'stop' && !isStarPipeTile(l1[c]) && !kept(c);
   const sideMemo = new Map<number, number[]>();
   const sides = (c: number): number[] => {
     let out = sideMemo.get(c);
@@ -111,11 +105,7 @@ export function routeEnds(route: readonly number[], l1: ArrayLike<number>, kinds
     const n = neighbor(c, d);
     return n >= 0 && sides(c).includes(d) && sides(n).includes(reverse(d));
   };
-  // from c, the last tile of a path (reached from `from`), back along it to the first level, stop or exit tile: the
-  // cells after c, outwards (null: c is no path's last tile, or the way back forks or ends on nothing); taken: cells
-  // the way back may not use (the route's)
   const backAlong = (c: number, from: number, taken: ReadonlySet<number>): number[] | null => {
-    if (!walked(c) && !passable(c)) return null;
     const out: number[] = [], seen = new Set(taken);
     for (let prev = from, cur = c; out.length < l1.length;) {
       seen.add(cur);
@@ -128,6 +118,30 @@ export function routeEnds(route: readonly number[], l1: ArrayLike<number>, kinds
     }
     return null;
   };
+  return { kind, walked, isStop, sides, linked, backAlong };
+}
+
+// The route as solved and written: the route as drawn, its ends taken on (CONTEXT.md "Route"):
+// - an end on a cell without a path (kind "none") goes on to a level or stop tile beside it, or to the last tile of a
+//   path beside it (see below; with the way back along that path): the one straight on (the way the route leaves or
+//   arrives at that end), else the only one beside it – with several and none straight on, or the route a single cell,
+//   it stays (a stop tile goes there): a route drawn from beside one level to beside another means those levels, not
+//   new stop tiles beside them;
+// - an end on the last tile of a path – a path tile linked to one cell besides the route, or a plain stop tile linked
+//   to one (not a star, pipe or level tile, nor one `kept`: its translevel brings something along) – goes on back
+//   along that path to the first level, stop or exit tile on it: the route draws the path on from its end, its tiles
+//   kept where they fit, a stop tile at the end becoming a path tile (`through`: its index in the cells, for the
+//   solver's RouteInput). Where the path forks or ends on nothing on the way back the end stays (a junction there).
+// Linked: as pathGraph says.
+export interface RouteEnds { cells: number[]; through: number[] }
+export function routeEnds(route: readonly number[], l1: ArrayLike<number>, kinds: readonly PathKind[], shapes: PathShapes,
+  kept: (cell: number) => boolean = () => false): RouteEnds {
+  if (route.length < 2) return { cells: route.slice(), through: [] };
+  const g = pathGraph(l1, kinds, shapes), { kind, walked, sides } = g;
+  // (a stop tile a path may be drawn on through: a plain stop, its translevel not kept)
+  const passable = (c: number) => kind(c) === 'stop' && !isStarPipeTile(l1[c]) && !kept(c);
+  // (from the last tile of a path, a path tile or a plain stop tile: back along it)
+  const backAlong = (c: number, from: number, taken: ReadonlySet<number>): number[] | null => (walked(c) || passable(c) ? g.backAlong(c, from, taken) : null);
   // the cells an end goes on to, outwards (end: the route's end cell, inner: the one before it), and the stop tile at a
   // path's end it runs through (via: the end or the stop beside it; null: none)
   type OnTo = { cells: number[]; via: number | null };
@@ -160,7 +174,7 @@ export function routeEnds(route: readonly number[], l1: ArrayLike<number>, kinds
 }
 
 // the direction from cell a to cell b next to it (undefined: not next to it)
-const dirTo = (a: number, b: number): number | undefined => [0, 1, 2, 3].find((d) => neighbor(a, d) === b);
+export const dirTo = (a: number, b: number): number | undefined => [0, 1, 2, 3].find((d) => neighbor(a, d) === b);
 
 export function routeTiles(route: readonly number[], inp: RouteInput): RouteTiles {
   return solve(route, inp, true);
