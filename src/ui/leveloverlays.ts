@@ -474,17 +474,18 @@ function drawEnter(ctx: CanvasRenderingContext2D, dirs: string, x: number, y: nu
 }
 
 // how the sprites are drawn: their images (imageAlpha: the level view's outside sprite mode), the sprite mode's
-// look (active) and selection, the sprites sprite memory draws incompletely (uids)
+// look (active) and selection, the sprites sprite memory draws incompletely and those it leaves out (uids)
 export interface SpriteDraw {
   image(s: LevelSprite): HTMLCanvasElement | undefined;
   imageAlpha: number;
   active: boolean;
   selected(s: LevelSprite): boolean;
   incomplete: ReadonlySet<number>;
+  missing?: ReadonlySet<number>;
 }
 
 // each sprite's image with a box on it (filled with its number where it has none, in sprite mode always numbered),
-// an orange box around one drawn incompletely (sprite memory)
+// an orange box around one drawn incompletely (sprite memory), a dashed one around one that doesn't appear
 export function paintSprites(ctx: CanvasRenderingContext2D, sprites: LevelSprite[], d: SpriteDraw, alpha: number, lw: number, px: number): void {
   ctx.font = `bold ${9 * px * 1.2}px monospace`;
   ctx.globalAlpha = alpha;
@@ -502,10 +503,13 @@ export function paintSprites(ctx: CanvasRenderingContext2D, sprites: LevelSprite
     ctx.strokeStyle = sel ? '#ff50c8' : 'rgba(255,80,200,0.8)';
     ctx.lineWidth = (sel ? 2 : 1) * lw;
     ctx.strokeRect(x, y, 16, 16);
-    if (d.incomplete.has(s.uid)) {
+    const missing = !!d.missing?.has(s.uid);
+    if (missing || d.incomplete.has(s.uid)) {
       ctx.strokeStyle = '#ffa020';
       ctx.lineWidth = 2 * lw;
+      if (missing) ctx.setLineDash([4 * lw, 3 * lw]);
       ctx.strokeRect(x - 2 * lw, y - 2 * lw, 16 + 4 * lw, 16 + 4 * lw);
+      ctx.setLineDash([]);
     }
     if (!img || sel || d.active) {
       ctx.fillStyle = '#fff';

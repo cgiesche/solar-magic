@@ -5,7 +5,7 @@ import type { App } from './app.ts';
 import { h, clear } from './dom.ts';
 import { closeMenus } from './menu.ts';
 import { exitProblems, levelProblems, scanProblems, sortProblems, type Problem, type ProblemPlace, type Severity } from '../core/problems.ts';
-import { incompleteSprites, spriteMemDialog, spriteMemText, SPRITE_MEM_HELP } from './spritemem.ts';
+import { incompleteSprites, leftOutSprites, spriteMemDialog, spriteMemText, missingText, SPRITE_MEM_HELP, MISSING_HELP } from './spritemem.ts';
 import { messageLevels, messageProblems, type MessageLevel } from '../core/messageuse.ts';
 import { loadLevel } from '../core/level.ts';
 import { levelMessages, spriteOpens } from './messagepanel.ts';
@@ -41,6 +41,11 @@ export function collectProblems(app: App, reveal: (uids: number[]) => void): Pro
   if (inc.length) {
     out.push({ key: 'sprite-mem', severity: 'warn', text: `${spriteMemText(inc.length)}: not enough sprite memory`, title: SPRITE_MEM_HELP,
       where: { sprites: inc }, fix: { label: 'Fix…', run: () => spriteMemDialog(app, reveal) } });
+  }
+  const miss = leftOutSprites(app);
+  if (miss.length) {
+    out.push({ key: 'sprite-missing', severity: 'warn', text: `${missingText(miss.length)}: no sprite slot free`, title: MISSING_HELP,
+      where: { sprites: miss }, fix: { label: 'Fix…', run: () => spriteMemDialog(app, reveal) } });
   }
   return sortProblems(out);
 }

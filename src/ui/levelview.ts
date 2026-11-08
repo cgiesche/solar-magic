@@ -13,7 +13,7 @@ import { layer3CellAt, layer3WordText } from '../core/layer3map.ts';
 import { contextMenu, type MenuItem } from './menu.ts';
 import { isPlacedPrefab, openSavePrefab } from './panels.ts';
 import { openInsertDialog, openScreenDialog } from './tools.ts';
-import { incompleteSprites } from './spritemem.ts';
+import { incompleteSprites, leftOutSprites } from './spritemem.ts';
 import { problemsButton } from './problems.ts';
 import { spriteOpens, messageOfBox, messageLabel, showMessageHover, hideMessageHover } from './messagepanel.ts';
 import { GAME_VIEW_W, GAME_VIEW_H, MARIO_H } from '../core/camerabands.ts';
@@ -479,7 +479,7 @@ export class LevelView {
   // the sprites as the level view draws them (leveloverlays.ts paintSprites)
   spriteDraw(): SpriteDraw {
     const app = this.app, active = app.model.mode === 'spr';
-    return { image: (s) => app.spriteImageOf(s), imageAlpha: active ? 1 : 0.85, active, selected: (s) => app.model.selection.has(s.uid), incomplete: new Set(incompleteSprites(app)) };
+    return { image: (s) => app.spriteImageOf(s), imageAlpha: active ? 1 : 0.85, active, selected: (s) => app.model.selection.has(s.uid), incomplete: new Set(incompleteSprites(app)), missing: new Set(leftOutSprites(app)) };
   }
 
   // ---------------- interactions ----------------

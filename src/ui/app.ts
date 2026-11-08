@@ -19,7 +19,7 @@ import { objectUserNames } from '../core/usernames.ts';
 import { loadPixiProject, customSpriteList, type CustomSprite } from '../core/pixi.ts';
 import { renderLevel, type LevelImages, composite, animatedPixels, TileAnimation, type AnimStep } from '../core/render.ts';
 import type { SpriteImage } from '../core/spritegfx.ts';
-import { usedSpriteMemory, spriteMemSpec, lostSprites, type SpriteMemResult } from '../core/spritemem.ts';
+import { usedSpriteMemory, spriteMemSpec, lostSprites, missingSprites, type SpriteMemResult } from '../core/spritemem.ts';
 import { DM16_EXT, levelGfx, levelExtGfx, customPalette, levelMusic } from '../core/patches.ts';
 import { gfxSkipMask, gfxFilesHash } from '../core/gfxpages.ts';
 import { flagBytes, usedFlags, isDm16, dm16Tiles } from '../core/cdm16.ts';
@@ -144,7 +144,7 @@ const SWEEP_SLICE = 64; // stored results checked against the ROM per background
 
 
 // result of the sprite memory check (see App.checkSpriteMem); gen: the edit session's levelGen when it started
-export interface SpriteMemState { key: string; level: number; mem: number; gen: number; conflicts: Set<number>; suggestion: number | null }
+export interface SpriteMemState { key: string; level: number; mem: number; gen: number; conflicts: Set<number>; missing: Set<number>; suggestion: number | null }
 
 export type { Marker };
 
@@ -787,9 +787,9 @@ export class App {
   }
 
   // ------------- sprite memory (see spritemem.ts) -------------
-  // sprites drawn incompletely because their OAM range is too small, and a sprite memory value
-  // that shows all; checked in the probe worker after every change (only the groups of sprites it changed: the others'
-  // results are kept there)
+  // sprites drawn incompletely because their OAM range is too small, sprites left out because no slot is free for
+  // them when they load, and a sprite memory value that shows all; checked in the probe worker after every change
+  // (only the groups of sprites it changed: the others' results are kept there)
   spriteMem: SpriteMemState | null = null;
   private spriteMemBase: SpriteMemState | null = null; // the latest check no edit came after (autocorrection compares with it)
   private spriteMemTimer = 0;
@@ -808,7 +808,7 @@ export class App {
     const run = ++this.spriteMemRun;
     const done = (r: SpriteMemResult) => {
       if (run !== this.spriteMemRun || this.level !== lv) return;
-      const cur = { key: checked, level: lv.number, mem, gen, conflicts: new Set(lostSprites(level, r)), suggestion: r.suggestion };
+      const cur = { key: checked, level: lv.number, mem, gen, conflicts: new Set(lostSprites(level, r)), missing: new Set(missingSprites(level, r)), suggestion: r.suggestion };
       this.spriteMem = cur;
       this.emit('sprite-mem');
       if (gen !== this.edits.levelGen) return; // edited meanwhile: checked again
@@ -827,15 +827,16 @@ export class App {
   }
 
   // An edit (committed since the previous check, same sprite memory) that makes further sprites
-  // incomplete sets the suggested value, as part of that edit's undo step. A value chosen by hand
-  // stays as long as edits add no new conflicts.
+  // incomplete or missing sets the suggested value, as part of that edit's undo step. A value chosen by hand
+  // stays as long as edits add no new incomplete or missing sprites.
   private autoSpriteMem(prev: SpriteMemState, cur: SpriteMemState): void {
     if (prev.level !== cur.level || prev.mem !== cur.mem || prev.gen === cur.gen || cur.suggestion === null) return;
-    if (![...cur.conflicts].some((u) => !prev.conflicts.has(u))) return;
+    const added = (now: Set<number>, before: Set<number>) => [...now].some((u) => !before.has(u));
+    if (!added(cur.conflicts, prev.conflicts) && !added(cur.missing, prev.missing)) return;
     if (this.edits.lastStep !== 'level') return;
     this.level.spriteHeader = (this.level.spriteHeader & 0xc0) | cur.suggestion;
     this.changed();
-    toast(`Sprite memory set to ${hex(cur.suggestion, 2)} so all sprites are shown completely (Ctrl+Z undoes it).`);
+    toast(`Sprite memory set to ${hex(cur.suggestion, 2)} so all sprites appear and are shown completely (Ctrl+Z undoes it).`);
     this.emit('level-header');
   }
 

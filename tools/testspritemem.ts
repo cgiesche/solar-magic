@@ -10,6 +10,9 @@
 // for the next one, also more than the bound (#200). A check depends on the bytes read for the current value and the
 // suggestion only, not a rejected value's; two groups with the same layout share a result (#208). Without a suggestion
 // it depends on the bytes read for every value tried (#219).
+// Missing sprites: two Banzai Bills in level 105 (its sprite memory keeps one slot for one); in the levels' own sprites
+// only level 135's Koopa the game also leaves out (level 5's line-guided Fuzzies, which die without their line in the
+// test level's first frames, are none).
 // Usage: node tools/testspritemem.ts [levels,hex]
 import { readFileSync } from 'node:fs';
 import { unzipSync } from 'fflate';
@@ -45,11 +48,12 @@ class Counted extends SpriteGroupResults {
     if (Object.values(this.get(key) ?? {}).some((v) => v instanceof RomReads)) fail(`${this.name}: a kept group holds its reads`);
   }
 }
-type Job = { check: { conflicts: Set<number>; live: number[] }; suggestion: number | null };
+type Job = { check: { conflicts: Set<number>; missing: Set<number>; live: number[] }; suggestion: number | null };
 // the check and suggestion of a level's sprites with sprite memory m (with the kept groups if given)
 const checkAndSuggest = (ctx: Omit<SpriteMemContext, 'groupResults'>, groupResults: SpriteGroupResults | undefined, m: number, sprites: LevelSprite[]): Job =>
   runJob(spriteMemJob({ ...ctx, groupResults }, m, candidates, sprites));
 const same = (a: Job, b: Job) => a.suggestion === b.suggestion && a.check.live.join() === b.check.live.join() &&
+  [...a.check.missing].sort().join() === [...b.check.missing].sort().join() &&
   a.check.conflicts.size === b.check.conflicts.size && [...a.check.conflicts].every((u) => b.check.conflicts.has(u));
 const candidates = usedSpriteMemory(rom);
 console.log('used sprite memory', candidates.map((m) => m.toString(16)).join(' '));
@@ -249,6 +253,32 @@ class Marked extends Counted {
   else console.log(`00C same layout: one group played for two, ${kept.check.conflicts.size} conflicts, suggestion ${kept.suggestion?.toString(16)} as a whole check`);
 }
 
+// two Banzai Bills ($9F) one above the other in level 105: its sprite memory 04 keeps slot 0 for one, the second is
+// missing (no slot search fails: the loader doesn't look for another); 0D has a slot for each and draws both
+// completely, the suggestion; one alone, or a generator beside one (it never takes a slot), is not missing
+{
+  const lv = loadLevel(rom, 0x105), m = lv.spriteHeader & 0x3f;
+  const ctx = { emu, level: 0x105, header: lv.header, bgPointer: bgOf(lv.layer2Pointer) };
+  const low = { uid: newUid(), num: 0x9f, x: 8, y: 0x14, extra: 0 }, high = { uid: newUid(), num: 0x9f, x: 8, y: 0x0f, extra: 0 };
+  const two = checkAndSuggest(ctx, undefined, m, [low, high]);
+  const missing = two.check.missing;
+  if (m !== 4 || missing.size !== 1 || two.check.conflicts.size) fail(`105 two Banzai Bills with ${m.toString(16)}: ${missing.size} missing, ${two.check.conflicts.size} conflicts`);
+  else if (two.suggestion === null) fail('105 two Banzai Bills: no suggestion');
+  else {
+    const c = checkSpriteMemory(ctx, two.suggestion, spriteGroups([low, high]));
+    if (c.missing.size || c.conflicts.size || c.live[0] !== 2) fail(`105 two Banzai Bills: suggestion ${two.suggestion.toString(16)} doesn't show both`);
+    else console.log(`105 two Banzai Bills: one missing, ${m.toString(16)} → ${two.suggestion.toString(16)}`);
+  }
+  const kept = new Counted('105 Banzai');
+  if (!same(checkAndSuggest(ctx, kept, m, [low, high]), two) || !same(checkAndSuggest(ctx, kept, m, [low, high]), two)) fail('105 two Banzai Bills: kept groups give another result');
+  if (checkSpriteMemory(ctx, m, spriteGroups([low])).missing.size) fail('105 one Banzai Bill: missing');
+  const gen = checkSpriteMemory(ctx, m, spriteGroups([{ ...low, num: 0xcb }, high]));
+  if (gen.missing.size) fail(`105 Banzai Bill and a generator: ${gen.missing.size} missing`);
+  // with 00 both have a slot but are drawn incompletely
+  const zero = checkSpriteMemory(ctx, 0, spriteGroups([low, high]));
+  if (zero.missing.size || zero.conflicts.size !== 2) fail(`105 two Banzai Bills with 00: ${zero.missing.size} missing, ${zero.conflicts.size} conflicts`);
+}
+
 // levels with their own sprite memory
 const list = process.argv[2] ? process.argv[2].split(',').map((x) => parseInt(x, 16)) : [0x5, 0x23, 0x135, 0x105, 0x106, 0x1, 0x2, 0x101, 0x103, 0x10b];
 for (const n of list) {
@@ -258,8 +288,12 @@ for (const n of list) {
   const groups = spriteGroups(lv.sprites);
   const c = checkSpriteMemory(ctx, lv.spriteHeader & 0x3f, groups);
   const names = [...c.conflicts].map((u) => { const s = lv.sprites.find((q) => q.uid === u)!; return `${s.num.toString(16)}@${s.x},${s.y}`; });
-  console.log(`${n.toString(16).padStart(3, '0')} mem=${(lv.spriteHeader & 0x3f).toString(16)} sprites=${lv.sprites.length} groups=${groups.length} ${Date.now() - t0}ms conflicts=${names.join(' ') || '-'}`);
+  console.log(`${n.toString(16).padStart(3, '0')} mem=${(lv.spriteHeader & 0x3f).toString(16)} sprites=${lv.sprites.length} groups=${groups.length} ${Date.now() - t0}ms conflicts=${names.join(' ') || '-'} missing=${c.missing.size}`);
   if (c.conflicts.size) fail(`${n.toString(16)}: conflicts with its own sprite memory`);
+  // the game's own shortage: level 135's column of seven Koopas at 78 with five sprites at 73 – 8 slots with 0E; played
+  // (Mario carried through it), the Koopas at 78,12–16 never get one
+  const lacks = [...c.missing].map((u) => { const s = lv.sprites.find((q) => q.uid === u)!; return `${s.num.toString(16)}@${s.x},${s.y}`; }).join(' ');
+  if (lacks !== (n === 0x135 ? 'a@78,16' : '')) fail(`${n.toString(16)}: sprites missing with its own sprite memory: ${lacks || '-'}`);
 }
 console.log('bad', bad);
 if (bad) process.exitCode = 1;

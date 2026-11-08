@@ -15,7 +15,7 @@ import { musicPlayer } from './musicplayer.ts';
 import { LAYER3_KIND_TEXT } from '../core/layer3.ts';
 import { levelSizeOptions, applyHeaderChange, headerRefusal, objectsBelow, NO_HEIGHTS, type HeaderChange } from '../core/levelheader.ts';
 import { RATE_OPTIONS, hRate, motionText, type Layer2Motions, type LayerMotion } from '../core/l2scroll.ts';
-import { incompleteSprites, spriteMemText, SPRITE_MEM_HELP } from './spritemem.ts';
+import { incompleteSprites, leftOutSprites, spriteMemText, missingText, SPRITE_MEM_HELP, MISSING_HELP } from './spritemem.ts';
 import { slipperyText } from './exitpanel.ts';
 
 function range(n: number, fmt: (i: number) => string = (i) => String(i)): [number, string][] {
@@ -36,14 +36,15 @@ export function openHeaderDialog(app: App): void {
 
   // sprite memory with the result of the background check (for the level's current value)
   const memInput = hexInput(spriteHeader & SPRITE_MEMORY, 2, (v) => (spriteHeader = (spriteHeader & 0xc0) | v), SPRITE_MEMORY);
-  const incomplete = incompleteSprites(app).length, sm = app.spriteMem;
+  const incomplete = incompleteSprites(app).length, missing = leftOutSprites(app).length, sm = app.spriteMem;
   const checked = sm && sm.level === lv.number && sm.mem === (lv.spriteHeader & SPRITE_MEMORY);
+  const problems = [...(incomplete ? [`${spriteMemText(incomplete)}: not enough sprite memory.`] : []), ...(missing ? [`${missingText(missing)}: no sprite slot free.`] : [])];
   const memStatus = !checked ? h('p', { class: 'hint' }, 'Checking sprite memory …')
-    : !incomplete ? h('p', { class: 'hint' }, '✓ All sprites are shown completely.')
-    : h('div', { class: 'warn-box', title: SPRITE_MEM_HELP }, `⚠ ${spriteMemText(incomplete)}: not enough sprite memory. `,
+    : !problems.length ? h('p', { class: 'hint' }, '✓ All sprites appear and are shown completely.')
+    : h('div', { class: 'warn-box', title: [...(incomplete ? [SPRITE_MEM_HELP] : []), ...(missing ? [MISSING_HELP] : [])].join('\n') }, `⚠ ${problems.join(' ')} `,
       sm.suggestion !== null
         ? h('button', { onclick: () => { memInput.value = hex2(sm.suggestion!); memInput.dispatchEvent(new Event('change')); } }, `Set to fit (${hex2(sm.suggestion)})`)
-        : 'No other value shows all of them completely – place the sprites further apart.');
+        : 'No other value shows all of them – place the sprites further apart.');
 
   const modes: [number, string][] = range(0x20, (i) => `${hex2(i)} – ${levelModeName(i)}`);
   // BG tilemaps in the vanilla bank ($0C) used by levels; edited ones (own bank) only count for their level

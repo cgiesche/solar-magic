@@ -426,8 +426,12 @@ _Avoid_: undo (that is an edit's), savestate (the one slot F5 saves)
 A slot search of the running game that found every slot it looked at taken, so a sprite (normal, extended or cluster) did not appear, or replaced another where the code then takes a slot anyway (core/slotwatch.ts). Recognised by what the code does (a loop testing consecutive slots for zero), not by the game's tables; a search through a few kept slots (Mario's two fireball slots) is none. It may come with other slots free: the level's sprite memory or the spawning code (a generator) limits the slots it may use. Test play's slot meter shows the live slots and lists the failed spawns with Mario's tile.
 _Avoid_: sprite overflow, slot overflow
 
+**Missing sprite**:
+A sprite of the level the game leaves out because the loader finds no slot for it when it comes into view: the level's sprite memory gives level sprites too few slots for a view's sprites, or keeps a slot for one sprite only (04: one Banzai Bill, in slot 0 – a second is skipped while the first lives). Found by the sprite memory check: a sprite without a slot right after its sprite group is loaded, with one when loaded alone (one that never takes a slot, a generator, is none; one that dies in the frames after, a line-guided sprite without its line, had one). Shown as a problem with a dashed orange box, and the check's suggestion then must make all appear. Test play's slot meter doesn't list it as a failed spawn when the loader looked at the kept slot only.
+_Avoid_: failed spawn (test play's, seen while playing), despawned
+
 **Sprite group**:
-A largest set of a level's sprites that fit in one view together (an isolated sprite is one alone; a sprite may be in several): what the sprite memory check plays in the emulator, one at a time, to see which sprites lose tiles (core/spritemem.ts). The latest used groups keep their result per sprite memory value while the ROM bytes it read are unchanged, kept by their sprites' places relative to each other, so after a sprite change only the groups that changed are played again (not one moved as a whole).
+A largest set of a level's sprites that fit in one view together (an isolated sprite is one alone; a sprite may be in several): what the sprite memory check plays in the emulator, one at a time, to see which sprites lose tiles and which are left out (missing sprites; core/spritemem.ts). The latest used groups keep their result per sprite memory value while the ROM bytes it read are unchanged, kept by their sprites' places relative to each other, so after a sprite change only the groups that changed are played again (not one moved as a whole).
 _Avoid_: window, object group, group sprite (one sprite that spawns several)
 
 **Group sprite**:
