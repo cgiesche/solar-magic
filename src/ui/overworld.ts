@@ -2000,12 +2000,21 @@ export class OverworldView {
 
   // palette sheet with the brush outlined and rectangle picking. `locate` finds the brush in the sheet (layer 1: a
   // rectangle of exactly its entries, sheetRect; layer 2: also mirrored, else its 8x8 tiles each outlined thin –
-  // core/owl2sheet.ts). A brush not there as it is (taken from the map, flipped) is also shown as a preview
+  // core/owl2sheet.ts). A brush not there as it is (taken from the map, flipped) is also shown as a preview. marks:
+  // what is drawn over the sheet's pixels in its coordinates (layer 1: the path marks), drawn at the size shown so its
+  // lines stay sharp – not scaled up from the sheet's pixels; preview draws the brush the same way
   sheetPalette(sheet: HTMLCanvasElement, cls: string, cols: number, rows: number, cell: number, sheetValue: (x: number, y: number) => number,
     preview: (ctx: CanvasRenderingContext2D) => void, describe: (r: { x: number; y: number; w: number; h: number }) => string[],
-    locate: () => SheetMark | null): HTMLElement {
+    locate: () => SheetMark | null, marks?: (ctx: CanvasRenderingContext2D) => void): HTMLElement {
     const b = this.brush;
     const { c, ctx, k, scale } = this.sheetCanvas(sheet, cls);
+    // (the hover preview's: the sheet's pixels with the marks, in the sheet's pixels)
+    let flat: HTMLCanvasElement | null = null;
+    const withMarks = () => {
+      if (!marks) return sheet;
+      if (!flat) { flat = h('canvas', { width: sheet.width, height: sheet.height }); const f = flat.getContext('2d')!; f.drawImage(sheet, 0, 0); marks(f); }
+      return flat;
+    };
     // (the route brush or a look chosen: no tile brush marked)
     const tileBrush = b.kind === this.mode && !this.routeBrush && this.lookBrush < 0;
     const mark = tileBrush ? locate() : null;
@@ -2013,6 +2022,7 @@ export class OverworldView {
     // r: the rectangle being picked (null: the brush's mark)
     const draw = (r: { x: number; y: number; w: number; h: number } | null) => {
       ctx.drawImage(sheet, 0, 0);
+      marks?.(ctx);
       if (!r && mark?.kind === 'tiles') {
         ctx.strokeStyle = '#4cc2ff'; ctx.lineWidth = 1 / k; // (one canvas pixel)
         for (const t of mark.cells) ctx.strokeRect(t.x * cell + ctx.lineWidth / 2, t.y * cell + ctx.lineWidth / 2, cell - ctx.lineWidth, cell - ctx.lineWidth);
@@ -2034,12 +2044,15 @@ export class OverworldView {
       this.buildSide();
       this.paint();
     });
-    previewSheet(c, () => sheet, cols, rows, cell, scale, describe);
+    previewSheet(c, withMarks, cols, rows, cell, scale, describe);
     const out = h('div', null);
     if ((!at || at.flip) && tileBrush) {
-      const p = h('canvas', { width: b.w * cell, height: b.h * cell, class: 'ow-brush' });
-      preview(p.getContext('2d')!);
-      sized(p, fitScale(p.width, p.height, sheet.width * scale, sheet.width * scale, scale));
+      // (drawn at the sheet's pixels per pixel, as the sheet)
+      const p = h('canvas', { width: b.w * cell * k, height: b.h * cell * k, class: 'ow-brush' }), pc = p.getContext('2d')!;
+      pc.imageSmoothingEnabled = false;
+      pc.setTransform(k, 0, 0, k, 0, 0);
+      preview(pc);
+      sized(p, fitScale(b.w * cell, b.h * cell, sheet.width * scale, sheet.width * scale, scale) / k);
       out.append(h('div', { class: 'hint' }, `Brush ${b.w}×${b.h}:`), h('div', { class: 'row' }, p));
     }
     out.append(c);
@@ -2068,7 +2081,8 @@ export class OverworldView {
     if (!r) return h('div', { class: 'hint' }, 'Loading the overworld…');
     const tc = owTileCaches(r).l1, kinds = this.pathKinds(), shapes = this.pathShapes(), walked = this.walkedWays();
     const empty = emptyL1Tiles(this.app.rom), free = freeL1Tiles(empty, kinds);
-    const tiles = (list: number[], w: number, W: number, H: number) => {
+    // the tiles of `list` (w a row) on a W×H canvas, their marks apart (drawn by sheetPalette at the size shown)
+    const tiles = (list: number[], w: number, W: number, H: number): { c: HTMLCanvasElement; marks: (ctx: CanvasRenderingContext2D) => void } => {
       const c = document.createElement('canvas');
       c.width = W; c.height = H;
       const ctx = c.getContext('2d')!;
@@ -2083,14 +2097,16 @@ export class OverworldView {
       });
       for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) if (!px[y * W + x]) px[y * W + x] = checker(x, y);
       ctx.putImageData(id, 0, 0);
-      if (kinds) list.forEach((t, i) => {
-        const k = kinds[t], x = (i % w) * 16, y = Math.floor(i / w) * 16;
-        if (!seen[i] && isPathKind(k)) drawPathMark(ctx, k, x, y, 0.5, usualWays(t, k, shapes, this.shown.l1, walked));
-        else if (KIND_BORDER[k]) { ctx.strokeStyle = KIND_BORDER[k]; ctx.lineWidth = 1; ctx.strokeRect(x + 0.5, y + 0.5, 15, 15); }
-      });
-      // the level tiles hatched (no brush tiles: objects on layer 1, placed with a look from "Levels")
-      hatchCells(ctx, list.flatMap((t, i) => (this.isLevelTile(t) ? [{ x: (i % w) * 16, y: Math.floor(i / w) * 16 }] : [])), 16, 1);
-      return c;
+      const marks = (m: CanvasRenderingContext2D) => {
+        if (kinds) list.forEach((t, i) => {
+          const k = kinds[t], x = (i % w) * 16, y = Math.floor(i / w) * 16;
+          if (!seen[i] && isPathKind(k)) drawPathMark(m, k, x, y, 0.5, usualWays(t, k, shapes, this.shown.l1, walked));
+          else if (KIND_BORDER[k]) { m.strokeStyle = KIND_BORDER[k]; m.lineWidth = 1; m.strokeRect(x + 0.5, y + 0.5, 15, 15); }
+        });
+        // the level tiles hatched (no brush tiles: objects on layer 1, placed with a look from "Levels")
+        hatchCells(m, list.flatMap((t, i) => (this.isLevelTile(t) ? [{ x: (i % w) * 16, y: Math.floor(i / w) * 16 }] : [])), 16, 1);
+      };
+      return { c, marks };
     };
     const b = this.brush, route = this.routeBrush, look = this.lookBrush;
     const one = b.kind === 'l1' && b.entries.length === 1;
@@ -2103,12 +2119,13 @@ export class OverworldView {
         p.page && (p.hidden || this.openPage1) ? h('button', { onclick: () => { this.openPage1 = !this.openPage1; this.buildSide(); } }, this.openPage1 ? 'Fold page 1' : 'Show page 1') : null) : null;
       if (!p.rows) return [fold];
       const sheet = tiles(Array.from({ length: p.rows * SHEET_COLS }, (_, k) => p.first + k), SHEET_COLS, SHEET_COLS * 16, p.rows * 16);
+      const brush = () => tiles(b.entries, b.w, b.w * 16, b.h * 16);
       const at = (x: number, y: number) => p.first + y * SHEET_COLS + x;
-      return [this.sheetPalette(sheet, 'ow-pal', SHEET_COLS, p.rows, 16, at,
-        (ctx) => ctx.drawImage(tiles(b.entries, b.w, b.w * 16, b.h * 16), 0, 0),
+      return [this.sheetPalette(sheet.c, 'ow-pal', SHEET_COLS, p.rows, 16, at,
+        (ctx) => { const t = brush(); ctx.drawImage(t.c, 0, 0); t.marks(ctx); },
         (q) => (q.w * q.h > 1 ? [`Block ${q.w}×${q.h} from tile ${l1Hex(at(q.x, q.y))}`]
           : [`Tile ${l1Hex(at(q.x, q.y))}`, ...l1TileLines(at(q.x, q.y), kinds, free[at(q.x, q.y)], shapes)]),
-        () => this.sheetRect(SHEET_COLS, p.rows, at)), fold];
+        () => this.sheetRect(SHEET_COLS, p.rows, at), sheet.marks), fold];
     };
     const [p0, p1] = sheetPages(empty, free, this.openPage1);
     return h('div', null,
