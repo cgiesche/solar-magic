@@ -65,6 +65,7 @@ import { WorldCheck } from './worldcheck.ts';
 import { layerStrengths, isLayerMode, type OwMode, type LayerStrengths } from '../core/owlayers.ts';
 import { OW_OPTIONS, owOption, owOptionValue, setOwOption, revealSpeed, setRevealSpeed, revealStepFrames, MAX_REVEAL_SPEED, DEFAULT_REVEAL_SPEED, submapLightning, setSubmapLightning, LIGHTNING_TITLE, lightningEditLabel } from '../core/owoptions.ts';
 import { boolPref, numberPref, prefFamily } from './prefs.ts';
+import { antsMenuItem } from './ants.ts';
 
 // a w×h block of L1 tiles (16x16) or L2 tilemap entries (8x8), row-major; a L1 brush has no level tiles (NO_TILE
 // where one was picked: they are objects on layer 1, placed with a look from the picker's "Levels", ADR 0012)
@@ -1537,6 +1538,7 @@ export class OverworldView {
           checked: () => this.cellHistory.on, onToggle: (v: boolean) => this.cellHistory.setOn(v) },
         view('Link arrows', () => this.links.show, (v) => (this.links.show = v),
           'Every overworld link as an arrow (else the selected tile\'s): stars, pipes and exit paths leading elsewhere, the locations exits to the overworld teleport to and the Koopa Kids\' places dashed'),
+        antsMenuItem(),
       ] }),
       h('span', { class: 'sep' }),
       this.zoomCtl.root,

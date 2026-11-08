@@ -8,6 +8,7 @@ import { COND_FLAGS, flagRam } from '../core/cdm16.ts';
 import { triggerMenu, setSwitch } from './triggerpanel.ts';
 import { projectId } from '../core/projectid.ts';
 import { loadDeaths, clearDeaths, clearAllDeaths, anyDeaths } from './deathmarks.ts';
+import { antsMenuItem } from './ants.ts';
 
 // paint: redraws the level view (overlay toggles that need no new composite)
 export function viewMenu(app: App, paint: () => void, full = true): HTMLElement {
@@ -79,6 +80,7 @@ export function viewMenu(app: App, paint: () => void, full = true): HTMLElement 
     show('arcs', 'Jump arcs at the mouse', 'Where Mario gets jumping from the tile under the mouse (emulated): from standing, walking, running and at P-speed, to both sides; Shift+J pins them to the tile', 'J'),
     show('gameView', 'Game view frame', 'What the player sees: a 256x224 screen over the level; drag it by its edge or label (snaps to 8x8), or Shift+V puts Mario with his feet in the tile under the mouse and the frame where the game puts the camera then. The level is darkened where the camera never goes (found by the level scan)', 'V'),
     show('scrollBands', 'Scroll bands', 'In the game view frame: where Mario is while the camera scrolls right, left, up and down, and after L/R looked ahead, under the level\'s scroll settings (found by emulation)'),
+    antsMenuItem(),
     anim,
     ...state(),
   ] : [{ heading: 'Level preview' }, anim, ...state()] });
