@@ -23,12 +23,12 @@
 import { DX, DY, PATH_TILES_END, reverse, shapeVector, type PathKind, type PathShapes } from './owpaths.ts';
 import { neighbor } from './owreach.ts';
 import { tileWays, WALKED_KINDS, type PathWay } from './owpathshape.ts';
-import { stopTile, levelsWithoutTile, type LevelTileEvent } from './owleveltiles.ts';
+import { stopTile, levelsWithoutTile, heldElsewhere, type LevelTileEvent } from './owleveltiles.ts';
 import type { Rom } from './rom.ts';
 import { OwRefusal, type OwRefusalData } from './owrefusal.ts';
 import {
   readL1, writeL1, readTranslevels, writeTranslevels, setExitDirection, setInitialFlags, translevelUse, hasNameEventOrMessages, freeTranslevel, resetTranslevel,
-  DIR_FLAGS, MAX_TRANSLEVEL,
+  DIR_FLAGS, MAX_TRANSLEVEL, isStarPipeTile,
 } from './overworld.ts';
 import { readEvents, writeEvents, paintEventL1, eventRunners } from './owevents.ts';
 
@@ -44,6 +44,7 @@ export interface RouteInput {
   prefer: PathKind;
   stop?: number;
   stops?: ReadonlySet<number>;
+  through?: ReadonlySet<number>; // route cells (indices) whose stop tile becomes a path tile (routeEnds' through)
   stopTranslevels?: StopTranslevels;
 }
 
@@ -68,7 +69,8 @@ export interface RouteStop { at: number; cell: number; dirs: number[] }
 
 // Per route cell the tile to write (null: left alone – a level, stop or exit tile, or a cell of the route after a
 // refusal), the stop tiles put (none on a refusal), and the refusal (null: every cell fits).
-export interface RouteTiles { tiles: (number | null)[]; stops: RouteStop[]; refusal: RouteRefusal | null }
+// through: the cells whose stop tile becomes a path tile (RouteInput through), their translevels freed when written.
+export interface RouteTiles { tiles: (number | null)[]; stops: RouteStop[]; refusal: RouteRefusal | null; through?: number[] }
 
 // what a cell of the route is: left alone (Mario stops or exits there), a stop tile to put, a path tile to find
 type Role = 'keep' | 'stop' | 'path';
@@ -78,24 +80,83 @@ export function routeKind(route: readonly number[], l1: ArrayLike<number>, kinds
   return route.map((c) => kinds[l1[c]]).find((k) => WALKED_KINDS.includes(k)) ?? 'walk';
 }
 
-// The route as drawn, its ends taken on to a level or stop tile next to them (a route drawn from beside a level tile
-// to beside another means those levels, not new stop tiles beside them): an end on a cell without a path (kind
-// "none") next to a level or stop tile off the route goes on to it – the one straight on (the way the route leaves
-// or arrives at that end), else the only one next to it; with several and none straight on, or the route a single
-// cell, it stays where it is (a stop tile goes there, as before). The route as drawn where neither end goes on.
-export function routeToStops(route: readonly number[], l1: ArrayLike<number>, kinds: readonly PathKind[]): number[] {
-  if (route.length < 2) return route.slice();
-  const stopAt = (c: number) => c >= 0 && !route.includes(c) && (kinds[l1[c]] === 'level' || kinds[l1[c]] === 'stop');
-  // (the end `end`, the cell before it on the route `inner`)
-  const onTo = (end: number, inner: number): number | undefined => {
-    if (kinds[l1[end]] !== 'none') return undefined;
-    const ahead = neighbor(end, reverse(dirTo(end, inner) ?? 0));
-    if (dirTo(end, inner) !== undefined && stopAt(ahead)) return ahead;
-    const next = [0, 1, 2, 3].map((d) => neighbor(end, d)).filter(stopAt);
-    return next.length === 1 ? next[0] : undefined;
+// The route as solved and written: the route as drawn, its ends taken on (CONTEXT.md "Route"):
+// - an end on a cell without a path (kind "none") goes on to a level or stop tile beside it, or to the last tile of a
+//   path beside it (see below; with the way back along that path): the one straight on (the way the route leaves or
+//   arrives at that end), else the only one beside it – with several and none straight on, or the route a single cell,
+//   it stays (a stop tile goes there): a route drawn from beside one level to beside another means those levels, not
+//   new stop tiles beside them;
+// - an end on the last tile of a path – a path tile linked to one cell besides the route, or a plain stop tile linked
+//   to one (not a star, pipe or level tile, nor one `kept`: its translevel brings something along) – goes on back
+//   along that path to the first level, stop or exit tile on it: the route draws the path on from its end, its tiles
+//   kept where they fit, a stop tile at the end becoming a path tile (`through`: its index in the cells, for the
+//   solver's RouteInput). Where the path forks or ends on nothing on the way back the end stays (a junction there).
+// Linked: the tiles of two cells side by side lead into each other – a path tile's ways (tileWays) reach that side, a
+// level, stop or exit tile leads every way.
+export interface RouteEnds { cells: number[]; through: number[] }
+export function routeEnds(route: readonly number[], l1: ArrayLike<number>, kinds: readonly PathKind[], shapes: PathShapes,
+  kept: (cell: number) => boolean = () => false): RouteEnds {
+  if (route.length < 2) return { cells: route.slice(), through: [] };
+  const kind = (c: number) => kinds[l1[c]], walked = (c: number) => WALKED_KINDS.includes(kind(c));
+  const isStop = (c: number) => kind(c) === 'level' || kind(c) === 'stop' || kind(c) === 'exit';
+  // (a stop tile a path may be drawn on through: a plain stop, its translevel not kept)
+  const passable = (c: number) => kind(c) === 'stop' && !isStarPipeTile(l1[c]) && !kept(c);
+  const sideMemo = new Map<number, number[]>();
+  const sides = (c: number): number[] => {
+    let out = sideMemo.get(c);
+    if (!out) sideMemo.set(c, out = isStop(c) ? [0, 1, 2, 3] : walked(c) ? [...new Set(tileWays(l1[c], kind(c), shapes).flatMap((w) => [reverse(w.dir), w.out]))] : []);
+    return out;
   };
-  const first = onTo(route[0], route[1]), last = onTo(route[route.length - 1], route[route.length - 2]);
-  return [...(first !== undefined ? [first] : []), ...route, ...(last !== undefined && last !== first ? [last] : [])];
+  const linked = (c: number, d: number) => {
+    const n = neighbor(c, d);
+    return n >= 0 && sides(c).includes(d) && sides(n).includes(reverse(d));
+  };
+  // from c, the last tile of a path (reached from `from`), back along it to the first level, stop or exit tile: the
+  // cells after c, outwards (null: c is no path's last tile, or the way back forks or ends on nothing); taken: cells
+  // the way back may not use (the route's)
+  const backAlong = (c: number, from: number, taken: ReadonlySet<number>): number[] | null => {
+    if (!walked(c) && !passable(c)) return null;
+    const out: number[] = [], seen = new Set(taken);
+    for (let prev = from, cur = c; out.length < l1.length;) {
+      seen.add(cur);
+      const next = [0, 1, 2, 3].filter((d) => linked(cur, d)).map((d) => neighbor(cur, d)).filter((n) => n !== prev && !seen.has(n));
+      if (next.length !== 1) return null;
+      out.push(next[0]);
+      if (isStop(next[0])) return out;
+      if (!walked(next[0])) return null;
+      prev = cur; cur = next[0];
+    }
+    return null;
+  };
+  // the cells an end goes on to, outwards (end: the route's end cell, inner: the one before it), and the stop tile at a
+  // path's end it runs through (via: the end or the stop beside it; null: none)
+  type OnTo = { cells: number[]; via: number | null };
+  const NONE: OnTo = { cells: [], via: null };
+  const through1 = (c: number, back: number[] | null): number | null => (back && passable(c) ? c : null);
+  const onTo = (end: number, inner: number, taken: ReadonlySet<number>): OnTo => {
+    if (kind(end) !== 'none') {
+      const back = backAlong(end, inner, taken);
+      return back ? { cells: back, via: through1(end, back) } : NONE;
+    }
+    const beside = [0, 1, 2, 3].flatMap((d): (OnTo & { d: number })[] => {
+      const n = neighbor(end, d);
+      if (n < 0 || taken.has(n)) return [];
+      // (a level or stop tile – a plain stop at a path's end with the way back –; the last tile of a path leading this way)
+      if (kind(n) === 'level' || kind(n) === 'stop') {
+        const back = backAlong(n, end, taken);
+        return [{ d, cells: [n, ...(back ?? [])], via: through1(n, back) }];
+      }
+      const back = walked(n) && sides(n).includes(reverse(d)) ? backAlong(n, end, taken) : null;
+      return back ? [{ d, cells: [n, ...back], via: null }] : [];
+    });
+    const ahead = beside.find((b) => b.d === reverse(dirTo(end, inner)!));
+    return ahead ?? (beside.length === 1 ? beside[0] : NONE);
+  };
+  const first = onTo(route[0], route[1], new Set(route));
+  const last = onTo(route[route.length - 1], route[route.length - 2], new Set([...route, ...first.cells]));
+  const cells = [...first.cells.slice().reverse(), ...route, ...last.cells];
+  const through = [first.via, last.via].flatMap((c) => (c === null ? [] : [cells.indexOf(c)])).sort((a, b) => a - b);
+  return { cells, through };
 }
 
 // the direction from cell a to cell b next to it (undefined: not next to it)
@@ -127,6 +188,7 @@ function solve(route: readonly number[], inp: RouteInput, askAlternatives: boole
 
   const roles: Role[] = route.map((c, k) => {
     const kind = kinds[l1[c]], end = k === 0 || k === route.length - 1;
+    if (inp.through?.has(k) && !end) return 'path';
     if (kind === 'level' || kind === 'stop' || (kind === 'exit' && end)) return 'keep';
     if (end || inp.stops?.has(k)) return 'stop';
     if (kind === 'exit') return 'path'; // (refused below)
@@ -168,7 +230,7 @@ function solve(route: readonly number[], inp: RouteInput, askAlternatives: boole
       return refuse(need[free].at, noTranslevel(st));
     }
   }
-  return { tiles, stops, refusal: null };
+  return { tiles, stops, refusal: null, through: [...(inp.through ?? [])].filter((k) => roles[k] === 'path').map((k) => route[k]) };
 }
 
 // the stop tiles the route puts, each cell once: the directions to the cells before and after it on the route, and
@@ -301,7 +363,8 @@ export function routeExits(rom: Rom, route: readonly number[], ev: LevelTileEven
 // progress, the table being per cell): its settings reset (no exit directions, resetTranslevel), its initial flags the
 // stop's directions (stopFlags). Throws (nothing written) where no translevel is left for one. Layer 2 is not
 // touched. The exits it set, the translevels the stops took.
-export function writeRoute(rom: Rom, route: readonly number[], solved: Pick<RouteTiles, 'tiles' | 'stops'>, ev: LevelTileEvent | null): { exits: RouteExit[]; taken: number[] } {
+export function writeRoute(rom: Rom, route: readonly number[], solved: Pick<RouteTiles, 'tiles' | 'stops' | 'through'>, ev: LevelTileEvent | null,
+  kinds: readonly PathKind[]): { exits: RouteExit[]; taken: number[] } {
   const { tiles } = solved, tls = readTranslevels(rom), need = solved.stops.filter((s) => !tls[s.cell]), st = stopTranslevels(rom, tls);
   if (need.length > st.free.length) throw new OwRefusal(noTranslevel(st));
   const cells = route.flatMap((c, k) => (tiles[k] === null ? [] : [[c, tiles[k]!] as const]));
@@ -314,8 +377,14 @@ export function writeRoute(rom: Rom, route: readonly number[], solved: Pick<Rout
     for (const [c, t] of cells) l1[c] = t;
     writeL1(rom, l1);
   }
+  // (a stop tile run through, a path tile now: its translevel freed – unless the cell is a stop or level tile at another
+  // progress, the table being per cell –, reset once no cell holds it)
+  const isStop = (t: number) => kinds[t] === 'stop' || kinds[t] === 'level';
+  const held = solved.through?.length ? heldElsewhere(rom, isStop, ev ? ev.event : -1, ev?.without ?? null) : () => true;
+  const freed = (solved.through ?? []).filter((c) => tls[c] && !held(c)).map((c) => { const tl = tls[c]; tls[c] = 0; return tl; });
   const taken = need.map((s) => takeStopTranslevel(rom, tls, st, s.cell, stopFlags(s)));
-  if (taken.length) writeTranslevels(rom, tls);
+  for (const tl of new Set(freed)) if (!tls.includes(tl) && !taken.includes(tl)) resetTranslevel(rom, tl);
+  if (taken.length || freed.length) writeTranslevels(rom, tls);
   const exits = routeExits(rom, route, ev);
   for (const x of exits) setExitDirection(rom, x.tl, x.exit, x.dir);
   return { exits, taken };

@@ -2,8 +2,10 @@
 // right drag (or Shift+drag, ADR 0011's paint buttons) from a cell through cells (each next to the one before; dragged
 // back over the route it shortens) draws a route; a left click picks tiles as always, which ends it (the tiles
 // picked are the brush), P goes back and forth between it and the last tile brush. The route shows the tiles the
-// editor chooses for it (owroute.ts routeTiles) – a cell no tile fits in red, why in the status bar. An end drawn on an
-// empty cell beside a level or stop tile goes on to it (owroute.ts routeToStops: the level meant, no stop tile beside it). Released, the tiles are written as one
+// editor chooses for it (owroute.ts routeTiles) – a cell no tile fits in red, why in the status bar. Its ends are taken
+// on (owroute.ts routeEnds): one drawn on an empty cell beside a level or stop tile goes on to it (the level meant, no
+// stop tile beside it); one on or beside the last tile of a path goes on back along it, the path drawn on from its end
+// (a stop tile there a path tile now). Released, the tiles are written as one
 // ROM edit into the progress chosen ("Map after": the event's layer 1 changes, else the map before events), as a
 // stroke, and a level tile at an end whose exit runs the event gets that exit's direction (owroute.ts writeRoute). A
 // stop tile it puts takes a level without level tile and without name, base event or messages (its translevel: the
@@ -14,15 +16,15 @@ import type { OverworldView } from './overworld.ts';
 import { drawPathMark } from './overworld.ts';
 import { toast } from './dom.ts';
 import { refusalWords, refusedToast } from './owrefusal.ts';
-import { l1Index, l1XY, exitDirections, DIR_NAMES, EXIT_NAMES, translevelToLevel } from '../core/overworld.ts';
+import { l1Index, l1XY, exitDirections, hasNameEventOrMessages, DIR_NAMES, EXIT_NAMES, translevelToLevel } from '../core/overworld.ts';
 import { usualWays } from '../core/owpathshape.ts';
-import { routeTiles, routeExits, routeKind, routeToStops, writeRoute, stopTranslevels, type RouteTiles, type StopTranslevels } from '../core/owroute.ts';
+import { routeTiles, routeExits, routeKind, routeEnds, writeRoute, stopTranslevels, type RouteTiles, type StopTranslevels } from '../core/owroute.ts';
 import { hex } from '../core/names.ts';
 
 export class PathTool {
   on = false; // the route brush chosen (the layer 1 mode's right button draws routes)
   private route: number[] | null = null; // the route being drawn (l1Index), as dragged
-  private cells: number[] = []; // the route as solved and written: its ends taken on to a level or stop tile beside them (routeToStops)
+  private cells: number[] = []; // the route as solved and written: its ends taken on (routeEnds)
   private solved: RouteTiles | null = null;
   private stopTls: StopTranslevels | null = null; // (the translevels a stop may take, read once per drag)
   constructor(private view: OverworldView) {}
@@ -91,7 +93,7 @@ export class PathTool {
     if (!turned.length && solved.tiles.every((t, k) => t === null || t === this.view.levelL1()[r[k]])) return;
     let taken: number[] = [];
     try {
-      this.view.app.romEdit(e >= 0 ? `Path (after event ${hex(e, 2)})` : 'Path', () => { taken = writeRoute(rom, r, solved, ev).taken; });
+      this.view.app.romEdit(e >= 0 ? `Path (after event ${hex(e, 2)})` : 'Path', () => { taken = writeRoute(rom, r, solved, ev, this.view.pathKinds()!).taken; });
     } catch (err) {
       refusedToast(this.view.app.rom, err, 'Route not drawn: ');
       this.view.sync();
@@ -111,8 +113,11 @@ export class PathTool {
   // the route dragged, its ends taken on to the level or stop tiles beside them (cells), and its tiles as the editor
   // chooses them (solved), on layer 1 as shown (after the event chosen)
   private solve(dragged: readonly number[]): void {
-    const v = this.view, kinds = v.pathKinds()!, l1 = v.levelL1(), r = this.cells = routeToStops(dragged, l1, kinds);
-    this.solved = routeTiles(r, { l1, kinds, shapes: v.pathShapes()!, prefer: routeKind(r, l1, kinds), stopTranslevels: this.stopTls ?? stopTranslevels(v.app.rom, v.tls) });
+    const v = this.view, kinds = v.pathKinds()!, shapes = v.pathShapes()!, l1 = v.levelL1(), rom = v.app.rom;
+    // (a stop tile whose translevel brings something along is kept: a name, base event or messages)
+    const ends = routeEnds(dragged, l1, kinds, shapes, (c) => !!v.tls[c] && hasNameEventOrMessages(rom, v.tls[c]));
+    const r = this.cells = ends.cells;
+    this.solved = routeTiles(r, { l1, kinds, shapes, prefer: routeKind(r, l1, kinds), through: new Set(ends.through), stopTranslevels: this.stopTls ?? stopTranslevels(rom, v.tls) });
   }
   private shown(): void {
     this.view.paint();

@@ -24,8 +24,8 @@ import { readEvents, applyEvents, layer1Without, eventL1Tiles, submapViews, subm
 import { OverworldStroke, type OwEventMaps } from '../src/core/owstroke.ts';
 import { levelTileTest } from '../src/core/owpaths.ts';
 import { RAM } from '../src/core/ram.ts';
-import { routeTiles, routeKind, routeToStops, writeRoute, stopTranslevels } from '../src/core/owroute.ts';
-import { levelsWithoutTile, type LevelTileEvent } from '../src/core/owleveltiles.ts';
+import { routeTiles, routeKind, routeEnds, writeRoute, stopTranslevels } from '../src/core/owroute.ts';
+import { levelsWithoutTile, stopTile, type LevelTileEvent } from '../src/core/owleveltiles.ts';
 import { refusalOf, refusalDetails } from '../src/core/owrefusal.ts';
 import { refusalWords } from '../src/ui/owrefusal.ts';
 import { setLevelNameTiles } from '../src/core/levelnames.ts';
@@ -94,31 +94,64 @@ if (found) {
     `its tiles: ${solved.tiles.map((t) => (t === null ? '–' : hx(t))).join(' ')}${solved.refusal ? ` refused: ${solved.refusal.why.kind}` : ''}`);
   // drawn from beside the level tile to beside the other (both ends on cells without a path): taken on to the level
   // tiles, no stop tile put
-  const beside = route.slice(1, -1), onto = routeToStops(beside, ev.after, kinds);
-  check(beside.length >= 2 && same(onto, route) && !routeTiles(onto, { l1: ev.after, kinds, shapes, prefer: 'walk' }).stops.length,
-    `drawn beside the level tiles: taken on to them (${onto.map(at).join(' → ')}), no stop tile`);
-  check(same(routeToStops(route, ev.after, kinds), route), 'drawn from level tile to level tile: as drawn');
-  // on a map with nothing but level and stop tiles put (main map, cells (x, y)): a single cell as drawn; beside two,
-  // the one straight on; beside two, none straight on: as drawn (a stop tile goes there); an end on a path tile: as
-  // drawn (it joins that path)
+  const beside = route.slice(1, -1), onto = routeEnds(beside, ev.after, kinds, shapes);
+  check(beside.length >= 2 && same(onto.cells, route) && !onto.through.length && !routeTiles(onto.cells, { l1: ev.after, kinds, shapes, prefer: 'walk' }).stops.length,
+    `drawn beside the level tiles: taken on to them (${onto.cells.map(at).join(' → ')}), no stop tile`);
+  check(same(routeEnds(route, ev.after, kinds, shapes).cells, route), 'drawn from level tile to level tile: as drawn');
+  // on a map with nothing but the tiles put (main map, cells (x, y); 04 a straight path left and right)
   {
-    const c = (x: number, y: number) => l1Index(0, x, y);
-    const map = (put: [number, number, string][]) => {
+    const c = (x: number, y: number) => l1Index(0, x, y), STOP = stopTile(kinds), STAR = 0x5f, H = 0x04;
+    const LEVEL = kinds.indexOf('level');
+    const map = (put: [number, number, number][]) => {
       const l1 = new Uint16Array(0x800);
-      for (const [x, y, k] of put) l1[c(x, y)] = kinds.indexOf(k as (typeof kinds)[number]);
+      for (const [x, y, t] of put) l1[c(x, y)] = t;
       return l1;
     };
+    const ends = (r: number[], l1: Uint16Array, kept?: (cell: number) => boolean) => routeEnds(r, l1, kinds, shapes, kept);
     const line = [c(5, 5), c(6, 5), c(7, 5)];
-    check(same(routeToStops([c(5, 5)], map([[4, 5, 'level']]), kinds), [c(5, 5)]), 'a single cell beside a level tile: as drawn');
-    check(same(routeToStops(line, map([[4, 5, 'level'], [5, 4, 'stop'], [8, 5, 'stop']]), kinds), [c(4, 5), ...line, c(8, 5)]),
+    // beside level and stop tiles
+    check(same(ends([c(5, 5)], map([[4, 5, LEVEL]])).cells, [c(5, 5)]), 'a single cell beside a level tile: as drawn');
+    check(same(ends(line, map([[4, 5, LEVEL], [5, 4, STOP], [8, 5, STOP]])).cells, [c(4, 5), ...line, c(8, 5)]),
       'beside a level and a stop tile, the level straight on: the level; the other end beside a stop: the stop');
-    check(same(routeToStops(line, map([[5, 4, 'level']]), kinds), [c(5, 4), ...line]), 'beside one level tile, not straight on: that one');
-    check(same(routeToStops(line, map([[5, 4, 'level'], [5, 6, 'level']]), kinds), line), 'beside two level tiles, none straight on: as drawn');
-    check(same(routeToStops(line, map([[4, 5, 'level'], [5, 5, 'walk']]), kinds), line), 'an end on a path tile: as drawn');
+    check(same(ends(line, map([[5, 4, LEVEL]])).cells, [c(5, 4), ...line]), 'beside one level tile, not straight on: that one');
+    check(same(ends(line, map([[5, 4, LEVEL], [5, 6, LEVEL]])).cells, line), 'beside two level tiles, none straight on: as drawn');
+    // an existing path going on (#: a path drawn on from its end): from its last path tile, or from beside it, the route
+    // runs back along the path to the level or stop tile it comes from; its tiles there kept where they fit, no stop
+    // tile at the path's end
+    const path = map([[3, 5, LEVEL], [4, 5, H], [5, 5, H]]), back = [c(3, 5), c(4, 5), ...line];
+    const fromEnd = ends(line, path);
+    check(same(fromEnd.cells, back) && !fromEnd.through.length, `from a path's last tile: back along it to the level (${fromEnd.cells.map(at).join(' → ')})`);
+    const solvedEnd = routeTiles(fromEnd.cells, { l1: path, kinds, shapes, prefer: 'walk', through: new Set(fromEnd.through) });
+    check(!solvedEnd.refusal && solvedEnd.stops.length === 1 && solvedEnd.stops[0].cell === c(7, 5) && solvedEnd.tiles[2] !== STOP && solvedEnd.tiles[1] === H,
+      `its tiles: ${solvedEnd.tiles.map((t) => (t === null ? '–' : hx(t))).join(' ')} – a stop at the new end only, the path's tiles kept`);
+    check(same(ends(line.slice(1), path).cells, back), 'from beside a path\'s last tile, straight on: back along it to the level');
+    // a path ending at a stop tile (a route's end): the route runs through it, the stop becomes a path tile
+    const atStop = map([[3, 5, LEVEL], [4, 5, H], [5, 5, STOP]]);
+    for (const [r, what] of [[line, 'from the stop tile'], [line.slice(1), 'from beside it']] as const) {
+      const e = ends([...r], atStop), t = routeTiles(e.cells, { l1: atStop, kinds, shapes, prefer: 'walk', through: new Set(e.through) });
+      check(same(e.cells, back) && same(e.through, [2]) && !t.refusal && t.tiles[2] !== null && kinds[t.tiles[2]!] === 'walk' && t.stops.length === 1,
+        `a path's end at a stop tile, ${what}: through it (${e.cells.map(at).join(' → ')}, through ${e.through}), a path tile there: ${t.tiles.map((x) => (x === null ? '–' : hx(x))).join(' ')}`);
+    }
+    // left alone: a stop tile Mario stops at on the way (the route runs back to it, not through it), a star at a path's
+    // end, a stop kept (kept: its translevel has a name …), the middle of a path (a junction), an end beside two paths
+    const twoStops = map([[1, 5, LEVEL], [2, 5, H], [3, 5, STOP], [4, 5, H], [5, 5, H]]);
+    const viaStop = ends(line, twoStops);
+    check(same(viaStop.cells, [c(3, 5), c(4, 5), ...line]) && !viaStop.through.length, 'back along a path: to the first stop tile on it, not through it');
+    const star = ends(line, map([[3, 5, LEVEL], [4, 5, H], [5, 5, STAR]]));
+    check(same(star.cells, line) && !star.through.length, 'a star at a path\'s end: as drawn (Mario stops there)');
+    const kept = ends(line, atStop, (cell) => cell === c(5, 5));
+    check(same(kept.cells, line) && !kept.through.length, 'a stop tile to keep at a path\'s end: as drawn');
+    const through = map([[3, 5, LEVEL], [4, 5, H], [5, 5, H], [6, 5, H], [7, 5, LEVEL]]), down = [c(5, 5), c(5, 6), c(5, 7)];
+    check(same(ends(down, through).cells, down), 'from the middle of a path: as drawn (a junction there)');
+    check(same(ends([c(5, 6), c(5, 7)], through).cells, [c(5, 6), c(5, 7)]), 'from beside the middle of a path: as drawn');
+    check(same(ends(line, map([[4, 5, LEVEL], [5, 5, 0x10]])).cells, line), 'an end on a path tile leading elsewhere (up and down): as drawn');
+    // (a stop tile on cell 0 – the main map's top left – is no end gone on from: nothing run through)
+    const corner = ends(line, map([[0, 0, STOP]])), cornerOn = ends([c(0, 0), c(1, 0), c(2, 0)], map([[0, 0, STOP]]));
+    check(same(corner.cells, line) && !corner.through.length && !cornerOn.through.length, `a stop tile on cell 0: nothing run through (${corner.through} / ${cornerOn.through})`);
   }
   const before = rom.data.slice(), l1b = readL1(rom), tl = tls[from], exit = e - baseEvent(rom, tl), dir = [0, 1, 2, 3].find((d) => neighbor(from, d) === route[1])!;
   let set: ReturnType<typeof writeRoute>['exits'] = [];
-  s.edit('Path', () => { set = writeRoute(rom, route, solved, ev).exits; }, { key: null });
+  s.edit('Path', () => { set = writeRoute(rom, route, solved, ev, kinds).exits; }, { key: null });
   check(s.history.undoStack.length === 1, 'written: one ROM edit');
   const steps = eventL1Tiles(readEvents(rom), e);
   check(route.slice(1, -1).every((c) => steps.includes(c)) && same(readL1(rom), l1b), 'the tiles: layer 1 changes of the event, the map before events unchanged');
@@ -135,17 +168,34 @@ if (found) {
   // on the map before events: into the map, no exit set
   const dirs0 = exitDirections(rom, tl).join();
   const plain = routeTiles(route, { l1: readL1(rom), kinds, shapes, prefer: 'walk' });
-  s.edit('Path', () => { set = writeRoute(rom, route, plain, null).exits; }, { key: null });
+  s.edit('Path', () => { set = writeRoute(rom, route, plain, null, kinds).exits; }, { key: null });
   const l1 = readL1(rom);
   check(!plain.refusal && route.every((c, k) => plain.tiles[k] === null || l1[c] === plain.tiles[k]) && !set.length && exitDirections(rom, tl).join() === dirs0,
     'before events: the tiles into the map, no exit set');
   s.undo();
   check(same(rom.data, before), 'undone: as before');
 
+  // ---- a path drawn on from a stop tile at its end, before events: the stop a path tile, its translevel freed ----
+  {
+    const part = route.slice(0, -1), firstPart = routeTiles(part, { l1: readL1(rom), kinds, shapes, prefer: 'walk', stopTranslevels: stopTranslevels(rom) });
+    s.edit('Path', () => { writeRoute(rom, part, firstPart, null, kinds); }, { key: null });
+    const end = part.at(-1)!, tlEnd = readTranslevels(rom)[end];
+    const l1 = readL1(rom), on = routeEnds([end, route.at(-1)!], l1, kinds, shapes);
+    const t = routeTiles(on.cells, { l1, kinds, shapes, prefer: 'walk', through: new Set(on.through), stopTranslevels: stopTranslevels(rom) });
+    check(firstPart.stops.length === 1 && kinds[l1[end]] === 'stop' && tlEnd > 0 && same(on.cells, route) && same(on.through, [route.length - 2]) && !t.refusal && !t.stops.length,
+      `a route ending on nothing: a stop tile (${at(end)}, translevel ${hx(tlEnd)}); drawn on from it to the level: back along the path, through the stop (${on.through}), no stop tile`);
+    s.edit('Path', () => { writeRoute(rom, on.cells, t, null, kinds); }, { key: null });
+    const l1n = readL1(rom), tlsN = readTranslevels(rom);
+    check(kinds[l1n[end]] === 'walk' && !tlsN[end] && !tlsN.includes(tlEnd) && initialFlags(rom, tlEnd) === 0,
+      `written: a path tile (${hx(l1n[end])}) there, translevel ${hx(tlEnd)} freed and reset (initial flags ${initialFlags(rom, tlEnd)})`);
+    s.undo(); s.undo();
+    check(same(rom.data, before), 'undone: as before');
+  }
+
   // ---- a junction: a second route across the first one, in the same event (#376) ----
   // its stop tiles get translevels no tile held, their initial flags the stops' ways; Mario leaves the junction in
   // every direction at every progress from the event on
-  s.edit('Path', () => { writeRoute(rom, route, solved, ev); }, { key: null });
+  s.edit('Path', () => { writeRoute(rom, route, solved, ev, kinds); }, { key: null });
   const after1 = mapAt(e + 1), on1 = new Set(route), free = (i: number) => i >= 0 && !on1.has(i) && kinds[after1[i]] === 'none';
   let cross: number[] | null = null;
   for (let k = 2; k < route.length - 2 && !cross; k++) {
@@ -167,7 +217,7 @@ if (found) {
       `its stop tiles: both ends and the junction, ways ${js?.dirs.map((d) => DIR_NAMES[d]).join(', ')}${solved2.refusal ? ` refused: ${solved2.refusal.why.kind}` : ''}`);
     const before2 = rom.data.slice(), without0 = levelsWithoutTile(tls0), kept0 = without0.filter((tl) => hasNameEventOrMessages(rom, tl));
     let taken: number[] = [];
-    s.edit('Path', () => { taken = writeRoute(rom, cross!, solved2, ev2).taken; }, { key: null });
+    s.edit('Path', () => { taken = writeRoute(rom, cross!, solved2, ev2, kinds).taken; }, { key: null });
     const tls2 = readTranslevels(rom), got = solved2.stops.map((x) => tls2[x.cell]);
     check(got.every((tl) => without0.includes(tl)) && new Set(got).size === 3 && levelsWithoutTile(tls2).length === without0.length - 3 && got.join() === taken.join(),
       `each stop tile a translevel no tile held (${got.map((tl) => hx(tl)).join(', ')}): 3 fewer levels without level tile`);
@@ -194,7 +244,7 @@ if (found) {
 
     // on the map before events: the stop tiles take translevels too
     const l1b2 = readL1(rom), solved3 = routeTiles(cross, { l1: l1b2, kinds, shapes, prefer: 'walk', stopTranslevels: stopTranslevels(rom, tls0) });
-    s.edit('Path', () => { writeRoute(rom, cross!, solved3, null); }, { key: null });
+    s.edit('Path', () => { writeRoute(rom, cross!, solved3, null, kinds); }, { key: null });
     const tls3 = readTranslevels(rom);
     check(!solved3.refusal && solved3.stops.length >= 2 && solved3.stops.every((x) => without0.includes(tls3[x.cell]) && initialFlags(rom, tls3[x.cell]) === x.dirs.reduce((f, d) => f | DIR_FLAGS[d], 0)),
       `before events: its ${solved3.stops.length} stop tiles take free translevels, their flags their ways`);
@@ -225,7 +275,7 @@ if (found) {
       // the junction of the route in the event, painted over as after the event: its translevel freed and reset
       // (a route and a name for one of its stops, as the player might give one)
       const named = (stop: number, write: () => void) => s.edit('Path', () => { write(); setLevelNameTiles(rom, readTranslevels(rom)[stop], [0x00, 0x01]); }, { key: null });
-      named(j, () => { writeRoute(rom, cross!, solved2, ev2); });
+      named(j, () => { writeRoute(rom, cross!, solved2, ev2, kinds); });
       const tlJ = readTranslevels(rom)[j], others = solved2.stops.filter((x) => x.cell !== j).map((x) => [x.cell, readTranslevels(rom)[x.cell]]);
       const undos = s.history.undoStack.length, was = rom.data.slice();
       check(!!tlJ && initialFlags(rom, tlJ) !== 0 && hasNameEventOrMessages(rom, tlJ) && paintOver(j, pathTile, true) && s.history.undoStack.length === undos + 1,
@@ -240,7 +290,7 @@ if (found) {
 
       // a stop of the route before events, painted over as after the event: kept (the cell is a stop before it)
       const end0 = solved3.stops[0].cell;
-      named(end0, () => { writeRoute(rom, cross!, solved3, null); });
+      named(end0, () => { writeRoute(rom, cross!, solved3, null, kinds); });
       const tl0 = readTranslevels(rom)[end0], flags0 = initialFlags(rom, tl0), stop0 = readL1(rom)[end0], was0 = rom.data.slice();
       check(flags0 !== 0 && hasNameEventOrMessages(rom, tl0) && paintOver(end0, pathTile, true), `a path (${hx(pathTile)}) painted over it as after event ${hx(e)}`);
       check(readTranslevels(rom)[end0] === tl0 && initialFlags(rom, tl0) === flags0 && hasNameEventOrMessages(rom, tl0) && eventL1Tiles(readEvents(rom), e).includes(end0) && readL1(rom)[end0] === stop0,
@@ -265,7 +315,7 @@ if (found) {
     writeTranslevels(rom, full);
     const before3 = rom.data.slice();
     let thrown: unknown = null;
-    try { writeRoute(rom, cross, solved2, ev2); } catch (err) { thrown = err; }
+    try { writeRoute(rom, cross, solved2, ev2, kinds); } catch (err) { thrown = err; }
     check(refusalOf(thrown)?.kind === 'routeNoTranslevel' && same(rom.data, before3), 'written anyway: refused (routeNoTranslevel), nothing written');
 
     // (#382) three translevels without tile, but each with a name, base event or messages: never taken – refused at
@@ -288,7 +338,7 @@ if (found) {
       check(!!words && /name, base event or messages/.test(words.reason) && /Without level tile/.test(words.instead), `the player's words: "${words?.reason}" ${words?.instead}`);
       const before4 = r2.data.slice();
       let thrown2: unknown = null;
-      try { writeRoute(r2, cross, solved2, ev2); } catch (err) { thrown2 = err; }
+      try { writeRoute(r2, cross, solved2, ev2, kinds); } catch (err) { thrown2 = err; }
       check(refusalOf(thrown2)?.kind === 'routeNoTranslevel' && same(r2.data, before4), 'written anyway: refused, nothing written (their settings kept)');
       // one of them without settings again: the stops take it – refused at the second
       setBaseEvent(r2, left2[0], NO_EVENT);
