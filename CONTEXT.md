@@ -443,7 +443,7 @@ Where Mario died in a recent test play of a level, drawn over it (View → Death
 _Avoid_: death point, skull
 
 **Prefetch**:
-Probing what a view shows before anyone asks for it (the picker's Objects tab: its objects' Map16 tiles; its Map16 tab and the Map16 editor: tiles 000–1FF; its Sprites tab: the sprites), only while such a view is shown, in the open level's tileset; after a ROM change only what a view shown then wants is probed again. It runs last, only when nothing else is pending – the open level's work, the probes asked directly, the lanes and tasks – and quietly: the busy indicator counts the probes asked directly only. The views themselves show what is known and don't ask; a search, a hover or an overlay asks.
+Probing what a panel shows before anyone asks for it (the picker's Objects tab: its objects' Map16 tiles; its Map16 tab and the Map16 editor: tiles 000–1FF; its Sprites tab: the sprites it lists, custom ones too), only while such a panel is shown, in the open level's tileset; after a ROM change only what a panel shown then wants is probed again. It runs last, only when nothing else is pending – the open level's work, the probes asked directly, the lanes and tasks – and quietly: the busy indicator counts the probes asked directly only. The panels themselves show what is known and don't ask; a search, a hover or an overlay asks.
 _Avoid_: background probes (the probes asked directly also run in the background worker)
 
 **Scroll bands**:

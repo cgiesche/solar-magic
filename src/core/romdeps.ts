@@ -387,6 +387,9 @@ export const always: Validity<null> = { stamp: () => 0, holds: () => true };
 // The result cache: results by key and input kept while the bytes they read are unchanged (KeptResults, checked
 // against the fingerprint), persisted: changed and dropped entries are collected for storing (see flush()). A key keeps
 // the results of its latest used INPUTS_PER_KEY inputs, the least recently used one dropped (also from storage).
+// what reading results takes of a result cache (a stored result by key)
+export type ResultGet = Pick<ResultCache, 'get'>;
+
 export class ResultCache {
   fp: RomFingerprint;
   private kept: KeptResults<RomDeps>;

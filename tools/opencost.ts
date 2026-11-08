@@ -1,5 +1,5 @@
 // What the probe worker (probehost.ts) does after a vanilla ROM is opened on a level (default 105), as the editor asks
-// for it: the level's block probes asked (the items overlay's tiles), the most the views prefetch (blocks 000-1FF
+// for it: the level's block probes asked (the items overlay's tiles), the most the panels prefetch (blocks 000-1FF
 // and all sprites: as with the Map16 and Sprites tabs shown, run last; at the open nothing shows them), the object kinds (the level's objects first) and the sprite images (the level's sprites first); prints when
 // each piece is ready (#393). --alone: no asked probes, no prefetch; --nosprites: no sprite images; --uses: the levels'
 // uses too.

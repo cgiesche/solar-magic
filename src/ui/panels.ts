@@ -38,7 +38,7 @@ import { contextMenu } from './menu.ts';
 import { collisionMarks, markCanvas, switchMarks, switchCanvas, MARK_TEXT, type CollisionMark } from './collisionmarks.ts';
 
 // behaviour of the given Map16 tiles when hit from below or entered (only tiles with an effect);
-// undefined while probes are still pending (asked for; without ask only those known: a view's come with its prefetch)
+// undefined while probes are still pending (asked for; without ask only those known: a picker tab's come with its prefetch)
 export function blockSummary(app: App, tiles: number[], all = false, ask = true): string[] | undefined {
   const out: string[] = [];
   let pending = false;
@@ -178,6 +178,7 @@ export class Picker {
   tab: PickerTab = 'obj';
   builtTab?: PickerTab; // the tab the body shows (undefined: a brush mode's sheet)
   scrolls = { obj: 0, m16: 0, spr: 0 }; // scroll position of each tab's list, kept across rebuilds and tab changes
+  private shown = true; // on screen (setShown): only then it wants a prefetch
   prefabBox: HTMLDivElement = h('div'); // the Prefabs section
   // its button and hint, which follow the selection without a rebuild
   thumbs = new Map<string, HTMLCanvasElement>();
@@ -564,19 +565,18 @@ export class Picker {
   }
 
   // Shown (the level editor's right side, not the message panel there) or hidden: what it wants prefetched follows
-  private shown = true;
   setShown(shown: boolean): void {
     this.shown = shown;
     this.wantPrefetch();
   }
 
   // what the picker shown wants prefetched (ProbeClient.wantPrefetch), the probes its tab shows: the Objects tab its
-  // objects' Map16 tiles, the Map16 tab tiles 000-1FF, the Sprites tab the sprites; nothing while it is hidden or shows
+  // objects' Map16 tiles, the Map16 tab tiles 000-1FF, the Sprites tab the sprites it lists (custom ones too); nothing while it is hidden or shows
   // a brush mode's sheet
   wantPrefetch(): void {
     const app = this.app, tab = this.shown && !isBrushMode(app.model.mode) ? this.tab : null;
     app.probes.wantPrefetch('picker', tab === 'obj' ? { tiles: [...new Set([...this.thumbTiles.values()].flat())] }
-      : tab === 'm16' ? { blocks: true } : tab === 'spr' ? { sprites: true } : null);
+      : tab === 'm16' ? { blocks: true } : tab === 'spr' ? { sprites: true, customSprites: app.customSprites().filter((c) => c.listed).map((c) => c.id) } : null);
   }
 
   // the standard objects (with their types), the extended objects or object 2D's custom numbers as listed in the

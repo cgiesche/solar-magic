@@ -368,7 +368,7 @@ export class App {
       this.emit('level');
       logMsg(`Level ${hex(n, 3)} opened`);
       this.scheduleSpriteMem();
-      this.probes.refreshPrefetch(); // (what the views shown want, in the level's tileset; none shown: nothing)
+      this.probes.refreshPrefetch(); // (what the panels shown want, in the level's tileset; none shown: nothing)
     });
   }
 

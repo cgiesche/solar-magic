@@ -33,7 +33,7 @@
 import { LevelEmulator, MAP_BASE } from './levelemu.ts';
 import { Rom } from './rom.ts';
 import { joinHooks, type SnesState, type MemHook } from './snes.ts';
-import { ResultCache, RomFingerprint, RomReads, type RomDeps } from './romdeps.ts';
+import { ResultCache, RomFingerprint, RomReads, type RomDeps, type ResultGet } from './romdeps.ts';
 import { spriteName, hex3 } from './names.ts';
 import { measureCameraBands, type CameraBands } from './camerabands.ts';
 import { applyTriggers, emptyTriggerView } from './extrigger.ts';
@@ -149,7 +149,6 @@ export interface SpriteProbe {
 }
 
 // sprite num's probe in tileset ts among results (undefined: not known)
-export type ResultGet = Pick<ResultCache, 'get'>;
 export function spriteProbeIn(results: ResultGet, ts: number, num: number): SpriteProbe | undefined {
   const p = results.get<SpriteProbe>(spriteKey(num));
   return p?.byTileset ? results.get<SpriteProbe>(spriteTsKey(ts, num)) : p;
@@ -189,10 +188,12 @@ interface TilesetProbes {
   floorTile: number; // a tile Mario can stand on (found by trying), -1 = not searched yet, -2 = none found
   switchFloor: Partial<Record<SwitchState, number>>; // the same in a switch state (the floor may depend on it)
   climbTile: number; // a tile Mario climbs in (vines, nets), the same way
-  // code (bank and address) that reads the tileset in the probe level without a sprite, with the ROM that run read (for
-  // the sprite probes only: the other probes don't depend on it)
-  tilesetReaders: { pcs: Set<number>; reads: RomReads; deps: RomDeps } | null;
+  tilesetReaders: TilesetReaders | null;
 }
+
+// the code (bank and address) that reads the tileset in the probe level without a sprite, with the ROM that run read
+// (for the sprite probes only: the other probes don't depend on it)
+interface TilesetReaders { pcs: Set<number>; reads: RomReads; deps: RomDeps }
 
 const freshTileset = (): TilesetProbes => ({ ready: null, reads: null, deps: null, by: 0, floorTile: -1, switchFloor: {}, climbTile: -1, tilesetReaders: null });
 
@@ -370,15 +371,15 @@ export class BlockProber {
     const known = this.cachedSprite(num);
     if (known) return known;
     if (!this.cur.ready) this.prepare();
-    const base = this.tilesetReaders();
+    const readers = this.findTilesetReaders();
     const before = new RomReads(this.rom, this.cur.reads);
-    before.add(base.reads);
+    before.add(readers.reads);
     let byTileset = false;
-    const cpu = this.emu.snes.cpu, hook: MemHook = { onWramRead: (a) => { if (a === RAM.tileset && !base.pcs.has(cpu.opPc)) byTileset = true; } };
+    const cpu = this.emu.snes.cpu, hook: MemHook = { onWramRead: (a) => { if (a === RAM.tileset && !readers.pcs.has(cpu.opPc)) byTileset = true; } };
     const { result, reads } = this.emu.tracked(() => this.withHook(hook, () => this.spriteProbe(num)), before);
-    const deps = this.results.fp.deps(reads), shared = this.results.get<SpriteProbe>(spriteKey(num));
-    if (byTileset || shared?.byTileset) this.results.set(spriteTsKey(this.tileset, num), result, deps);
-    if (!shared) this.results.set(spriteKey(num), byTileset ? { ...result, byTileset: true } : result, deps);
+    const deps = this.results.fp.deps(reads), forAll = this.results.get<SpriteProbe>(spriteKey(num));
+    if (byTileset || forAll?.byTileset) this.results.set(spriteTsKey(this.tileset, num), result, deps);
+    if (!forAll) this.results.set(spriteKey(num), byTileset ? { ...result, byTileset: true } : result, deps);
     return result;
   }
 
@@ -391,7 +392,7 @@ export class BlockProber {
 
   // the code reading the tileset in the probe level without a sprite, Mario jumping as for a sprite's probe (once per
   // tileset and ROM state)
-  private tilesetReaders(): { pcs: Set<number>; reads: RomReads } {
+  private findTilesetReaders(): TilesetReaders {
     const c = this.cur;
     if (c.tilesetReaders) return c.tilesetReaders;
     const pcs = new Set<number>(), s = this.emu.snes;

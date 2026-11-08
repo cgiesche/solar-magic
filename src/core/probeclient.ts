@@ -1,5 +1,5 @@
 // The editor's side of the probes (probehost.ts): asks for block, collision and sprite probes, Mario's
-// run speeds and the game view's scroll bands in the current tileset, prefetches what the views shown
+// run speeds and the game view's scroll bands in the current tileset, prefetches what the panels shown
 // want (last, quietly), and runs the object kinds, the level scan, the camera at a place and the result learner's jobs (CONTEXT.md;
 // probeprotocol.ts LearnJob), all in the probe worker. It sends the ROM once, then the ranges each change
 // wrote (the worker keeps its queue and restarts only tasks
@@ -62,10 +62,11 @@ export interface LearnOptions<T> {
 // (resent: the ROM generation it was last sent again for, a reply from an older one coming: once per generation)
 interface LearnWant { msg: LearnMessage; opts: LearnOptions<unknown>; done: ((r: unknown) => void)[]; failed: (() => void)[]; dropped: (() => void)[]; resent: number }
 
-// what a view shown wants prefetched (ProbeClient.wantPrefetch) in the current tileset: blocks, the block probes of
-// Map16 tiles 000-1FF; tiles, the block and collision probes of these; sprites, the probes of all sprites
-export interface PrefetchWant { blocks?: boolean; tiles?: readonly number[]; sprites?: boolean }
-// the views that want a prefetch: the level editor's picker, the graphics workspace's Map16 editor
+// what a panel shown wants prefetched (ProbeClient.wantPrefetch) in the current tileset: blocks, the block probes of
+// Map16 tiles 000-1FF; tiles, the block and collision probes of these; sprites, the probes of the original sprites;
+// customSprites, those of these custom sprites (PIXI ids $2xx/$3xx)
+export interface PrefetchWant { blocks?: boolean; tiles?: readonly number[]; sprites?: boolean; customSprites?: readonly number[] }
+// the panels that want a prefetch: the level editor's picker, the graphics workspace's Map16 editor
 export type PrefetchOwner = 'picker' | 'map16tab';
 
 export class ProbeClient {
@@ -74,7 +75,7 @@ export class ProbeClient {
   private size = -1; // and the ROM's size
   private asked = new Map<string, ProbeJob>(); // asked for and not done yet
   private prefetched = new Map<string, ProbeJob>(); // the same, probed when nothing else is pending
-  private prefetchWants = new Map<PrefetchOwner, PrefetchWant>(); // by the view wanting it (only those shown)
+  private prefetchWants = new Map<PrefetchOwner, PrefetchWant>(); // by the panel wanting it (only those shown)
   private prefetchSent = false; // the worker may have a prefetch queue (one was sent with jobs)
   // probes and tilesets whose object kinds failed, forgotten whenever the ROM changes: a deliberate exception
   // to emulated results holding by the bytes they read (a failure is rare and cheap to try again)
@@ -106,7 +107,7 @@ export class ProbeClient {
   sprite(num: number): SpriteProbe | undefined {
     return probeable(num) ? this.probed({ kind: 'sprite', ts: this.d.tileset(), num }) : undefined;
   }
-  // as sprite, without asking for it (a view's: its prefetch brings it, wantPrefetch)
+  // as sprite, without asking for it (a picker tab's: its prefetch brings it, wantPrefetch)
   spriteKnown(num: number): SpriteProbe | undefined {
     return probeable(num) ? jobResult<SpriteProbe>(this.d.results, { kind: 'sprite', ts: this.d.tileset(), num }) : undefined;
   }
@@ -152,10 +153,10 @@ export class ProbeClient {
     });
   }
 
-  // A view that shows probe results (a picker tab, the Map16 editor) is shown (want: what it shows, PrefetchWant) or hidden (null), named by owner:
-  // the probes the shown views want are prefetched (CONTEXT.md "Prefetch"), in the worker only when nothing else is
-  // pending and not counted as busy; nothing is prefetched that no view shown wants. The same want again changes
-  // nothing.
+  // A panel that shows probe results (a picker tab, the Map16 editor) is shown (want: what it shows, PrefetchWant) or
+  // hidden (null), named by owner: the probes the shown panels want are prefetched (CONTEXT.md "Prefetch"), in the
+  // worker only when nothing else is pending and not counted as busy; nothing is prefetched that no panel shown wants.
+  // The same want again changes nothing.
   wantPrefetch(owner: PrefetchOwner, want: PrefetchWant | null): void {
     const was = this.prefetchWants.get(owner);
     if (sameWant(was, want ?? undefined)) return;
@@ -163,7 +164,7 @@ export class ProbeClient {
     this.refreshPrefetch();
   }
 
-  // Makes the prefetch queue anew: what the shown views want (wantPrefetch) in the current tileset (the queue of
+  // Makes the prefetch queue anew: what the shown panels want (wantPrefetch) in the current tileset (the queue of
   // another tileset dropped) and not known yet; results go to the cache, so each is probed once per tileset and ROM state (the sprites once per ROM state, blockprobe.ts)
   refreshPrefetch(): void {
     this.d.cacheReady.then(() => {
@@ -178,6 +179,7 @@ export class ProbeClient {
       for (const w of wants) for (const tile of w.tiles ?? []) { add({ kind: 'block', ts, tile }); add({ kind: 'collision', ts, tile }); }
       if (wants.some((w) => w.blocks)) for (let tile = 0; tile < 0x200; tile++) add({ kind: 'block', ts, tile });
       if (wants.some((w) => w.sprites)) for (let num = 0; num < SPRITE_PROBE_END; num++) add({ kind: 'sprite', ts, num });
+      for (const w of wants) for (const num of w.customSprites ?? []) if (probeable(num)) add({ kind: 'sprite', ts, num });
       // (a queue the worker may have is replaced, also by none)
       if (!jobs.size && !this.prefetchSent) return;
       this.prefetched = jobs;
@@ -372,7 +374,7 @@ export class ProbeClient {
       for (const w of this.playWant.values()) this.send(w.msg);
       for (const lane of this.lanes.values()) for (const w of lane.jobs) { w.resent = this.gen; this.post(this.withParts(w.msg)); }
     }
-    // (what the views shown want: results that read changed ROM data are redone)
+    // (what the panels shown want: results that read changed ROM data are redone)
     this.d.later('probe-prefetch', () => this.refreshPrefetch());
   }
 
@@ -556,9 +558,9 @@ export class ProbeClient {
 
 type Played = 'scan' | 'camera'; // tasks that play a level
 
-// (the same tiles in the same order: a view asks with the same list again)
+// (the same numbers in the same order: a panel asks with the same lists again)
 function sameWant(a: PrefetchWant | undefined, b: PrefetchWant | undefined): boolean {
   if (!a || !b) return a === b;
-  const at = a.tiles ?? [], bt = b.tiles ?? [];
-  return !!a.blocks === !!b.blocks && !!a.sprites === !!b.sprites && at.length === bt.length && at.every((t, i) => t === bt[i]);
+  const same = (x: readonly number[] = [], y: readonly number[] = []) => x.length === y.length && x.every((t, i) => t === y[i]);
+  return !!a.blocks === !!b.blocks && !!a.sprites === !!b.sprites && same(a.tiles, b.tiles) && same(a.customSprites, b.customSprites);
 }

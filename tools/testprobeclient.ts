@@ -3,7 +3,7 @@
 // again, results come in after it, and one still valid is kept, one whose bytes changed meanwhile not (asked again); after the first copy of the ROM it gets the
 // ranges a change wrote; a broken worker hands everything
 // wanted to the main thread, and without a worker it all runs there; a failed probe is not asked again until the ROM changes; the
-// prefetch follows the tileset and what the views shown want (none: nothing), not counted as busy; object kinds are kept while the bytes they read are unchanged, those of the open level's objects known first (#393); a cancelled
+// prefetch follows the tileset and what the panels shown want (none: nothing), not counted as busy; object kinds are kept while the bytes they read are unchanged, those of the open level's objects known first (#393); a cancelled
 // scan is told to the worker; learn jobs (the sprite images) come in as they run, with a worker and without; a lane's
 // jobs can be dropped (telling their askers), an urgent one (or any, urged) runs without a worker while a dialog holds the background slices; a failed job
 // asked again is FAILED without telling the asker again, the open level's last known tiles hold for their level and ROM
@@ -247,9 +247,9 @@ function editor(worker: Worker | null) {
   check(pf[1]?.type === 'prefetch' && pf[1].jobs.length > 0 && pf[1].jobs.every((j) => j.ts === 2), 'tileset 2: only its jobs');
 }
 
-// the prefetch on demand: nothing before a view shown wants it (also after a ROM change); a view's want: only
+// the prefetch on demand: nothing before a panel shown wants it (also after a ROM change); a panel's want: only
 // its probes (block probes 000-1FF, the sprites', a list of tiles' block and collision probes), the same want again
-// sends nothing; all views hidden: the queue dropped, nothing again after a ROM change; the busy label counts the
+// sends nothing; all panels hidden: the queue dropped, nothing again after a ROM change; the busy label counts the
 // asked probes only, 'ready' told once the prefetch is done
 {
   const w = new Worker(), e = editor(w);
@@ -263,7 +263,7 @@ function editor(worker: Worker | null) {
   await settle();
   e.drain(true);
   await settle();
-  check(sent().length === 0, 'no view shown: nothing prefetched, also after a ROM change');
+  check(sent().length === 0, 'no panel shown: nothing prefetched, also after a ROM change');
   check(e.busy.get('probe') === 'Block behavior (2)', `busy: the asked probes (${e.busy.get('probe')})`);
 
   e.client.wantPrefetch('map16tab', { blocks: true });
@@ -288,17 +288,24 @@ function editor(worker: Worker | null) {
   e.drain(true);
   await settle();
   const again = sent().at(-1);
-  check(sent().length === 4 && !!again && kinds(again) === 'sprite', `after a ROM change: what the views shown want again (${again && kinds(again)})`);
+  check(sent().length === 4 && !!again && kinds(again) === 'sprite', `after a ROM change: what the panels shown want again (${again && kinds(again)})`);
   e.client.wantPrefetch('picker', null);
   await settle();
   const none = sent().at(-1);
-  check(sent().length === 5 && none?.jobs.length === 0, 'all views hidden: the queue dropped');
+  check(sent().length === 5 && none?.jobs.length === 0, 'all panels hidden: the queue dropped');
   touch(e.rom);
   e.client.block(0x133);
   await settle();
   e.drain(true);
   await settle();
   check(sent().length === 5, 'nothing wanted: nothing prefetched after a ROM change');
+  // the Sprites tab lists custom sprites (PIXI ids $2xx/$3xx): theirs are prefetched too
+  e.client.wantPrefetch('picker', { customSprites: [0x200, 0x312] });
+  await settle();
+  const custom = sent().at(-1)?.jobs.map((j) => (j.kind === 'sprite' ? j.num : -1)).sort((a, b) => a - b).join(',');
+  check(sent().length === 6 && custom === `${0x200},${0x312}`, `custom sprites listed: their probes prefetched (${custom})`);
+  e.client.wantPrefetch('picker', null);
+  await settle();
 
   // the asked probes done, a small prefetch then: 'ready' for each, no busy label for the prefetch
   w.run();
