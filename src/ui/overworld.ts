@@ -25,7 +25,7 @@ import {
 import { OverworldStroke, shownMaps } from '../core/owstroke.ts';
 import { PathTool } from './owpathtool.ts';
 import { isPathKind, type PathKind, type PathShapes } from '../core/owpaths.ts';
-import { pathWays, pathTileText, type PathWay } from '../core/owpathshape.ts';
+import { mapWays, usualWays, pathTileText, type PathWay } from '../core/owpathshape.ts';
 import { emptyL1Tiles, freeL1Tiles, sheetPages, l1TileLines, l1Hex, l1BrushEntries, NO_TILE, SHEET_COLS, type SheetPage } from '../core/owl1sheet.ts';
 import { findL2Brush, l2BrushPalettes, l2SharedBits, l2SheetEntry, L2_SHEET_COLS, L2_SHEET_ROWS, L2_FLIP_X, L2_FLIP_Y, L2_PRIORITY, type SheetMark } from '../core/owl2sheet.ts';
 import { mapPieces, piecesAt, replacePiece, samePiece, gridInside, l2Block, PIECE_COLS } from '../core/owl2pieces.ts';
@@ -587,15 +587,23 @@ export class OverworldView {
   }
 
   // the path tiles of the map shown, a mark per kind (as Lunar Magic's "Layer 1 Mario Paths"): walk green, climb
-  // green with rungs, swim blue, exit red, stop a cross; the tile's shape as lines (once the shapes are learned)
+  // green with rungs, swim blue, exit red, stop a cross; the tile's shape as lines (once the shapes are learned): where
+  // Mario walks over the cell (owpathshape.ts mapWays: a straight tile at the height the tile before leaves him), else
+  // the tile's usual lines (usualWays)
   paintPaths(lw: number): void {
     const kinds = this.pathKinds();
     if (!kinds) return;
-    const ctx = this.canvas.getContext('2d')!, l1 = this.shown.l1, shapes = this.pathShapes();
+    const ctx = this.canvas.getContext('2d')!, l1 = this.shown.l1, shapes = this.pathShapes(), walked = this.walkedWays();
     for (let y = 0; y < 32; y++) for (let x = 0; x < 32; x++) {
-      const t = l1[l1Index(this.region, x, y)], k = kinds[t];
-      if (isPathKind(k)) drawPathMark(ctx, k, x * 16, y * 16, lw, pathWays(t, k, shapes));
+      const i = l1Index(this.region, x, y), t = l1[i], k = kinds[t];
+      if (isPathKind(k)) drawPathMark(ctx, k, x * 16, y * 16, lw, walked.get(i) ?? usualWays(t, k, shapes, l1, walked));
     }
+  }
+  // the ways Mario takes over each path tile of the maps shown (owpathshape.ts mapWays; none while the path kinds and
+  // shapes are learned)
+  walkedWays(l1: ArrayLike<number> = this.shown.l1): Map<number, PathWay[]> {
+    const kinds = this.pathKinds(), shapes = this.pathShapes();
+    return kinds && shapes ? mapWays(l1, kinds, shapes) : new Map();
   }
 
   // the cells a change being moved from a cell's history takes along (green; red where the move is refused)
@@ -2058,7 +2066,7 @@ export class OverworldView {
   l1Palette(): HTMLElement {
     const r = this.render();
     if (!r) return h('div', { class: 'hint' }, 'Loading the overworld…');
-    const tc = owTileCaches(r).l1, kinds = this.pathKinds(), shapes = this.pathShapes();
+    const tc = owTileCaches(r).l1, kinds = this.pathKinds(), shapes = this.pathShapes(), walked = this.walkedWays();
     const empty = emptyL1Tiles(this.app.rom), free = freeL1Tiles(empty, kinds);
     const tiles = (list: number[], w: number, W: number, H: number) => {
       const c = document.createElement('canvas');
@@ -2077,7 +2085,7 @@ export class OverworldView {
       ctx.putImageData(id, 0, 0);
       if (kinds) list.forEach((t, i) => {
         const k = kinds[t], x = (i % w) * 16, y = Math.floor(i / w) * 16;
-        if (!seen[i] && isPathKind(k)) drawPathMark(ctx, k, x, y, 0.5, pathWays(t, k, shapes));
+        if (!seen[i] && isPathKind(k)) drawPathMark(ctx, k, x, y, 0.5, usualWays(t, k, shapes, this.shown.l1, walked));
         else if (KIND_BORDER[k]) { ctx.strokeStyle = KIND_BORDER[k]; ctx.lineWidth = 1; ctx.strokeRect(x + 0.5, y + 0.5, 15, 15); }
       });
       // the level tiles hatched (no brush tiles: objects on layer 1, placed with a look from "Levels")
@@ -2291,8 +2299,8 @@ export class OverworldView {
 }
 
 // the mark of a path tile of kind k (isPathKind) on the 16x16 tile at (px, py), as the map's "Path tiles" overlay
-// draws it: walk green, climb green with rungs, swim blue, exit red, stop a cross; its ways (owpathshape.ts pathWays,
-// none while the shapes are learned) as white lines through the tile (lw: the width of a pixel)
+// draws it: walk green, climb green with rungs, swim blue, exit red, stop a cross; its ways (owpathshape.ts mapWays or
+// usualWays, none while the shapes are learned) as white lines through the tile (lw: the width of a pixel)
 // (each kind's colour, r,g,b: the mark's fill with its alpha, the sheet's border opaque; a level tile has no mark)
 const KIND_RGB: Partial<Record<PathKind, [string, number]>> = { walk: ['90,230,100', 0.7], climb: ['90,230,100', 0.7], swim: ['60,140,255', 0.75], exit: ['235,60,60', 0.8], stop: ['255,255,255', 1], level: ['255,210,60', 1] };
 const PATH_FILL = Object.fromEntries(Object.entries(KIND_RGB).map(([k, [c, a]]) => [k, `rgba(${c},${a})`])) as Partial<Record<PathKind, string>>;

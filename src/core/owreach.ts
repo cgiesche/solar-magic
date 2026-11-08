@@ -106,7 +106,10 @@ function last<T>(a: T[], f: (v: T) => boolean): T | undefined {
   return undefined;
 }
 
-export function walkFrom(inp: ReachInput, from: number, d: number): Walk | null {
+// onStep: each path tile walked over by its shape (not an exit tile), with where Mario steps onto it and where its
+// vector moves him (pixels in the tile), stepping on in direction dir and going on in direction out
+export type WalkStep = (cell: number, from: [number, number], to: [number, number], dir: number, out: number) => void;
+export function walkFrom(inp: ReachInput, from: number, d: number, onStep?: WalkStep): Walk | null {
   const { l1, kinds, shapes } = inp;
   const next = neighbor;
   const walkable = (i: number) => i >= 0 && kinds[l1[i]] !== 'none';
@@ -141,10 +144,14 @@ export function walkFrom(inp: ReachInput, from: number, d: number): Walk | null 
       path.push(cur);
     } else {
       // moved by the tile's vector (the sum's low 2 bits cleared), turned by where it ends
-      const [vx, vy] = shapeVector(shapes.walk, l1[n], dir, 16);
+      const [vx, vy] = shapeVector(shapes.walk, l1[n], dir, 16), was = [px, py], into = dir;
       px = (px + vx) & ~3; py = (py + vy) & ~3;
       dir = turnedAt(px, py, vx, vy, dir);
       cur = n;
+      if (onStep) {
+        const { x: cx, y: cy } = l1XY(n);
+        onStep(n, [was[0] - cx * 16, was[1] - cy * 16], [px - cx * 16, py - cy * 16], into, dir);
+      }
     }
     // the way he has first, else the first other one but back
     const ways = [dir, ...TURNS.filter((t) => t !== dir && t !== reverse(dir))];

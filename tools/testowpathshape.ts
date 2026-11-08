@@ -5,9 +5,9 @@
 // stair, a tile with two ways through it; an exit tile's axis, the way he comes out on, on the other submap.
 // node tools/testowpathshape.ts
 import { Rom } from '../src/core/rom.ts';
-import { readL1 } from '../src/core/overworld.ts';
 import { PATH_KIND_NAMES, PATH_TILES_END } from '../src/core/owpaths.ts';
-import { pathWays, pathWaysText, pathTileText, pathTileLines, exitAxis, exitFirstStepMisses, climbedOnto, EXIT_FIRST_STEP_MISSES, CLIMBED_ONTO, SHAPES_LEARNING, SHAPED_KINDS, type PathWay } from '../src/core/owpathshape.ts';
+import { readL1, OverworldEmulator, OverworldLoads, gameL1, l1XY, OW_EVENTS } from '../src/core/overworld.ts';
+import { mapWays, usualWays, pathWays, tileWays, pathWaysText, pathTileText, pathTileLines, exitAxis, exitFirstStepMisses, climbedOnto, EXIT_FIRST_STEP_MISSES, CLIMBED_ONTO, SHAPES_LEARNING, SHAPED_KINDS, type PathWay } from '../src/core/owpathshape.ts';
 import { editorImage, pathKinds, pathShapes } from './fixture.ts';
 
 let bad = 0;
@@ -84,6 +84,28 @@ check(!pathWays(0x25, 'exit', mixed).length && pathTileLines(0x25, 'exit', mixed
 check(pathTileText(0x07, 'walk', shapes) === 'Path: walk · from below to the right, from the right down', `07: "${pathTileText(0x07, 'walk', shapes)}"`);
 check(pathTileText(0x3f, kinds[0x3f], shapes) === 'Path: climb · from below up, from above down', `3F: "${pathTileText(0x3f, kinds[0x3f], shapes)}"`);
 check(pathTileText(0x07, 'walk', null) === `Path: walk · ${SHAPES_LEARNING}`, 'shapes not known: the shape is being learned');
+
+// on the map: where Mario walks over a tile, as the game moves him – a straight tile's line at the height the tile
+// before leaves him (02, 04 and 06 move him alike; on the game's map he walks over 02 at its bottom, 04 through its
+// middle, 06 at its top), the sheet's line the one the map's cells with the tile have most
+const g = new OverworldLoads(new OverworldEmulator(rom), 4).get(0, OW_EVENTS), l1 = gameL1(g).slice();
+const walked = mapWays(l1, kinds, shapes);
+const lineSet = (ws: readonly PathWay[]) => [...new Set(ws.map((w) => [w.from.join(), w.to.join()].sort().join('–')))].sort().join(' ');
+const cellsOf = (t: number) => [...walked.keys()].filter((c) => l1[c] === t);
+const onMap = (t: number) => [...new Set(cellsOf(t).map((c) => lineSet(walked.get(c)!)))].join(' / ');
+for (const [t, want] of [[0x02, '0,12–16,12'], [0x04, HORIZ], [0x06, '0,4–16,4']] as const) {
+  check(cellsOf(t).length > 0 && onMap(t) === want, `${hx(t)} on the map: ${want} (${onMap(t)}, ${cellsOf(t).length} cells)`);
+  check(lineSet(usualWays(t, kinds[t], shapes, l1, walked)) === want, `${hx(t)} in the sheet: ${lineSet(usualWays(t, kinds[t], shapes, l1, walked))}`);
+}
+// told apart by where they are walked, not by their vectors (the same)
+check(new Set([0x02, 0x04, 0x06].map((t) => lineSet(usualWays(t, kinds[t], shapes, l1, walked)))).size === 3, '02, 04 and 06: three different lines');
+// each line walked on the map is one of the tile's ways (tileWays: from a point along a side to another side, the
+// way back leading back)
+const notAWay = [...walked].filter(([c, ws]) => !ws.every((w) => tileWays(l1[c], kinds[l1[c]], shapes).some((v) => v.dir === w.dir && v.from.join() === w.from.join() && v.to.join() === w.to.join())));
+check(!notAWay.length, `every line walked on the map is one of its tile's ways (not: ${notAWay.slice(0, 5).map(([c]) => `${hx(l1[c])} at ${l1XY(c).x},${l1XY(c).y}`).join(', ') || '–'})`);
+// a tile no cell of the map has: its most centred lines (pathWays)
+const unused = shaped.find((t) => SHAPED_KINDS.includes(kinds[t]) && kinds[t] !== 'exit' && !cellsOf(t).length && !cellsOf(t + 0x100).length);
+check(unused !== undefined && lineSet(usualWays(unused, kinds[unused], shapes, l1, walked)) === lines(unused), `a tile not on the map (${hx(unused ?? 0)}): its centred lines`);
 
 console.log(bad ? `\n${bad} FAILED` : '\nall ok');
 process.exit(bad ? 1 : 0);

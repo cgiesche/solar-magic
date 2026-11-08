@@ -2,6 +2,7 @@
 // editor draws through its mark (the "Path tiles" overlay, the layer 1 sheet) and the words its popup and status bar
 // say – derived from the path shapes learned by emulation (owpaths.ts). Pure: nothing drawn.
 import { DX, DY, NO_SHAPE, PATH_KIND_NAMES, reverse, turnedAt, type PathKind, type PathShapes } from './owpaths.ts';
+import { walkFrom, neighbor, type ReachInput } from './owreach.ts';
 
 // the kinds whose tiles Mario walks over by their shape, on the map they are on (the route solver's, owroute.ts; a
 // stop or level tile stops him)
@@ -40,6 +41,52 @@ export function pathWays(t: number, kind: PathKind | undefined, shapes: PathShap
     }
     if (best) ways.push(best, back(best));
   }
+  return ways;
+}
+
+// The ways Mario takes over each path tile of a map (l1: both maps, l1Index order), as the game moves him: a tile's
+// shape alone doesn't say where on its side he steps on – a straight tile (02, 04, 06) moves him a tile on at the
+// height the tile before left him –, so he is followed from every stop and level tile in each direction there is a
+// tile to walk onto (owreach.ts walkFrom, whatever the level flags open; to the next stop, level or exit tile) and each
+// path tile gets the lines he walks on over it, each way followed by its way back (as pathWays). A cell no walk from
+// a stop or level tile leads over has none.
+export function mapWays(l1: ArrayLike<number>, kinds: readonly PathKind[], shapes: PathShapes): Map<number, PathWay[]> {
+  const inp: ReachInput = { l1, tls: new Uint8Array(l1.length), flags: [], kinds, shapes, start: 0, stars: new Map(), exitPaths: [], hard: [] };
+  const out = new Map<number, PathWay[]>(), key = (w: PathWay) => `${w.dir} ${w.from} ${w.to}`;
+  const add = (cell: number, from: [number, number], to: [number, number], dir: number, out_: number) => {
+    const w: PathWay = { dir, out: out_, from, to }, ways = out.get(cell) ?? [];
+    if (!ways.some((v) => key(v) === key(w) || key(v) === key(back(w)))) ways.push(w, back(w));
+    out.set(cell, ways);
+  };
+  for (let i = 0; i < l1.length; i++) {
+    const k = kinds[l1[i]];
+    if (k !== 'stop' && k !== 'level') continue;
+    for (let d = 0; d < 4; d++) {
+      const n = neighbor(i, d);
+      if (n >= 0 && kinds[l1[n]] !== 'none') walkFrom(inp, i, d, add);
+    }
+  }
+  return out;
+}
+
+// The ways tile t is shown with where no walk says (the layer 1 sheet, a cell Mario doesn't walk over): those the map's
+// cells with it are walked on most (mapWays; per way onto it, the one most cells have), then pathWays' for the ways
+// onto it none of them takes – its most centred lines. Page 1 acts as page 0, so its tiles count together.
+export function usualWays(t: number, kind: PathKind | undefined, shapes: PathShapes | null, l1: ArrayLike<number>, walked: ReadonlyMap<number, readonly PathWay[]>): PathWay[] {
+  const centred = pathWays(t, kind, shapes);
+  if (!centred.length || kind === 'exit') return centred;
+  const count = new Map<string, { w: PathWay; n: number }>();
+  for (const [cell, ways] of walked) {
+    if ((l1[cell] & 0xff) !== (t & 0xff)) continue;
+    for (const w of ways) {
+      const c = count.get(`${w.dir} ${w.from} ${w.to}`) ?? { w, n: 0 };
+      c.n++;
+      count.set(`${w.dir} ${w.from} ${w.to}`, c);
+    }
+  }
+  const ways: PathWay[] = [], taken = (dir: number) => ways.some((w) => w.dir === dir);
+  const byUse = [...count.values()].sort((a, b) => b.n - a.n).map((c) => c.w);
+  for (const w of [...byUse, ...centred]) if (!taken(w.dir) && !taken(reverse(w.out))) ways.push(w, back(w));
   return ways;
 }
 

@@ -14,7 +14,7 @@ import { drawPathMark } from './overworld.ts';
 import { toast } from './dom.ts';
 import { refusalWords, refusedToast } from './owrefusal.ts';
 import { l1Index, l1XY, exitDirections, DIR_NAMES, EXIT_NAMES, translevelToLevel } from '../core/overworld.ts';
-import { pathWays } from '../core/owpathshape.ts';
+import { usualWays } from '../core/owpathshape.ts';
 import { routeTiles, routeExits, routeKind, writeRoute, stopTranslevels, type RouteTiles, type StopTranslevels } from '../core/owroute.ts';
 import { hex } from '../core/names.ts';
 
@@ -135,12 +135,16 @@ export class PathTool {
     const v = this.view, kinds = v.pathKinds(), shapes = v.pathShapes();
     if (!kinds) return;
     const bad = s.refusal ? s.refusal.at : -1;
+    // (the ways Mario would take over the route's tiles: on the map shown with them written)
+    const l1 = Uint16Array.from(v.shown.l1);
+    r.forEach((c, k) => { if (s.tiles[k] !== null) l1[c] = s.tiles[k]!; });
+    const walked = v.walkedWays(l1);
     r.forEach((c, k) => {
       if ((c >= 0x400) !== (v.region === 1)) return;
       const { x, y } = l1XY(c), t = s.tiles[k];
       ctx.fillStyle = k === bad ? 'rgba(235,40,40,0.55)' : 'rgba(255,255,255,0.18)';
       ctx.fillRect(x * 16, y * 16, 16, 16);
-      if (t !== null && k !== bad) drawPathMark(ctx, kinds[t], x * 16, y * 16, lw, pathWays(t, kinds[t], shapes));
+      if (t !== null && k !== bad) drawPathMark(ctx, kinds[t], x * 16, y * 16, lw, walked.get(c) ?? usualWays(t, kinds[t], shapes, l1, walked));
       ctx.strokeStyle = k === bad ? '#ff3030' : 'rgba(255,255,0,0.9)';
       ctx.lineWidth = lw;
       ctx.strokeRect(x * 16 + 0.5 * lw, y * 16 + 0.5 * lw, 16 - lw, 16 - lw);
