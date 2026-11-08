@@ -2343,7 +2343,7 @@ export function drawPathMark(ctx: CanvasRenderingContext2D, k: PathKind, px: num
   ctx.beginPath();
   ctx.rect(px, py, 16, 16);
   ctx.clip();
-  for (const [c, w] of [['rgba(0,0,0,0.85)', 3], ['#fff', 1.5]] as [string, number][]) {
+  for (const [c, w] of [['rgba(0,0,0,0.85)', 5], ['#fff', 3]] as [string, number][]) {
     ctx.strokeStyle = c;
     ctx.lineWidth = w * lw;
     ctx.lineCap = 'round';
