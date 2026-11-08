@@ -10,17 +10,18 @@ import type { OwRender } from '../core/overworld.ts';
 import { translevelToLevel } from '../core/overworld.ts';
 import { TileCache, blit8 } from '../core/render.ts';
 import { levelNameTiles, setLevelNameTiles, decodeName, encodeName, tileChar, tileEscape, NAME_LEN, NAME_VRAM, NAME_ATTR, NAME_SPACE, type EncodedName } from '../core/levelnames.ts';
+import { boolPref } from './prefs.ts';
 
 const COLS = 32, ROWS = 3, FIRST_ROW = 3; // the border's rows shown: the name's (4) with the one above and below
 const W = COLS * 8, H = ROWS * 8;
 const FONT_TILES = 0x100; // the tiles the picker shows (16 × 16)
 const MISSING = 0xff3030e0, TOO_LONG = 0x803030ff; // (ABGR) // a character without a tile; a tile past the name's 19 (blended)
 
-const MULTI_PREF = 'smwe.levelNameMultiChar';
-let multiChar = ((): boolean => { try { return localStorage.getItem(MULTI_PREF) !== '0'; } catch { return true; } })();
+const multiCharPref = boolPref('level-name-multi-char', true);
+let multiChar = multiCharPref.get();
 function setMultiChar(on: boolean): void {
   multiChar = on;
-  try { localStorage.setItem(MULTI_PREF, on ? '1' : '0'); } catch { /* no storage */ }
+  multiCharPref.set(on);
 }
 
 // the layer 3 font of the map shown: tile t as the game writes a name's tile

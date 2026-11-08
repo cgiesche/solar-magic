@@ -1,8 +1,9 @@
 // Log bar at the bottom of the editor: collapsed it shows the latest message, expanded the whole
 // history with times (toasts vanish after a few seconds, the log keeps them).
 import { h, logEntries, onLog, clearLog, type LogEntry } from './dom.ts';
+import { boolPref } from './prefs.ts';
 
-const PREF = 'smw-log-open';
+const logOpen = boolPref('log-open', false);
 const KIND_LABEL = { info: 'Message', error: 'Error', warn: 'Warning', output: 'Tool output', event: 'Event' } as const;
 
 // version and commit of the build (set by the Docker and desktop builds), shown at the right of the bar
@@ -33,9 +34,7 @@ export class LogBar {
     this.root = h('div', { class: 'logbar' }, head, this.list);
     for (const e of logEntries) this.list.append(this.row(e));
     onLog((e, repeat) => this.add(e, repeat));
-    let open = false;
-    try { open = localStorage.getItem(PREF) === '1'; } catch { /* no storage */ }
-    this.setOpen(open);
+    this.setOpen(logOpen.get());
     this.updateLatest();
   }
 
@@ -45,7 +44,7 @@ export class LogBar {
     this.open = open;
     this.root.classList.toggle('open', open);
     this.toggleBtn.textContent = open ? '▾ Log' : '▸ Log';
-    try { localStorage.setItem(PREF, open ? '1' : '0'); } catch { /* no storage */ }
+    logOpen.set(open);
     if (open) this.list.scrollTop = this.list.scrollHeight;
     this.updateLatest();
   }

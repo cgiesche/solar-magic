@@ -4,6 +4,7 @@
 // pixels, at most 2× in their box. Below 3× the hovered entry is shown enlarged beside the picker
 // (showPickerPreview), on the level's side so the picker stays free. Sizes are in CSS pixels per pixel.
 import { h } from './dom.ts';
+import { numberPref, prefFamily } from './prefs.ts';
 
 // pickers below this size get the hover preview
 export const PREVIEW_BELOW = 3;
@@ -136,8 +137,8 @@ export function previewSheet(c: HTMLCanvasElement, sheet: () => CanvasImageSourc
 }
 
 // ---------------- side panel width ----------------
-const SIDE_W = 'side-width-'; // + workspace (localStorage)
 const SIDE_MIN = 330;
+const sideWidths = prefFamily('side-width:', (name) => numberPref(name, 0, (v) => v >= SIDE_MIN)); // per workspace (0: the default)
 // by default as wide as a Map16 page at 2× needs with the panel's padding and scroll bar, while the level keeps
 // most of the window
 const sideDefault = () => Math.max(SIDE_MIN, Math.min(512 + 34, Math.round(innerWidth * 0.35)));
@@ -151,7 +152,8 @@ export function sideSplitter(layout: HTMLElement): { root: HTMLElement; use: (ws
   const use = (next: string) => {
     ws = next;
     w = sideDefault();
-    try { const v = Number(localStorage.getItem(SIDE_W + ws)); if (v >= SIDE_MIN) w = v; } catch { /* no storage */ }
+    const v = sideWidths.at(ws).get();
+    if (v >= SIDE_MIN) w = v;
     apply();
   };
   const root = h('div', { class: 'side-split', title: 'Drag: width of the side panel' });
@@ -165,7 +167,7 @@ export function sideSplitter(layout: HTMLElement): { root: HTMLElement; use: (ws
       window.removeEventListener('mousemove', move);
       window.removeEventListener('mouseup', up);
       document.body.classList.remove('col-resizing');
-      try { localStorage.setItem(SIDE_W + ws, String(w)); } catch { /* no storage */ }
+      sideWidths.at(ws).set(w);
     };
     window.addEventListener('mousemove', move);
     window.addEventListener('mouseup', up);
@@ -174,7 +176,7 @@ export function sideSplitter(layout: HTMLElement): { root: HTMLElement; use: (ws
   root.addEventListener('dblclick', () => {
     w = sideDefault();
     apply();
-    try { localStorage.removeItem(SIDE_W + ws); } catch { /* no storage */ }
+    sideWidths.at(ws).reset();
   });
   window.addEventListener('resize', apply);
   return { root, use };

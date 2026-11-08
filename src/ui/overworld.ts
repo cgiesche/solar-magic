@@ -64,6 +64,7 @@ import { ExitArrowLayer } from './owexitarrows.ts';
 import { WorldCheck } from './worldcheck.ts';
 import { layerStrengths, isLayerMode, type OwMode, type LayerStrengths } from '../core/owlayers.ts';
 import { OW_OPTIONS, owOption, owOptionValue, setOwOption, revealSpeed, setRevealSpeed, revealStepFrames, MAX_REVEAL_SPEED, DEFAULT_REVEAL_SPEED, submapLightning, setSubmapLightning, LIGHTNING_TITLE, lightningEditLabel } from '../core/owoptions.ts';
+import { boolPref, numberPref, prefFamily } from './prefs.ts';
 
 // a w×h block of L1 tiles (16x16) or L2 tilemap entries (8x8), row-major; a L1 brush has no level tiles (NO_TILE
 // where one was picked: they are objects on layer 1, placed with a look from the picker's "Levels", ADR 0012)
@@ -138,8 +139,8 @@ export class OverworldView {
   shown: { l1: Uint16Array; l2: Uint16Array };
   tls: Uint8Array;
   mode: OwMode = 'l1';
-  dimL2 = loadPref(DIM_PREF); // layer 2 dimmed while layer 1 is painted (View → Layers, kept in the browser)
-  l1InL2 = loadPref(L1_IN_L2_PREF); // layer 1 shown (dimmed) while layer 2 is painted (View → Layers, kept in the browser)
+  dimL2 = DIM_PREF.get(); // layer 2 dimmed while layer 1 is painted (View → Layers, kept in the browser)
+  l1InL2 = L1_IN_L2_PREF.get(); // layer 1 shown (dimmed) while layer 2 is painted (View → Layers, kept in the browser)
   private solo = false; // Q held: layer 2 hidden while layer 1 is painted; layer 1 the other way while layer 2 is
   private openPage1 = false; // page 1 of the layer 1 sheet shown though none of its tiles is the ROM's own
   links = new LinkLayer(this);
@@ -1519,9 +1520,9 @@ export class OverworldView {
       menuButton({ label: 'View', items: [
         { heading: 'Layers' },
         { label: 'Dim layer 2 while painting layer 1', title: 'In the layer 1 mode layer 2 drawn dimmed, else at full strength (Q held hides it)', checked: () => this.dimL2,
-          onToggle: (v: boolean) => { this.dimL2 = v; storePref(DIM_PREF, v); this.composeMap(); this.paint(); } },
+          onToggle: (v: boolean) => { this.dimL2 = v; DIM_PREF.set(v); this.composeMap(); this.paint(); } },
         { label: 'Layer 1 while painting layer 2', title: 'In the layer 2 mode layer 1 – its tiles, path marks, level numbers and unreached tiles – drawn dimmed, else not at all (Q held: the other way)', checked: () => this.l1InL2,
-          onToggle: (v: boolean) => { this.l1InL2 = v; storePref(L1_IN_L2_PREF, v); this.composeMap(); this.paint(); this.updateStatus(); } },
+          onToggle: (v: boolean) => { this.l1InL2 = v; L1_IN_L2_PREF.set(v); this.composeMap(); this.paint(); this.updateStatus(); } },
         { heading: 'Guides' },
         view('Grid', () => this.showGrid, (v) => (this.showGrid = v), undefined, 'G'),
         view('Unreached tiles', () => this.reach.show, (v) => (this.reach.show = v),
@@ -2400,22 +2401,17 @@ function outlineCells(ctx: CanvasRenderingContext2D, r: { x: number; y: number; 
 
 // the event chosen in the strip kept per ROM (by its name) in the browser, -1: before events (a new key: the event progress
 // kept before was a view only, the map painted before events)
-const EVENT_PREF = 'ow-map-after:';
+const eventAfter = prefFamily('ow-map-after:', (name) => numberPref(name, -1));
 function loadEvent(rom: string): number {
-  try { const v = localStorage.getItem(EVENT_PREF + rom); return v === null ? -1 : stepEvent(Number(v) || 0, 0); } catch { return -1; }
+  const v = eventAfter.at(rom).get();
+  return v < 0 ? -1 : stepEvent(v, 0);
 }
 function storeEvent(rom: string, e: number): void {
-  try { if (e >= 0) localStorage.setItem(EVENT_PREF + rom, String(e)); else localStorage.removeItem(EVENT_PREF + rom); } catch { /* no storage */ }
+  if (e >= 0) eventAfter.at(rom).set(e); else eventAfter.at(rom).reset();
 }
 
 // View → Layers' switches kept in the browser (on unless switched off)
-const DIM_PREF = 'ow-dim-l2', L1_IN_L2_PREF = 'ow-l1-in-l2';
-function loadPref(key: string): boolean {
-  try { return localStorage.getItem(key) !== '0'; } catch { return true; }
-}
-function storePref(key: string, on: boolean): void {
-  try { localStorage.setItem(key, on ? '1' : '0'); } catch { /* no storage */ }
-}
+const DIM_PREF = boolPref('ow-dim-l2', true), L1_IN_L2_PREF = boolPref('ow-l1-in-l2', true);
 
 // a map region's layers drawn apart: layer 1 transparent where it has no pixel, layer 2 black there (the back area)
 function putLayers(l1c: HTMLCanvasElement, l2c: HTMLCanvasElement, rom: Rom, r: OwRender, region: number, l1: Uint16Array, l2: Uint16Array): void {

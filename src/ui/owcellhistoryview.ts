@@ -18,6 +18,7 @@ import { cellText } from '../core/oweventtiles.ts';
 import { l1Hex } from '../core/owl1sheet.ts';
 import type { PathKind } from '../core/owpaths.ts';
 import { refusalText, refusedToast } from './owrefusal.ts';
+import { boolPref } from './prefs.ts';
 
 const REST_MS = 700; // the mouse resting on a cell this long shows its history
 const LEAVE_MS = 300; // the time to move from the cell into the popup
@@ -31,7 +32,7 @@ export function tileWords(kinds: readonly PathKind[] | null, t: number): string 
 }
 
 // View → Cell history kept in the browser (on unless switched off)
-const PREF = 'ow-cell-history';
+const cellHistoryOn = boolPref('ow-cell-history', true); // View → Cell history
 
 // a change being moved: the cell and event, dragged (the button held) or picked (after "Move to…"), the event of the
 // strip under the mouse (null none), Alt held; the events, maps and level exits running the events read once (the ROM
@@ -284,9 +285,9 @@ function targetAt(e: MouseEvent): number | null {
 
 // whether the popup is on (View → Cell history; a browser without storage: on)
 function loadOn(): boolean {
-  try { return localStorage.getItem(PREF) !== '0'; } catch { return true; }
+  return cellHistoryOn.get();
 }
 // View → Cell history kept
 function storeOn(on: boolean): void {
-  try { localStorage.setItem(PREF, on ? '1' : '0'); } catch { /* no storage */ }
+  cellHistoryOn.set(on);
 }

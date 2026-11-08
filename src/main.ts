@@ -33,6 +33,7 @@ import { musicPlayer, LEVEL_MUSIC, isSubmapMusic } from './ui/musicplayer.ts';
 import { MessagePanel, levelMessages } from './ui/messagepanel.ts';
 import { NavHistory, fromHash, type NavLoc } from './ui/navhistory.ts';
 import { initLanding } from './ui/landing.ts';
+import { clearPrefs } from './ui/prefs.ts';
 
 const root = document.getElementById('app')!;
 
@@ -598,7 +599,7 @@ async function closeProject(app: App): Promise<void> {
   window.onbeforeunload = null;
   guardClose(() => false);
   try { await kvClear(); } catch (e) { toast(`Could not clear the browser storage: ${e instanceof Error ? e.message : e}`, 'error'); return; }
-  try { localStorage.clear(); } catch { /* no storage */ }
+  clearPrefs();
   location.replace(location.pathname);
 }
 async function exportProject(app: App, askWhere = false): Promise<void> {

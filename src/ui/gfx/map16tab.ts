@@ -43,11 +43,12 @@ import { overworldReplacement, MAP_NAMES, type OwRender } from '../../core/overw
 import { gfxTarget, type GfxTarget, type Map16Target } from './target.ts';
 import { drawMap16 } from '../../core/render.ts';
 import { QuarterGrid, markRect, editMarked, setPalette, setBit, setTileNum, stamp, mirror, summary, wholeTiles, FLIP_X, FLIP_Y, PRIO, type QuarterEdit, type MarkMode, type BitState } from '../../core/quarters.ts';
+import { numberPref } from '../prefs.ts';
 
 const Z = 2; // sheet zoom
 const M = 34; // sheet margin for the ranges and row numbers
 const BZ = 12; // largest fitted builder zoom
-const GFX_W = 'mt-gfx-width'; // the graphics column's width (localStorage)
+const GFX_W = numberPref('mt-gfx-width', 0, (v) => v >= 200 && v <= 1600); // the graphics column's width (0: none kept)
 const LABELS_W = 92; // the slot names left of the 8x8 graphics
 const QUARTER_NAMES = ['top left', 'bottom left', 'top right', 'bottom right'];
 const SHEET_BACK = 0xff1b1d22;
@@ -936,7 +937,7 @@ export class Map16Tab implements WsPanel {
   // the handle between the builder and the graphics: drag to change the graphics column's width (the
   // builder takes the rest)
   private splitter(): HTMLElement {
-    try { const v = Number(localStorage.getItem(GFX_W)); if (v >= 200 && v <= 1600) this.gfxW = v; } catch { /* no storage */ }
+    { const v = GFX_W.get(); if (v) this.gfxW = v; }
     this.gfxCol.style.width = `${this.gfxW}px`;
     const el = h('div', { class: 'mt-split', title: 'Drag: width of the builder and the 8x8 graphics' });
     el.addEventListener('mousedown', (e) => {
@@ -950,7 +951,7 @@ export class Map16Tab implements WsPanel {
       const up = () => {
         window.removeEventListener('mousemove', move);
         window.removeEventListener('mouseup', up);
-        try { localStorage.setItem(GFX_W, String(this.gfxW)); } catch { /* no storage */ }
+        GFX_W.set(this.gfxW);
       };
       window.addEventListener('mousemove', move);
       window.addEventListener('mouseup', up);
