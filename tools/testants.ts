@@ -10,6 +10,19 @@ const check = (ok: boolean, what: string) => { console.log((ok ? 'ok   ' : 'FAIL
 const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
 setPrefStorage(null);
 
+// the page's IntersectionObserver (whether a sheet is on the screen: scrolled into its panel, its panel shown)
+class FakeObserver {
+  cb: (entries: { target: unknown; isIntersecting: boolean }[]) => void;
+  targets = new Set<unknown>();
+  constructor(cb: FakeObserver['cb']) { this.cb = cb; observers.push(this); }
+  observe(t: unknown) { this.targets.add(t); }
+  unobserve(t: unknown) { this.targets.delete(t); }
+  disconnect() { this.targets.clear(); }
+}
+const observers: FakeObserver[] = [];
+(globalThis as { IntersectionObserver?: unknown }).IntersectionObserver = FakeObserver;
+const onScreen = (target: unknown, isIntersecting: boolean) => { for (const o of observers) if (o.targets.has(target)) o.cb([{ target, isIntersecting }]); };
+
 check(ANTS_PERIOD_MS === 100, 'the ticker runs at 10 fps');
 check(antsPhase(0) === 0 && antsPhase(99) === 0 && antsPhase(100) === 1 && antsPhase(750) === 7 && antsPhase(800) === 0, 'the phase steps a pixel a tick, over the 8 pixels of a dash and its gap');
 {
@@ -98,6 +111,33 @@ const asEl = (c: ReturnType<typeof fakeCanvas>) => c.canvas as unknown as HTMLCa
   const nGone = na;
   await wait(250);
   check(na === nGone, 'a canvas taken off: no more repaints');
+}
+
+// a sheet scrolled out of its panel or hidden, and back
+{
+  const s = fakeCanvas();
+  let n = 0;
+  onAntsTick(asEl(s), () => { n++; strokeAnts(as2d(s), '#fff'); });
+  onScreen(s.canvas, true);
+  strokeAnts(as2d(s), '#fff');
+  await wait(250);
+  check(n >= 1, 'on the screen: running');
+  onScreen(s.canvas, false);
+  await wait(150);
+  const k = n;
+  await wait(300);
+  check(n === k, 'scrolled out of its panel (or its panel hidden): not repainted');
+  onScreen(s.canvas, true);
+  await wait(250);
+  check(n > k, 'back on the screen: running again by itself');
+  onScreen(s.canvas, false);
+  await wait(150);
+  const j = n;
+  animateAnts.set(false);
+  check(n === j, 'the switch changed: a sheet off the screen not repainted');
+  onScreen(s.canvas, true);
+  check(n === j + 1, '... but once it is back on it');
+  animateAnts.set(true);
 }
 
 if (bad) { console.log(`\n${bad} FAILED`); process.exit(1); }

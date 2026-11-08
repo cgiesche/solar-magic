@@ -79,16 +79,49 @@ const wanted = new Set<AnyCanvas>(); // stroked ants since the last tick
 let timer: ReturnType<typeof setTimeout> | null = null;
 
 const doc = (): Document | undefined => (globalThis as { document?: Document }).document;
+// whether a canvas is on the screen – scrolled into its panel, the panel shown – as the page's IntersectionObserver
+// says (before it has: shown by its style)
+const onScreen = new WeakMap<AnyCanvas, boolean>();
+const parked = new WeakSet<AnyCanvas>(); // off the screen when it was to be repainted: repainted when back on it
+let observer: IntersectionObserver | null | undefined;
+const offscreen = (c: AnyCanvas): c is OffscreenCanvas => typeof OffscreenCanvas !== 'undefined' && c instanceof OffscreenCanvas;
+function observe(c: AnyCanvas): void {
+  if (observer === undefined) {
+    const IO = (globalThis as { IntersectionObserver?: typeof IntersectionObserver }).IntersectionObserver;
+    observer = IO ? new IO((entries) => {
+      for (const e of entries) {
+        const t = e.target as HTMLCanvasElement;
+        onScreen.set(t, e.isIntersecting);
+        if (!e.isIntersecting || !parked.has(t)) continue;
+        parked.delete(t);
+        repaints.get(t)?.();
+      }
+    }) : null;
+  }
+  if (observer && !offscreen(c)) observer.observe(c);
+}
 function visible(c: AnyCanvas): boolean {
   const e = c as HTMLCanvasElement & { checkVisibility?: () => boolean };
-  return e.isConnected !== false && (e.checkVisibility?.() ?? true);
+  if (e.isConnected === false) return false;
+  return onScreen.get(c) ?? e.checkVisibility?.() ?? true;
+}
+// repainted now when on the screen, else once back on it
+function repaintOrPark(c: AnyCanvas, repaint: () => void): void {
+  if (visible(c)) repaint(); else parked.add(c);
 }
 
-// the sheet of `canvas` repainted on the ticks while its paint strokes ants; returns: taking it off
+// the sheet of `canvas` repainted on the ticks while its paint strokes ants and it is on the screen; returns:
+// taking it off
 export function onAntsTick(canvas: AnyCanvas, repaint: () => void): () => void {
-  if (!repaints.has(canvas)) registered.add(new WeakRef(canvas));
+  if (!repaints.has(canvas)) { registered.add(new WeakRef(canvas)); observe(canvas); }
   repaints.set(canvas, repaint);
-  return () => { if (repaints.get(canvas) === repaint) { repaints.delete(canvas); wanted.delete(canvas); } };
+  return () => {
+    if (repaints.get(canvas) !== repaint) return;
+    repaints.delete(canvas);
+    wanted.delete(canvas);
+    parked.delete(canvas);
+    if (observer && !offscreen(canvas)) observer.unobserve(canvas);
+  };
 }
 
 function wantTick(c: AnyCanvas): void {
@@ -107,21 +140,23 @@ function tick(): void {
   wanted.clear();
   for (const c of now) {
     const repaint = repaints.get(c);
-    if (repaint && visible(c)) repaint();
+    if (repaint) repaintOrPark(c, repaint);
   }
 }
 doc()?.addEventListener('visibilitychange', schedule);
 
-animateAnts.onChange(() => {
+// the switch changed (or, with nothing kept, the system's reduced motion): every sheet standing still or running again
+function switched(): void {
   if (timer !== null) { clearTimeout(timer); timer = null; }
   wanted.clear();
-  // standing still, or running again
   for (const ref of [...registered]) {
     const c = ref.deref(), repaint = c && repaints.get(c);
     if (!c || !repaint) { registered.delete(ref); continue; }
-    if (visible(c)) repaint();
+    repaintOrPark(c, repaint);
   }
-});
+}
+animateAnts.onChange(switched);
+try { globalThis.matchMedia?.('(prefers-reduced-motion: reduce)').addEventListener('change', switched); } catch { /* none */ }
 
 // A sheet whose picture is costly to draw again (a Map16 page, the graphics column): its paint ends in over(),
 // which keeps the canvas as drawn so far and draws the marks on it – on the ticks only the marks again, over the

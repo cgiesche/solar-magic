@@ -1,6 +1,7 @@
 // The editor's preferences kept in the browser (localStorage): each one named, typed, with its default; a value
 // not of its type, a browser without storage or one refusing it gives the default (a value set then holds for the
-// session). Every key starts with PREF_PREFIX. A change is told to the preference's listeners.
+// session). Every key starts with PREF_PREFIX. A change is told to the preference's listeners. (clearPrefs empties the
+// whole storage – closing the project, the page loaded anew after it.)
 // Families: values kept per key (a workspace, a ROM, a level), cleared or looked for by the keys' start.
 
 export const PREF_PREFIX = 'smwe:';

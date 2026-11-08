@@ -15,7 +15,7 @@ const MAX_KEPT = 100;
 export type DeathMark = Omit<Death, 'level'> & { version: number };
 
 const key = (project: string, level: number) => `${project}:${level}`;
-const kept = prefFamily('deaths:', (name) => jsonPref<DeathMark[]>(name, [], (v): v is DeathMark[] => Array.isArray(v)));
+const keptDeaths = prefFamily('deaths:', (name) => jsonPref<DeathMark[]>(name, [], (v): v is DeathMark[] => Array.isArray(v)));
 
 // the level as saved in the ROM (header, objects, sprites), as a hash; -1 when it can't be read
 const versions = new Map<number, { rom: Rom; gen: number; version: number }>();
@@ -37,7 +37,7 @@ export function loadDeaths(project: string, level: number): DeathMark[] {
   const k = key(project, level);
   let marks = cache.get(k);
   if (!marks) {
-    marks = kept.at(k).get();
+    marks = keptDeaths.at(k).get();
     cache.set(k, marks);
   }
   return marks;
@@ -59,25 +59,25 @@ export function removeDeath(project: string, level: number, mark: DeathMark): vo
 function store(project: string, level: number, all: DeathMark[]): void {
   const k = key(project, level);
   cache.set(k, all);
-  kept.at(k).set(all);
+  keptDeaths.at(k).set(all);
 }
 
 export function clearDeaths(project: string, level: number): void {
   const k = key(project, level);
   cache.set(k, []);
-  kept.at(k).reset();
+  keptDeaths.at(k).reset();
 }
 
 // the deaths of every level of the ROM
 export function clearAllDeaths(project: string): void {
   const pref = `${project}:`;
   for (const k of cache.keys()) if (k.startsWith(pref)) cache.set(k, []);
-  kept.clear(pref);
+  keptDeaths.clear(pref);
 }
 
 // whether any level of the ROM has deaths kept
 export function anyDeaths(project: string): boolean {
-  return kept.any(`${project}:`);
+  return keptDeaths.any(`${project}:`);
 }
 
 // what killed Mario, for a sentence ("Killed by …"); name: a normal sprite's name by its id

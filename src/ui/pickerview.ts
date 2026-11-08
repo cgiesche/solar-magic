@@ -151,9 +151,7 @@ export function sideSplitter(layout: HTMLElement): { root: HTMLElement; use: (ws
   const apply = () => layout.style.setProperty('--side-w', `${Math.min(w, sideMax())}px`);
   const use = (next: string) => {
     ws = next;
-    w = sideDefault();
-    const v = sideWidths.at(ws).get();
-    if (v >= SIDE_MIN) w = v;
+    w = sideWidths.at(ws).get() || sideDefault();
     apply();
   };
   const root = h('div', { class: 'side-split', title: 'Drag: width of the side panel' });

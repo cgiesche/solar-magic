@@ -140,8 +140,8 @@ export class OverworldView {
   shown: { l1: Uint16Array; l2: Uint16Array };
   tls: Uint8Array;
   mode: OwMode = 'l1';
-  dimL2 = DIM_PREF.get(); // layer 2 dimmed while layer 1 is painted (View → Layers, kept in the browser)
-  l1InL2 = L1_IN_L2_PREF.get(); // layer 1 shown (dimmed) while layer 2 is painted (View → Layers, kept in the browser)
+  dimL2 = dimL2Pref.get(); // layer 2 dimmed while layer 1 is painted (View → Layers, kept in the browser)
+  l1InL2 = l1InL2Pref.get(); // layer 1 shown (dimmed) while layer 2 is painted (View → Layers, kept in the browser)
   private solo = false; // Q held: layer 2 hidden while layer 1 is painted; layer 1 the other way while layer 2 is
   private openPage1 = false; // page 1 of the layer 1 sheet shown though none of its tiles is the ROM's own
   links = new LinkLayer(this);
@@ -1521,9 +1521,9 @@ export class OverworldView {
       menuButton({ label: 'View', items: [
         { heading: 'Layers' },
         { label: 'Dim layer 2 while painting layer 1', title: 'In the layer 1 mode layer 2 drawn dimmed, else at full strength (Q held hides it)', checked: () => this.dimL2,
-          onToggle: (v: boolean) => { this.dimL2 = v; DIM_PREF.set(v); this.composeMap(); this.paint(); } },
+          onToggle: (v: boolean) => { this.dimL2 = v; dimL2Pref.set(v); this.composeMap(); this.paint(); } },
         { label: 'Layer 1 while painting layer 2', title: 'In the layer 2 mode layer 1 – its tiles, path marks, level numbers and unreached tiles – drawn dimmed, else not at all (Q held: the other way)', checked: () => this.l1InL2,
-          onToggle: (v: boolean) => { this.l1InL2 = v; L1_IN_L2_PREF.set(v); this.composeMap(); this.paint(); this.updateStatus(); } },
+          onToggle: (v: boolean) => { this.l1InL2 = v; l1InL2Pref.set(v); this.composeMap(); this.paint(); this.updateStatus(); } },
         { heading: 'Guides' },
         view('Grid', () => this.showGrid, (v) => (this.showGrid = v), undefined, 'G'),
         view('Unreached tiles', () => this.reach.show, (v) => (this.reach.show = v),
@@ -2424,7 +2424,7 @@ function storeEvent(rom: string, e: number): void {
 }
 
 // View → Layers' switches kept in the browser (on unless switched off)
-const DIM_PREF = boolPref('ow-dim-l2', true), L1_IN_L2_PREF = boolPref('ow-l1-in-l2', true);
+const dimL2Pref = boolPref('ow-dim-l2', true), l1InL2Pref = boolPref('ow-l1-in-l2', true);
 
 // a map region's layers drawn apart: layer 1 transparent where it has no pixel, layer 2 black there (the back area)
 function putLayers(l1c: HTMLCanvasElement, l2c: HTMLCanvasElement, rom: Rom, r: OwRender, region: number, l1: Uint16Array, l2: Uint16Array): void {

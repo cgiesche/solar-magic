@@ -50,7 +50,7 @@ const Z = 2; // sheet zoom
 const M = 34; // sheet margin for the ranges and row numbers
 const BZ = 12; // largest fitted builder zoom
 const REMAP_TO = '#50dc78'; // where remap's marked 8x8 tiles are dragged (the destinations' green; the dash no longer sets it apart)
-const GFX_W = numberPref('mt-gfx-width', 0, (v) => v >= 200 && v <= 1600); // the graphics column's width (0: none kept)
+const gfxWidthPref = numberPref('mt-gfx-width', 0, (v) => v >= 200 && v <= 1600); // the graphics column's width (0: none kept)
 const LABELS_W = 92; // the slot names left of the 8x8 graphics
 const QUARTER_NAMES = ['top left', 'bottom left', 'top right', 'bottom right'];
 const SHEET_BACK = 0xff1b1d22;
@@ -935,7 +935,7 @@ export class Map16Tab implements WsPanel {
   // the handle between the builder and the graphics: drag to change the graphics column's width (the
   // builder takes the rest)
   private splitter(): HTMLElement {
-    { const v = GFX_W.get(); if (v) this.gfxW = v; }
+    { const v = gfxWidthPref.get(); if (v) this.gfxW = v; }
     this.gfxCol.style.width = `${this.gfxW}px`;
     const el = h('div', { class: 'mt-split', title: 'Drag: width of the builder and the 8x8 graphics' });
     el.addEventListener('mousedown', (e) => {
@@ -949,7 +949,7 @@ export class Map16Tab implements WsPanel {
       const up = () => {
         window.removeEventListener('mousemove', move);
         window.removeEventListener('mouseup', up);
-        GFX_W.set(this.gfxW);
+        gfxWidthPref.set(this.gfxW);
       };
       window.addEventListener('mousemove', move);
       window.addEventListener('mouseup', up);
@@ -1394,6 +1394,7 @@ export class Map16Tab implements WsPanel {
     // the chosen 8x8 tiles, or those being chosen; remap's marked tiles and where they are dragged (running)
     const d = this.drag, r = d ? { x: Math.min(d.a.x, d.b.x), y: Math.min(d.a.y, d.b.y), w: Math.abs(d.a.x - d.b.x) + 1, h: Math.abs(d.a.y - d.b.y) + 1 } : this.remapping ? null : this.pick;
     const from = this.remapping ? this.visualFrom : null, to = from && this.visualTo;
+    c.style.width = `${W * z}px`; c.style.height = `${Hh * z}px`; // (before the marks: their dashes are in screen pixels)
     this.gfxMarks.over((mc) => {
       mc.lineWidth = 2;
       const box = (x: number, y: number, w: number, hh: number, color: string) => antsRect(mc, x * 8 * this.gzPx + 1, y * 8 * this.gzPx + 1, w * 8 * this.gzPx - 2, hh * 8 * this.gzPx - 2, color);
@@ -1401,7 +1402,6 @@ export class Map16Tab implements WsPanel {
       if (from) box(from.x, from.y, from.w, from.h, '#4cc2ff');
       if (from && to) box(to.x, to.y, from.w, from.h, REMAP_TO);
     });
-    c.style.width = `${W * z}px`; c.style.height = `${Hh * z}px`;
     this.gfxLabels.replaceChildren(...slots.map((s) => h('div', { class: 'mt-slot', style: { height: `${64 * z}px` } },
       h('span', { class: 'mt-slot-name' }, s.name),
       h('a', { href: '#', class: 'mt-slot-file', title: 'Open in the Graphics tab (sheet and pixel editor)', onclick: (e: Event) => { e.preventDefault(); this.ws.showGfx(s.file); } }, gfxName(s.file)),
