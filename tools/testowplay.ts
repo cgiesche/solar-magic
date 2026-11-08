@@ -71,9 +71,11 @@ const saves = progressSaves(new OverworldLoads(new OverworldEmulator(rom), 4));
     }
   }
   check(!off.length, `every progress 00–78 of the clean game: the levels passed and the directions open as the rule gave them (the game opens more) ${off.slice(0, 6).join(' ')}`);
-  const counts = saves.map((v) => v.eventsTriggered);
-  check(counts.every((c, p) => !p || c - counts[p - 1] === 0 || c - counts[p - 1] === 1) && counts[0x60] === 0x60,
-    `events triggered follow the progress: one more with each event the game runs (${hx(counts[0x10])} at 10, ${hx(counts[0x60])} at 60, ${hx(counts[OW_EVENTS])} at 78)`);
+  // (an event no level's exit runs – the stars' base events 36 44 50 53 56 59 5C 5F 64 6D, #390 – is set, counted by
+  // nothing: the all-events save counts 100, docs/research/star-tile-translevels.md)
+  const counts = saves.map((v) => v.eventsTriggered), ran = (p: number) => [...runners.keys()].filter((ev) => ev < p).length;
+  check(counts.every((c, p) => !p || c - counts[p - 1] === (runners.has(p - 1) ? 1 : 0)) && counts[0x60] === ran(0x60) && counts[OW_EVENTS] === 100,
+    `events triggered follow the progress: one more with each event a level's exit runs (${hx(counts[0x10])} at 10, ${hx(counts[0x60])} at 60 for ${hx(ran(0x60))}, ${hx(counts[OW_EVENTS])} at 78)`);
   // (the switch palaces are pressed in their levels: progressSaveJob adds them, tools/testowswitches.ts)
   check(saves.every((v) => v.switchPalaces.every((x) => !x)), 'switch palaces: a new file\'s at every progress (the job adds those pressed)');
 }
