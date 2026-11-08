@@ -4,10 +4,11 @@
 import { Rom } from '../src/core/rom.ts';
 import { readLinks, linkEndCells, moveLinkEnds, koopaTeleport, type OwLink, type LinkEnd } from '../src/core/owlinks.ts';
 import { endTile } from '../src/core/owlinkends.ts';
-import { l1Index, readL1, readL2 } from '../src/core/overworld.ts';
+import { l1Index, readL1, readL2, gameL1, OverworldLoads, OverworldEmulator, OW_EVENTS } from '../src/core/overworld.ts';
 import { OverworldStroke } from '../src/core/owstroke.ts';
 import { levelTileTest } from '../src/core/owpaths.ts';
 import { routeTiles } from '../src/core/owroute.ts';
+import { linkTileProblems, applyFix } from '../src/core/worldcheck.ts';
 import { editorImage, pathKinds, pathShapes } from './fixture.ts';
 
 let bad = 0;
@@ -16,6 +17,8 @@ const image = await editorImage();
 const fresh = () => new Rom(image.slice());
 const rom = fresh(), l1 = readL1(rom), links = readLinks(rom);
 const kinds = pathKinds(fresh()), shapes = pathShapes(fresh());
+const gameL1Every = gameL1(new OverworldLoads(new OverworldEmulator(fresh()), 1).get(0, OW_EVENTS)).slice();
+const hx = (v: number) => v.toString(16);
 const at = (e: LinkEnd, s: number, x: number, y: number) => e.submap === s && e.x === x && e.y === y;
 const find = (ls: OwLink[], s: number, x: number, y: number) => ls.find((l) => at(l.a, s, x, y));
 
@@ -84,6 +87,35 @@ const find = (ls: OwLink[], s: number, x: number, y: number) => ls.find((l) => a
   const r2 = fresh();
   moveLinkEnds(r2, l1Index(0, p.x, p.y), l1Index(0, p.x + 1, p.y));
   check(koopaTeleport(r2, 0)!.x === p.x, 'not by a move on the other region');
+}
+
+// ---- the World check: a link from or to a tile Mario can't use it on ----
+{
+  // (the maps at each progress: `before` up to progress `p`, `after` from it)
+  const place = (i: number) => hx(i), on = (before: ArrayLike<number>, after = before, p = 0) =>
+    linkTileProblems(links, (q) => ({ inp: { l1: q < p ? before : after, kinds } }), place);
+  const every = gameL1Every;
+  const deadStar = find(links, 0, 20, 2)!;
+  check(on(every).length === 0 && every[endTile(deadStar.a)] === 0, 'the clean game: none – its star entry from Main map 14,02 (empty at every progress) not either');
+  const known = (ps: ReturnType<typeof on>) => ps;
+  check(known(on(l1, every, 5)).length === 0, 'a star an event reveals later (none before): none');
+  const star = find(links, 0, 17, 7)!, painted = every.slice();
+  painted[endTile(star.a)] = 0;
+  const p = known(on(every, painted, 3));
+  check(p.length === 1 && p[0].group === 'links' && p[0].severity === 'error' && p[0].tile === endTile(star.a) && p[0].progress === 3 && !!p[0].fix && 'link' in p[0].fix && p[0].fix.link === star,
+    `a star's tile changed by an event: one error there, from that progress, its fix removing the link (${p[0]?.text})`);
+  check(known(on(painted, every, 3)).length === 0, 'changed back by a later event: none');
+  const exit = find(links, 0, 2, 20)!, gone = every.slice();
+  gone[endTile(exit.b)] = 0;
+  const q = known(on(gone)), path = every.slice();
+  check(q.length === 0, 'an exit path\'s target empty at every progress: none (Mario never there)');
+  path[endTile(exit.b)] = every[l1Index(0, 5, 20)];
+  const w = on(path);
+  check(kinds[path[endTile(exit.b)]] !== 'exit' && kinds[path[endTile(exit.b)]] !== 'none' && w.length === 1 && w[0].tile === endTile(exit.b) && w[0].severity === 'warn' && / to /.test(w[0].text),
+    `an exit path's target another tile at every progress: a warning at its target (${w[0]?.text})`);
+  const r = fresh();
+  applyFix(r, p[0].fix!);
+  check(!find(readLinks(r), 0, 17, 7) && readLinks(r).length === links.length - 1, 'the fix removes the link');
 }
 
 if (bad) { console.log(`${bad} failed`); process.exit(1); }

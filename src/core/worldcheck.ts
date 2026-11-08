@@ -11,7 +11,8 @@ import { readEvents, submapViewsJob, submapOf } from './owevents.ts';
 import { budgetLevel, budgetText, owBudgets, fullestSubmap, type Budget } from './owbudget.ts';
 import { progressSavesJob, progressMapsFromEvents, progressInput, progressSearches } from './owprogress.ts';
 import { l1OwnLooksJob, lookProblems } from './owlook.ts';
-import { tileText } from './owteleport.ts';
+import { tileText, type OwTile } from './owteleport.ts';
+import { readLinks, removeLink, type OwLink } from './owlinks.ts';
 import { ExitGraph } from './exitgraph.ts';
 import type { ScreenExit } from './level.ts';
 import type { Job } from './jobrunner.ts';
@@ -22,7 +23,7 @@ import { hex3 } from './names.ts';
 import type { PathKind, PathShapes } from './owpaths.ts';
 import type { OwRefusalData } from './owrefusal.ts';
 import { checkContext, eventsNeverRun, stranded, untiledLevelsEntered, eventOrderProblems, starsWithoutTranslevelProblems, misplacedLinkEnds } from './owchecks.ts';
-import { moveEnd, type MisplacedEnd } from './owlinkends.ts';
+import { moveEnd, endTile, type MisplacedEnd } from './owlinkends.ts';
 import type { Rect } from './owevents.ts';
 
 export type CheckGroup = 'paths' | 'progress' | 'links' | 'look' | 'budget';
@@ -39,9 +40,11 @@ export type { CheckSeverity };
 
 // a fix of a problem, one ROM edit (applyFix): layer 1 tile `tile` (l1Index) of the map before events set to `to`; or a
 // link's end at `tile` moved to the submap whose paths its tile is on (owlinkends.ts moveEnd)
-export type WorldFix = TileFix | LinkEndFix;
+export type WorldFix = TileFix | LinkEndFix | LinkRemoveFix;
 export interface TileFix { label: string; title: string; tile: number; to: number }
 export interface LinkEndFix { label: string; title: string; tile: number; end: MisplacedEnd }
+// a link removed (owlinks.ts removeLink): one from or to a tile Mario can't use it on (#413)
+export interface LinkRemoveFix { label: string; title: string; tile: number; link: OwLink }
 
 export interface WorldProblem {
   key: string; // kind and place: the same while the problem stays
@@ -134,12 +137,50 @@ export function stuckAtEveryProgress(rom: Rom, at: (progress: number) => Checked
     const s = at(p);
     for (const q of stuckProblems(s, place)) if (!out.has(q.key)) out.set(q.key, reachProblem(q, s, fixes));
   }
+  for (const q of linkTileProblems(readLinks(rom), at, place)) out.set(q.key, q);
   return [...out.values()];
+}
+
+// The links from or to a tile Mario can't use them on (#413): a star/pipe link from a tile he doesn't stop on (A warps
+// him only from a stop or level tile), an exit path from or to a tile that is neither an exit path tile nor a stop tile
+// (the game's cave starts one from a stop) – found at the first event progress from which it stays so up to every event
+// passed (`at`: the maps at each progress 0 … OW_EVENTS): a tile an event reveals later is fine before, one painted,
+// destroyed or changed by an event is not – an error; one on a tile Mario can use it on at no progress a warning (maybe
+// painted over before events), none where the cell is empty at every progress: an entry nothing uses, Mario never
+// there (the clean game has one, from Main map 14,02). Fix: the link removed.
+export function linkTileProblems(links: readonly OwLink[], at: (progress: number) => { inp: { l1: ArrayLike<number>; kinds: readonly PathKind[] } }, place: (tile: number) => string): WorldProblem[] {
+  const out: WorldProblem[] = [], maps = Array.from({ length: OW_EVENTS + 1 }, (_, p) => at(p).inp);
+  for (const l of links) {
+    const fits = (inp: typeof maps[number], t: OwTile, start: boolean) => {
+      const k = inp.kinds[inp.l1[endTile(t)]];
+      return l.kind === 'exit' ? k === 'exit' || k === 'stop' : !start || k === 'stop' || k === 'level';
+    };
+    for (const e of [{ t: l.a, start: true }, { t: l.b, start: l.kind === 'exit' || l.both }]) {
+      if (fits(maps[OW_EVENTS], e.t, e.start)) continue;
+      let from = OW_EVENTS;
+      while (from > 0 && !fits(maps[from - 1], e.t, e.start)) from--;
+      const never = from === 0;
+      if (never && maps.every((inp) => inp.kinds[inp.l1[endTile(e.t)]] === 'none')) continue;
+      const tile = endTile(e.t), name = l.kind === 'exit' ? 'exit path' : 'star/pipe link', what = place(tile);
+      const text = l.kind === 'exit'
+        ? `The exit path ${e.t === l.a ? 'from' : 'to'} ${what} is not on an exit path tile: Mario never takes it there`
+        : `The star/pipe link ${e.t === l.a ? 'from' : 'back from'} ${what} is not on a tile Mario stops on: pressing A there does nothing`;
+      out.push({
+        key: `link-tile:${l.kind}:${l.entries.join(',')}:${tile}`, group: 'links', severity: never ? 'warn' : 'error',
+        text: never ? `${text} at any event progress (an entry nothing uses)` : text, brief: `${name} on the wrong tile at ${what}`,
+        title: never ? `The ${name} leads from a tile that is never one to take it from; maybe it was painted over before events.` : `The tile at ${what} changes (painted over or by an event) after the ${name} was usable there.`,
+        tile, progress: from,
+        fix: { label: 'Remove the link', title: `Remove the ${name} ${tileText(l.a)} ${l.both ? '↔' : '→'} ${tileText(l.b)} (one ROM edit)`, tile, link: l },
+      });
+      break;
+    }
+  }
+  return out;
 }
 
 // whether a World check problem is found at every event progress at once (stuckAtEveryProgress, the Look group's
 // paths): learned later than the others, said apart from them
-export const isFoundAtEveryProgress = (p: WorldProblem): boolean => /^(dead-end|exit-nowhere|exit-off-path|arrival-stuck|path-late-look|path-no-look):/.test(p.key);
+export const isFoundAtEveryProgress = (p: WorldProblem): boolean => /^(dead-end|exit-nowhere|exit-off-path|arrival-stuck|path-late-look|path-no-look|link-tile):/.test(p.key);
 
 // The checks of owchecks.ts with every event passed (`all`), the levels' exits in `graph`: events never run, links
 // stranding Mario, levels without level tile an exit leads into, events out of play order, stars without translevel,
@@ -245,6 +286,7 @@ export function stopTile(l1: ArrayLike<number>, kinds: readonly PathKind[]): num
 // the fix written (call it inside one ROM edit)
 export function applyFix(rom: Rom, fix: WorldFix): void {
   if ('end' in fix) { moveEnd(rom, fix.end); return; }
+  if ('link' in fix) { removeLink(rom, fix.link); return; }
   const l1 = readL1(rom);
   l1[fix.tile] = fix.to;
   writeL1(rom, l1);
