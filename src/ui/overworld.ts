@@ -2336,8 +2336,13 @@ export function drawPathMark(ctx: CanvasRenderingContext2D, k: PathKind, px: num
     for (const ry of [5, 8, 11]) { ctx.moveTo(px + 2, py + ry); ctx.lineTo(px + 14, py + ry); }
     ctx.stroke();
   }
-  // (a way and the way back are one line: each drawn twice, the same)
+  // (a way and the way back are one line: each drawn twice, the same; cut at the tile's edge – its round ends and
+  // outline would reach into the tiles next to it – so the lines of tiles side by side still meet)
   if (!ways.length) return;
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(px, py, 16, 16);
+  ctx.clip();
   for (const [c, w] of [['rgba(0,0,0,0.85)', 3], ['#fff', 1.5]] as [string, number][]) {
     ctx.strokeStyle = c;
     ctx.lineWidth = w * lw;
@@ -2346,7 +2351,7 @@ export function drawPathMark(ctx: CanvasRenderingContext2D, k: PathKind, px: num
     for (const { from, to } of ways) { ctx.moveTo(px + from[0], py + from[1]); ctx.lineTo(px + to[0], py + to[1]); }
     ctx.stroke();
   }
-  ctx.lineCap = 'butt';
+  ctx.restore();
 }
 // the colour of the border a visible tile of kind k gets in the paint sheet (the overlay's; a level tile yellow)
 const KIND_BORDER = Object.fromEntries(Object.entries(KIND_RGB).map(([k, [c]]) => [k, `rgb(${c})`])) as Partial<Record<PathKind, string>>;
