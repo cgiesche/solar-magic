@@ -8,6 +8,7 @@ import { fitScale, sized, previewSheet } from './pickerview.ts';
 import { TileCache } from '../core/render.ts';
 import { blankTile, l3Palette, withL3Palette, L3_TILE, L3_PAL, L3_PRIO, L3_FLIP_X, L3_FLIP_Y } from '../core/layer3map.ts';
 import { hex3 } from '../core/names.ts';
+import { antsRect, onAntsTick } from './ants.ts';
 
 // layer 3's graphics and colors as shown
 export interface L3Graphics { vram: Uint8Array; cgram: Uint8Array; charBase: number }
@@ -40,12 +41,15 @@ export function layer3Picker(body: HTMLElement, g: L3Graphics, b: Brush, setBrus
   const sctx = sheet.getContext('2d')!, img = sctx.createImageData(128, 256), px = new Uint32Array(img.data.buffer);
   for (let t = 0; t < 0x200; t++) draw(px, 128, t | (pal << 10), (t & 15) * 8, (t >> 4) * 8);
   sctx.putImageData(img, 0, 0);
+  let shown: [number, number, number, number] = [-1, 0, 0, 0];
   const show = (x: number, y: number, w: number, hh: number) => {
+    shown = [x, y, w, hh];
     ctx.drawImage(sheet, 0, 0, c.width, c.height);
     if (x < 0) return;
-    ctx.strokeStyle = '#4cc2ff'; ctx.lineWidth = 2;
-    ctx.strokeRect(x * 8 * S, y * 8 * S, w * 8 * S, hh * 8 * S);
+    ctx.lineWidth = 2;
+    antsRect(ctx, x * 8 * S, y * 8 * S, w * 8 * S, hh * 8 * S, '#4cc2ff');
   };
+  onAntsTick(c, () => show(...shown));
   if (onSheet) show(w0 & 15, (w0 & L3_TILE) >> 4, b.w, b.h); else show(-1, 0, 0, 0);
   attachRectPick(c, 16, 32, (q) => show(q.x, q.y, q.w, q.h), (q) =>
     setBrush({ w: q.w, h: q.h, tiles: Array.from({ length: q.w * q.h }, (_, i) => ((q.y + Math.floor(i / q.w)) * 16 + q.x + (i % q.w)) | (attr & (L3_PAL | L3_PRIO))) }));

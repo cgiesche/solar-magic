@@ -44,6 +44,7 @@ type Shown = { vram: Uint8Array; cgram: Uint8Array; wram: Uint8Array; ppuRegs: U
 const NOTHING_SHOWN: Shown = { vram: new Uint8Array(0x10000), cgram: new Uint8Array(0x200), wram: new Uint8Array(0x20000), ppuRegs: new Uint8Array(0x40) };
 import { triggerPanel, owTriggerPanel } from '../triggerpanel.ts';
 import { eventTriggerState } from '../../core/owanimview.ts';
+import { AntsMarks, strokeAnts } from '../ants.ts';
 
 const TILE_TYPES = [0x01, 0x02, 0x04, 0x08, 0x10, 0x11, 0x12, 0x03, 0x05, 0x06, 0x07, 0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e];
 const COLOR_TYPES = [0x14, 0x13, 0x15, 0x16, 0x17];
@@ -1093,10 +1094,14 @@ export class AnimTab implements WsPanel {
     const per = shapeOf(s.type).w * shapeOf(s.type).h;
     const tiles = file.length >> 5;
     const c = this.sheet(tiles, (t) => file.subarray(t * 32, t * 32 + 32), row);
-    const ctx = c.getContext('2d')!;
     const first = cur >> 5;
-    ctx.strokeStyle = '#ffb000'; ctx.lineWidth = 2;
-    for (let k = 0; k < per; k++) { const t = first + k; ctx.strokeRect((t & 15) * 24 + 1, (t >> 4) * 24 + 1, 22, 22); }
+    // (the frame's source tiles, running)
+    new AntsMarks(c).over((ctx) => {
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      for (let k = 0; k < per; k++) { const t = first + k; ctx.rect((t & 15) * 24 + 1, (t >> 4) * 24 + 1, 22, 22); }
+      strokeAnts(ctx, '#ffb000');
+    });
     c.addEventListener('mousedown', (e) => {
       const rc = c.getBoundingClientRect();
       const t = Math.floor((e.clientY - rc.top) / (rc.height / Math.ceil(tiles / 16))) * 16 + Math.floor((e.clientX - rc.left) / (rc.width / 16));
@@ -1137,12 +1142,17 @@ export class AnimTab implements WsPanel {
     for (const sl of slots) {
       const c = this.sheet(128, (t) => vram.subarray((base + (sl.first + t) * 32) & 0xffff, ((base + (sl.first + t) * 32) & 0xffff) + 32), row);
       const t0 = this.targetTile(s) - sl.first;
-      const ctx = c.getContext('2d')!;
-      ctx.strokeStyle = '#ffb000'; ctx.lineWidth = 2;
-      for (let y = 0; y < shape.h; y++) for (let x = 0; x < shape.w; x++) {
-        const t = t0 + y * 16 + x;
-        if (t >= 0 && t < 128) ctx.strokeRect((t & 15) * 24 + 1, (t >> 4) * 24 + 1, 22, 22);
-      }
+      // (the target's tiles, running)
+      new AntsMarks(c).over((ctx) => {
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        let any = false;
+        for (let y = 0; y < shape.h; y++) for (let x = 0; x < shape.w; x++) {
+          const t = t0 + y * 16 + x;
+          if (t >= 0 && t < 128) { ctx.rect((t & 15) * 24 + 1, (t >> 4) * 24 + 1, 22, 22); any = true; }
+        }
+        if (any) strokeAnts(ctx, '#ffb000');
+      });
       c.addEventListener('mousedown', (e) => {
         const rc = c.getBoundingClientRect();
         const t = sl.first + Math.floor((e.clientY - rc.top) / (rc.height / 8)) * 16 + Math.floor((e.clientX - rc.left) / (rc.width / 16));

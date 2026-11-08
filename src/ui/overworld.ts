@@ -65,7 +65,7 @@ import { WorldCheck } from './worldcheck.ts';
 import { layerStrengths, isLayerMode, type OwMode, type LayerStrengths } from '../core/owlayers.ts';
 import { OW_OPTIONS, owOption, owOptionValue, setOwOption, revealSpeed, setRevealSpeed, revealStepFrames, MAX_REVEAL_SPEED, DEFAULT_REVEAL_SPEED, submapLightning, setSubmapLightning, LIGHTNING_TITLE, lightningEditLabel } from '../core/owoptions.ts';
 import { boolPref, numberPref, prefFamily } from './prefs.ts';
-import { antsMenuItem } from './ants.ts';
+import { antsMenuItem, antsRect, onAntsTick, strokeAnts } from './ants.ts';
 
 // a w×h block of L1 tiles (16x16) or L2 tilemap entries (8x8), row-major; a L1 brush has no level tiles (NO_TILE
 // where one was picked: they are objects on layer 1, placed with a look from the picker's "Levels", ADR 0012)
@@ -2048,17 +2048,22 @@ export class OverworldView {
     const tileBrush = b.kind === this.mode && !this.routeBrush && this.lookBrush < 0;
     const mark = tileBrush ? locate() : null;
     const at = mark?.kind === 'rect' ? mark : null;
-    // r: the rectangle being picked (null: the brush's mark)
+    // r: the rectangle being picked (null: the brush's mark); drawn again as shown on the ants' ticks
+    let shown: { x: number; y: number; w: number; h: number } | null = null;
     const draw = (r: { x: number; y: number; w: number; h: number } | null) => {
+      shown = r;
       ctx.drawImage(sheet, 0, 0);
       marks?.(ctx);
       if (!r && mark?.kind === 'tiles') {
-        ctx.strokeStyle = '#4cc2ff'; ctx.lineWidth = 1 / k; // (one canvas pixel)
-        for (const t of mark.cells) ctx.strokeRect(t.x * cell + ctx.lineWidth / 2, t.y * cell + ctx.lineWidth / 2, cell - ctx.lineWidth, cell - ctx.lineWidth);
+        ctx.lineWidth = 1 / k; // (one canvas pixel)
+        ctx.beginPath();
+        for (const t of mark.cells) ctx.rect(t.x * cell + ctx.lineWidth / 2, t.y * cell + ctx.lineWidth / 2, cell - ctx.lineWidth, cell - ctx.lineWidth);
+        strokeAnts(ctx, '#4cc2ff');
       }
       r ??= at;
       if (r) outlineCells(ctx, r, cell);
     };
+    onAntsTick(c, () => draw(shown));
     draw(null);
     attachRectPick(c, cols, rows, draw, (r) => {
       // (a reveal being added: the tile it becomes)
@@ -2247,13 +2252,17 @@ export class OverworldView {
     pieces.forEach((p, i) => p.entries.forEach((v, k) => { list[(Math.floor(i / PIECE_COLS) * 2 + (k >> 1)) * w + (i % PIECE_COLS) * 2 + (k & 1)] = v; }));
     const sheet = drawEntries(list, w, w * 8, rows * 16);
     const { c, ctx } = this.sheetCanvas(sheet, 'ow-pal8');
-    ctx.drawImage(sheet, 0, 0);
     const b = this.brush;
     const at = b.kind === 'l2' && b.w === 2 && b.h === 2 ? pieces.findIndex((p) => p.entries.every((v, j) => v === b.entries[j])) : -1;
-    if (at >= 0) outlineCells(ctx, pieceBox(at), 16);
-    // (the piece to replace, picked: dashed)
+    // (the piece to replace, picked: in its own colour, both running)
     const from = this.replacing?.from, fi = from ? pieces.findIndex((p) => samePiece(p.entries, from)) : -1;
-    if (fi >= 0) { ctx.setLineDash([3, 2]); outlineCells(ctx, pieceBox(fi), 16); ctx.setLineDash([]); }
+    const draw = () => {
+      ctx.drawImage(sheet, 0, 0);
+      if (at >= 0) outlineCells(ctx, pieceBox(at), 16);
+      if (fi >= 0) outlineCells(ctx, pieceBox(fi), 16, REPLACED_PIECE);
+    };
+    onAntsTick(c, draw);
+    draw();
     const cellAt = (e: MouseEvent) => {
       const rc = c.getBoundingClientRect();
       const x = Math.floor((e.clientX - rc.left) / (rc.width / PIECE_COLS)), y = Math.floor((e.clientY - rc.top) / (rc.height / rows));
@@ -2396,10 +2405,12 @@ const checker = (x: number, y: number): number => (((x >> 2) ^ (y >> 2)) & 1 ? 0
 // the brush's rectangle r (cells of `cell` pixels) outlined in a sheet, an eighth of a cell wide
 // piece k's cell in the "Pieces on this map" sheet
 const pieceBox = (k: number) => ({ x: k % PIECE_COLS, y: Math.floor(k / PIECE_COLS), w: 1, h: 1 });
-function outlineCells(ctx: CanvasRenderingContext2D, r: { x: number; y: number; w: number; h: number }, cell: number): void {
-  ctx.strokeStyle = '#4cc2ff'; ctx.lineWidth = cell / 8;
-  ctx.strokeRect(r.x * cell + ctx.lineWidth / 2, r.y * cell + ctx.lineWidth / 2, r.w * cell - ctx.lineWidth, r.h * cell - ctx.lineWidth);
+// a sheet's brush or pick outlined, running (ants.ts)
+function outlineCells(ctx: CanvasRenderingContext2D, r: { x: number; y: number; w: number; h: number }, cell: number, color = '#4cc2ff'): void {
+  ctx.lineWidth = cell / 8;
+  antsRect(ctx, r.x * cell + ctx.lineWidth / 2, r.y * cell + ctx.lineWidth / 2, r.w * cell - ctx.lineWidth, r.h * cell - ctx.lineWidth, color);
 }
+const REPLACED_PIECE = '#ffb000'; // the piece "Replace piece…" replaces, in the pieces sheet
 
 // the event chosen in the strip kept per ROM (by its name) in the browser, -1: before events (a new key: the event progress
 // kept before was a view only, the map painted before events)

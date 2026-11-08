@@ -36,6 +36,7 @@ import { matchesAll, type SearchProvider, type SearchResult } from './search.ts'
 import { blockFilesByTile } from './blockdialog.ts';
 import { contextMenu } from './menu.ts';
 import { collisionMarks, markCanvas, switchMarks, switchCanvas, MARK_TEXT, type CollisionMark } from './collisionmarks.ts';
+import { antsRect, onAntsTick } from './ants.ts';
 
 // behaviour of the given Map16 tiles when hit from below or entered (only tiles with an effect);
 // undefined while probes are still pending (asked for; without ask only those known: a picker tab's come with its prefetch)
@@ -351,9 +352,10 @@ export class Picker {
         ctx.drawImage(pageSheet(), 0, 0, c.width, c.height);
         drawTileMatches(ctx, this.m16Match, base, 256, S);
         if (x < 0) return;
-        ctx.strokeStyle = '#4cc2ff'; ctx.lineWidth = 2;
-        ctx.strokeRect(x * S, y * S, w * S, hh * S);
+        ctx.lineWidth = 2;
+        antsRect(ctx, x * S, y * S, w * S, hh * S, '#4cc2ff');
       };
+      onAntsTick(c, () => draw(...shownRect));
       const sel = curTile - base;
       const shown = () => (sel >= 0 && sel < 256 ? draw(sel & 15, sel >> 4, bw, bh) : draw(-1, 0, 0, 0));
       draws.set(c, shown);
@@ -461,9 +463,10 @@ export class Picker {
       shownRect = [x, y, w, hh];
       ctx.drawImage(sheet, 0, 0, c.width, c.height);
       if (x < 0) return;
-      ctx.strokeStyle = '#4cc2ff'; ctx.lineWidth = 2;
-      ctx.strokeRect(x * S, y * S, w * S, hh * S);
+      ctx.lineWidth = 2;
+      antsRect(ctx, x * S, y * S, w * S, hh * S, '#4cc2ff');
     };
+    onAntsTick(c, () => draw(...shownRect));
     animateSheet(app, sheet, true, this.bgBase, c, () => draw(...shownRect));
     if (onSheet) draw(t0 & 15, t0 >> 4, brush.w, brush.h); else draw(-1, 0, 0, 0);
     // click picks a tile, dragging picks a rectangle of tiles (as in the Map16 tab)

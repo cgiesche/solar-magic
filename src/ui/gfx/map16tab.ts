@@ -44,10 +44,12 @@ import { gfxTarget, type GfxTarget, type Map16Target } from './target.ts';
 import { drawMap16 } from '../../core/render.ts';
 import { QuarterGrid, markRect, editMarked, setPalette, setBit, setTileNum, stamp, mirror, summary, wholeTiles, FLIP_X, FLIP_Y, PRIO, type QuarterEdit, type MarkMode, type BitState } from '../../core/quarters.ts';
 import { numberPref } from '../prefs.ts';
+import { AntsMarks, antsRect, onAntsTick } from '../ants.ts';
 
 const Z = 2; // sheet zoom
 const M = 34; // sheet margin for the ranges and row numbers
 const BZ = 12; // largest fitted builder zoom
+const REMAP_TO = '#50dc78'; // where remap's marked 8x8 tiles are dragged (the destinations' green; the dash no longer sets it apart)
 const GFX_W = numberPref('mt-gfx-width', 0, (v) => v >= 200 && v <= 1600); // the graphics column's width (0: none kept)
 const LABELS_W = 92; // the slot names left of the 8x8 graphics
 const QUARTER_NAMES = ['top left', 'bottom left', 'top right', 'bottom right'];
@@ -115,6 +117,7 @@ export class Map16Tab implements WsPanel {
   // all pages of 256 tiles in one list, each drawn once it scrolls into view
   private scroll = h('div', { class: 'mt-scroll' });
   private pages: HTMLCanvasElement[] = [];
+  private pageMarks: AntsMarks[] = []; // (each page's selection and move target, running over the page)
   private heads: HTMLElement[] = [];
   private near = new Set<number>(); // pages in or near the view
   private dirty = new Set<number>(); // pages to draw once they come near the view
@@ -144,6 +147,7 @@ export class Map16Tab implements WsPanel {
   private gfxTitle = h('div', { class: 'panel-title' });
   private gfxLabels = h('div', { class: 'mt-gfx-labels' });
   private gfxCanvas = h('canvas', { class: 'mt-gfx-canvas' });
+  private gfxMarks = new AntsMarks(this.gfxCanvas); // (the chosen 8x8 tiles, remap's marked ones, running)
   private gfxScroll = h('div', { class: 'mt-gfx-scroll' }, h('div', { class: 'mt-gfx-wrap' }, this.gfxLabels, this.gfxCanvas));
   private gfxCol = h('div', { class: 'mt-col mt-gfx-col' }, this.gfxTitle, this.gfxScroll);
   private remapping: Remapping | null = null;
@@ -469,6 +473,7 @@ export class Map16Tab implements WsPanel {
       const c = h('canvas', { class: 'mt-sheet', width: 256 * Z + M, height: 256 * Z });
       const head = h('div', { class: 'picker-head' });
       this.pages.push(c);
+      this.pageMarks.push(new AntsMarks(c));
       this.heads.push(head);
       this.dirty.add(p);
       observer.observe(c);
@@ -532,21 +537,14 @@ export class Map16Tab implements WsPanel {
       }
     }
     drawTileMatches(ctx, this.match, base, 256, 16 * Z, M);
-    // the selection may reach over several pages; each draws its part
+    // the selection may reach over several pages, each draws its part; the move's target (both running)
     const row = (this.sel >> 4) - p * 16;
-    if (row < 16 && row + this.selH > 0) {
-      ctx.strokeStyle = '#4cc2ff';
-      ctx.lineWidth = 2;
-      ctx.strokeRect(M + (this.sel & 15) * 16 * Z + 1, row * 16 * Z + 1, this.selW * 16 * Z - 2, this.selH * 16 * Z - 2);
-    }
     const to = this.moving?.to ?? -1, toRow = (to >> 4) - p * 16;
-    if (to >= 0 && toRow < 16 && toRow + this.selH > 0) {
-      ctx.strokeStyle = '#ffb000';
-      ctx.lineWidth = 2;
-      ctx.setLineDash([6, 4]);
-      ctx.strokeRect(M + (to & 15) * 16 * Z + 1, toRow * 16 * Z + 1, this.selW * 16 * Z - 2, this.selH * 16 * Z - 2);
-      ctx.setLineDash([]);
-    }
+    this.pageMarks[p].over((mc) => {
+      mc.lineWidth = 2;
+      if (row < 16 && row + this.selH > 0) antsRect(mc, M + (this.sel & 15) * 16 * Z + 1, row * 16 * Z + 1, this.selW * 16 * Z - 2, this.selH * 16 * Z - 2, '#4cc2ff');
+      if (to >= 0 && toRow < 16 && toRow + this.selH > 0) antsRect(mc, M + (to & 15) * 16 * Z + 1, toRow * 16 * Z + 1, this.selW * 16 * Z - 2, this.selH * 16 * Z - 2, '#ffb000');
+    });
   }
 
   // the overworld's tiles as a sheet of 256 (past C0 none)
@@ -1023,11 +1021,11 @@ export class Map16Tab implements WsPanel {
     let matches: number[] | null = null, pending = 0;
     const draw = () => {
       ctx.drawImage(sheet, 0, 0, 512, 1024);
-      ctx.lineWidth = 2;
-      ctx.strokeStyle = '#ffb000';
-      ctx.strokeRect((cur & 15) * 32 + 1, (cur >> 4) * 32 + 1, 30, 30);
       drawTileMatches(ctx, matches, 0, 0x200, 32);
+      ctx.lineWidth = 2;
+      antsRect(ctx, (cur & 15) * 32 + 1, (cur >> 4) * 32 + 1, 30, 30, '#ffb000');
     };
+    onAntsTick(c, draw);
     const update = (scrollTo = true) => {
       const behaviors = tileBehaviors(app, input.value, 0x200);
       pending = behaviors.pending;
@@ -1393,12 +1391,16 @@ export class Map16Tab implements WsPanel {
       });
     }
     if (this.remapping) this.drawRemapMarks(ctx, slots);
-    // the chosen 8x8 tiles, or those being chosen
+    // the chosen 8x8 tiles, or those being chosen; remap's marked tiles and where they are dragged (running)
     const d = this.drag, r = d ? { x: Math.min(d.a.x, d.b.x), y: Math.min(d.a.y, d.b.y), w: Math.abs(d.a.x - d.b.x) + 1, h: Math.abs(d.a.y - d.b.y) + 1 } : this.remapping ? null : this.pick;
-    if (r) {
-      ctx.strokeStyle = '#4cc2ff'; ctx.lineWidth = 2;
-      ctx.strokeRect(r.x * 8 * this.gzPx + 1, r.y * 8 * this.gzPx + 1, r.w * 8 * this.gzPx - 2, r.h * 8 * this.gzPx - 2);
-    }
+    const from = this.remapping ? this.visualFrom : null, to = from && this.visualTo;
+    this.gfxMarks.over((mc) => {
+      mc.lineWidth = 2;
+      const box = (x: number, y: number, w: number, hh: number, color: string) => antsRect(mc, x * 8 * this.gzPx + 1, y * 8 * this.gzPx + 1, w * 8 * this.gzPx - 2, hh * 8 * this.gzPx - 2, color);
+      if (r) box(r.x, r.y, r.w, r.h, '#4cc2ff');
+      if (from) box(from.x, from.y, from.w, from.h, '#4cc2ff');
+      if (from && to) box(to.x, to.y, from.w, from.h, REMAP_TO);
+    });
     c.style.width = `${W * z}px`; c.style.height = `${Hh * z}px`;
     this.gfxLabels.replaceChildren(...slots.map((s) => h('div', { class: 'mt-slot', style: { height: `${64 * z}px` } },
       h('span', { class: 'mt-slot-name' }, s.name),
@@ -1423,21 +1425,14 @@ export class Map16Tab implements WsPanel {
     sc.scrollTop = ly * z - ay;
   }
 
-  // remap: the list's sources (orange) and destinations (green), the visual mode's marked tiles (blue)
-  // and where they are being dragged (dashed)
+  // remap: the list's sources (orange) and destinations (green) (the visual mode's marked tiles, blue, and where
+  // they are being dragged, green: drawGfx's running marks)
   private drawRemapMarks(ctx: CanvasRenderingContext2D, slots: { first: number }[]): void {
     const { remap } = this.remapping!.ed.parsed();
     const at = (t: number) => { const si = slots.findIndex((s) => t >= s.first && t < s.first + 0x80); return si < 0 ? null : { x: ((t - slots[si].first) & 15) * 8 * this.gzPx, y: (si * 8 + ((t - slots[si].first) >> 4)) * 8 * this.gzPx }; };
     const fill = (tiles: Iterable<number>, color: string) => { ctx.fillStyle = color; for (const t of tiles) { const p = at(t); if (p) ctx.fillRect(p.x, p.y, 8 * this.gzPx, 8 * this.gzPx); } };
     fill(new Set([...remap.tiles.keys(), ...remap.tilePals.keys()]), 'rgba(255,176,0,0.35)');
     fill(new Set(remap.tiles.values()), 'rgba(80,220,120,0.35)');
-    const box = (x: number, y: number, w: number, hh: number, dash: boolean) => {
-      ctx.strokeStyle = '#4cc2ff'; ctx.lineWidth = 2; ctx.setLineDash(dash ? [4, 3] : []);
-      ctx.strokeRect(x * 8 * this.gzPx + 1, y * 8 * this.gzPx + 1, w * 8 * this.gzPx - 2, hh * 8 * this.gzPx - 2);
-      ctx.setLineDash([]);
-    };
-    if (this.visualFrom) box(this.visualFrom.x, this.visualFrom.y, this.visualFrom.w, this.visualFrom.h, false);
-    if (this.visualFrom && this.visualTo) box(this.visualTo.x, this.visualTo.y, this.visualFrom.w, this.visualFrom.h, true);
   }
 
   // 8x8 tile number at a cell of the grouped view (-1: none)
