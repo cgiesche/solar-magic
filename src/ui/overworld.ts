@@ -2008,13 +2008,6 @@ export class OverworldView {
     locate: () => SheetMark | null, marks?: (ctx: CanvasRenderingContext2D) => void): HTMLElement {
     const b = this.brush;
     const { c, ctx, k, scale } = this.sheetCanvas(sheet, cls);
-    // (the hover preview's: the sheet's pixels with the marks, in the sheet's pixels)
-    let flat: HTMLCanvasElement | null = null;
-    const withMarks = () => {
-      if (!marks) return sheet;
-      if (!flat) { flat = h('canvas', { width: sheet.width, height: sheet.height }); const f = flat.getContext('2d')!; f.drawImage(sheet, 0, 0); marks(f); }
-      return flat;
-    };
     // (the route brush or a look chosen: no tile brush marked)
     const tileBrush = b.kind === this.mode && !this.routeBrush && this.lookBrush < 0;
     const mark = tileBrush ? locate() : null;
@@ -2044,7 +2037,7 @@ export class OverworldView {
       this.buildSide();
       this.paint();
     });
-    previewSheet(c, withMarks, cols, rows, cell, scale, describe);
+    previewSheet(c, () => sheet, cols, rows, cell, scale, describe, undefined, marks);
     const out = h('div', null);
     if ((!at || at.flip) && tileBrush) {
       // (drawn at the sheet's pixels per pixel, as the sheet)

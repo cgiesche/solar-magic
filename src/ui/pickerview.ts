@@ -51,15 +51,20 @@ function previewScale(w: number, hh: number): number {
   return Math.max(w, hh) <= 8 ? 8 : fitScale(w, hh, BOX, BOX, 4);
 }
 
-// shows `image` enlarged with its lines of text left of the side panel `from` is in, at the mouse's height
-export function showPickerPreview(from: HTMLElement, e: MouseEvent, image: HTMLCanvasElement | null, lines: string[], legend: LegendRow[] = []): void {
+// the screen pixels per pixel a w×h image is shown at in the preview (whole ones: an image drawn at that many pixels
+// per pixel, `res`, shows sharp)
+export const previewPixels = (w: number, hh: number): number => Math.max(1, Math.round(previewScale(w, hh) * dpr()));
+
+// shows `image` enlarged with its lines of text left of the side panel `from` is in, at the mouse's height; res: the
+// image's pixels per pixel of what it shows (drawn larger than its pixels, as lines over them: previewPixels)
+export function showPickerPreview(from: HTMLElement, e: MouseEvent, image: HTMLCanvasElement | null, lines: string[], legend: LegendRow[] = [], res = 1): void {
   if (!pop) {
     const img = h('div', { class: 'pick-pop-img' }), text = h('div', { class: 'pick-pop-text' }), lg = h('div', { class: 'pick-pop-legend' });
     pop = { root: h('div', { class: 'pick-pop' }, img, text, lg), img, text, legend: lg };
   }
   if (!pop.root.isConnected) document.body.append(pop.root);
   owner = from;
-  pop.img.replaceChildren(...(image ? [sized(image, previewScale(image.width, image.height))] : []));
+  pop.img.replaceChildren(...(image ? [sized(image, previewScale(image.width / res, image.height / res) / res)] : []));
   pop.img.hidden = !image;
   pop.text.replaceChildren(...lines.filter(Boolean).map((l, i) => h('div', { class: i ? '' : 'pick-pop-head' }, l)));
   // canvases at 2× (larger ones fitted into 32 px)
@@ -91,9 +96,11 @@ export function previewOnHover(el: HTMLElement, shown: number, image: () => HTML
 }
 
 // a sheet of cells (cols × rows, each `cell` native pixels) drawn at `shown`: previews the hovered cell, or the
-// rectangle dragged from where the left button went down, with what describe() says about it and legend()'s rows
+// rectangle dragged from where the left button went down, with what describe() says about it and legend()'s rows;
+// marks: what is drawn over the sheet's pixels (in its coordinates), drawn at the preview's size so it stays sharp
 export function previewSheet(c: HTMLCanvasElement, sheet: () => CanvasImageSource, cols: number, rows: number, cell: number, shown: number,
-  describe: (r: { x: number; y: number; w: number; h: number }) => string[], legend?: (r: { x: number; y: number; w: number; h: number }) => LegendRow[]): void {
+  describe: (r: { x: number; y: number; w: number; h: number }) => string[], legend?: (r: { x: number; y: number; w: number; h: number }) => LegendRow[],
+  marks?: (ctx: CanvasRenderingContext2D) => void): void {
   if (shown >= PREVIEW_BELOW) return;
   let down: { x: number; y: number } | null = null;
   const cellAt = (e: MouseEvent) => {
@@ -106,7 +113,17 @@ export function previewSheet(c: HTMLCanvasElement, sheet: () => CanvasImageSourc
   const show = (e: MouseEvent) => {
     const a = cellAt(e), b = down ?? a;
     const r = { x: Math.min(a.x, b.x), y: Math.min(a.y, b.y), w: Math.abs(a.x - b.x) + 1, h: Math.abs(a.y - b.y) + 1 };
-    showPickerPreview(c, e, crop(sheet(), r.x * cell, r.y * cell, r.w * cell, r.h * cell), describe(r), legend?.(r));
+    const x = r.x * cell, y = r.y * cell, w = r.w * cell, hh = r.h * cell;
+    if (!marks) { showPickerPreview(c, e, crop(sheet(), x, y, w, hh), describe(r), legend?.(r)); return; }
+    // (the pixels enlarged, the marks drawn over them at that size)
+    const res = previewPixels(w, hh), img = document.createElement('canvas');
+    img.width = w * res; img.height = hh * res;
+    const ctx = img.getContext('2d')!;
+    ctx.imageSmoothingEnabled = false;
+    ctx.setTransform(res, 0, 0, res, -x * res, -y * res);
+    ctx.drawImage(sheet(), 0, 0);
+    marks(ctx);
+    showPickerPreview(c, e, img, describe(r), legend?.(r), res);
   };
   c.addEventListener('mousedown', (e) => {
     if (e.button !== 0 || e.ctrlKey || e.metaKey) return;
