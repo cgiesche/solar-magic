@@ -170,7 +170,7 @@ The text a message box sprite (B9) shows: two per translevel (message 1 and 2, a
 _Avoid_: message slot
 
 **Path tile**:
-A layer 1 tile Mario walks, climbs or swims along, or stops or exits on; invisible in the game, drawn by the editor as an overlay. The game's 5 hardcoded paths are not tiles.
+A layer 1 tile Mario walks, climbs or swims along, or stops or exits on; invisible in the game, drawn by the editor as a mark – each overworld mode shows what its task needs (#412, core/owlayers.ts): the layer 1 mode always (layer 2 dimmed or full by View → Layers, gone while Q is held), the layer 2 mode with all of layer 1 – its tiles, the marks, the level numbers, unreached tiles – dimmed together or not at all (View → Layers "Layer 1 while painting layer 2", on by default; Q held the other way), the links and sprites modes not (both layers full). The game's 5 hardcoded paths are not tiles.
 _Avoid_: road, Mario path (Lunar Magic's view name)
 
 **Free tile** (overworld layer 1):

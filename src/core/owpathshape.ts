@@ -1,5 +1,5 @@
 // A path tile's shape shown (CONTEXT.md "Path shape"): the ways Mario takes over a tile – the lines the overworld
-// editor draws through its mark (the "Path tiles" overlay, the layer 1 sheet) and the words its popup and status bar
+// editor draws through its mark (the path marks on the map, the layer 1 sheet) and the words its popup and status bar
 // say – derived from the path shapes learned by emulation (owpaths.ts). Pure: nothing drawn.
 import { DX, DY, NO_SHAPE, PATH_KIND_NAMES, reverse, turnedAt, type PathKind, type PathShapes } from './owpaths.ts';
 import { walkFrom, neighbor, type ReachInput } from './owreach.ts';

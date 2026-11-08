@@ -62,7 +62,7 @@ import type { Rom } from '../core/rom.ts';
 import { ReachLayer } from './owreachview.ts';
 import { ExitArrowLayer } from './owexitarrows.ts';
 import { WorldCheck } from './worldcheck.ts';
-import { layerStrengths, isLayerMode, type OwMode } from '../core/owlayers.ts';
+import { layerStrengths, isLayerMode, type OwMode, type LayerStrengths } from '../core/owlayers.ts';
 import { OW_OPTIONS, owOption, owOptionValue, setOwOption, revealSpeed, setRevealSpeed, revealStepFrames, MAX_REVEAL_SPEED, DEFAULT_REVEAL_SPEED, submapLightning, setSubmapLightning, LIGHTNING_TITLE, lightningEditLabel } from '../core/owoptions.ts';
 
 // a w×h block of L1 tiles (16x16) or L2 tilemap entries (8x8), row-major; a L1 brush has no level tiles (NO_TILE
@@ -138,10 +138,9 @@ export class OverworldView {
   shown: { l1: Uint16Array; l2: Uint16Array };
   tls: Uint8Array;
   mode: OwMode = 'l1';
-  showL1 = true;
-  showL2 = true;
-  dimOther = loadDim(); // the layer not painted dimmed (View → Layers, kept in the browser)
-  private solo = false; // Q held: the layer not painted hidden
+  dimL2 = loadPref(DIM_PREF); // layer 2 dimmed while layer 1 is painted (View → Layers, kept in the browser)
+  l1InL2 = loadPref(L1_IN_L2_PREF); // layer 1 shown (dimmed) while layer 2 is painted (View → Layers, kept in the browser)
+  private solo = false; // Q held: layer 2 hidden while layer 1 is painted; layer 1 the other way while layer 2 is
   private openPage1 = false; // page 1 of the layer 1 sheet shown though none of its tiles is the ROM's own
   showLinks = false; // the links' arrows also while painting (always in the links mode)
   links = new LinkLayer(this);
@@ -187,7 +186,6 @@ export class OverworldView {
   private strip = h('div', { class: 'ow-strip' });
   private stripList = h('div', { class: 'ow-strip-list' });
   showGrid = false;
-  showPaths = false;
   // whole screen pixels per SNES pixel (pixelZoomSteps): 200 % or the nearest level of the screen's scale
   zoom = snapZoom(2, pixelZoomSteps());
   private zoomCtl = zoomControl(() => this.zoom, (z) => this.setZoom(z), undefined, undefined, pixelZoomSteps);
@@ -384,15 +382,17 @@ export class OverworldView {
   private composeMap(): void {
     composeLayers(this.mapCanvas, this.l1Canvas, this.l2Canvas, this.strengths());
   }
-  private strengths(): { l1: number; l2: number } {
-    return layerStrengths({ mode: this.mode, showL1: this.showL1, showL2: this.showL2, dim: this.dimOther, solo: this.solo });
+  private strengths(): LayerStrengths {
+    return layerStrengths({ mode: this.mode, dimL2: this.dimL2, l1InL2: this.l1InL2, solo: this.solo });
   }
-  // Q held (or released): the layer not painted hidden (or shown again)
+  // Q held (or released): layer 2 hidden while layer 1 is painted, layer 1 switched the other way while layer 2 is (or
+  // back again)
   private setSolo(on: boolean): void {
     if (this.solo === on) return;
     this.solo = on;
     this.composeMap();
     this.paint();
+    this.updateStatus();
   }
 
   drawL1Tile(img: Uint32Array, tc: TileCache, t: number, px: number, py: number, W = 512, H = 512): void {
@@ -439,7 +439,9 @@ export class OverworldView {
   private paintMap(ctx: CanvasRenderingContext2D, lw: number): void {
     if (this.playing) this.paintPlay(ctx);
     else ctx.drawImage(this.mapCanvas, 0, 0);
-    if (!this.playing) this.reach.paint(ctx);
+    // (layer 1's overlays – unreached tiles, level numbers, path marks – at its strength: dimmed or gone with it)
+    const s1 = this.strengths();
+    if (!this.playing && s1.l1) { ctx.globalAlpha = s1.l1; this.reach.paint(ctx); ctx.globalAlpha = 1; }
     if (this.showGrid) {
       const step = this.cellSize;
       ctx.strokeStyle = 'rgba(255,255,255,0.12)';
@@ -453,7 +455,8 @@ export class OverworldView {
     const levels = this.levelL1(), shared = sharedTranslevels(levels, this.tls, this.isLevelTile);
     if (this.mode === 'l1') this.hatchLevelTiles(ctx, levels, lw);
     ctx.font = `bold ${8}px monospace`;
-    for (let y = 0; y < 32; y++) for (let x = 0; x < 32; x++) {
+    ctx.globalAlpha = s1.l1;
+    if (s1.l1) for (let y = 0; y < 32; y++) for (let x = 0; x < 32; x++) {
       const i = l1Index(this.region, x, y), tl = this.tls[i];
       if (!this.isLevelTile(levels[i])) continue;
       ctx.fillStyle = i === this.selected ? 'rgba(76,194,255,0.85)' : shared.has(tl) || !tl ? 'rgba(230,120,0,0.85)' : 'rgba(0,0,0,0.6)';
@@ -461,10 +464,12 @@ export class OverworldView {
       ctx.fillStyle = '#fff';
       ctx.fillText(tl ? hex(translevelToLevel(tl), 3) : '---', x * 16 + 1, y * 16 + 16);
     }
-    if (this.showPaths) this.paintPaths(lw);
+    ctx.globalAlpha = s1.marks;
+    if (s1.marks) this.paintPaths(lw);
+    ctx.globalAlpha = 1;
     if (this.mode === 'sprites' || this.showSprites) this.sprites.paint(ctx, lw);
     if (this.mode === 'links' || this.showLinks) this.links.paint(ctx, lw);
-    if (this.mode !== 'links' && this.mode !== 'sprites') this.paintSelected(lw);
+    if (this.mode !== 'links' && this.mode !== 'sprites' && s1.l1) this.paintSelected(lw);
     this.nameEditor.paint(ctx, lw);
     this.hatchRefused(ctx, lw);
     this.paintMovePreview(ctx, lw);
@@ -1038,7 +1043,7 @@ export class OverworldView {
       return;
     }
     if (!c) {
-      const solo = isLayerMode(this.mode) ? ` · Hold Q: hide layer ${this.mode === 'l1' ? 2 : 1}` : '';
+      const solo = this.mode === 'l1' ? ' · Hold Q: hide layer 2' : this.mode === 'l2' ? ` · Hold Q: ${this.l1InL2 ? 'hide' : 'show'} layer 1` : '';
       this.statusText.textContent = this.ev
         ? `Painting layer ${this.mode === 'l1' ? 1 : 2} as after ${eventTitle(this.ev.runners, this.event)} · Click/drag picks up tiles · Right click/Shift+click paints · Esc: the map before events${solo}`
         : `Click/drag picks up tiles · Right click/Shift+click paints · Alt/Ctrl+click: tile settings${this.mode === 'l1' ? ' · Level tiles: click selects, drag moves, right click: menu, Delete removes' : ''}${solo}`;
@@ -1056,13 +1061,13 @@ export class OverworldView {
           t += tl ? `  ·  Level ${hex(translevelToLevel(tl), 3)} “${levelName(this.app.rom, tl)}”` : '  ·  Enters no level';
           if (this.mode === 'l1') t += '  ·  Click: select · Drag: move · Right click: menu · Double click: open';
         }
-        const k = this.showPaths ? this.pathKinds()?.[shown] : undefined;
+        const s1 = this.strengths(), k = s1.marks ? this.pathKinds()?.[shown] : undefined;
         if (k && isPathKind(k)) {
           const what = pathTileText(shown, k, this.pathShapes());
           t += `  ·  ${what}`;
           this.scroller.title = what;
         }
-        const unreached = this.reach.status(i);
+        const unreached = s1.l1 ? this.reach.status(i) : '';
         if (unreached) t += `  ·  ${unreached}`;
       }
     } else if (c.x >= 0 && c.y >= 0 && c.x < 64 && c.y < 64) {
@@ -1070,6 +1075,11 @@ export class OverworldView {
       t += `  ·  Entry ${hex(shown, 4)}`;
       if (this.ev) { if (shown !== this.ev.before[i]) t += ` (by this event, ${hex(this.ev.before[i], 4)} before)`; }
       else if (shown !== this.l2[i]) t += ` (by events, ${hex(this.l2[i], 4)} before)`;
+      // (layer 1's words with it: the path tile and whether Mario gets there, while layer 1 is shown)
+      const s1 = this.strengths(), j = l1Index(this.region, c.x >> 1, c.y >> 1), k = s1.marks ? this.pathKinds()?.[this.shown.l1[j]] : undefined;
+      if (k && isPathKind(k)) t += `  ·  ${pathTileText(this.shown.l1[j], k, this.pathShapes())}`;
+      const unreached = s1.l1 ? this.reach.status(j) : '';
+      if (unreached) t += `  ·  ${unreached}`;
     }
     this.statusText.textContent = t;
   }
@@ -1486,21 +1496,19 @@ export class OverworldView {
       h('label', { class: 'row' }, 'Map ', select(MAP_NAMES.map((n, i) => [i, n] as [number, string]), this.map, (v) => this.setMap(v))),
       h('span', { class: 'sep' }),
       h('div', { class: 'btn-group' },
-        h('button', { class: `ow-l1${this.mode === 'l1' ? ' active' : ''}`, title: 'Layer 1 (1): paths painted as tiles, the level tiles objects on top (hatched) – click selects one, drag moves it, right click: its menu, Delete removes it; placed with a look from "Levels" in the picker · layer 2 dimmed while it is painted, hold Q to hide it', onclick: () => this.setMode('l1') }, 'Layer 1 (paths & levels)'),
-        h('button', { class: `ow-l2${this.mode === 'l2' ? ' active' : ''}`, title: 'Layer 2 (2) · layer 1 dimmed while it is painted, hold Q to hide it', onclick: () => this.setMode('l2') }, 'Layer 2 (terrain)'),
+        h('button', { class: `ow-l1${this.mode === 'l1' ? ' active' : ''}`, title: 'Layer 1 (1): paths painted as tiles, the level tiles objects on top (hatched) – click selects one, drag moves it, right click: its menu, Delete removes it; placed with a look from "Levels" in the picker · the path tiles marked; layer 2 dimmed (View → Layers), hold Q to hide it', onclick: () => this.setMode('l1') }, 'Layer 1 (paths & levels)'),
+        h('button', { class: `ow-l2${this.mode === 'l2' ? ' active' : ''}`, title: 'Layer 2 (2) · layer 1 with its path marks dimmed or hidden (View → Layers), hold Q for the other', onclick: () => this.setMode('l2') }, 'Layer 2 (terrain)'),
         h('button', { class: this.mode === 'links' ? 'active' : '', title: 'Overworld links (3): stars, pipes and exit paths leading elsewhere, drawn as arrows; drag from a tile to where it leads', onclick: () => this.setMode('links') }, 'Overworld links'),
         h('button', { class: this.mode === 'sprites' ? 'active' : '', title: 'Sprites (4): the overworld\'s sprites as the game shows them at the event progress, the start positions and the Koopa Kids\' places; drag to move', onclick: () => this.setMode('sprites') }, 'Sprites')),
       h('span', { class: 'sep' }),
       menuButton({ label: 'View', items: [
         { heading: 'Layers' },
-        view('Layer 1', () => this.showL1, (v) => (this.showL1 = v)),
-        view('Layer 2', () => this.showL2, (v) => (this.showL2 = v)),
-        { label: 'Dim the layer not painted', title: 'While layer 1 or 2 is painted the other one is drawn dimmed (Q held hides it)', checked: () => this.dimOther,
-          onToggle: (v: boolean) => { this.dimOther = v; storeDim(v); this.composeMap(); this.paint(); } },
+        { label: 'Dim layer 2 while painting layer 1', title: 'In the layer 1 mode layer 2 drawn dimmed, else at full strength (Q held hides it)', checked: () => this.dimL2,
+          onToggle: (v: boolean) => { this.dimL2 = v; storePref(DIM_PREF, v); this.composeMap(); this.paint(); } },
+        { label: 'Layer 1 while painting layer 2', title: 'In the layer 2 mode layer 1 – its tiles, path marks, level numbers and unreached tiles – drawn dimmed, else not at all (Q held: the other way)', checked: () => this.l1InL2,
+          onToggle: (v: boolean) => { this.l1InL2 = v; storePref(L1_IN_L2_PREF, v); this.composeMap(); this.paint(); this.updateStatus(); } },
         { heading: 'Guides' },
         view('Grid', () => this.showGrid, (v) => (this.showGrid = v), undefined, 'G'),
-        view('Path tiles', () => this.showPaths, (v) => (this.showPaths = v),
-          'Layer 1 tiles Mario walks, climbs (rungs) or swims along (blue), exits to another submap on (red) or stops on without entering a level (cross) – invisible in the game; what each does is learned from the game\'s code'),
         view('Unreached tiles', () => this.reach.show, (v) => (this.reach.show = v),
           'Path and level tiles Mario can\'t get to at this event progress dimmed – searched along the paths as the game moves him (what each tile does learned from the game\'s code), with the level flags of a save at the progress; the problems of the paths are in the status bar'),
         view('Exit arrows', () => this.exits.show, (v) => (this.exits.show = v),
@@ -2065,8 +2073,8 @@ export class OverworldView {
   }
 
   // the layer 1 sheet (owl1sheet.ts): pages 0 and 1 (tiles 100–1FF do where Mario walks what 00–FF do) in number
-  // order, 16 a row; transparent pixels on a checkerboard, a path tile invisible in the game with its mark of the map's
-  // "Path tiles" overlay, a visible tile doing something with a border of its colour (none while the kinds are learned);
+  // order, 16 a row; transparent pixels on a checkerboard, a path tile invisible in the game with its mark as on the map,
+  // a visible tile doing something with a border of its colour (none while the kinds are learned);
   // the rows of free tiles at a page's end folded into one row (page 1 whole while none of its tiles is the ROM's own,
   // "Show page 1" opens it: its invisible path and level tiles acting as page 0's)
   l1Palette(): HTMLElement {
@@ -2308,7 +2316,7 @@ export class OverworldView {
   }
 }
 
-// the mark of a path tile of kind k (isPathKind) on the 16x16 tile at (px, py), as the map's "Path tiles" overlay
+// the mark of a path tile of kind k (isPathKind) on the 16x16 tile at (px, py), as the map's path marks
 // draws it: walk green, climb green with rungs, swim blue, exit red, stop a cross; its ways (owpathshape.ts mapWays or
 // usualWays, none while the shapes are learned) as white lines through the tile (lw: the width of a pixel)
 // (each kind's colour, r,g,b: the mark's fill with its alpha, the sheet's border opaque; a level tile has no mark)
@@ -2353,7 +2361,7 @@ export function drawPathMark(ctx: CanvasRenderingContext2D, k: PathKind, px: num
   }
   ctx.restore();
 }
-// the colour of the border a visible tile of kind k gets in the paint sheet (the overlay's; a level tile yellow)
+// the colour of the border a visible tile of kind k gets in the paint sheet (the map's path marks'; a level tile yellow)
 const KIND_BORDER = Object.fromEntries(Object.entries(KIND_RGB).map(([k, [c]]) => [k, `rgb(${c})`])) as Partial<Record<PathKind, string>>;
 // the background of transparent pixels in the paint sheet: a checkerboard of 4x4 pixel squares (layer 2 shows there)
 const checker = (x: number, y: number): number => (((x >> 2) ^ (y >> 2)) & 1 ? 0xff2a2a2a : 0xff1c1c1c);
@@ -2375,13 +2383,13 @@ function storeEvent(rom: string, e: number): void {
   try { if (e >= 0) localStorage.setItem(EVENT_PREF + rom, String(e)); else localStorage.removeItem(EVENT_PREF + rom); } catch { /* no storage */ }
 }
 
-// "Dim the layer not painted" kept in the browser (on unless switched off)
-const DIM_PREF = 'ow-dim-other';
-function loadDim(): boolean {
-  try { return localStorage.getItem(DIM_PREF) !== '0'; } catch { return true; }
+// View → Layers' switches kept in the browser (on unless switched off)
+const DIM_PREF = 'ow-dim-l2', L1_IN_L2_PREF = 'ow-l1-in-l2';
+function loadPref(key: string): boolean {
+  try { return localStorage.getItem(key) !== '0'; } catch { return true; }
 }
-function storeDim(on: boolean): void {
-  try { localStorage.setItem(DIM_PREF, on ? '1' : '0'); } catch { /* no storage */ }
+function storePref(key: string, on: boolean): void {
+  try { localStorage.setItem(key, on ? '1' : '0'); } catch { /* no storage */ }
 }
 
 // a map region's layers drawn apart: layer 1 transparent where it has no pixel, layer 2 black there (the back area)
