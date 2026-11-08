@@ -2,7 +2,8 @@
 // right drag (or Shift+drag, ADR 0011's paint buttons) from a cell through cells (each next to the one before; dragged
 // back over the route it shortens) draws a route; a left click picks tiles as always, which ends it (the tiles
 // picked are the brush), P goes back and forth between it and the last tile brush. The route shows the tiles the
-// editor chooses for it (owroute.ts routeTiles) – a cell no tile fits in red, why in the status bar. Released, the tiles are written as one
+// editor chooses for it (owroute.ts routeTiles) – a cell no tile fits in red, why in the status bar. An end drawn on an
+// empty cell beside a level or stop tile goes on to it (owroute.ts routeToStops: the level meant, no stop tile beside it). Released, the tiles are written as one
 // ROM edit into the progress chosen ("Map after": the event's layer 1 changes, else the map before events), as a
 // stroke, and a level tile at an end whose exit runs the event gets that exit's direction (owroute.ts writeRoute). A
 // stop tile it puts takes a level without level tile and without name, base event or messages (its translevel: the
@@ -15,12 +16,13 @@ import { toast } from './dom.ts';
 import { refusalWords, refusedToast } from './owrefusal.ts';
 import { l1Index, l1XY, exitDirections, DIR_NAMES, EXIT_NAMES, translevelToLevel } from '../core/overworld.ts';
 import { usualWays } from '../core/owpathshape.ts';
-import { routeTiles, routeExits, routeKind, writeRoute, stopTranslevels, type RouteTiles, type StopTranslevels } from '../core/owroute.ts';
+import { routeTiles, routeExits, routeKind, routeToStops, writeRoute, stopTranslevels, type RouteTiles, type StopTranslevels } from '../core/owroute.ts';
 import { hex } from '../core/names.ts';
 
 export class PathTool {
   on = false; // the route brush chosen (the layer 1 mode's right button draws routes)
-  private route: number[] | null = null; // the route being drawn (l1Index), its tiles
+  private route: number[] | null = null; // the route being drawn (l1Index), as dragged
+  private cells: number[] = []; // the route as solved and written: its ends taken on to a level or stop tile beside them (routeToStops)
   private solved: RouteTiles | null = null;
   private stopTls: StopTranslevels | null = null; // (the translevels a stop may take, read once per drag)
   constructor(private view: OverworldView) {}
@@ -45,7 +47,7 @@ export class PathTool {
     if (!this.inside(x, y)) return;
     this.route = [l1Index(this.view.region, x, y)];
     this.stopTls = stopTranslevels(this.view.app.rom, this.view.tls);
-    this.solved = this.solve(this.route);
+    this.solve(this.route);
     this.shown();
   }
   // dragged onto cell (x, y): the route goes on to it (in steps to cells next to each other), back over it shortens
@@ -66,19 +68,22 @@ export class PathTool {
       const c = steps.find((c) => !r.includes(c)) ?? steps[0], k = r.indexOf(c);
       if (k >= 0) r.length = k + 1; else r.push(c);
     }
-    this.solved = this.solve(r);
+    this.solve(r);
     this.shown();
   }
   // released: the route written (one ROM edit), or refused (why) – solved again on the map as it is now (an undo or
   // another event chosen during the drag)
   up(): void {
-    const r = this.route;
+    let r = this.route;
     this.route = this.solved = this.stopTls = null;
     this.shown();
     if (!r || r.length < 2) return;
     const why = this.blocked();
     if (why) { toast(why, 'error'); return; }
-    const solved = this.solve(r), ev = this.view.levelEvent(), e = this.view.event, rom = this.view.app.rom;
+    this.solve(r);
+    const solved = this.solved!, ev = this.view.levelEvent(), e = this.view.event, rom = this.view.app.rom;
+    this.solved = null;
+    r = this.cells;
     if (solved.refusal) { toast(`Route not drawn: ${this.refusalText(solved)}`, 'error'); return; }
     if (typeof ev === 'string') return; // (blocked said so)
     // (nothing to write: the tiles there already, the exits' directions set)
@@ -103,10 +108,11 @@ export class PathTool {
     return true;
   }
 
-  // the route's tiles as the editor chooses them, on layer 1 as shown (after the event chosen)
-  private solve(r: readonly number[]): RouteTiles {
-    const v = this.view, kinds = v.pathKinds()!, l1 = v.levelL1();
-    return routeTiles(r, { l1, kinds, shapes: v.pathShapes()!, prefer: routeKind(r, l1, kinds), stopTranslevels: this.stopTls ?? stopTranslevels(v.app.rom, v.tls) });
+  // the route dragged, its ends taken on to the level or stop tiles beside them (cells), and its tiles as the editor
+  // chooses them (solved), on layer 1 as shown (after the event chosen)
+  private solve(dragged: readonly number[]): void {
+    const v = this.view, kinds = v.pathKinds()!, l1 = v.levelL1(), r = this.cells = routeToStops(dragged, l1, kinds);
+    this.solved = routeTiles(r, { l1, kinds, shapes: v.pathShapes()!, prefer: routeKind(r, l1, kinds), stopTranslevels: this.stopTls ?? stopTranslevels(v.app.rom, v.tls) });
   }
   private shown(): void {
     this.view.paint();
@@ -125,13 +131,13 @@ export class PathTool {
   status(): string | null {
     if (!this.route) return this.on ? 'Path (auto): Click/drag picks up tiles · Right click/Shift+drag draws the route, the editor chooses its tiles (back over it shortens it) · release writes them · Esc cancels · P: the last tile brush' : null;
     const s = this.solved;
-    return s?.refusal ? `Route of ${this.route.length} cells · ${this.refusalText(s)}` : `Route of ${this.route.length} cells · release writes its tiles · Esc cancels`;
+    return s?.refusal ? `Route of ${this.cells.length} cells · ${this.refusalText(s)}` : `Route of ${this.cells.length} cells · release writes its tiles · Esc cancels`;
   }
 
   // the route: its cells outlined, the tiles chosen as path marks (with their ways), a cell no tile fits in red
   paint(ctx: CanvasRenderingContext2D, lw: number): void {
-    const r = this.route, s = this.solved;
-    if (!r || !s) return;
+    const r = this.cells, s = this.solved;
+    if (!this.route || !s) return;
     const v = this.view, kinds = v.pathKinds(), shapes = v.pathShapes();
     if (!kinds) return;
     const bad = s.refusal ? s.refusal.at : -1;

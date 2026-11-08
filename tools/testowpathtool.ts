@@ -15,7 +15,7 @@ import { Rom } from '../src/core/rom.ts';
 import { RomEditSession } from '../src/core/romedit.ts';
 import {
   OverworldEmulator, OverworldLoads, gameL1, readL1, readL2, readTranslevels, writeTranslevels, baseEvent, setBaseEvent, hasNameEventOrMessages, exitDirections, initialFlags, l1XY, translevelToLevel,
-  DIR_NAMES, DIR_FLAGS, NO_EVENT, OW_EVENTS,
+  DIR_NAMES, DIR_FLAGS, NO_EVENT, OW_EVENTS, l1Index,
 } from '../src/core/overworld.ts';
 import { progressSaves } from '../src/core/owprogress.ts';
 import { reach, reachInput, neighbor, type ReachInput } from '../src/core/owreach.ts';
@@ -24,7 +24,7 @@ import { readEvents, applyEvents, layer1Without, eventL1Tiles, submapViews, subm
 import { OverworldStroke, type OwEventMaps } from '../src/core/owstroke.ts';
 import { levelTileTest } from '../src/core/owpaths.ts';
 import { RAM } from '../src/core/ram.ts';
-import { routeTiles, routeKind, writeRoute, stopTranslevels } from '../src/core/owroute.ts';
+import { routeTiles, routeKind, routeToStops, writeRoute, stopTranslevels } from '../src/core/owroute.ts';
 import { levelsWithoutTile, type LevelTileEvent } from '../src/core/owleveltiles.ts';
 import { refusalOf, refusalDetails } from '../src/core/owrefusal.ts';
 import { refusalWords } from '../src/ui/owrefusal.ts';
@@ -92,6 +92,30 @@ if (found) {
   const solved = routeTiles(route, { l1: ev.after, kinds, shapes, prefer: routeKind(route, ev.after, kinds) });
   check(!solved.refusal && solved.tiles[0] === null && solved.tiles.at(-1) === null && solved.tiles.slice(1, -1).every((t) => t !== null),
     `its tiles: ${solved.tiles.map((t) => (t === null ? '–' : hx(t))).join(' ')}${solved.refusal ? ` refused: ${solved.refusal.why.kind}` : ''}`);
+  // drawn from beside the level tile to beside the other (both ends on cells without a path): taken on to the level
+  // tiles, no stop tile put
+  const beside = route.slice(1, -1), onto = routeToStops(beside, ev.after, kinds);
+  check(beside.length >= 2 && same(onto, route) && !routeTiles(onto, { l1: ev.after, kinds, shapes, prefer: 'walk' }).stops.length,
+    `drawn beside the level tiles: taken on to them (${onto.map(at).join(' → ')}), no stop tile`);
+  check(same(routeToStops(route, ev.after, kinds), route), 'drawn from level tile to level tile: as drawn');
+  // on a map with nothing but level and stop tiles put (main map, cells (x, y)): a single cell as drawn; beside two,
+  // the one straight on; beside two, none straight on: as drawn (a stop tile goes there); an end on a path tile: as
+  // drawn (it joins that path)
+  {
+    const c = (x: number, y: number) => l1Index(0, x, y);
+    const map = (put: [number, number, string][]) => {
+      const l1 = new Uint16Array(0x800);
+      for (const [x, y, k] of put) l1[c(x, y)] = kinds.indexOf(k as (typeof kinds)[number]);
+      return l1;
+    };
+    const line = [c(5, 5), c(6, 5), c(7, 5)];
+    check(same(routeToStops([c(5, 5)], map([[4, 5, 'level']]), kinds), [c(5, 5)]), 'a single cell beside a level tile: as drawn');
+    check(same(routeToStops(line, map([[4, 5, 'level'], [5, 4, 'stop'], [8, 5, 'stop']]), kinds), [c(4, 5), ...line, c(8, 5)]),
+      'beside a level and a stop tile, the level straight on: the level; the other end beside a stop: the stop');
+    check(same(routeToStops(line, map([[5, 4, 'level']]), kinds), [c(5, 4), ...line]), 'beside one level tile, not straight on: that one');
+    check(same(routeToStops(line, map([[5, 4, 'level'], [5, 6, 'level']]), kinds), line), 'beside two level tiles, none straight on: as drawn');
+    check(same(routeToStops(line, map([[4, 5, 'level'], [5, 5, 'walk']]), kinds), line), 'an end on a path tile: as drawn');
+  }
   const before = rom.data.slice(), l1b = readL1(rom), tl = tls[from], exit = e - baseEvent(rom, tl), dir = [0, 1, 2, 3].find((d) => neighbor(from, d) === route[1])!;
   let set: ReturnType<typeof writeRoute>['exits'] = [];
   s.edit('Path', () => { set = writeRoute(rom, route, solved, ev).exits; }, { key: null });

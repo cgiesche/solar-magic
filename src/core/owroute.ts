@@ -78,6 +78,26 @@ export function routeKind(route: readonly number[], l1: ArrayLike<number>, kinds
   return route.map((c) => kinds[l1[c]]).find((k) => WALKED_KINDS.includes(k)) ?? 'walk';
 }
 
+// The route as drawn, its ends taken on to a level or stop tile next to them (a route drawn from beside a level tile
+// to beside another means those levels, not new stop tiles beside them): an end on a cell without a path (kind
+// "none") next to a level or stop tile off the route goes on to it – the one straight on (the way the route leaves
+// or arrives at that end), else the only one next to it; with several and none straight on, or the route a single
+// cell, it stays where it is (a stop tile goes there, as before). The route as drawn where neither end goes on.
+export function routeToStops(route: readonly number[], l1: ArrayLike<number>, kinds: readonly PathKind[]): number[] {
+  if (route.length < 2) return route.slice();
+  const stopAt = (c: number) => c >= 0 && !route.includes(c) && (kinds[l1[c]] === 'level' || kinds[l1[c]] === 'stop');
+  // (the end `end`, the cell before it on the route `inner`)
+  const onTo = (end: number, inner: number): number | undefined => {
+    if (kinds[l1[end]] !== 'none') return undefined;
+    const ahead = neighbor(end, reverse(dirTo(end, inner) ?? 0));
+    if (dirTo(end, inner) !== undefined && stopAt(ahead)) return ahead;
+    const next = [0, 1, 2, 3].map((d) => neighbor(end, d)).filter(stopAt);
+    return next.length === 1 ? next[0] : undefined;
+  };
+  const first = onTo(route[0], route[1]), last = onTo(route[route.length - 1], route[route.length - 2]);
+  return [...(first !== undefined ? [first] : []), ...route, ...(last !== undefined && last !== first ? [last] : [])];
+}
+
 // the direction from cell a to cell b next to it (undefined: not next to it)
 const dirTo = (a: number, b: number): number | undefined => [0, 1, 2, 3].find((d) => neighbor(a, d) === b);
 
