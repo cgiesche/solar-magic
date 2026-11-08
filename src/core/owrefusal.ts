@@ -44,7 +44,7 @@ export type OwRefusalData =
   | { kind: 'routeCrosses' }
   // no path tile leads Mario in direction dir and out toward out (where: at all, from where his first step off the stop
   // or the path before leaves him, to where his first step off the stop after it leaves him walking back)
-  | { kind: 'routeNoTile'; dir: number; out: number; where: 'any' | 'stopStep' | 'pathBefore' | 'stepBack' }
+  | { kind: 'routeNoTile'; dir: number; out: number; where: 'any' | 'stopStep' | 'pathBefore' | 'stepBack' | 'exitEntry' }
   | { kind: 'starOnLevel'; cell: number; tl: number; pipe: boolean } // a star (pipe: a pipe 5B) painted on cell, a level tile entering translevel tl at another event progress
   | { kind: 'starNoTranslevel'; max: number; kept: number; pipe: boolean } // a star (pipe: a pipe 5B) painted (owstars.ts): every translevel 01…max held by a tile or (kept of them) with a name, base event or messages
   | { kind: 'routeNoTranslevel'; max: number; kept: number } // a stop tile the route puts: every translevel 01…max held by a tile, by a stop before or (kept of them) with a name, base event or messages
@@ -144,7 +144,8 @@ export function refusalDetails(r: OwRefusalData): string {
 export function routeNoTileText(r: Extract<OwRefusalData, { kind: 'routeNoTile' }>): string {
   const way = wayText(r.dir, r.out);
   return r.where === 'any' ? `No path tile leads Mario ${way}`
-    : r.where !== 'stepBack' ? `No path tile leads Mario ${way} from where ${r.where === 'stopStep' ? 'his first step off the stop' : 'the path before'} leaves him`
+    : r.where === 'stopStep' || r.where === 'pathBefore' ? `No path tile leads Mario ${way} from where ${r.where === 'stopStep' ? 'his first step off the stop' : 'the path before'} leaves him`
+    : r.where === 'exitEntry' ? `No path tile leads Mario ${way} to where the exit tile after it takes him on (an exit path entry there)`
     : `No path tile leads Mario ${way} to where his first step off the stop after it leaves him walking back`;
 }
 

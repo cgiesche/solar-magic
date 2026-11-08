@@ -33,7 +33,8 @@ const all = reachInput(rom, gameL1(r).slice(), r.wram.slice(RAM.owTranslevels, R
 const game = all.l1, views = submapViews(loads), STOP = stopTile(kinds);
 const shaped = (t: number) => WALKED_KINDS.includes(kinds[t]);
 const stepDir = (a: number, b: number) => [0, 1, 2, 3].find((d) => { const p = l1XY(a), q = l1XY(b); return a >> 10 === b >> 10 && p.x + DX[d] === q.x && p.y + DY[d] === q.y; }) ?? -1;
-const solveInput = (l1: ArrayLike<number>, prefer: PathKind): RouteInput => ({ l1, kinds, shapes, prefer });
+// (the exit path entries: a route ending on an exit tile leaves Mario where one of its entries takes him on, #409)
+const solveInput = (l1: ArrayLike<number>, prefer: PathKind): RouteInput => ({ l1, kinds, shapes, prefer, exitPaths: all.exitPaths });
 // the way a tile takes Mario from cell `a` over cell c to cell b (null: it doesn't)
 const wayOver = (t: number, a: number, c: number, b: number) => tileWays(t, kinds[t], shapes).find((w) => w.dir === stepDir(a, c) && w.out === stepDir(c, b)) ?? null;
 
@@ -104,6 +105,34 @@ console.log(`     ${tilesN} path tiles: ${samePoints} with the game's line, ${sa
     route.forEach((c, k) => { if (res.tiles[k] !== null && res.tiles[k] !== game[c]) changed.push(`${at(c)} ${hx(game[c])}→${hx(res.tiles[k]!)}`); });
   }
   check(!changed.length, `the routes over the paths as they are: the game's tiles kept ${changed.slice(0, 6).join(', ')}`);
+}
+
+// ---- a route ending on an exit tile (#409) ----
+// Yoshi's Island's path up from 03,08 to the exit tile at 04,00 (to the main map), its path tiles cleared: solved
+// without the exit path entries its tiles may leave Mario where no entry takes him on (stuck there); with them, at
+// the entry's point; with the entry moved off every point a tile leaves him at, refused there
+{
+  const p = paths.find((q) => at(q.from) === 'submaps 03,08' && q.dir === 0)!;
+  const route = p && routesOf(p.from, p.w)[0], exit = route?.at(-1);
+  check(!!route && kinds[game[exit!]] === 'exit', `the path up from submaps 03,08 ends on the exit tile at ${exit === undefined ? '?' : at(exit)}`);
+  if (route) {
+    const l1 = Uint16Array.from(game);
+    for (const c of route.slice(1, -1)) if (shaped(game[c])) l1[c] = 0;
+    const walked = (tiles: (number | null)[]) => {
+      const w = Uint16Array.from(l1);
+      route.forEach((c, k) => { if (tiles[k] !== null) w[c] = tiles[k]!; });
+      return walkFrom({ ...all, l1: w }, p.from, p.dir);
+    };
+    const res = routeTiles(route, solveInput(l1, 'walk'));
+    const there = !res.refusal ? walked(res.tiles) : null;
+    check(!!there && there.to === p.w.to, `with the entries: Mario walks it to ${at(p.w.to)} (${res.refusal ? refusalDetails(res.refusal.why) : there && there.to >= 0 ? at(there.to) : 'stuck'})`);
+    const moved = all.exitPaths.map((e) => ({ ...e, from: { ...e.from, x: e.from.x + 1 } }));
+    const off = routeTiles(route, { ...solveInput(l1, 'walk'), exitPaths: moved });
+    check(off.refusal?.why.kind === 'routeNoTile' && off.refusal.why.where === 'exitEntry' && off.refusal.at === route.length - 2,
+      `an entry no tile leaves Mario at: refused at the last path cell (${off.refusal ? refusalDetails(off.refusal.why) : 'not refused'})`);
+    const none = routeTiles(route, { ...solveInput(l1, 'walk'), exitPaths: [] });
+    check(!none.refusal, 'no entry at the exit tile (its link not made yet): not refused');
+  }
 }
 
 // ---- junctions ----

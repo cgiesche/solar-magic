@@ -313,6 +313,15 @@ function arrivalProblems(s: Reached, place: (tile: number) => string): ReachProb
 // ---- the input at an event progress ----
 
 // the input of the search for a ROM at an event progress: layer 1 and the translevels as the game has them there
+// the ROM's exit path entries as a search (ReachInput.exitPaths) and the route solver (owroute.ts RouteInput) take them
+export function exitPathEntries(rom: Rom): ReachInput['exitPaths'] {
+  return readExitPaths(rom).flatMap((e) => {
+    if (!e) return [];
+    const tile = l1Index(e.to.submap ? 1 : 0, e.tile.x, e.tile.y);
+    return [{ from: { region: e.from.submap ? 1 : 0, x: e.from.x, y: e.from.y }, to: { x: e.to.x, y: e.to.y }, tile }];
+  });
+}
+
 // (gameL1 of the map loaded at it, its translevels), the level flags of the save there (owprogress.ts), the path
 // kinds and Mario's start position; levelWarps: where the levels' exits to the overworld teleport (optional)
 export function reachInput(rom: Rom, l1: ArrayLike<number>, tls: ArrayLike<number>, flags: ArrayLike<number>, kinds: readonly PathKind[],
@@ -321,11 +330,7 @@ export function reachInput(rom: Rom, l1: ArrayLike<number>, tls: ArrayLike<numbe
   readTeleports(rom).forEach((t, i, all) => {
     if (t.from && t.to && starEntryAt(all, t.from) === i) { stars.set(tileOf(t.from), [tileOf(t.to)]); targets.set(tileOf(t.to), t.to); } // the entry the game finds
   });
-  const exitPaths = readExitPaths(rom).flatMap((e) => {
-    if (!e) return [];
-    const tile = l1Index(e.to.submap ? 1 : 0, e.tile.x, e.tile.y);
-    return [{ from: { region: e.from.submap ? 1 : 0, x: e.from.x, y: e.from.y }, to: { x: e.to.x, y: e.to.y }, tile }];
-  });
+  const exitPaths = exitPathEntries(rom);
   return {
     l1, tls, flags, kinds, shapes, start: tileOf(start), stars, exitPaths, hard: hardPaths(rom), targets,
     levelWarps: levelWarps && ((tl) => levelWarps(tl).map((t) => { targets.set(tileOf(t), t); return tileOf(t); })),

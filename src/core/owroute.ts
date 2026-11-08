@@ -28,7 +28,7 @@ import type { Rom } from './rom.ts';
 import { OwRefusal, type OwRefusalData } from './owrefusal.ts';
 import {
   readL1, writeL1, readTranslevels, writeTranslevels, setExitDirection, setInitialFlags, translevelUse, hasNameEventOrMessages, freeTranslevel, resetTranslevel,
-  DIR_FLAGS, MAX_TRANSLEVEL, isStarPipeTile,
+  DIR_FLAGS, MAX_TRANSLEVEL, isStarPipeTile, l1XY,
 } from './overworld.ts';
 import { readEvents, writeEvents, paintEventL1, eventRunners } from './owevents.ts';
 
@@ -47,6 +47,10 @@ export interface RouteInput {
   through?: ReadonlySet<number>; // route cells (indices) whose stop tile becomes a path tile (routeEnds' through)
   stopTranslevels?: StopTranslevels;
   fixed?: ReadonlySet<number>; // cells (l1Index) a link ends at (owlinks.ts linkEndCells, #413): a level or stop tile kept, others refused
+  // the exit path entries (owreach.ts exitPathEntries; the pixel position Mario's step onto an exit tile ends at, which
+  // the game looks up): a route ending on an exit tile with entries there leaves him at one of them, else he is stuck
+  // on it (#409); an exit tile without entries (its link not made yet), or none given: wherever its tiles lead
+  exitPaths?: readonly { from: { region: number; x: number; y: number } }[];
 }
 
 // each layer 1 tile's translevel (tls) and those a new stop tile may take (free): no tile holds them and they have
@@ -298,6 +302,9 @@ function solveStretch(sv: Solving, a: number, b: number): { at: number; why: OwR
     return [8 + f[0] - DX[d] * (exitAt(s) ? 8 : 16), 8 + f[1] - DY[d] * (exitAt(s) ? 8 : 16)];
   };
   const endExit = exitAt(b);
+  // (an exit tile at the end: the points its entries take Mario on from, null: anywhere)
+  const entries = endExit ? exitEntryPoints(inp, route[b]) : null;
+  const atEntry = (k: number, to: readonly number[]) => { const { x, y } = l1XY(route[k]); return entries!.has(key([x * 16 + to[0], y * 16 + to[1]])); };
   let layer = new Map<string, Step>();
   for (let k = a + 1; k < b; k++) {
     const d = dirs[k - 1], o = dirs[k], first = k === a + 1, last = k === b - 1, here = l1[route[k]];
@@ -316,6 +323,8 @@ function solveStretch(sv: Solving, a: number, b: number): { at: number; why: OwR
         met = true;
         // (the last: where his first step off the stop tile after leaves him walking back is where this way ends)
         if (last && !endExit && key(firstStep(b, c.tile, reverse(o))) !== key(w.to)) continue;
+        // (the last before an exit tile with entries: his step onto it ends where one takes him on)
+        if (last && entries && !atEntry(k, w.to)) continue;
         const prev = first ? null : layer.get(key(w.from))!;
         const cost = (prev?.cost ?? 0) + (here === c.tile ? 0 : c.cost);
         const at = key([w.to[0] - DX[o] * 16, w.to[1] - DY[o] * 16]), had = next.get(at);
@@ -326,13 +335,24 @@ function solveStretch(sv: Solving, a: number, b: number): { at: number; why: OwR
       // the cells before it as far as they fit (the cheapest way there)
       fill(cheapest(layer), k - 1, tiles);
       const turns = [0, 1, 2, 3].filter((t) => t !== o && t !== reverse(d) && cands.some((c) => c.ways.some((w) => w.dir === d && w.out === t && steppedOn(c, w))));
-      const why: OwRefusalData = { kind: 'routeNoTile', dir: d, out: o, where: !any ? 'any' : !met ? (first ? 'stopStep' : 'pathBefore') : 'stepBack' };
+      const why: OwRefusalData = { kind: 'routeNoTile', dir: d, out: o, where: !any ? 'any' : !met ? (first ? 'stopStep' : 'pathBefore') : entries ? 'exitEntry' : 'stepBack' };
       return { at: k, why, turns };
     }
     layer = next;
   }
   fill(cheapest(layer), b - 1, tiles);
   return null;
+}
+
+// the pixel positions (on the map, as owreach.ts walkFrom's) Mario's step onto exit tile `cell` takes the exit path
+// from: its entries' – on the cell or its edges, of its region; null where it has none
+function exitEntryPoints(inp: RouteInput, cell: number): Set<string> | null {
+  const { x, y } = l1XY(cell), r = cell >> 10, out = new Set<string>();
+  for (const e of inp.exitPaths ?? []) {
+    const f = e.from;
+    if (f.region === r && f.x >= x * 16 && f.x <= x * 16 + 16 && f.y >= y * 16 && f.y <= y * 16 + 16) out.add(key([f.x, f.y]));
+  }
+  return out.size ? out : null;
 }
 
 const cheapest = (layer: Map<string, Step>): Step | null => [...layer.values()].reduce<Step | null>((m, s) => (!m || s.cost < m.cost ? s : m), null);

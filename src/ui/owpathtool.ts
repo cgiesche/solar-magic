@@ -20,6 +20,7 @@ import { l1Index, l1XY, exitDirections, hasNameEventOrMessages, DIR_NAMES, EXIT_
 import { usualWays } from '../core/owpathshape.ts';
 import { routeTiles, routeExits, routeKind, routeEnds, writeRoute, stopTranslevels, type RouteTiles, type StopTranslevels } from '../core/owroute.ts';
 import { hex } from '../core/names.ts';
+import { exitPathEntries } from '../core/owreach.ts';
 
 export class PathTool {
   on = false; // the route brush chosen (the layer 1 mode's right button draws routes)
@@ -118,7 +119,7 @@ export class PathTool {
     const fixed = v.links.cells();
     const ends = routeEnds(dragged, l1, kinds, shapes, (c) => fixed.has(c) || (!!v.tls[c] && hasNameEventOrMessages(rom, v.tls[c])));
     const r = this.cells = ends.cells;
-    this.solved = routeTiles(r, { l1, kinds, shapes, prefer: routeKind(r, l1, kinds), through: new Set(ends.through), stopTranslevels: this.stopTls ?? stopTranslevels(rom, v.tls), fixed });
+    this.solved = routeTiles(r, { l1, kinds, shapes, prefer: routeKind(r, l1, kinds), through: new Set(ends.through), stopTranslevels: this.stopTls ?? stopTranslevels(rom, v.tls), fixed, exitPaths: exitPathEntries(rom) });
   }
   private shown(): void {
     this.view.paint();

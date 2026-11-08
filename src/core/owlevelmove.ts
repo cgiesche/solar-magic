@@ -11,8 +11,8 @@
 import type { Rom } from './rom.ts';
 import { readL1, writeL1, readTranslevels, exitDirections, setExitDirection, initialFlags, setInitialFlags, hasLevelFlagsPatch, DIR_FLAGS } from './overworld.ts';
 import { readEvents, writeEvents, paintEventL1, eventL1Tiles } from './owevents.ts';
-import { neighbor } from './owreach.ts';
-import { pathGraph, routeTiles, routeKind, dirTo, type RouteTiles } from './owroute.ts';
+import { neighbor, exitPathEntries } from './owreach.ts';
+import { pathGraph, routeTiles, routeKind, dirTo, type RouteTiles, type RouteInput } from './owroute.ts';
 import { moveLevelTile, type LevelTileEvent } from './owleveltiles.ts';
 import type { PathKind, PathShapes } from './owpaths.ts';
 
@@ -48,6 +48,7 @@ export interface LevelMovePlan { l1: Uint16Array; changed: Set<number>; routes: 
 export interface LevelMoveInput {
   l1: ArrayLike<number>; moved?: ArrayLike<number>; kinds: readonly PathKind[]; shapes: PathShapes;
   editable: (cell: number) => boolean; avoid?: (cell: number) => boolean; cleared: (cell: number) => number;
+  exitPaths?: RouteInput['exitPaths']; // (a path drawn again to an exit tile: Mario left where its entry takes him on)
 }
 
 export function planLevelMove(inp: LevelMoveInput, from: number, to: number): LevelMovePlan {
@@ -75,7 +76,7 @@ export function planLevelMove(inp: LevelMoveInput, from: number, to: number): Le
     const route = [path.far!, ...way, to];
     // (solved on the cells cleared: an old tile kept there may lead into another path drawn again beside it – the
     // solver would make that a junction; the tiles of a way the old path took come out the same)
-    const solved = routeTiles(route, { l1: trial, kinds, shapes, prefer: routeKind(path.cells, inp.l1, kinds) });
+    const solved = routeTiles(route, { l1: trial, kinds, shapes, prefer: routeKind(path.cells, inp.l1, kinds), exitPaths: inp.exitPaths });
     if (solved.refusal || solved.stops.length) { kept.push({ path, why: 'noTiles' }); taken.add(path.dir); continue; }
     route.forEach((c, k) => { if (solved.tiles[k] !== null) trial[c] = solved.tiles[k]!; });
     for (const c of [...old, ...route]) if (trial[c] !== w[c]) changed.add(c);
@@ -134,6 +135,7 @@ export function moveLevelTileWithPaths(rom: Rom, from: number, to: number, ev: L
     editable: own ? (c) => own.has(c) : (c) => !byEvents.has(c),
     avoid: own ? undefined : (c) => byEvents.has(c),
     cleared: ev ? (c) => ev.without[c] : () => 0,
+    exitPaths: exitPathEntries(rom),
   }, from, to);
   if (!plan.routes.length) return { rerouted: 0, kept: plan.kept };
   if (ev) writeEvents(rom, paintEventL1(readEvents(rom), ev.event, plan.l1, ev.without, plan.changed));
