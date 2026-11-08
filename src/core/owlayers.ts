@@ -1,9 +1,8 @@
 // What the overworld editor draws of its two layers, each mode what its task needs (#412): painting layer 1 (the level
 // tiles as objects on it, ADR 0012) with its path marks, layer 2 dimmed (View → Layers) or full, gone while Q is held;
 // painting layer 2 with all of layer 1 – its pixels, path marks, level numbers, unreached tiles – dimmed together, or
-// gone (View → Layers), Q held the other way; the object modes (links, sprites) both layers at full strength without
-// path marks.
-export type OwMode = 'l1' | 'l2' | 'links' | 'sprites';
+// gone (View → Layers), Q held the other way; the sprites mode both layers at full strength without path marks.
+export type OwMode = 'l1' | 'l2' | 'sprites';
 // whether mode m paints a layer (l1, l2) rather than objects
 export const isLayerMode = (m: OwMode): m is 'l1' | 'l2' => m === 'l1' || m === 'l2';
 export interface LayerView {

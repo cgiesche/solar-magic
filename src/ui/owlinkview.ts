@@ -1,13 +1,14 @@
-// The overworld links on the map (the overworld view's "Overworld links" mode): every star/pipe and exit path link
-// drawn as an arrow (one head one-way, two heads both ways), the locations exits to the overworld teleport to and the
-// Koopa Kids' places as dashed arrows from the tiles they belong to. Dragging from a tile to another links them: an
-// exit path tile by an exit path (the side its path goes on found from the path tiles around it, the target's the
-// opposite one), a tile Mario stops on by a star/pipe link, a Koopa Kid's tile by its place. Dragging an end of the
-// selected arrow, a location or a Koopa Kid's place moves it; a tile on the other map region is linked by choosing it
-// after the source ("…to a tile on another map", the map's cursor a crosshair while it is pending); Delete removes the
-// selected link. A link end dropped on a tile several submaps' views show asks which submap at the cursor, the one whose
-// paths the tile is on first (core/owlinkends.ts endChoice); a click there finds links ending on any of them. Each
-// change is one ROM edit (owlinks.ts).
+// The overworld links on layer 1 (the overworld view's layer 1 mode, #413; no mode of their own): star/pipe and exit
+// path links, the locations exits to the overworld teleport to and the Koopa Kids' places. Each cell a link ends at
+// (owlinks.ts linkEndCells) is an object there: hatched, left alone by painting, with a mark of its kind in its corner;
+// the arrows (one head one-way, two heads both ways; locations and Koopa Kids' places dashed from the tiles they belong
+// to) only of the selected tile – all with View → "Link arrows". A tile is linked by "Link to…" (its menu or
+// properties) and a click on the target (the pick pending: refused tiles hatched, the map's cursor a crosshair; Esc
+// cancels): an exit path tile by an exit path (the side its path goes on found from the path tiles around it, the
+// target's the opposite one), a tile Mario stops on by a star/pipe link, a Koopa Kid's tile by its place. Dragging the
+// selected link's other end, a location or a Koopa Kid's place moves it; "Remove link" (menu, Delete) removes it, the
+// tile staying. A link end dropped on a tile several submaps' views show asks which submap at the cursor, the one whose
+// paths the tile is on first (core/owlinkends.ts endChoice). Each change is one ROM edit (owlinks.ts).
 
 import type { OverworldView, PickCheck } from './overworld.ts';
 import { l1Hex } from '../core/owl1sheet.ts';
@@ -23,7 +24,7 @@ import { readTeleports, tileText, sameTile, type OwTile } from '../core/owtelepo
 import { l1Index, l1XY, DIR_NAMES, DIR_ARROWS, MAP_NAMES } from '../core/overworld.ts';
 import { inView } from '../core/owevents.ts';
 import { endChoice, endChoiceText, clickedLinks, submapsShowing, endTile } from '../core/owlinkends.ts';
-import { contextMenu } from './menu.ts';
+import { contextMenu, type MenuItem } from './menu.ts';
 import { isPathKind, PATH_KIND_NAMES } from '../core/owpaths.ts';
 import { ExitGraph } from '../core/exitgraph.ts';
 import { readSecondaryEntrance, levelTranslevel } from '../core/level.ts';
@@ -49,6 +50,7 @@ export class LinkLayer {
   // a source chosen to be linked to a tile on another map (the next click), or what is moved there
   pending: { from: OwTile } | { move: Moved } | null = null;
   both = true; // new links both ways
+  show = false; // every link's arrows (View → "Link arrows"); else the selected tile's
   private data: { gen: number; links: OwLink[]; uses: Map<number, number[]>; levels: Map<number, number[]> | null } | null = null;
   constructor(private view: OverworldView) {}
 
@@ -184,35 +186,69 @@ export class LinkLayer {
   }
 
   // ---- drawing ----
+  // the marks of the link ends of the region shown, and the arrows: the selected tile's (its links, the locations its
+  // level's exits teleport to, its Koopa Kid's place) or, with `show`, all; what is dragged or chosen where it goes
   paint(ctx: CanvasRenderingContext2D, lw: number): void {
-    const { links, uses } = this.info(), sel = this.sel, d = this.drag, moving = d?.move ?? null;
+    const { links, uses } = this.info(), sel = this.sel, d = this.drag, moving = d?.move ?? null, at = this.view.selected;
     const isMoved = (s: Sel) => !!moving && JSON.stringify(moving.sel) === JSON.stringify(s);
+    this.marks(ctx, lw);
     for (const l of links) {
       const on = sel?.kind === 'link' && sel.link === l;
       if (on && moving) continue;
+      if (!this.show && !on && !(at >= 0 && (this.endsAt(l.a, at) || this.endsAt(l.b, at)))) continue;
       this.link(ctx, lw, l.a, l.b, COLORS[l.kind], l.both, on);
     }
     const teleports = readTeleports(this.rom);
     for (const [i] of uses) {
-      const at = isMoved({ kind: 'location', i }) ? this.tile(d!.to) : teleports[i].to;
-      if (!at || !this.shown(at)) continue;
-      const on = sel?.kind === 'location' && sel.i === i;
-      for (const t of this.levelTiles(this.locationLevels(i))) arrow(ctx, lw, center(l1XY(t)), center(at), COLORS.location, false, on, true);
-      marker(ctx, lw, center(at), COLORS.location, on);
+      const to = isMoved({ kind: 'location', i }) ? this.tile(d!.to) : teleports[i].to;
+      if (!to || !this.shown(to)) continue;
+      // (the selected level tile's: drawn with its exits' results – paintExitResults)
+      const on = sel?.kind === 'location' && sel.i === i, from = this.levelTiles(this.locationLevels(i));
+      if (!this.show && !on && this.index(to) !== at) continue;
+      for (const t of from) arrow(ctx, lw, center(l1XY(t)), center(to), COLORS.location, false, on, true);
+      marker(ctx, lw, center(to), COLORS.location, on);
     }
     for (let k = 0; k < KOOPAS; k++) {
       const place = isMoved({ kind: 'koopa', k }) ? l1XY(d!.to) : koopaTeleport(this.rom, k), from = this.koopaTiles(k);
       if (!place || !from.length) continue;
       const on = sel?.kind === 'koopa' && sel.k === k;
+      if (!this.show && !on && !from.includes(at)) continue;
       for (const t of from) arrow(ctx, lw, center(l1XY(t)), center(place), COLORS.koopa, false, on, true);
       marker(ctx, lw, center(place), COLORS.koopa, on);
     }
-    if (d && !moving && d.to !== d.from) {
-      const k = this.source(d.from).kind;
-      if (k) arrow(ctx, lw, center(l1XY(d.from)), center(l1XY(d.to)), COLORS[k], this.both && k !== 'koopa', true, k === 'koopa');
-    } else if (d && moving?.sel.kind === 'link') {
+    if (d && moving?.sel.kind === 'link') {
       const l = moving.sel.link, to = this.tile(d.to);
       this.link(ctx, lw, moving.target ? l.a : to, moving.target ? to : l.b, COLORS[l.kind], l.both, true);
+    }
+    // (a link being made: from its tile to the cell under the mouse)
+    const p = this.pending, hover = this.view.hover;
+    if (p && 'from' in p && this.shown(p.from) && hover && hover.x >= 0 && hover.y >= 0 && hover.x < 32 && hover.y < 32) {
+      const k = this.source(this.index(p.from), p.from).kind;
+      if (k) arrow(ctx, lw, center(p.from), { x: hover.x * 16 + 8, y: hover.y * 16 + 8 }, COLORS[k], this.both && k !== 'koopa', true, k === 'koopa');
+    }
+  }
+  // a small dot of its kind's colour in the top right corner of each cell a link ends at (the region shown)
+  private marks(ctx: CanvasRenderingContext2D, lw: number): void {
+    const { links, uses } = this.info(), dots = new Map<number, string>();
+    const put = (t: OwTile, c: string) => { if (this.shown(t) && !dots.has(this.index(t))) dots.set(this.index(t), c); };
+    for (const l of links) { put(l.a, COLORS[l.kind]); put(l.b, COLORS[l.kind]); }
+    const teleports = readTeleports(this.rom);
+    for (const [i] of uses) { const to = teleports[i].to; if (to) put(to, COLORS.location); }
+    for (let k = 0; k < KOOPAS; k++) {
+      const p = koopaTeleport(this.rom, k), from = this.koopaTiles(k);
+      if (!p || !from.length) continue;
+      for (const t of from) dots.set(t, COLORS.koopa);
+      dots.set(l1Index(this.view.region, p.x, p.y), COLORS.koopa);
+    }
+    for (const [i, c] of dots) {
+      const { x, y } = l1XY(i);
+      ctx.beginPath();
+      ctx.arc(x * 16 + 13, y * 16 + 3, 2.5, 0, Math.PI * 2);
+      ctx.fillStyle = c;
+      ctx.fill();
+      ctx.lineWidth = lw;
+      ctx.strokeStyle = 'rgba(0,0,0,0.85)';
+      ctx.stroke();
     }
   }
   // a link's arrow; an end on the other region shown as a short arrow off its tile, labelled with where it leads
@@ -230,7 +266,7 @@ export class LinkLayer {
   // its moved end or a Koopa Kid's place can go (null: none, or a drag from a tile that links nothing)
   pickCheck(): PickCheck | null {
     const d = this.drag, p = this.pending, rom = this.rom, dep = this.view.shown.l1;
-    if (d && d.to === d.from) return null;
+    if (!d && !p) return null;
     const move = d ? d.move : p && 'move' in p ? p.move : null;
     // (tile(i) takes the submap shown: the key has the map)
     const key = (what: object) => JSON.stringify({ ...what, both: this.both, map: this.view.map });
@@ -265,27 +301,47 @@ export class LinkLayer {
   }
 
   // ---- interaction (cells of layer 1) ----
-  // a press at map cell x, y (the cursor at cx, cy)
-  down(x: number, y: number, cx: number, cy: number): void {
-    if (x < 0 || y < 0 || x >= 32 || y >= 32) return;
-    const i = l1Index(this.view.region, x, y), t = this.tile(i), s = this.sel;
-    if (this.pending) { this.finishPending(i, cx, cy); return; }
-    // (the selected link's end at the cell, whatever submap it is stored on)
-    const end = (target: boolean): Moved | null => {
-      if (s?.kind !== 'link') return null;
-      const e = target ? s.link.b : s.link.a;
-      return this.shown(e) && this.index(e) === i ? { sel: s, target } : null;
-    };
-    // an end of the selected link, a location or a Koopa Kid's place where no link starts: moved
-    let move = end(true) ?? end(false);
-    if (!move && !this.startsLink(t)) {
-      const loc = this.locationAt(t), koopa = this.koopaPlaceAt(i);
-      if (loc >= 0) this.sel = { kind: 'location', i: loc };
-      else if (koopa >= 0) this.sel = { kind: 'koopa', k: koopa };
-      if (loc >= 0 || koopa >= 0) move = { sel: this.sel!, target: true };
+  // the selection of what is at cell i (l1Index; -1 none), as a click on the map selects the tile: a link ending there
+  // (the one on the submap the user acts on first), else a location there, a Koopa Kid's place or tile, else the tile
+  selectAt(i: number): void {
+    if (i < 0) { this.sel = null; return; }
+    const t = this.tile(i), found = clickedLinks(this.info().links, i, this.around(i));
+    const loc = this.locationAt(t), place = this.koopaPlaceAt(i), koopa = place >= 0 ? place : this.koopaAt(i);
+    this.sel = found[0] ? { kind: 'link', link: found[0] } : loc >= 0 ? { kind: 'location', i: loc } : koopa >= 0 ? { kind: 'koopa', k: koopa } : { kind: 'tile', t };
+  }
+  // a press at map cell x, y on what the selection leads to – the selected link's other end (not the selected tile
+  // itself), the selected location or Koopa Kid's place – not a level tile (moved itself): dragged to move it (released
+  // without moving: its tile selected). Whether it was
+  grab(x: number, y: number): boolean {
+    if (x < 0 || y < 0 || x >= 32 || y >= 32 || !this.view.views) return false;
+    const i = l1Index(this.view.region, x, y), s = this.sel;
+    // (a level tile there is dragged as itself: moved; its link end is moved by "Change target…")
+    if (!s || this.view.isLevelTile(this.view.levelL1()[i])) return false;
+    let move: Moved | null = null;
+    if (s.kind === 'link') {
+      for (const target of [true, false]) {
+        const e = target ? s.link.b : s.link.a;
+        if (!move && i !== this.view.selected && this.shown(e) && this.index(e) === i) move = { sel: s, target };
+      }
+    } else if (s.kind === 'location') {
+      const to = readTeleports(this.rom)[s.i].to;
+      if (to && this.shown(to) && this.index(to) === i) move = { sel: s, target: true };
+    } else if (s.kind === 'koopa') {
+      const p = koopaTeleport(this.rom, s.k);
+      if (p && this.koopaTiles(s.k).length && l1Index(this.view.region, p.x, p.y) === i) move = { sel: s, target: true };
     }
+    if (!move) return false;
     this.drag = { from: i, to: i, move };
     this.view.paint();
+    return true;
+  }
+  // a press while a tile is to be chosen (pending): the tile at cell x, y (the cursor at cx, cy), outside the map
+  // cancelled. Whether one was pending
+  pickPending(x: number, y: number, cx: number, cy: number): boolean {
+    if (!this.pending) return false;
+    if (x < 0 || y < 0 || x >= 32 || y >= 32) { this.cancelPending(); this.view.paint(); return true; }
+    this.finishPending(l1Index(this.view.region, x, y), cx, cy);
+    return true;
   }
   move(x: number, y: number): void {
     if (!this.drag || x < 0 || y < 0 || x >= 32 || y >= 32) return;
@@ -298,12 +354,40 @@ export class LinkLayer {
     const d = this.drag;
     this.drag = null;
     if (!d) return;
-    if (d.to === d.from) { if (d.move?.sel.kind === 'link') this.view.paint(); else this.select(d.from, cx, cy); return; }
+    if (d.to === d.from || !d.move) { this.view.selectTile(d.from, false); return; }
+    this.view.updateStatus();
+    const m = d.move, drop = (to: OwTile) => this.apply(() => this.moveTo(m, to));
+    if (this.asks(m, d.from)) this.ask(d.to, cx, cy, drop, this.stuckNote(m, d.from, d.to));
+    else drop(this.tile(d.to));
+  }
+  // the map of link end t shown, its tile selected (the link kept selected)
+  private goTo(t: OwTile): void {
+    const s = this.sel;
+    this.view.setMap(t.submap);
+    this.view.selectTile(this.index(t), true);
+    if (s?.kind === 'link') { this.sel = s; this.view.buildProps(); this.view.paint(); }
+  }
+  // "Link to…": the next click on a map chooses the tile `t` leads to (a Koopa Kid's tile: its place)
+  startLink(t: OwTile): void {
+    this.pending = { from: t };
     this.view.paint();
     this.view.updateStatus();
-    const drop = (to: OwTile) => this.apply(() => (d.move ? this.moveTo(d.move, to) : this.make(this.tile(d.from), to)));
-    if (this.asks(d.move, d.from)) this.ask(d.to, cx, cy, drop, this.stuckNote(d.move, d.from, d.to));
-    else drop(this.tile(d.to));
+  }
+  // the menu entries of cell i (a right click on it): linking it, removing its links or Koopa Kid's place
+  menuItems(i: number): MenuItem[] {
+    if (!this.view.views) return [];
+    const t = this.tile(i), src = this.source(i, t), out: MenuItem[] = [];
+    const koopa = this.koopaAt(i);
+    if (koopa >= 0) {
+      out.push({ label: 'Mario is put at…', title: 'Choose where Mario is put after losing to this Koopa Kid (the next click)', onClick: () => this.startLink(t) });
+      if (koopaTeleport(this.rom, koopa)) out.push({ label: 'Remove place', onClick: () => { this.sel = { kind: 'koopa', k: koopa }; this.remove(); } });
+      return out;
+    }
+    if (src.kind) out.push({ label: 'Link to…', title: 'Choose the tile it leads to (the next click, on any map); a link it has is replaced', onClick: () => this.startLink(t) });
+    for (const l of clickedLinks(this.info().links, i, this.around(i))) {
+      out.push({ label: `Remove link ${tileText(l.a)} ${l.both ? '↔' : '→'} ${tileText(l.b)}`, title: 'The tile stays (and can be painted over again)', onClick: () => { this.sel = { kind: 'link', link: l }; this.remove(); } });
+    }
+    return out;
   }
   // whether a drop of `move` (or of a new link from tile `from`) takes the submap asked in an overlap: a link's end or a
   // location, not a Koopa Kid's place (on the submap of its tile) nor a tile no link starts at (refused at once)
@@ -334,27 +418,6 @@ export class LinkLayer {
     this.pending = null;
     this.view.updateStatus();
     return true;
-  }
-  // whether a link starts at tile t (its source, or its target both ways), on any submap whose view shows it
-  private startsLink(t: OwTile): boolean {
-    const i = this.index(t);
-    return this.info().links.some((l) => this.endsAt(l.a, i) || (l.both && this.endsAt(l.b, i)));
-  }
-  // a click (the cursor at cx, cy): the link, location or Koopa Kid's place at tile i selected (a link's source first),
-  // else the tile. A link ending there on any submap whose view shows it (core/owlinkends.ts linksEndingAt): the one on
-  // the submap the user acts on first; links there on several other submaps only: a menu asks which
-  private select(i: number, cx: number, cy: number): void {
-    const t = this.tile(i), found = clickedLinks(this.info().links, i, this.around(i));
-    const pick = (l: OwLink | null) => {
-      const loc = this.locationAt(t), place = this.koopaPlaceAt(i), koopa = place >= 0 ? place : this.koopaAt(i);
-      this.sel = l ? { kind: 'link', link: l } : loc >= 0 ? { kind: 'location', i: loc } : koopa >= 0 ? { kind: 'koopa', k: koopa } : { kind: 'tile', t };
-      this.view.paint();
-      this.view.buildProps();
-    };
-    if (found.length < 2) { pick(found[0] ?? null); return; }
-    contextMenu(cx, cy, [{ heading: 'Overworld links here' }, ...found.map((l) => ({
-      label: `${tileText(l.a)} ${l.both ? '↔' : '→'} ${tileText(l.b)}`, onClick: () => pick(l),
-    }))], true);
   }
   private locationAt(t: OwTile): number {
     const all = readTeleports(this.rom);
@@ -429,33 +492,38 @@ export class LinkLayer {
   }
 
   // ---- properties ----
-  props(): HTMLElement {
+  // the selected tile's overworld links, under its other properties (null: nothing to say – a tile no link can start at)
+  props(): HTMLElement | null {
     const s = this.sel, rom = this.rom;
-    const both = checkbox('New links both ways', 'An overworld link made by dragging leads back too (two entries)', this.both, (on) => (this.both = on));
+    if (!s || !this.view.views) return null;
+    const both = checkbox('New links both ways', 'A link made by "Link to…" leads back too (two entries)', this.both, (on) => (this.both = on));
     const other = (label: string, title: string, p: NonNullable<LinkLayer['pending']>) =>
-      h('button', { title, onclick: () => { this.pending = p; this.view.updateStatus(); } }, label);
-    if (!s) return h('div', { class: 'ow-info' }, both, emptyState('Drag from a star, pipe or exit path tile (or a Koopa Kid\'s tile 49–4B) to where it leads. Click a tile to select its overworld link, drag its ends to move them, Delete removes it.'));
+      h('button', { title, onclick: () => { this.pending = p; this.view.paint(); this.view.updateStatus(); } }, label);
+    const section = (...c: (HTMLElement | null)[]) => h('div', { class: 'ow-info' }, h('div', { class: 'panel-subtitle' }, 'Overworld link'), ...c);
     if (s.kind === 'tile') {
+      // (a level tile's locations: moved at its exits' sentences, "When beaten…")
       const src = this.source(this.index(s.t), s.t);
-      return h('div', { class: 'ow-info' },
-        h('div', null, h('b', null, `Tile ${tileText(s.t)}`), ' · no overworld link'),
-        src.kind ? other('Link to a tile on another map…', 'Choose the tile it leads to on another map (the next click)', { from: s.t }) : h('div', { class: 'hint' }, `Not a tile to link: ${src.why}.`),
+      if (!src.kind) return null;
+      return section(
+        h('div', { class: 'row' }, h('span', { class: 'hint' }, 'No link starts here. '), h('button', { title: 'Choose the tile it leads to (the next click, on any map)', onclick: () => this.startLink(s.t) }, 'Link to…')),
         both);
     }
     if (s.kind === 'location') {
       const to = readTeleports(rom)[s.i].to, levels = this.locationLevels(s.i);
-      return h('div', { class: 'ow-info' },
+      return section(
         h('div', null, h('b', null, `Location ${hex(s.i, 2)}`), ` · ${to ? tileText(to) : 'not set up'}`),
-        h('div', { class: 'hint' }, `Exits to the overworld of level${levels.length > 1 ? 's' : ''} ${levels.map((l) => hex(l, 3)).join(', ')} teleport here (set in the level's entrance) – drag it to move it.`),
+        h('div', { class: 'hint' }, `Exits to the overworld of level${levels.length > 1 ? 's' : ''} ${levels.map((l) => hex(l, 3)).join(', ')} teleport here (set in the level's entrance) – drag the ring to move it.`),
         to && levels.length ? this.stuckBox(to, 'teleport') : null,
-        other('Move to another map…', 'Choose the tile on another map (the next click)', { move: { sel: s, target: true } }), both);
+        other('Move…', 'Choose the tile it teleports to (the next click, on any map)', { move: { sel: s, target: true } }));
     }
     if (s.kind === 'koopa') {
-      const p = koopaTeleport(rom, s.k);
-      return h('div', { class: 'ow-info' },
+      const p = koopaTeleport(rom, s.k), tile = this.koopaTiles(s.k)[0];
+      return section(
         h('div', null, h('b', null, `Koopa Kid ${s.k + 1}`), ` · tile ${hex(KOOPA_TILE + s.k, 2)}`),
-        h('div', { class: 'hint' }, `Losing to it puts Mario at ${p ? `${hex(p.x, 2)},${hex(p.y, 2)} of his submap` : 'no place (the game\'s 0,0)'} – drag from its tile or the place to set it.`),
-        h('div', { class: 'row' }, h('button', { onclick: () => this.remove() }, 'No place')), both);
+        h('div', { class: 'hint' }, `Losing to it puts Mario at ${p ? `${hex(p.x, 2)},${hex(p.y, 2)} of his submap – drag the ring to move it` : 'no place (the game\'s 0,0)'}.`),
+        h('div', { class: 'row' },
+          tile !== undefined ? h('button', { title: 'Choose the place (the next click, on the submap of its tile)', onclick: () => this.startLink(this.romTile(tile)) }, 'Mario is put at…') : null,
+          p ? h('button', { title: 'Mario is put nowhere (the game\'s 0,0)', onclick: () => this.remove() }, 'Remove place') : null));
     }
     const l = s.link, name = l.kind === 'exit' ? 'Exit path' : 'Star/pipe';
     // the source's side chosen; the target's derived from it (owlinks.ts linkedTarget), shown – one a ROM has
@@ -474,17 +542,25 @@ export class LinkLayer {
     // (#403) an end on a submap whose view doesn't show its tile: likely meant for another submap sharing the region
     const views = this.view.views, offView = [l.a, l.b].filter((t) => t.submap > 0 && views && !inView(views[t.submap], this.index(t)))
       .map((t) => h('div', { class: 'warn-box' }, `${tileText(t)} lies outside ${MAP_NAMES[t.submap]}'s view (the part of the map the game shows there): Mario would be where the player can't see him – likely meant for another submap.`));
-    return h('div', { class: 'ow-info' },
+    // (several links ending at the selected tile: each chosen here)
+    const at = this.view.selected, here = at >= 0 ? clickedLinks(this.info().links, at, this.around(at)) : [];
+    const others = here.length < 2 ? null : h('div', { class: 'row' }, ...here.map((k) => h('button', { class: k === l ? 'active' : '', onclick: () => { this.sel = { kind: 'link', link: k }; this.view.paint(); this.view.buildProps(); } },
+      `${tileText(k.a)} ${k.both ? '↔' : '→'} ${tileText(k.b)}`)));
+    return section(
+      others,
       h('div', null, h('b', null, name), ` · ${tileText(l.a)} ${l.both ? '↔' : '→'} ${tileText(l.b)}`),
+      // (the other end: a jump there, its tile selected)
+      h('div', { class: 'row' }, h('button', { class: 'link-btn', title: 'Shows the other end, on its map, selected', onclick: () => this.goTo(at >= 0 && this.endsAt(l.a, at) ? l.b : l.a) },
+        `Leads to ${tileText(at >= 0 && this.endsAt(l.a, at) ? l.b : l.a)}`)),
       h('div', { class: 'hint' }, `Entr${l.entries.length > 1 ? 'ies' : 'y'} ${l.entries.map((i) => hex(i, 2)).join(', ')} of the ${l.kind === 'exit' ? 'exit path' : 'star/pipe'} table`),
       checkbox('Both ways', 'The target leads back to this tile', l.both, (on) => this.apply(() => this.edit(`${name}: ${on ? 'both ways' : 'one-way'}`, () => { this.sel = { kind: 'link', link: setBothWays(rom, l, on) }; }))),
       ...exitInfo,
       ...offView,
       ...l.kind === 'star' ? [this.stuckBox(l.b, 'star'), l.both ? this.stuckBox(l.a, 'star') : null] : [],
+      h('div', { class: 'hint' }, 'Drag its other end on the map to move it.'),
       h('div', { class: 'row' },
-        other('Target on another map…', 'Choose the tile it leads to on another map (the next click)', { move: { sel: s, target: true } }),
-        h('button', { title: 'Remove the overworld link (Delete)', onclick: () => this.remove() }, 'Remove')),
-      both);
+        other('Change target…', 'Choose the tile it leads to (the next click, on any map)', { move: { sel: s, target: true } }),
+        h('button', { title: 'Remove the overworld link (Delete): the tile stays and can be painted over again', onclick: () => this.remove() }, 'Remove link')));
   }
 }
 

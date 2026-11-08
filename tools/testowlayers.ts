@@ -1,7 +1,7 @@
 // What the overworld editor draws of its two layers (core/owlayers.ts), each mode what its task needs (#412): painting
 // layer 1 – its level tiles as objects (ADR 0012) – with its path marks, layer 2 dimmed or full (Q held: gone);
 // painting layer 2 with all of layer 1 – pixels, path marks – dimmed or gone together (Q held: the other way); the
-// object modes (links, sprites) both layers at full strength, no path marks.
+// sprites mode both layers at full strength, no path marks (the links are layer 1's, #413).
 import { layerStrengths, DIM_STRENGTH, type LayerView } from '../src/core/owlayers.ts';
 
 let bad = 0;
@@ -19,7 +19,7 @@ check(is(layerStrengths(v({ mode: 'l2', l1InL2: false })), 0, 1, 0), 'painting l
 check(is(layerStrengths(v({ mode: 'l2', solo: true })), 0, 1, 0), 'painting layer 2, Q held: layer 1 gone');
 check(is(layerStrengths(v({ mode: 'l2', l1InL2: false, solo: true })), DIM_STRENGTH, 1, DIM_STRENGTH), 'painting layer 2 with layer 1 off, Q held: layer 1 dimmed');
 check(is(layerStrengths(v({ mode: 'l2', dimL2: false })), DIM_STRENGTH, 1, DIM_STRENGTH), 'painting layer 2: the layer 1 mode\'s dimming does nothing');
-for (const mode of ['links', 'sprites'] as const)
+for (const mode of ['sprites'] as const)
   check(is(layerStrengths(v({ mode })), 1, 1, 0) && is(layerStrengths(v({ mode, solo: true, l1InL2: false, dimL2: false })), 1, 1, 0), `${mode} mode: both layers full, no path marks, Q and the switches do nothing`);
 
 if (bad) { console.log(`${bad} failed`); process.exit(1); }

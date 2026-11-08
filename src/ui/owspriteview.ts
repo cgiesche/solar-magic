@@ -235,7 +235,7 @@ export class SpriteLayer {
       const p = koopaKidPos(rom, s.k);
       return h('div', { class: 'ow-info' },
         h('div', null, h('b', null, `Koopa Kid ${s.k + 1}`), h('span', { class: 'hint' }, ` · tile ${hex(KOOPA_TILE + s.k, 2)}`)),
-        h('div', { class: 'hint' }, `Jumps out here when Mario stands on its tile (paint tile ${hex(KOOPA_TILE + s.k, 2)} on layer 1); its place, where Mario goes after losing to it, is set in the Overworld links mode.`),
+        h('div', { class: 'hint' }, `Jumps out here when Mario stands on its tile (paint tile ${hex(KOOPA_TILE + s.k, 2)} on layer 1); its place, where Mario goes after losing to it, is set in the layer 1 mode (its tile's menu: Mario is put at…).`),
         pos(p.x, p.y, (x, y) => this.edit(`Koopa Kid ${s.k + 1}: jumps out elsewhere`, () => setKoopaKidPos(rom, s.k, { x, y }))));
     }
     const st = readStart(rom, s.player), set = (p: Partial<typeof st>) => this.edit(`${PLAYERS[s.player]}'s start: moved`, () => writeStart(rom, s.player, { ...st, ...p }));

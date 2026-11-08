@@ -263,7 +263,7 @@ export function budgetPlace(rom: Rom, b: Budget, chosen = -1): BudgetPlace {
   switch (b.key) {
     case 'l1Tiles': return { mode: 'l1' };
     case 'translevels': return { mode: 'l1' }; // (the layer 1 picker's "Levels")
-    case 'stars': case 'exitPaths': return { mode: 'links' };
+    case 'stars': case 'exitPaths': return { mode: 'l1' }; // (the overworld links: their gauges under the properties)
     case 'customSprites': return { mode: 'sprites', submap: b.submap ?? 0 };
     case 'destroys': return { mode: 'l1', event: readDestroyList(rom).find((d) => d.event !== NO_EVENT)?.event ?? 0 };
     case 'revealPairs': return { mode: 'l1', event: first((e) => eventReveal(rom, e) >= 0) };

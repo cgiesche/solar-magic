@@ -97,6 +97,7 @@ export class LevelTileLayer {
     if (!this.ready()) return false;
     try {
       this.view.selected = select;
+      this.view.links.selectAt(select); // (the link selection follows the tile's)
       this.view.app.romEdit(this.where(label), f);
       return true;
     } catch (e) {
@@ -198,6 +199,7 @@ export class LevelTileLayer {
       { label: 'Open level', disabled: () => !tl, title: tl ? `Level ${levelHex(tl)} in the level editor (also by double click)` : 'It enters no level', onClick: () => v.onOpenLevel(translevelToLevel(tl)) },
       { label: 'Change look…', onClick: () => this.lookDialog(i) },
       { label: 'Remove', shortcut: 'Del', title: 'The stop tile 81 in its place – the level keeps its settings', onClick: () => { v.selectTile(i, false); this.remove(); } },
+      ...v.links.menuItems(i), // (its overworld links, #413)
     ]);
   }
   // "Change look…": the looks, a click on one changes the look of the level tile at i (its level kept)

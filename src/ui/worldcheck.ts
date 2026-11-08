@@ -173,6 +173,7 @@ export class WorldCheck {
     const v = this.view, event = p.show ? p.show.event : p.progress - 1;
     if (event !== v.event) v.setEvent(event);
     if (p.show) v.setMode(p.show.mode);
+    else if (p.group === 'links') v.setMode('l1'); // (the overworld links are layer 1's, #413)
     v.showTile(p.tile);
   }
   // the mode (and submap) of the budget's gauge; one beside an event's actions: an event chosen (budgetPlace)
