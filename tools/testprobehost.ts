@@ -586,13 +586,15 @@ for (const changeRead of [false, true]) {
   check(p.first.length === 4 && p.again.join() === `spr/${spriteLoad(0x220).toString(16)}` && p.same,
     `PIXI: a tweaker of custom sprite 20 changed: only its load captured again (${p.again.join()}), the images as a capture of the whole set`);
 
-  // inserted again with more code in sprite 20: the editor places every custom sprite's code anew (their INIT/MAIN
-  // pointers change), the runtime and the game's sprites stay
+  // inserted again with more code in sprite 20: its code changed (where the editor places it – today in its old place,
+  // its INIT/MAIN pointers as they were), a sprite whose pointers changed counts as changed too; the runtime and the
+  // game's sprites stay
   const moved = (r: Rom) => [0x10, 0x20].filter((n) => { const o = rowB - (0x20 - n) * 16 + 8; return r.data.subarray(o, o + 6).some((b, i) => b !== pr.data[o + i]); });
   let movedNow: number[] = [];
   const re = recaptured(new Rom(pr.data.slice()), pnums, (r) => { savePixiProject(r, project('  NOP #8\n')); movedNow = moved(r); });
-  check(movedNow.length === 2 && re.again.join() === movedNow.map((n) => `spr/${spriteLoad(0x200 | n).toString(16)}`).join() && re.same,
-    `PIXI inserted again, sprites ${movedNow.map((n) => n.toString(16)).join()} moved: only their loads captured again (${re.again.join()}), the images as a capture of the whole set`);
+  const changedNow = [...new Set([...movedNow, 0x20])].sort((x, y) => x - y);
+  check(re.again.join() === changedNow.map((n) => `spr/${spriteLoad(0x200 | n).toString(16)}`).join() && re.same,
+    `PIXI inserted again, sprite 20's code changed${movedNow.length ? `, sprites ${movedNow.map((n) => n.toString(16)).join()} moved` : ''}: only their loads captured again (${re.again.join()}), the images as a capture of the whole set`);
 }
 
 // the levels' uses, the sprite memory check and the animated tiles and colors (learn jobs, #177): results and entries
