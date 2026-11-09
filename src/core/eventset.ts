@@ -65,3 +65,14 @@ export function progressWords(p: EventProgress): string {
   const es = passedEvents(p);
   return es.length <= 4 ? `with event${es.length === 1 ? '' : 's'} ${es.map(hex2).join(', ')}` : `with ${es.length} of ${hex2(OW_EVENTS)} events`;
 }
+
+// the set with event e passed (on) or not, a new set
+export function withEvent(p: EventProgress, e: number, on = true): EventSet {
+  const b = eventBits(p);
+  if (e >= 0 && e < OW_EVENTS) { if (on) b[e >> 3] |= 0x80 >> (e & 7); else b[e >> 3] &= ~(0x80 >> (e & 7)); }
+  return b;
+}
+// the events below e not passed at the progress: where the map shown with e differs from the one e is stored against
+// (the map before e in number order, CONTEXT.md "Event step")
+export const missingBefore = (p: EventProgress, e: number): number[] =>
+  Array.from({ length: Math.max(0, Math.min(e, OW_EVENTS)) }, (_, k) => k).filter((k) => !isPassed(p, k));

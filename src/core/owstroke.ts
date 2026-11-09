@@ -8,7 +8,7 @@
 
 import type { Rom } from './rom.ts';
 import {
-  type OwRender, readL2, writeL1, writeL2, l1Index, l2Index, gameL1, gameL2,
+  readL2, writeL1, writeL2, l1Index, l2Index,
 } from './overworld.ts';
 import { readEvents, writeEvents, paintEvent, paintEventL1, eventRunners, eventTitle, type EventPlace } from './owevents.ts';
 import type { LevelTileTest } from './owpaths.ts';
@@ -122,15 +122,31 @@ export class OverworldStroke {
   }
 }
 
-// the maps of a region as the game shows them at an event progress (`r`, the game's load), with the tiles painted since
-// the maps were as in `from` (the maps as in the ROM the load was made of): a painted tile shown as painted, the
-// others as the game shows them. While an event is painted (`ev`), both layers as after it
+// the event being painted as the view shows it (shownMaps): layer 2 as after it (`after`, painted in place) and as
+// when it was read from the ROM (`synced`), layer 1 as after it (`l1`, with the strokes painted; `game` as the game
+// showed it; null until its load comes); atBase: the map shown is the one the event is stored against (the events below
+// it passed, none above: the event progress just after it)
+export interface ShownEvent { after: Uint16Array; synced: Uint16Array; l1: Uint16Array | null; game: Uint16Array | null; atBase: boolean }
+
+// the maps of a region as the game shows them at the event progress shown (`game`: layer 1 and the region's layer 2,
+// gameL1 / gameL2 of the game's load, or built from the event data while it is emulated), with the tiles painted since
+// the maps were as in `from` (the maps as in the ROM `game` was made of): a painted tile shown as painted, the others
+// as the game shows them. While an event is painted (`ev`): at its base both layers as after it; at another progress
+// (other events checked, CONTEXT.md "Event list") the map shown with the tiles painted into the event over it
 export function shownMaps(
-  r: OwRender, region: number, maps: OwMaps, from: { l1: Uint16Array; l2: Uint16Array }, ev?: { after: Uint16Array; l1: Uint16Array | null } | null,
+  game: { l1: ArrayLike<number>; l2: ArrayLike<number> }, region: number, maps: OwMaps, from: { l1: Uint16Array; l2: Uint16Array }, ev?: ShownEvent | null,
 ): { l1: Uint16Array; l2: Uint16Array } {
-  const base = region * 0x1000, game1 = gameL1(r), game2 = gameL2(r);
+  const base = region * 0x1000, inRegion = (i: number) => i >= base && i < base + 0x1000;
+  if (ev?.atBase) return { l1: ev.l1 ?? Uint16Array.from(game.l1), l2: ev.after };
+  if (ev) {
+    const l1 = ev.l1, was = ev.game;
+    return {
+      l1: Uint16Array.from(game.l1, (t, i) => (l1 && was && l1[i] !== was[i] ? l1[i] : t)),
+      l2: ev.after.map((t, i) => (t !== ev.synced[i] || !inRegion(i) ? t : game.l2[i - base])),
+    };
+  }
   return {
-    l1: ev?.l1 ?? maps.l1.map((t, i) => (t !== from.l1[i] ? t : game1[i])),
-    l2: ev ? ev.after : maps.l2.map((t, i) => (t !== from.l2[i] || i < base || i >= base + 0x1000 ? t : game2[i - base])),
+    l1: maps.l1.map((t, i) => (t !== from.l1[i] ? t : game.l1[i])),
+    l2: maps.l2.map((t, i) => (t !== from.l2[i] || !inRegion(i) ? t : game.l2[i - base])),
   };
 }

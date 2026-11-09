@@ -191,17 +191,17 @@ export class CellHistoryPopup {
     m.to = targetAt(e);
     m.label.style.left = `${e.clientX + 14}px`;
     m.label.style.top = `${e.clientY + 14}px`;
-    this.scrollStrip(e);
+    this.scrollList(e);
     this.preview();
   }
-  // the mouse near the strip's ends scrolls it
-  private scrollStrip(e: MouseEvent): void {
-    const list = this.view.root.querySelector<HTMLElement>('.ow-strip-list');
+  // the mouse near the event list's top or bottom scrolls it
+  private scrollList(e: MouseEvent): void {
+    const list = this.view.left.querySelector<HTMLElement>('.ow-event-list');
     if (!list) return;
     const r = list.getBoundingClientRect();
-    if (e.clientY < r.top - 20 || e.clientY > r.bottom + 20) return;
-    if (e.clientX < r.left + 40) list.scrollLeft -= 16;
-    else if (e.clientX > r.right - 40) list.scrollLeft += 16;
+    if (e.clientX < r.left - 20 || e.clientX > r.right + 20) return;
+    if (e.clientY < r.top + 30) list.scrollTop -= 16;
+    else if (e.clientY > r.bottom - 30) list.scrollTop += 16;
   }
   // the move of m's change to `to` (single: Alt held)
   private ask(m: Moving, to: number, single: boolean): MoveAsk {
@@ -226,7 +226,7 @@ export class CellHistoryPopup {
     const refused = to !== null && to !== m.from && !!p.refusal;
     v.movePreview = { cells: p.cells, refused };
     v.paint();
-    for (const c of v.root.querySelectorAll<HTMLElement>('.ow-strip-chip')) {
+    for (const c of v.left.querySelectorAll<HTMLElement>('.ow-ev-row')) {
       const here = to !== null && to !== m.from && c.dataset.event === String(to);
       c.classList.toggle('ow-drop', here && !refused);
       c.classList.toggle('ow-drop-refused', here && refused);
@@ -269,16 +269,16 @@ export class CellHistoryPopup {
     m.label.remove();
     const v = this.view;
     v.movePreview = null;
-    for (const c of v.root.querySelectorAll('.ow-drop, .ow-drop-refused')) c.classList.remove('ow-drop', 'ow-drop-refused');
+    for (const c of v.left.querySelectorAll('.ow-drop, .ow-drop-refused')) c.classList.remove('ow-drop', 'ow-drop-refused');
     v.paint();
     if (!this.over) this.hide();
     return true;
   }
 }
 
-// the event of the strip at the mouse (-1 "Before events"; null: none)
+// the event of the event list at the mouse (-1 "Map before events"; null: none)
 function targetAt(e: MouseEvent): number | null {
-  const chip = (document.elementFromPoint(e.clientX, e.clientY) as HTMLElement | null)?.closest<HTMLElement>('.ow-strip-chip');
+  const chip = (document.elementFromPoint(e.clientX, e.clientY) as HTMLElement | null)?.closest<HTMLElement>('.ow-ev-row');
   const ev = chip?.dataset.event;
   return ev === undefined ? null : Number(ev);
 }

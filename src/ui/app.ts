@@ -1178,6 +1178,12 @@ export class App {
     return this.probes.learn<OwRender>(`owm1:${map}${special ? ':special' : ''}`, { kind: 'owMap', map, progress, ...(special ? { special } : {}) },
       { lane: dialog?.lane ?? 'ow', urgent: !!dialog, failed: dialog?.failed, input: { progress }, replace: true, label: 'Overworld', done });
   }
+  // Map `map` at the event progress an edited event is stored against (`progress`: the events up to it passed, none
+  // after – CONTEXT.md "Event list"), while another progress is shown: what painting into the event starts from. Kept
+  // and asked as overworldMap, in a lane of its own (a new request drops the one still waiting)
+  overworldEventBase(map: number, progress: number, done: (r: OwRender) => void): OwRender | undefined {
+    return this.probes.learn<OwRender>(`owmb1:${map}`, { kind: 'owMap', map, progress }, { lane: 'owmb', input: { progress }, replace: true, label: 'Overworld', done });
+  }
   // Map `map` at event progress `progress` (special: after the special world) with the event triggers 01–08 of its
   // animations switched for the graphics workspace's preview (owanimview.ts owTriggerRender), learned in the probe
   // worker and kept in memory while the ROM bytes it read are unchanged: undefined while it runs (a new request drops

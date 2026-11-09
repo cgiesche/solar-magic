@@ -1,6 +1,6 @@
 # Level tiles as objects on top of layer 1
 
-_The "Map after" select named below was replaced by the playthrough strip (ADR 0013): "Map after: event X" reads as event X chosen in the strip._
+_The "Map after" select named below was replaced by the playthrough strip (ADR 0013), the strip by the event list (ADR 0014): "Map after: event X" and "the event chosen in the strip" read as event X edited in the event list. The level list on the left is gone (ADR 0014): "in the list" selection is a click on the map, "Without level tile" is in the layer 1 picker's Levels section._
 
 _Amended (#396): the Levels mode is gone – level tiles are objects on top of layer 1 **in the layer 1 mode** (see "Amendment: no mode of their own" below). The rules below stay; what is said of the Levels mode applies to the layer 1 mode._
 

@@ -3,7 +3,7 @@
 // event progress (emulated); the patch changes no event's effect.
 import { Rom } from '../src/core/rom.ts';
 import { OverworldEmulator, gameL2, readL2, OW_EVENTS } from '../src/core/overworld.ts';
-import { readEvents, applyEvents, hasEventPatch, playthroughStrip, eventRunners, stepEvent, type EventData, type EventRunner } from '../src/core/owevents.ts';
+import { readEvents, applyEvents, hasEventPatch, eventList, eventListOrder, stepInList, eventRunners, type EventData, type EventRunner } from '../src/core/owevents.ts';
 import { levelName } from '../src/core/levelnames.ts';
 import { cleanImage, editorImage } from './fixture.ts';
 
@@ -38,26 +38,30 @@ for (const n of [0, 0x20, 0x6f]) for (const r of [0, 1]) {
   check(!d, `progress ${hx(n)}, region ${r}: the editor's ROM shows the clean game's layer 2${d ? ` (${d} tiles differ)` : ''}`);
 }
 
-// ---- the playthrough strip: before events, then every event in number order, labelled by the level exit running it ----
+// ---- the event list: grouped by the submap of the level running the event, number order within, the unrun ones last ----
 {
   const runners = new Map<number, EventRunner[]>([
-    [5, [{ tl: 0x02, exit: 1, tile: 0 }, { tl: 0x07, exit: 0, tile: 0 }]], // level 002's secret exit (and level 007's normal one)
-    [3, [{ tl: 0x02, exit: 0, tile: 0 }]], // level 002's normal exit
-    [9, [{ tl: 0x01, exit: 2, tile: 0 }]], // level 001's secret exit 2
+    [5, [{ tl: 0x02, exit: 1, tile: 0x450 }, { tl: 0x07, exit: 0, tile: 0 }]], // level 002's secret exit (and level 007's normal one)
+    [3, [{ tl: 0x02, exit: 0, tile: 0x450 }]], // level 002's normal exit
+    [9, [{ tl: 0x01, exit: 2, tile: 0x10 }]], // level 001's secret exit 2, on the main map
+    [7, [{ tl: 0x03, exit: 0, tile: 0x460 }]],
   ]);
-  const strip = playthroughStrip(runners, (tl) => `Level ${tl}`);
-  check(strip.length === OW_EVENTS + 1 && strip[0].event === -1 && strip[0].label === 'Before events', 'the strip: "Before events", then every event once');
-  check(strip.slice(1).every((x, k) => x.event === k), 'in number order (the order the game applies them)');
-  check(strip[4].label === 'Level 2 · normal exit' && strip[4].number === '03', `an event by the exit running it, the number apart: ${strip[4].label} (${strip[4].number})`);
-  check(strip[6].label === 'Level 2 · secret exit' && strip[6].others.join() === 'Level 7 · normal exit', `the first exit running it, the others apart: ${strip[6].label}; ${strip[6].others}`);
-  check(strip[10].label === 'Level 1 · secret exit 2', `secret exits 2 and 3 numbered: ${strip[10].label}`);
-  check(strip[0x50].label === 'Event 4F (run by no level exit)' && strip[0x50].number === '', `an event no exit runs: ${strip[0x50].label}`);
+  const sub = (tile: number) => (tile >= 0x400 ? 2 : 0);
+  const list = eventList(runners, (tl) => `Level ${tl}`, sub);
+  check(list.groups.map((g) => `${g.submap}:${g.entries.map((x) => x.event).join(',')}`).join(' ') === '0:9 2:3,5,7', 'grouped by the submap of the level running the event (submaps in order), number order within');
+  check(list.unrun.length === OW_EVENTS - 4 && list.unrun[0].event === 0 && list.unrun[0].label === 'Event 00' && list.unrun[0].number === '', `the events no exit runs apart: ${list.unrun.length}, "${list.unrun[0].label}"`);
+  const x3 = list.groups[1].entries[0], x5 = list.groups[1].entries[1];
+  check(x3.label === 'Level 2 · normal exit' && x3.number === '03', `an event by the exit running it, the number apart: ${x3.label} (${x3.number})`);
+  check(x5.label === 'Level 2 · secret exit' && x5.others.join() === 'Level 7 · normal exit', `the first exit running it, the others apart: ${x5.label}; ${x5.others}`);
+  check(list.groups[0].entries[0].label === 'Level 1 · secret exit 2', 'secret exits 2 and 3 numbered');
+  const order = eventListOrder(list);
+  check(order.slice(0, 5).join() === '9,3,5,7,0' && order.length === OW_EVENTS, `the list's order: ${order.slice(0, 5).join(', ')} …`);
+  check(stepInList(order, -1, 1) === 9 && stepInList(order, -1, -1) === -1 && stepInList(order, 9, -1) === -1 && stepInList(order, 9, 1) === 3 && stepInList(order, 7, 1) === 0
+    && stepInList(order, order[order.length - 1], 1) === order[order.length - 1], 'stepping one row back/on in the list\'s order, from none to the first, back from the first to none, stopping at the last');
   // the test ROM: labelled by the levels' names
-  const real = playthroughStrip(eventRunners(rom), (tl) => levelName(rom, tl));
-  const yi2 = real.filter((x) => /YOSHI'S ISLAND 2/i.test(x.label)).map((x) => `${x.label} (${x.number})`);
+  const real = eventList(eventRunners(rom), (tl) => levelName(rom, tl), (tile) => (tile >= 0x400 ? 1 : 0));
+  const yi2 = real.groups.flatMap((g) => g.entries).filter((x) => /YOSHI'S ISLAND 2/i.test(x.label)).map((x) => `${x.label} (${x.number})`);
   check(yi2.length > 0 && yi2.every((l) => / · (normal|secret) exit \(\w\w\)$/.test(l)), `the test ROM's labels by level name: ${yi2.join(', ')}`);
-  check(stepEvent(-1, -1) === -1 && stepEvent(-1, 1) === 0 && stepEvent(0, -1) === -1 && stepEvent(5, 1) === 6, 'stepping: one event back/further in number order, -1 the map before events');
-  check(stepEvent(OW_EVENTS - 1, 1) === OW_EVENTS - 1, 'stepping stops at the last event');
 }
 
 if (bad) { console.log(`${bad} failed`); process.exit(1); }

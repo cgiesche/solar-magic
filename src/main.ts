@@ -271,7 +271,7 @@ function buildUi(app: App): { start: (at: NavLoc | null) => Promise<void> } {
     testBtn.disabled = (workspace === 'ow' && !owShown()) || workspace === 'game';
     testBtn.title = workspace === 'game' ? 'Test play is available in the level and overworld workspaces'
       : workspace !== 'ow' ? testLevelTitle
-      : owShown() ? 'Play the game from the overworld in the built-in emulator (T): a new game at the event progress shown, Mario on the selected tile (without one at the start position)'
+      : owShown() ? 'Play the game from the overworld in the built-in emulator (T): a new game with the events checked in the event list passed, Mario on the selected tile (without one at the start position)'
         : 'The overworld is replaced by a package';
     musicBtn.disabled = romOnly();
     musicBtn.title = romOnly() ? 'The level\'s music plays in the level editor' : musicTitle;
@@ -382,11 +382,11 @@ function buildUi(app: App): { start: (at: NavLoc | null) => Promise<void> } {
   app.on('rom-change', () => { if (workspace === 'ow' && !!overworldReplacement(app.rom) !== !!owLocked) { showOverworld(); updateToolbar(); } });
   // the overworld editor while it is shown (not while locked)
   const owShown = () => (workspace === 'ow' && !owLocked ? ow : null);
-  // test play from the overworld: the selected tile, the event progress shown with the save learned for it (once it
-  // is; a new file's when it can't be); a moment of the meters is shown in the level editor
+  // test play from the overworld: the selected tile, exactly the events checked in the event list with the save learned
+  // for them (once it is; a new file's when it can't be); a moment of the meters is shown in the level editor
   const testOverworld = () => {
     const o = owShown();
-    if (o) openOverworldTestPlay(app, o.selected, o.progress, app.progressSave(o.progress), (n, at) => void setWorkspace('level').then((ok) => { if (ok) app.showUse(n, at); }));
+    if (o) openOverworldTestPlay(app, o.selected, o.checked, app.progressSave(o.checked), (n, at) => void setWorkspace('level').then((ok) => { if (ok) app.showUse(n, at); }));
   };
 
   app.gotoOverworldTile = async (i) => { if (await setWorkspace('ow')) owShown()?.showTile(i); };
@@ -662,9 +662,10 @@ function showHelp(): void {
       ['Alt+click / Ctrl+click', 'Level info of the level tile'],
       ['G', 'Grid on/off'],
       ['M', 'Edit the selected tile\'s 8x8 tiles in the Map16 tab (target Overworld)'],
-      [', / .', 'Event progress: one event back / further'],
+      [', / .', 'Event list: edit the event one row up / down'],
+      ['Space · Esc', 'Check / uncheck the edited event · end editing (paint the map before events)'],
       ['Q (held)', 'While layer 1 or 2 is painted: the other layer hidden (else dimmed, View → Layers)'],
-      ['T', 'Test play from the overworld: a new game at the event progress, Mario on the selected tile (or at the start position)'],
+      ['T', 'Test play from the overworld: a new game with the checked events passed, Mario on the selected tile (or at the start position)'],
     ]],
     ['Graphics', [
       ['P / M / G / A', 'Tab palettes / Map16 tiles / graphics / animations; Esc back to the level'],

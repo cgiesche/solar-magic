@@ -1,5 +1,7 @@
 # The event progress as a playthrough strip in the game's load order
 
+_Superseded by ADR 0014 (event progress as a set of passed events): the strip is replaced by the event list._
+
 The overworld editor showed and painted the map at an event progress (CONTEXT.md "Event progress") chosen in a "Map after" select in the context bar: the events sorted by the level exit running them, the event's number after the label. Which events come before the chosen one – which changes the map shown already holds – was not visible, and a select hides all but one entry (#343, #358).
 
 We decided that the event progress is chosen in a **playthrough strip** under the map (core/owevents.ts `playthroughStrip`, ui/overworld.ts `buildStrip`), replacing the select – one control for one state:

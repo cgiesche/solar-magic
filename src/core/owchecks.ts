@@ -1,10 +1,10 @@
-// The World check's checks beyond the paths' problems (worldcheck.ts): events nothing runs, links Mario can't come
-// back from, levels without level tile an exit leads into, events a loaded save draws in another order than they
-// ran in play, stars without a translevel of their own and link ends on the other submap of an overlap. Each a plain
-// function of the ROM and the searches of owreach.ts with every event passed.
+// The World check's checks beyond the paths' problems (worldcheck.ts): events nothing runs, links Mario can't come back
+// from, levels without level tile an exit leads into, events a loaded save draws in another order than they ran in
+// play, stars without a translevel of their own, link ends on the other submap of an overlap and level tiles sharing a
+// level or entering none. Each a plain function of the ROM and the searches of owreach.ts with every event passed.
 
 import type { Rom } from './rom.ts';
-import { OW_EVENTS, MAX_TRANSLEVEL, translevelToLevel, readL1, readTranslevels, l1Index, isStarPipeTile, MAP_NAMES } from './overworld.ts';
+import { OW_EVENTS, MAX_TRANSLEVEL, translevelToLevel, sharedTranslevels, readL1, readTranslevels, l1Index, isStarPipeTile, MAP_NAMES } from './overworld.ts';
 import { readEvents, cellsBecoming, eventChanges, eventRunners, eventPieces, drawPiece, l2XY, type EventData, type EventChanges, type EventRunner } from './owevents.ts';
 import { reach, inputWithout, type Reach } from './owreach.ts';
 import { starsWithoutTranslevel, ownsTranslevel, isStar } from './owstars.ts';
@@ -127,6 +127,29 @@ export function misplacedLinkEnds(c: CheckContext, views: readonly Rect[]): Worl
       fix: { label: `Move to ${to}`, tile, end: m,
         title: `The link's ${m.end === 'b' ? 'target' : 'source'} on ${to} (${tileText({ ...t, submap: m.to })}) – one ROM edit` } };
   });
+}
+
+// ---- level tiles sharing a level, level tiles entering none ----
+
+// The level tiles (with every event passed) entering a level another level tile enters too – they share its name, base
+// event, exit directions and messages (the translevel table is per cell, CONTEXT.md "Level tile") –, and those entering
+// no level (translevel 0: the status bar's blank name, the flags shared with every such tile). Warnings: a hack may
+// mean either. Shown at the first such tile (the shared level's: the first in l1Index order)
+export function sharedOrEmptyLevelTiles(c: CheckContext): WorldProblem[] {
+  const { l1, tls, kinds } = c.all.inp, isLevel = (t: number) => kinds[t] === 'level', out: WorldProblem[] = [];
+  for (let i = 0; i < l1.length; i++) {
+    if (!isLevel(l1[i]) || tls[i]) continue;
+    out.push({ key: `level-tile-empty:${i}`, group: 'progress', severity: 'warn', tile: i, progress: OW_EVENTS,
+      text: `The level tile at ${c.place(i)} enters no level`, brief: `level tile entering no level at ${c.place(i)}`,
+      title: 'Its translevel is 0: Mario stops on it, the status bar shows no name, and its ways off are those of every tile without a level. Move a level onto it (drag a level tile there) or remove it (Delete: the stop tile).' });
+  }
+  for (const [tl, tiles] of [...sharedTranslevels(l1, Uint8Array.from(tls), isLevel)].sort((a, b) => a[0] - b[0])) {
+    const level = translevelToLevel(tl);
+    out.push({ key: `level-tile-shared:${tl}`, group: 'progress', severity: 'warn', tile: tiles[0], progress: OW_EVENTS,
+      text: `${tiles.length} level tiles enter level ${hex3(level)} (${tiles.map(c.place).join(', ')})`, brief: `level ${hex3(level)} entered by ${tiles.length} level tiles`,
+      title: 'They share the level\'s name, base event, exit directions and messages: passing it from one passes it for all. Fine for a level meant to be entered from two places; else place another level on one of them.' });
+  }
+  return out;
 }
 
 // ---- levels without level tile an exit leads into ----

@@ -11,7 +11,7 @@ import { reach, reachInput } from '../src/core/owreach.ts';
 import { readStart } from '../src/core/owsprites.ts';
 import { RAM } from '../src/core/ram.ts';
 import { ExitGraph } from '../src/core/exitgraph.ts';
-import { checkContext, eventsNeeded, eventsNeverRun, stranded, untiledLevelsEntered, eventOrderProblems, starsWithoutTranslevelProblems, type CheckContext } from '../src/core/owchecks.ts';
+import { checkContext, eventsNeeded, eventsNeverRun, stranded, untiledLevelsEntered, eventOrderProblems, starsWithoutTranslevelProblems, sharedOrEmptyLevelTiles, type CheckContext } from '../src/core/owchecks.ts';
 import type { CheckedAt, WorldProblem } from '../src/core/worldcheck.ts';
 import { editorImage, pathKinds, pathShapes } from './fixture.ts';
 
@@ -23,14 +23,14 @@ const at = (i: number) => { const { x, y } = l1XY(i); return `${i >> 10 ? 'subma
 const rom = new Rom(await editorImage());
 const kinds = pathKinds(rom), shapes = pathShapes(rom);
 // every check of a ROM, with every event passed (its loads and saves emulated anew)
-type Checks = { never: WorldProblem[]; stranded: WorldProblem[]; untiled: WorldProblem[]; order: WorldProblem[]; needed: number[][] };
+type Checks = { never: WorldProblem[]; stranded: WorldProblem[]; untiled: WorldProblem[]; order: WorldProblem[]; levels: WorldProblem[]; needed: number[][] };
 function checks(r: Rom): Checks {
   const loads = new OverworldLoads(new OverworldEmulator(r), 4), saves = progressSaves(loads), g = loads.get(0, OW_EVENTS);
   const inp = reachInput(r, gameL1(g).slice(), g.wram.slice(RAM.owTranslevels, RAM.owTranslevelsEnd), saves[OW_EVENTS].levelFlags, kinds, shapes, readStart(r, 0));
   const all: CheckedAt = { inp, r: reach(inp), progress: OW_EVENTS }, c = checkContext(r, all, at);
   const t0 = performance.now();
   const needed = eventsNeeded(c);
-  const out = { never: eventsNeverRun(c), stranded: stranded(c), untiled: untiledLevelsEntered(c, new ExitGraph(r)), order: eventOrderProblems(c, needed), needed };
+  const out = { never: eventsNeverRun(c), stranded: stranded(c), untiled: untiledLevelsEntered(c, new ExitGraph(r)), order: eventOrderProblems(c, needed), levels: sharedOrEmptyLevelTiles(c), needed };
   console.log(`     checked in ${Math.round(performance.now() - t0)} ms`);
   return out;
 }
@@ -44,9 +44,9 @@ const emptyTiles = (r: Rom, cell: number) => [...kinds.keys()].filter((t) => kin
 // ---- the clean game: none of them ----
 const clean = checks(rom);
 {
-  const all = [...clean.never, ...clean.stranded, ...clean.untiled, ...clean.order];
+  const all = [...clean.never, ...clean.stranded, ...clean.untiled, ...clean.order, ...clean.levels];
   console.log(list(all));
-  check(!all.length, `the clean game: no event never run, no link stranding Mario, no level without level tile an exit leads into, no events out of order (${all.length})`);
+  check(!all.length, `the clean game: no event never run, no link stranding Mario, no level without level tile an exit leads into, no events out of order, no level tile sharing a level or entering none (${all.length})`);
   // (the play order: Star World 5's secret exit's event before the Special World levels' events, as it opens the way
   // there; the star leading there runs no event, #390. Events whose numbers are not in play order change no tile both)
   const outOfOrder = clean.needed.flatMap((as, b) => as.filter((a) => a < b).map((a) => [b, a]));
@@ -151,6 +151,22 @@ const [late, early] = clean.needed.flatMap((as, b) => as.filter((a) => a < b).ma
   const p = checks(r).untiled, u = has(p, 'untiled-level:261');
   console.log(list(p));
   check(!!u && u.severity === 'warn' && u.group === 'progress' && u.text.includes('level 1CB'), `level 105's tile taken away: ${u?.text}`);
+}
+
+// ---- level tiles sharing a level, a level tile entering none (#426: the level list's warning) ----
+{
+  // the first two level tiles of the main map: the second enters the first's level, then (another copy) none
+  const tls = readTranslevels(rom), g = new OverworldLoads(new OverworldEmulator(rom), 2).get(0, OW_EVENTS), l1 = gameL1(g);
+  const tiles = [...tls.keys()].filter((i) => i < 0x400 && tls[i] && kinds[l1[i]] === 'level').slice(0, 2);
+  const r = copy(), t = readTranslevels(r);
+  t[tiles[1]] = t[tiles[0]]; writeTranslevels(r, t);
+  const s = checks(r).levels, p = has(s, `level-tile-shared:${t[tiles[0]]}`);
+  console.log(list(s));
+  check(!!p && p.severity === 'warn' && p.group === 'progress' && p.tile === tiles[0] && s.length === 1, `${at(tiles[1])} entering ${at(tiles[0])}'s level: ${p?.text}`);
+  const r2 = copy(), t2 = readTranslevels(r2);
+  t2[tiles[1]] = 0; writeTranslevels(r2, t2);
+  const e = checks(r2).levels, q = has(e, `level-tile-empty:${tiles[1]}`);
+  check(!!q && q.severity === 'warn' && q.tile === tiles[1] && e.length === 1, `${at(tiles[1])} entering no level: ${q?.text}`);
 }
 
 // ---- events out of order ----

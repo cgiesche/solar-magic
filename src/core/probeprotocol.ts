@@ -218,17 +218,17 @@ export type LearnLane =
   | 'sprites' | 'variants' | 'bytes' | 'spritemem' | 'animated' | 'layer3' | 'l2' | 'lt' | 'uses' | 'arcs' | 'thumbs'
   | 'placement' | 'sizes' | 'prefab-suggest' | 'msgr' | 'level-png' | 'level-images' | 'gamebg' | 'prefab-places'
   | 'breakup' | 'slippery' | 'otab'
-  | 'ow' | 'owpick' | 'owpk1' | 'owsh' | 'owreach' | 'owrw' | 'owlw' | 'owps' | 'owpn' | 'owpa' | 'owxe' | 'owwc' | 'owv' | 'owt' | 'owgc' | 'ows' | 'owbs' | 'owbt' | 'owl' | 'owan' | `owc${number}`;
+  | 'ow' | 'owpick' | 'owpk1' | 'owsh' | 'owreach' | 'owrw' | 'owlw' | 'owmb' | 'owps' | 'owpn' | 'owpa' | 'owxe' | 'owwc' | 'owv' | 'owt' | 'owgc' | 'ows' | 'owbs' | 'owbt' | 'owl' | 'owan' | `owc${number}`;
 
 // Who asks for the save at an event progress (owSave, App.progressSave) and the lane it is asked in (#388): a test play
-// (owps: it waits for its own), the playthrough strip's progress shown (owpn: a new one replaces the one asked before,
-// scrubbing queues no save per progress), every event passed (owpa: the same at every progress shown)
+// (owps: it waits for its own), the event progress shown (owpn: a new one replaces the one asked before, clicking
+// through the event list queues no save per progress), every event passed (owpa: the same at every progress shown)
 export type SaveAsker = 'test' | 'shown' | 'every';
 export const SAVE_LANES: Record<SaveAsker, { lane: LearnLane; replace: boolean }> = {
   test: { lane: 'owps', replace: false }, shown: { lane: 'owpn', replace: true }, every: { lane: 'owpa', replace: false },
 };
-// the overworld view's lanes of seconds of work, unlearned when the overworld is left (App.overworldLeft): the strip's
-// saves, the World check, the exits' arrows (not a test play's save)
+// the overworld view's lanes of seconds of work, unlearned when the overworld is left (App.overworldLeft): the shown
+// progress's saves, the World check, the exits' arrows (not a test play's save)
 export const OW_LEFT_LANES: LearnLane[] = ['owpn', 'owpa', 'owwc', 'owxe'];
 
 // what the probe client shows as busy: the probes, the tasks, the learn jobs' lanes

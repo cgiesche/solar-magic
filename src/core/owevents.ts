@@ -492,22 +492,31 @@ export function eventWords(runners: Map<number, EventRunner[]>, e: number, name:
   return r ? exitWords(r, name) : `Event ${hex2(e)} (run by no level exit)`;
 }
 
-// The playthrough strip under the overworld map (CONTEXT.md "Event progress", ADR 0013): "Before events" (-1), then
-// every event in number order – the order the game applies them loading a save –, each labelled in the player's
-// words (eventWords) with the event's number apart (shown small after it; none for an event no level exit runs, its
-// label has it). others: the further level exits running the event (the first one is the one passed at the progress)
-export interface StripEntry { event: number; label: string; number: string; others: string[] }
-export function playthroughStrip(runners: Map<number, EventRunner[]>, name: (tl: number) => string): StripEntry[] {
-  return [{ event: -1, label: 'Before events', number: '', others: [] },
-    ...Array.from({ length: OW_EVENTS }, (_, e) => {
-      const more = runners.get(e)?.slice(1) ?? [];
-      return { event: e, label: eventWords(runners, e, name), number: runners.has(e) ? hex2(e) : '', others: more.map((r) => exitWords(r, name)) };
-    })];
+// The event list (CONTEXT.md "Event list", ADR 0014): every event, grouped by the submap of the level running it
+// (submap: the submap of a layer 1 tile), in number order within a group, each labelled in the player's words
+// (eventWords) with the event's number apart (shown small after it); the events no level exit runs last, apart
+// ("Event 4F"). others: the further level exits running the event (the first one names it)
+export interface EventEntry { event: number; label: string; number: string; others: string[] }
+export interface EventGroup { submap: number; entries: EventEntry[] }
+export interface EventList { groups: EventGroup[]; unrun: EventEntry[] }
+export function eventList(runners: Map<number, EventRunner[]>, name: (tl: number) => string, submap: (tile: number) => number): EventList {
+  const groups = new Map<number, EventEntry[]>(), unrun: EventEntry[] = [];
+  for (let e = 0; e < OW_EVENTS; e++) {
+    const rs = runners.get(e);
+    if (!rs?.length) { unrun.push({ event: e, label: `Event ${hex2(e)}`, number: '', others: [] }); continue; }
+    const s = submap(rs[0].tile), list = groups.get(s) ?? groups.set(s, []).get(s)!;
+    list.push({ event: e, label: exitWords(rs[0], name), number: hex2(e), others: rs.slice(1).map((r) => exitWords(r, name)) });
+  }
+  return { groups: [...groups].sort((a, b) => a[0] - b[0]).map(([submap, entries]) => ({ submap, entries })), unrun };
 }
-
-// one event back (d -1) or further (+1) in number order from e (-1: the map before events), clamped
-export function stepEvent(e: number, d: number): number {
-  return Math.max(-1, Math.min(OW_EVENTS - 1, e + d));
+// the events in the list's order (its rows top to bottom)
+export const eventListOrder = (l: EventList): number[] => [...l.groups.flatMap((g) => g.entries), ...l.unrun].map((x) => x.event);
+// one row back (d -1) or on (+1) from event e in the list's order (`order`, eventListOrder); from none (-1) on: the
+// first, back from the first: none; clamped at the last
+export function stepInList(order: readonly number[], e: number, d: number): number {
+  const k = order.indexOf(e);
+  if (k < 0) return d > 0 ? order[0] ?? -1 : -1;
+  return k + d < 0 ? -1 : order[Math.min(order.length - 1, k + d)];
 }
 
 // the part of the submaps' region each submap shows (8x8 tiles; the camera the game sets there, emulated), index

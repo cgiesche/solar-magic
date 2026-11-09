@@ -10,13 +10,14 @@ import { Rom } from '../src/core/rom.ts';
 import { Snes } from '../src/core/snes.ts';
 import { OverworldEmulator, OverworldLoads, gameL1, gameL2, readL2, loadKey, OW_EVENTS, FLAG, type OwRender } from '../src/core/overworld.ts';
 import {
-  eventBits, eventSetOf, isPassed, passedEvents, prefixLength, progressKey, sameProgress, canonicalProgress, progressWords,
+  eventBits, eventSetOf, isPassed, withEvent, missingBefore, passedEvents, prefixLength, progressKey, sameProgress, canonicalProgress, progressWords,
 } from '../src/core/eventset.ts';
 import { layer1AtProgress } from '../src/core/owcellhistory.ts';
 import { readEvents, layer2AtProgress, applyEvents, eventRunners } from '../src/core/owevents.ts';
 import { progressSaves, progressSaveJob, progressMapFromEvents, progressMapsFromEvents, type ProgressSave } from '../src/core/owprogress.ts';
 import { reach, reachInput } from '../src/core/owreach.ts';
 import { readStart } from '../src/core/owsprites.ts';
+import { shownMaps } from '../src/core/owstroke.ts';
 import type { Job } from '../src/core/jobrunner.ts';
 import { LevelEmulator } from '../src/core/levelemu.ts';
 import { PlaySession } from '../src/core/playsession.ts';
@@ -115,6 +116,29 @@ const save = run(progressSaveJob(loads, S)) as ProgressSave;
   check(!same(a.tiles, at3r.tiles), 'other tiles reached than at the prefix up to event 02');
   const p4 = progressMapFromEvents(rom, 4, saves[4].levelFlags), m4 = progressMapsFromEvents(rom, saves.map((s) => s.levelFlags))[4];
   check(same(p4.l1, m4.l1) && same(p4.flags, m4.flags), 'a prefix: the map of progressMapsFromEvents');
+}
+
+// ---- the event list's checks and the edited event (#426) ----
+{
+  check(passedEvents(withEvent(S, 0)).join() === '0,1,3,9' && passedEvents(withEvent(S, 3, false)).join() === '1,9' && prefixLength(withEvent(eventSetOf([0, 1]), 2)) === 3,
+    'an event checked or unchecked');
+  check(missingBefore(S, 9).join() === '0,2,4,5,6,7,8' && !missingBefore(eventSetOf([0, 1, 2, 7]), 3).length && missingBefore(eventSetOf([]), 0).length === 0,
+    'the events below the edited one not checked (where the map shown differs from the one it is stored against)');
+  // the maps shown while event 09 is edited: at its base (events 00–08 checked) both layers as after it; with the set
+  // {01, 03} checked the map at {01, 03, 09} with the tiles painted into the event over it
+  const r = new OverworldEmulator(rom), base = r.load(1, 10), other = r.load(1, withEvent(S, 9));
+  const maps = { l1: readL2(rom).slice(0, 0x800), l2: readL2(rom) }, from = { l1: maps.l1.slice(), l2: maps.l2.slice() };
+  const after = applyEvents(readL2(rom), d, 0, 10), synced = after.slice(), l1 = gameL1(base), was = l1.slice();
+  const cell = 0x400 + 5, l2cell = 0x1000 + 7;
+  l1[cell] = 0x7f; after[l2cell] = 0x1234; // (painted into the event)
+  const ev = { after, synced, l1, game: was };
+  const atBase = shownMaps({ l1: gameL1(base), l2: gameL2(base) }, 1, maps, from, { ...ev, atBase: true });
+  check(atBase.l1 === l1 && atBase.l2 === after, 'at the edited event\'s base: its maps as painted');
+  const shown = shownMaps({ l1: gameL1(other), l2: gameL2(other) }, 1, maps, from, { ...ev, atBase: false });
+  const g1 = gameL1(other), g2 = gameL2(other);
+  check(shown.l1[cell] === 0x7f && shown.l2[l2cell] === 0x1234, 'at another set: the tiles painted into the event shown');
+  check(shown.l1.every((t, i) => i === cell || t === g1[i]) && [...shown.l2.subarray(0x1000, 0x2000)].every((t, k) => k === 7 || t === g2[k]),
+    'the other tiles as the game shows the set (the checked events and the edited one)');
 }
 
 // ---- test play with the set ----

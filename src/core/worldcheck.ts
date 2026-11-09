@@ -23,7 +23,7 @@ import { reach, reachProblems, stuckProblems, exitTileFix, ANY_WAY_TILE, type Re
 import { hex3 } from './names.ts';
 import type { PathKind, PathShapes } from './owpaths.ts';
 import type { OwRefusalData } from './owrefusal.ts';
-import { checkContext, eventsNeverRun, stranded, untiledLevelsEntered, eventOrderProblems, starsWithoutTranslevelProblems, misplacedLinkEnds } from './owchecks.ts';
+import { checkContext, eventsNeverRun, stranded, untiledLevelsEntered, eventOrderProblems, starsWithoutTranslevelProblems, misplacedLinkEnds, sharedOrEmptyLevelTiles } from './owchecks.ts';
 import { moveEnd, endTile, type MisplacedEnd } from './owlinkends.ts';
 import type { Rect } from './owevents.ts';
 
@@ -185,11 +185,12 @@ export const isFoundAtEveryProgress = (p: WorldProblem): boolean => /^(dead-end|
 
 // The checks of owchecks.ts with every event passed (`all`), the levels' exits in `graph`: events never run, links
 // stranding Mario, levels without level tile an exit leads into, events out of play order, stars without translevel,
-// link ends on a submap whose paths their tile is not on (with the submaps' views: views)
+// link ends on a submap whose paths their tile is not on (with the submaps' views: views), level tiles sharing a level
+// or entering none
 export function worldChecks(rom: Rom, all: CheckedAt, place: (tile: number) => string, graph: ExitGraph, views: readonly Rect[]): WorldProblem[] {
   const c = checkContext(rom, all, place);
   return [...eventsNeverRun(c), ...stranded(c), ...untiledLevelsEntered(c, graph), ...eventOrderProblems(c), ...starsWithoutTranslevelProblems(c),
-    ...misplacedLinkEnds(c, views)];
+    ...misplacedLinkEnds(c, views), ...sharedOrEmptyLevelTiles(c)];
 }
 
 // What the World check learns in the probe worker (worldCheckJob): the problems of worldChecks and the budgets' (found

@@ -7,7 +7,7 @@ import { syncBowsieMaxTile } from '../core/bowsie.ts';
 import { h, toast, choose, select, checkbox, hexInput, attachPanZoom, zoomControl, pixelZoomSteps, snapZoom, attachRectPick, emptyState, putImage, type CellRect } from './dom.ts';
 import { BrushDrag, drawBrushFrame, paintButton } from './brushsurface.ts';
 import {
-  type OwRender, gameL1, readL1, readL2, l1Index, l1XY, l2Index, readTranslevels, writeTranslevels, readMaps,
+  type OwRender, gameL1, gameL2, readL1, readL2, l1Index, l1XY, l2Index, readTranslevels, writeTranslevels, readMaps,
   sharedTranslevels, translevelToLevel, MAP_NAMES,
   resetTranslevel, baseEvent, setBaseEvent, eventNames, exitDirections, setExitDirection, DIR_ARROWS, DIR_NAMES, EXIT_NAMES, NO_EVENT,
   initialFlags, setInitialFlags, FLAG, DIR_FLAGS, OW_EVENTS, revealEvents, revealedTile, revealEventCount,
@@ -19,8 +19,8 @@ import { messageRoutineNote, messageRoutineUnknown, MESSAGE_ROUTINE_CHECKING } f
 import { levelName, hasLevelName, levelNamePatch } from '../core/levelnames.ts';
 import { levelNameField } from './levelnamefield.ts';
 import {
-  readEvents, writeEvents, applyEvents, reorderSteps, eventRunners, exitEvent, eventTitle, eventWords, playthroughStrip, stepEvent, eventPlace, submapOf, submapShown, pieceTiles, isBig, l2XY,
-  eventL1Tiles, exitChanges, type EventData, type EventRunner, type Rect, type ExitChanges, type StripEntry,
+  readEvents, writeEvents, applyEvents, layer2AtProgress, reorderSteps, eventRunners, exitEvent, eventTitle, eventWords, eventList, eventListOrder, stepInList, eventPlace, submapOf, submapShown,
+  pieceTiles, isBig, l2XY, eventL1Tiles, exitChanges, type EventData, type EventRunner, type Rect, type ExitChanges, type EventEntry, type EventList,
 } from '../core/owevents.ts';
 import { OverworldStroke, shownMaps } from '../core/owstroke.ts';
 import { PathTool } from './owpathtool.ts';
@@ -64,7 +64,11 @@ import { ExitArrowLayer } from './owexitarrows.ts';
 import { WorldCheck } from './worldcheck.ts';
 import { layerStrengths, isLayerMode, type OwMode, type LayerStrengths } from '../core/owlayers.ts';
 import { OW_OPTIONS, owOption, owOptionValue, setOwOption, revealSpeed, setRevealSpeed, revealStepFrames, MAX_REVEAL_SPEED, DEFAULT_REVEAL_SPEED, submapLightning, setSubmapLightning, LIGHTNING_TITLE, lightningEditLabel } from '../core/owoptions.ts';
-import { boolPref, numberPref, prefFamily } from './prefs.ts';
+import { boolPref, jsonPref, prefFamily } from './prefs.ts';
+import { layer1AtProgress } from '../core/owcellhistory.ts';
+import {
+  eventSetOf, withEvent, isPassed, passedEvents, prefixLength, progressKey, canonicalProgress, missingBefore, type EventSet, type EventProgress,
+} from '../core/eventset.ts';
 import { antsMenuItem, AntsOverlay, type AntsMark } from './ants.ts';
 
 // a w×h block of L1 tiles (16x16) or L2 tilemap entries (8x8), row-major; a L1 brush has no level tiles (NO_TILE
@@ -118,8 +122,10 @@ export class OverworldView {
   private palPanel = h('div', { class: 'panel ow-pal-panel' });
   private palPixels = 0; // the screen pixels per pixel the paint sheet is drawn at (0: none shown)
   private props = h('div', { class: 'panel props' });
-  private tlList = h('div', { class: 'level-list' });
-  private tlCount = h('span', { class: 'hint' });
+  private evList = h('div', { class: 'level-list ow-event-list' }); // the event list (buildLeft)
+  private evCount = h('span', { class: 'hint' });
+  private unrunOpen = false; // the event list's "Run by no level exit" group open (for the session)
+  private scrolledTo: number | null = null; // the edited event the list was last scrolled to
   private eventsBadge = h('div', { class: 'ow-badge' });
   map = 0;
   private watch: Watch; // the ROM bytes the view was built from (romwatch.ts)
@@ -157,18 +163,25 @@ export class OverworldView {
   // a change of a cell's history being moved to another event (owcellhistoryview.ts): the cells that would move,
   // outlined on the map (refused: hatched red)
   movePreview: { cells: number[]; refused: boolean } | null = null;
-  // the event the map is shown and painted as after (both layers; the playthrough strip under the map), -1: the map before events
-  // (kept per ROM in the browser, not in the ROM)
+  // The event progress (CONTEXT.md "Event progress", "Event list"): the events checked in the event list, and the event
+  // edited – painted into, its timeline open under the map (-1: none, painting goes into the map before events); the
+  // map shows the checked events plus the edited one. Both kept per ROM in the browser, not in the ROM
+  checked: EventSet = eventSetOf([]);
   event = -1;
-  // event progress: the map shown with events 0 … progress-1 passed, those up to the event shown
-  get progress(): number {
-    return this.event + 1;
+  // the event progress shown: the checked events and the edited one (a prefix as its count)
+  get progress(): EventProgress {
+    return canonicalProgress(this.event >= 0 ? withEvent(this.checked, this.event) : this.checked);
+  }
+  // whether the map shown is the one the edited event is stored against: the events below it passed, none above (its
+  // steps are found against the map before it in number order)
+  private atBase(): boolean {
+    return this.event >= 0 && prefixLength(this.progress) === this.event + 1;
   }
   // l1: layer 1 as after it (the game's at the event progress just after it, game; null until its load comes), with the
   // stroke being painted; without: layer 1 as after it without its layer 1 changes (what a stroke is compared with,
   // App.layer1Without; undefined while it is emulated, null when it could not be). Layer 1 is painted once both come
   private ev: {
-    data: EventData; before: Uint16Array; after: Uint16Array; l1: Uint16Array | null; game: Uint16Array | null; without: Uint16Array | null | undefined;
+    data: EventData; before: Uint16Array; after: Uint16Array; synced: Uint16Array; l1: Uint16Array | null; game: Uint16Array | null; without: Uint16Array | null | undefined;
     runners: Map<number, EventRunner[]>;
   } | null = null;
   private hoverStep: { kind: StepKind; k: number } | null = null;
@@ -183,9 +196,6 @@ export class OverworldView {
   private replacing: { from: number[] | null } | null = null;
   private playing: { start: number; before: HTMLCanvasElement; stepMs: number; fade: boolean } | null = null;
   private timeline = h('div', { class: 'ow-timeline' });
-  // the playthrough strip choosing the event (buildStrip), its chips scrolled horizontally
-  private strip = h('div', { class: 'ow-strip' });
-  private stripList = h('div', { class: 'ow-strip-list' });
   showGrid = false;
   // whole screen pixels per SNES pixel (pixelZoomSteps): 200 % or the nearest level of the screen's scale
   zoom = snapZoom(2, pixelZoomSteps());
@@ -217,9 +227,9 @@ export class OverworldView {
   onOpenLevel: (n: number) => void = () => {};
   onNav: () => void = () => {};
   // the graphics workspace on a submap's graphics (shown at an event progress)
-  onEditGraphics: (map: number, progress: number) => void = () => {};
+  onEditGraphics: (map: number, progress: EventProgress) => void = () => {};
   onEditBorder: (map: number) => void = () => {};
-  // test play from the selected tile at the event progress (the strip's button, as key T)
+  // test play from the selected tile with the checked events (the event list's button, as key T)
   onTestPlay: () => void = () => {};
 
   constructor(app: App) {
@@ -235,11 +245,10 @@ export class OverworldView {
     this.status = h('div', { class: 'statusbar' }, this.statusText, this.statusStats, this.check.button);
     this.side = h('div', { class: 'ow-side' }, this.check.root, this.palPanel, this.props);
     this.bar = h('div', { class: 'ctxbar' });
-    this.left = h('div', { class: 'left' }, h('div', { class: 'panel levels' },
-      h('div', { class: 'panel-title' }, 'Level tiles', this.tlCount), this.tlList));
-    this.root = h('div', { class: 'center' }, h('div', { class: 'level-view' }, this.scroller, this.eventsBadge), this.strip, this.timeline, this.status);
+    this.left = h('div', { class: 'left' }, h('div', { class: 'panel levels ow-events' },
+      h('div', { class: 'panel-title' }, 'Events ', this.evCount), this.evList));
+    this.root = h('div', { class: 'center' }, h('div', { class: 'level-view' }, this.scroller, this.eventsBadge), this.timeline, this.status);
     this.scroller.addEventListener('scroll', () => { this.cellHistory.close(); this.paint(); });
-    new ResizeObserver(() => this.stripToChosen()).observe(this.stripList);
     // next frame: layout() resizes the canvas inside the observed scroller (no ResizeObserver loop error); the zoom
     // follows a screen of another scale (the browser's zoom changed: the scroller has other CSS pixels)
     new ResizeObserver(() => requestAnimationFrame(() => {
@@ -311,6 +320,12 @@ export class OverworldView {
     if (r) this.last = { r, map: this.map, rom: this.rom };
     return r;
   }
+  // the map at the progress the edited event is stored against (atBase): the load shown there, else its own; undefined
+  // while it is emulated (or none edited)
+  private baseLoad(): OwRender | undefined {
+    if (this.event < 0) return undefined;
+    return this.atBase() ? this.load() : this.app.overworldEventBase(this.map, this.event + 1, this.loaded);
+  }
   private loaded = () => {
     if (!this.root.isConnected) return;
     this.redrawMap();
@@ -333,6 +348,7 @@ export class OverworldView {
     if (!this.root.isConnected || this.shownViews) return;
     this.shownViews = v;
     this.buildTimeline();
+    this.buildLeft(); // (the event list grouped by submap)
     if (this.mode === 'l2') this.buildSide(); // (the pieces on this map)
     this.paint();
     if (this.pendingTile >= 0) { const i = this.pendingTile; this.pendingTile = -1; this.showTile(i); }
@@ -370,13 +386,28 @@ export class OverworldView {
   private redrawMapNow(): void {
     const exact = this.load(), last = exact ? null : this.last?.map === this.map ? this.last : null;
     if (!exact && !last) { this.paint(); return; }
-    const r = exact ?? last!.r, from = exact ? this.rom : last!.rom;
-    if (exact && this.ev && !this.ev.l1) { this.ev.l1 = gameL1(r); this.ev.game = this.ev.l1.slice(); }
-    this.shown = shownMaps(r, this.region, this, from, this.ev);
+    const r = exact ?? last!.r, ev = this.ev;
+    if (ev && !ev.l1) { const b = this.baseLoad(); if (b) { ev.l1 = gameL1(b); ev.game = ev.l1.slice(); } }
+    // (while the load is emulated: the map built from the event data, drawn with the last load's graphics)
+    const game = exact ? { l1: gameL1(exact), l2: gameL2(exact) } : this.mapFromEvents();
+    this.shown = shownMaps(game, this.region, this, this.rom, ev && { ...ev, atBase: this.atBase() });
     putLayers(this.l1Canvas, this.l2Canvas, this.app.rom, r, this.region, this.shown.l1, this.shown.l2);
     this.composeMap();
     this.paint();
     this.check.update();
+    this.showEventBadge(); // (Loading… gone once the loads came)
+  }
+
+  // layer 1 and the region's layer 2 at the event progress shown built from the event data (owcellhistory.ts
+  // layer1AtProgress, owevents.ts layer2AtProgress: the model the World check searches), kept for the ROM generation
+  private builtMap: { key: string; l1: Uint16Array; l2: Uint16Array } | null = null;
+  private mapFromEvents(): { l1: Uint16Array; l2: Uint16Array } {
+    const rom = this.app.rom, p = this.progress, key = `${rom.gen}:${progressKey(p)}:${this.region}`;
+    if (this.builtMap?.key !== key) {
+      const l2 = layer2AtProgress(readL2(rom), readEvents(rom), p), base = this.region * 0x1000;
+      this.builtMap = { key, l1: layer1AtProgress(rom, p), l2: l2.slice(base, base + 0x1000) };
+    }
+    return this.builtMap;
   }
 
   // the map image from its layers, each at the strength the mode, Q and the view switches give it (layerStrengths)
@@ -796,7 +827,7 @@ export class OverworldView {
       return;
     }
     if (e.button !== 0) return;
-    if (e.altKey || (this.mode === 'l1' && e.ctrlKey)) { this.info(c.x, c.y); return; }
+    if (e.altKey || e.ctrlKey) { this.info(c.x, c.y); return; }
     this.brushDrag.startPick(c);
     this.paint();
   }
@@ -865,14 +896,14 @@ export class OverworldView {
     return { x: Math.min(x0, n.w - 1), y: Math.min(y0, n.h - 1), w: Math.max(1, x1 - x0 + 1), h: Math.max(1, y1 - y0 + 1) };
   }
 
-  // a stroke on layer `layer` begun: into the map before events, or as after the event chosen in the playthrough strip
+  // a stroke on layer `layer` begun: into the map before events, or as after the event edited (the event list)
   private newStroke(layer: 'l1' | 'l2'): OverworldStroke {
     return new OverworldStroke(this.app.rom, layer, this, this.isLevelTile,
       this.ev && { event: this.event, after: this.ev.after, l1: this.ev.l1, game: this.ev.game, without: this.ev.without, place: () => this.place(this.event) },
       layer === 'l1' ? this.starPaths() : null, layer === 'l1' ? (i) => this.links.cells().has(i) : undefined);
   }
 
-  // the layer 2 a stroke paints: as after the event chosen in the playthrough strip, or the map before events
+  // the layer 2 a stroke paints: as after the event edited, or the map before events
   private paintedL2(): Uint16Array {
     return this.ev ? this.ev.after : this.l2;
   }
@@ -985,8 +1016,10 @@ export class OverworldView {
     this.paint();
   }
 
+  // Alt/Ctrl+click: the layer 1 tile there selected, its settings in the properties – in the layer 2 mode too (a level
+  // tile's settings without going to layer 1; the event list took the level list's place)
   info(x: number, y: number): void {
-    if (this.mode !== 'l1') { toast('Tile settings are available on layer 1'); return; }
+    if (!isLayerMode(this.mode)) return;
     if (x < 0 || y < 0 || x >= 32 || y >= 32) return;
     this.selectTile(l1Index(this.region, x, y), false);
   }
@@ -1000,7 +1033,7 @@ export class OverworldView {
     this.selectTile(i, true);
   }
 
-  // selects a layer 1 tile (a level tile in the list, any tile by Alt/Ctrl+click; l1Index); center: scroll the map to it
+  // selects a layer 1 tile (a level tile clicked, any tile by Alt/Ctrl+click; l1Index); center: scroll the map to it
   selectTile(i: number, center: boolean): void {
     if (i !== this.selected) this.nameEditor.close(true);
     this.selected = i;
@@ -1062,7 +1095,7 @@ export class OverworldView {
     if (!c) {
       const solo = this.mode === 'l1' ? ' · Hold Q: hide layer 2' : this.mode === 'l2' ? ` · Hold Q: ${this.l1InL2 ? 'hide' : 'show'} layer 1` : '';
       this.statusText.textContent = this.ev
-        ? `Painting layer ${this.mode === 'l1' ? 1 : 2} as after ${eventTitle(this.ev.runners, this.event)} · Click/drag picks up tiles · Right click/Shift+click paints · Esc: the map before events${solo}`
+        ? `Painting layer ${this.mode === 'l1' ? 1 : 2} as after ${eventTitle(this.ev.runners, this.event)} · Click/drag picks up tiles · Right click/Shift+click paints · Alt/Ctrl+click: tile settings · Esc: end editing${solo}`
         : `Click/drag picks up tiles · Right click/Shift+click paints · Alt/Ctrl+click: tile settings${this.mode === 'l1' ? ' · Level tiles: click selects, drag moves, right click: menu, Delete removes' : ''}${solo}`;
       return;
     }
@@ -1102,21 +1135,56 @@ export class OverworldView {
   }
 
   // ---------------- the event shown and painted ----------------
-  // the badge on the map: the layer painted (in its colour) and where painting goes – on layer 1 also the level tiles'
-  // changes – (or, in the sprites mode, the event the map is shown after)
+  // The badge on the map: the layer painted (in its colour) and the event edited ("Editing: Yoshi's Island 2 · secret
+  // exit", "Editing: before events"; in the sprites mode the map shown), the events shown of all, where the map shown
+  // differs from the one the edited event is stored against (an event below it not checked: a click checks them), and
+  // "Loading…" while the map is emulated
   private showEventBadge(): void {
-    const e = this.event, painting = isLayerMode(this.mode);
-    const layer = this.mode === 'l1' ? 'Layer 1 (paths, levels & links)' : 'Layer 2', verb = 'painting';
-    this.eventsBadge.classList.toggle('show', e >= 0 || painting);
-    this.eventsBadge.classList.toggle('ow-l1', this.mode === 'l1');
-    this.eventsBadge.classList.toggle('ow-l2', this.mode === 'l2');
-    if (e < 0) { if (painting) this.eventsBadge.textContent = `${layer} · ${verb} the map before events`; return; }
-    const title = `${eventWords(eventRunners(this.app.rom), e, this.levelWords)} (event ${hex(e, 2)})`;
-    this.eventsBadge.textContent = painting ? `${layer} · ${verb} into ${title}` : `The map as after ${title}`;
+    const e = this.event, painting = isLayerMode(this.mode), b = this.eventsBadge;
+    b.classList.add('show');
+    b.classList.toggle('ow-l1', this.mode === 'l1');
+    b.classList.toggle('ow-l2', this.mode === 'l2');
+    const layer = this.mode === 'l1' ? 'Layer 1 (paths, levels & links)' : 'Layer 2';
+    const what = e < 0 ? 'before events' : `${eventWords(eventRunners(this.app.rom), e, this.levelWords)} (event ${hex(e, 2)})`;
+    const shown = passedEvents(this.progress).length, missing = e < 0 ? [] : missingBefore(this.checked, e);
+    const loading = !this.app.overworldMap(this.map, this.progress, this.loaded) || (e >= 0 && !this.ev?.l1);
+    // (built again only when it says something else: a click on its button isn't lost to a redraw)
+    // (events after the edited one checked: the map shows them over it – a cell they change shows their tile)
+    const above = e >= 0 && passedEvents(this.checked).some((x) => x > e);
+    const said = [painting, this.mode, what, shown, missing.join(), loading, above].join('|');
+    if (said === this.badgeSaid) return;
+    this.badgeSaid = said;
+    b.replaceChildren(...[
+      h('span', null, painting ? `${layer} · Editing: ${what}` : `Editing: ${what}`),
+      h('span', { class: 'hint' }, ` · ${shown} of ${hex(OW_EVENTS, 2)} events shown${above ? ' (some after it: drawn over it)' : ''}`),
+      missing.length ? h('button', {
+        class: 'ow-badge-fix',
+        title: `The event's steps are found against the map before it in number order: events ${missing.map((x) => hex(x, 2)).join(', ')} come before it but are not checked, so the map shown differs from the one it is stored against (what you paint still goes into the event) – click to check them`,
+        onclick: () => this.setChecked(eventSetOf([...passedEvents(this.checked), ...missing])),
+      }, `⚠ ${missing.length} event${missing.length > 1 ? 's' : ''} before it not checked – check`) : null,
+      loading ? h('span', { class: 'hint' }, ' · Loading…') : null].filter((x) => x !== null));
+  }
+
+  private badgeSaid = ''; // what the badge says (showEventBadge)
+  // the event list's checks set (the map shown with them; kept per ROM in the browser)
+  setChecked(set: EventSet): void {
+    this.checked = eventBits(set);
+    storeEvents(this.app.romName, this.checked, this.event);
+    this.stopPlay();
+    this.buildLeft();
+    this.showEventBadge();
+    this.buildTimeline();
+    this.redrawMap();
+    this.updateStatus();
+  }
+  // event e's check in the event list switched
+  toggleChecked(e: number): void {
+    if (e >= 0) this.setChecked(withEvent(this.checked, e, !isPassed(this.checked, e)));
   }
 
   // ---------------- painting an event ----------------
-  // the map shown and painted as after event e (-1: the map before events), the event progress just after it
+  // event e edited (-1: none – painting goes into the map before events): painted into, its timeline open, the map
+  // shown with it and the checked events
   setEvent(e: number): void {
     if (e === this.event) return;
     this.stopPlay();
@@ -1124,8 +1192,9 @@ export class OverworldView {
     this.hoverStep = null;
     this.hoverClause = null;
     this.eventPick = null;
-    storeEvent(this.app.romName, e);
+    storeEvents(this.app.romName, this.checked, e);
     this.syncEvent();
+    this.buildLeft();
     this.buildBar();
     this.buildSide();
     this.redrawMap();
@@ -1136,7 +1205,8 @@ export class OverworldView {
     const e = this.event;
     if (e < 0) { this.ev = null; this.buildTimeline(); return; }
     const rom = this.app.rom, data = readEvents(rom), base = readL2(rom), before = applyEvents(base, data, 0, e);
-    const ev = this.ev = { data, before, after: applyEvents(before, data, e, e + 1), l1: null, game: null, without: undefined as Uint16Array | null | undefined, runners: eventRunners(rom) };
+    const after = applyEvents(before, data, e, e + 1);
+    const ev = this.ev = { data, before, after, synced: after.slice(), l1: null, game: null, without: undefined as Uint16Array | null | undefined, runners: eventRunners(rom) };
     ev.without = this.app.layer1Without(e, (v) => { if (this.ev === ev) ev.without = v; });
     this.buildTimeline();
   }
@@ -1163,34 +1233,8 @@ export class OverworldView {
     const views = this.views;
     return views && eventPlace(this.ev!.runners, views, e, this.map);
   }
-  // a level by its name ("Level 105" while it has none): the words the strip and the badge name a level exit in
+  // a level by its name ("Level 105" while it has none): the words the event list and the badge name a level exit in
   levelWords = (tl: number): string => hasLevelName(this.app.rom, tl) ? levelName(this.app.rom, tl) : `Level ${hex(translevelToLevel(tl), 3)}`;
-  // The playthrough strip under the map (ADR 0013): "Before events", then every event in number order labelled by the
-  // level exit running it (playthroughStrip), the chosen one marked with "▶ Test play from here" after it; ‹ › (, .)
-  // one back/further, scrolled to keep the chosen one in view
-  private buildStrip(): void {
-    const list = this.stripList;
-    const chip = (x: StripEntry) => h('button', {
-      class: `ow-strip-chip${x.event === this.event ? ' active' : ''}${x.event >= 0 && !x.number ? ' unrun' : ''}`,
-      'data-event': String(x.event), // (a change dragged from a cell's history drops on it)
-      title: `${x.label}${x.others.length ? ` (also run by ${x.others.join(', ')})` : ''} – the map as after loading a save in which the events up to this one passed, in their number order as the game does; what is painted goes into ${x.event < 0 ? 'the map before events' : 'this event'}`,
-      onclick: () => this.setEvent(x.event),
-    }, x.label, x.number ? h('small', null, ` ${x.number}`) : null);
-    const items = playthroughStrip(eventRunners(this.app.rom), this.levelWords).flatMap((x) => x.event !== this.event ? [chip(x)]
-      : [chip(x), h('button', { class: 'ow-strip-test', title: 'Test play from the selected tile with a save at this progress (T)', onclick: () => this.onTestPlay() }, '▶ Test play from here')]);
-    list.replaceChildren(...items);
-    const step = (d: number, label: string, title: string) => h('button', { class: 'ow-strip-step', title, disabled: stepEvent(this.event, d) === this.event, onclick: () => this.setEvent(stepEvent(this.event, d)) }, label);
-    this.strip.replaceChildren(step(-1, '‹', 'One event back (,)'), list, step(1, '›', 'One event further (.)'));
-    this.stripToChosen();
-  }
-  // the chosen entry and its test play button scrolled into the strip's view (also when the strip comes into sight:
-  // built while hidden it has no width)
-  private stripToChosen(): void {
-    const list = this.stripList, at = list.querySelector<HTMLElement>('.active'), end = list.querySelector<HTMLElement>('.ow-strip-test') ?? at;
-    if (!at || !end || !list.clientWidth) return;
-    const view = list.getBoundingClientRect(), from = at.getBoundingClientRect().left - view.left, to = end.getBoundingClientRect().right - view.left;
-    if (from < 0 || to > view.width) list.scrollLeft += from - Math.max(0, (view.width - (to - from)) / 3);
-  }
   private editSteps(what: string, order: number[]): void {
     const rom = this.app.rom, e = this.event;
     this.app.romEdit(`${eventTitle(this.ev!.runners, e)}: ${what}`, () => writeEvents(rom, reorderSteps(readEvents(rom), e, order)));
@@ -1238,7 +1282,7 @@ export class OverworldView {
         h('button', { title: 'Show the steps as the game does (path fade)', disabled: !steps.length, onclick: () => this.play() }, '▶ Play'),
         h('button', { title: 'The steps in the opposite order (from the other end of the path)', disabled: steps.length < 2,
           onclick: () => this.editSteps('steps reversed', steps.map((_, i) => steps.length - 1 - i)) }, '⇄ Reverse'),
-        h('button', { title: 'Back to the map before events (Esc)', onclick: () => this.setEvent(-1) }, 'Done')),
+        h('button', { title: 'End editing the event: painting goes into the map before events (Esc)', onclick: () => this.setEvent(-1) }, 'Done')),
       h('div', { class: 'ow-steps' },
         h('span', { class: 'hint' }, steps.length ? `Steps on ${where}:` : `No steps on ${where}`),
         ...steps.map((_, k) => chip(k)),
@@ -1543,7 +1587,6 @@ export class OverworldView {
       h('span', { class: 'sep' }),
       this.zoomCtl.root,
     );
-    this.buildStrip();
   }
 
   // keys while the overworld is shown; false: not handled
@@ -1570,44 +1613,79 @@ export class OverworldView {
     if (k === 'g') { this.showGrid = !this.showGrid; this.paint(); return true; }
     if (k === 'q' && isLayerMode(this.mode)) { this.setSolo(true); return true; }
     if (k === 'm' && this.selected >= 0 && isLayerMode(this.mode)) { this.editTile(this.selected); return true; }
-    if (k === ',' || k === '.') { this.setEvent(stepEvent(this.event, k === ',' ? -1 : 1)); return true; }
+    if (k === ',' || k === '.') { this.setEvent(stepInList(this.listOrder(), this.event, k === ',' ? -1 : 1)); return true; }
+    // (Space on a focused button is the button's)
+    if (k === ' ' && this.event >= 0 && !(document.activeElement instanceof HTMLButtonElement)) { this.toggleChecked(this.event); return true; }
     if (k >= '1' && k <= '3') { (this.bar.querySelectorAll('.btn-group button')[+k - 1] as HTMLButtonElement).click(); return true; }
     if ((k === 'delete' || k === 'backspace') && this.mode === 'sprites') return this.sprites.remove();
     if ((k === 'delete' || k === 'backspace') && this.mode === 'l1') return this.levelTiles.remove() || this.links.remove();
     return false;
   }
 
-  // ---------------- left: level tiles of the map ----------------
+  // ---------------- left: the event list ----------------
+  // the event list (core/owevents.ts eventList) as shown: grouped by the submap of the level running the event (the
+  // submaps' views while learned: by region)
+  private events(): EventList {
+    const views = this.views;
+    return eventList(eventRunners(this.app.rom), this.levelWords, (tile) => (views ? submapOf(views, tile) : tile >= 0x400 ? 1 : 0));
+  }
+  // the events in the list's order (its rows top to bottom; , and . step through it)
+  private listOrder(): number[] {
+    return eventListOrder(this.events());
+  }
   // (what it reads watched too: drawn again on its own after the last sync)
   buildLeft(): void {
     this.watch.add(() => this.buildLeftNow());
   }
+  // The event list (CONTEXT.md "Event list", ADR 0014) in the left panel: All / None / ▶ Test play, "Map before events",
+  // then the events grouped by submap (a group's checkbox checks or clears all of it, partly checked shown so), the
+  // events no level exit runs collapsed at the end. A row's checkbox checks the event (the map shows it passed), a click
+  // on its text edits it (the timeline under the map), its context menu "Up to here" checks the events up to it in
+  // number order; the edited row highlighted, kept in view
   private buildLeftNow(): void {
-    // (while the path tiles are learned which tiles are level tiles is not known: said so, not "none")
-    if (!this.pathKinds()) {
-      this.tlCount.textContent = '…';
-      this.tlList.replaceChildren(emptyState(LEVEL_TILES_LEARNED));
-      return;
-    }
-    const levels = this.levelL1(), shared = sharedTranslevels(levels, this.tls, this.isLevelTile);
-    const items: HTMLElement[] = [];
-    for (let y = 0; y < 32; y++) for (let x = 0; x < 32; x++) {
-      const i = l1Index(this.region, x, y), tl = this.tls[i];
-      if (!this.isLevelTile(levels[i])) continue;
-      const lvl = translevelToLevel(tl), name = tl ? levelName(this.app.rom, tl) : '(enters no level)';
-      const cur = i === this.selected, warn = shared.has(tl) || !tl;
-      const el = h('div', { class: `level-item${cur ? ' current' : ''}`, title: `${name}\n${warn && tl ? 'Another level tile enters this level too\n' : ''}Click: select · Double click: open in the level editor`,
-        onclick: () => this.selectTile(i, true), ondblclick: () => { if (tl) { this.selectTile(i, false); this.onOpenLevel(lvl); } } },
-        tl ? hex(lvl, 3) : '---', h('span', { class: 'lname' }, ` ${name}`), warn ? h('span', { class: 'warn-text' }, ' ⚠') : null);
-      items.push(el);
-      if (cur) setTimeout(() => el.scrollIntoView({ block: 'nearest' }), 0);
-    }
-    this.tlCount.textContent = String(items.length);
-    // the levels no level tile on any map enters (their settings kept with their translevels): dragged onto the map
-    const without = levelsWithoutTile(this.tls);
-    this.tlList.replaceChildren(...(items.length ? items : [emptyState('This map has no level tiles.')]),
-      ...(without.length ? [h('div', { class: 'gt-list-head', title: 'Levels no level tile on any map enters – drag one onto the map to place it' }, `Without level tile (${without.length})`),
-        ...this.levelTiles.withoutTile(without)] : []));
+    const list = this.events(), checked = this.checked, n = passedEvents(checked).length;
+    this.evCount.textContent = `${n} of ${hex(OW_EVENTS, 2)} checked`;
+    const row = (x: EventEntry) => {
+      const e = x.event, box = eventCheckbox(isPassed(checked, e), `Checked: the map shows event ${hex(e, 2)} passed (Space for the edited one)`, () => this.toggleChecked(e));
+      return h('div', {
+        class: `level-item ow-ev-row${e === this.event ? ' current' : ''}`, 'data-event': String(e), // (a change dragged from a cell's history drops on it)
+        oncontextmenu: (ev: MouseEvent) => {
+          ev.preventDefault();
+          contextMenu(ev.clientX, ev.clientY, [{ label: 'Up to here', title: `Check the events 00–${hex(e, 2)} (number order, as a save that far loads them), uncheck the others`,
+            onClick: () => this.setChecked(eventBits(e + 1)) }]);
+        },
+      }, box, h('span', {
+        class: 'ow-ev-label', onclick: () => this.setEvent(e),
+        title: `${x.label}${x.others.length ? ` – also run by ${x.others.join(', ')}` : ''}\nClick: edit this event (paint into it, its steps under the map) · Right click: Up to here`,
+      }, x.label, x.number ? h('small', null, ` ${x.number}`) : null));
+    };
+    const group = (name: string, entries: EventEntry[], open: boolean, toggle?: () => void) => {
+      const on = entries.filter((x) => isPassed(checked, x.event)).length;
+      const box = eventCheckbox(on === entries.length, `Check ${on === entries.length ? 'none' : 'all'} of ${name}`, () => {
+        const set = new Set(passedEvents(checked));
+        for (const x of entries) { if (on === entries.length) set.delete(x.event); else set.add(x.event); }
+        this.setChecked(eventSetOf(set));
+      });
+      box.indeterminate = on > 0 && on < entries.length;
+      return [h('div', { class: 'gt-list-head ow-ev-group' }, box,
+        toggle ? h('button', { class: 'link-btn', title: open ? 'Collapse' : 'Expand', onclick: toggle }, `${open ? '▾' : '▸'} ${name} (${entries.length})`) : h('span', null, `${name} (${entries.length})`)),
+      ...open ? entries.map(row) : []];
+    };
+    const before = h('div', { class: `level-item ow-ev-row ow-ev-before${this.event < 0 ? ' current' : ''}`, 'data-event': '-1',
+      title: 'Edit the map before events: painting goes into it (Esc)', onclick: () => this.setEvent(-1) }, 'Map before events');
+    this.evList.replaceChildren(
+      h('div', { class: 'ow-ev-head' },
+        h('button', { title: 'Check every event: the map with every event passed', onclick: () => this.setChecked(eventBits(OW_EVENTS)) }, 'All'),
+        h('button', { title: 'Check no event: the map before events', onclick: () => this.setChecked(eventSetOf([])) }, 'None'),
+        h('button', { title: 'Test play from the selected tile with a save of exactly the checked events (T)', onclick: () => this.onTestPlay() }, '▶ Test play')),
+      before,
+      // (while the submaps' views are learned the submaps' events are one group)
+      ...list.groups.flatMap((g) => group(this.views || !g.submap ? MAP_NAMES[g.submap] : 'Submaps', g.entries, true)),
+      // (open while one of its events is edited: , and . step into it)
+      ...list.unrun.length ? group('Run by no level exit', list.unrun, this.unrunOpen || list.unrun.some((x) => x.event === this.event), () => { this.unrunOpen = !this.unrunOpen; this.buildLeft(); }) : []);
+    // (scrolled to the edited row when it changed: the list stays where the user scrolled it otherwise)
+    const cur = this.evList.querySelector<HTMLElement>('.current');
+    if (cur && this.scrolledTo !== this.event) { this.scrolledTo = this.event; setTimeout(() => cur.scrollIntoView({ block: 'nearest' }), 0); }
   }
 
   // ---------------- right: palette, properties ----------------
@@ -1636,8 +1714,8 @@ export class OverworldView {
     const links = this.mode === 'l1' && this.selected >= 0 ? this.links.props() : null;
     const own = this.mode === 'sprites' ? [h('div', { class: 'panel-title' }, 'Sprite'), this.sprites.props()]
       : [h('div', { class: 'panel-title' }, 'Properties'),
-        this.selected >= 0 ? this.tileInfo(this.selected) : emptyState(this.mode === 'l1' ? 'Click a level tile on the map or in the list on the left, or any tile with Alt/Ctrl+click.'
-          : 'Select a level tile in the list on the left, or any tile with Alt/Ctrl+click on the map.'),
+        this.selected >= 0 ? this.tileInfo(this.selected) : emptyState(this.mode === 'l1' ? 'Click a level tile on the map, or any tile with Alt/Ctrl+click.'
+          : 'Select a tile – a level tile too – with Alt/Ctrl+click on the map.'),
         ...links ? [links] : [], ...this.mode === 'l1' ? [this.linkLegend()] : []];
     const map = h('details', { class: 'ow-section', open: this.mapOpen, ontoggle: () => (this.mapOpen = map.open) },
       h('summary', { title: `The settings of the map shown (${MAP_NAMES[this.map]})` }, 'Map', h('span', { class: 'hint' }, ` · ${MAP_NAMES[this.map]}`)),
@@ -1720,7 +1798,14 @@ export class OverworldView {
       h('div', { class: 'hint ow-page', title: 'Level tiles are objects on top of layer 1 – the only place they are changed –, each change one ROM edit of the map before events, or with an event chosen in the strip under the map a layer 1 change of the event (the tile changed from the event on). Click one on the map to select it, drag it to move it (it swaps with the tile there, its level and settings go with it), Delete leaves the stop tile 81 (the level keeps its settings, listed under "Without level tile"), right click for its menu' },
         'Levels', h('span', { class: 'hint' }, look >= 0 ? ` · Right click/Shift+click a cell: Place level here… (look ${l1Hex(look)})` : ' · choose a look, then right click a cell')),
       this.levelTiles.lookPicker(look, (t) => this.setLookBrush(t)),
-      budgetRow('Levels with a level tile', this.budget('translevels')));
+      budgetRow('Levels with a level tile', this.budget('translevels')),
+      ...this.withoutTileList());
+  }
+  // the levels no level tile on any map enters (their settings kept with their translevels): dragged onto the map
+  private withoutTileList(): HTMLElement[] {
+    const without = levelsWithoutTile(this.tls);
+    return without.length ? [h('div', { class: 'gt-list-head', title: 'Levels no level tile on any map enters – drag one onto the map to place it' }, `Without level tile (${without.length})`),
+      h('div', { class: 'level-list ow-without' }, ...this.levelTiles.withoutTile(without))] : [];
   }
 
   // what the overworld links' arrows mean, the tables' budgets
@@ -2328,7 +2413,9 @@ export class OverworldView {
     this.pendingTile = -1;
     this.links.pending = null; // (left for another tab: ended)
     void this.views; // (asked for now: the links, sprites and events need them)
-    this.event = loadEvent(this.app.romName);
+    const kept = loadEvents(this.app.romName);
+    this.checked = kept.checked;
+    this.event = kept.edited;
     // (the map drawn last may be another ROM's: not shown while this one's load is emulated)
     this.last = null;
     if (!this.load()) {
@@ -2398,15 +2485,25 @@ function cellMark(r: { x: number; y: number; w: number; h: number }, cell: numbe
 }
 const REPLACED_PIECE = '#ffb000'; // the piece "Replace piece…" replaces, in the pieces sheet
 
-// the event chosen in the strip kept per ROM (by its name) in the browser, -1: before events (a new key: the event progress
-// kept before was a view only, the map painted before events)
-const eventAfter = prefFamily('ow-map-after:', (name) => numberPref(name, -1));
-function loadEvent(rom: string): number {
-  const v = eventAfter.at(rom).get();
-  return v < 0 ? -1 : stepEvent(v, 0);
+// a checkbox of the event list (its change calls `change`)
+function eventCheckbox(on: boolean, title: string, change: () => void): HTMLInputElement {
+  const c = h('input', { type: 'checkbox', checked: on, title });
+  c.addEventListener('change', change);
+  return c;
 }
-function storeEvent(rom: string, e: number): void {
-  if (e >= 0) eventAfter.at(rom).set(e); else eventAfter.at(rom).reset();
+
+// the event list's checks and the edited event kept per ROM (by its name) in the browser (a new ROM: none checked, none
+// edited)
+interface KeptEvents { checked: number[]; edited: number }
+const isKeptEvents = (v: unknown): v is KeptEvents => !!v && typeof v === 'object' && Array.isArray((v as KeptEvents).checked)
+  && (v as KeptEvents).checked.every((e) => Number.isInteger(e)) && Number.isInteger((v as KeptEvents).edited);
+const keptEvents = prefFamily('ow-events:', (name) => jsonPref<KeptEvents>(name, { checked: [], edited: -1 }, isKeptEvents));
+function loadEvents(rom: string): { checked: EventSet; edited: number } {
+  const v = keptEvents.at(rom).get();
+  return { checked: eventSetOf(v.checked), edited: v.edited >= 0 && v.edited < OW_EVENTS ? v.edited : -1 };
+}
+function storeEvents(rom: string, checked: EventSet, edited: number): void {
+  keptEvents.at(rom).set({ checked: passedEvents(checked), edited });
 }
 
 // View → Layers' switches kept in the browser (on unless switched off)
