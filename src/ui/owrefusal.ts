@@ -6,7 +6,7 @@
 
 import type { Rom } from '../core/rom.ts';
 import { refusalOf, refusalDetails, routeNoTileText, type OwRefusalData } from '../core/owrefusal.ts';
-import { eventRunners } from '../core/owevents.ts';
+import { eventRunners, runnerExit, EXIT_WORDS } from '../core/owevents.ts';
 import { levelName, hasLevelName } from '../core/levelnames.ts';
 import { h, toast } from './dom.ts';
 
@@ -19,7 +19,6 @@ export interface RefusalWords {
 // a way out of a refusal: one ROM edit, its hover saying what it writes
 export interface RefusalFix { label: string; preview: string; run: () => void }
 
-const EXIT_WORDS = ['normal exit', 'secret exit', 'secret exit 2', 'secret exit 3'];
 // a level's name as the player reads it ("Vanilla Dome 2" for the game's VANILLA DOME 2); tl: a translevel
 export function levelTitle(rom: Rom, tl: number): string {
   const n = levelName(rom, tl);
@@ -28,10 +27,11 @@ export function levelTitle(rom: Rom, tl: number): string {
   return n.toLowerCase().replace(/(^|\s)(\S)/g, (m, s: string, c: string) => s + c.toUpperCase())
     .replace(/(?<=\s)(Of|The|And|A|In|On)(?=\s)/g, (w) => w.toLowerCase());
 }
-// event e as the player knows it: by the level exit that runs it ("the secret exit of Vanilla Dome 2"), else "this event"
+// event e as the player knows it: by the level exit that runs it ("the secret exit of Vanilla Dome 2", "the exit to
+// overworld (normal exit) of Vanilla Dome 2"), else "this event"
 export function eventPhrase(rom: Rom, e: number): string {
   const r = eventRunners(rom).get(e)?.[0];
-  return r ? `the ${EXIT_WORDS[r.exit]} of ${levelTitle(rom, r.tl)}` : 'this event';
+  return r ? `the ${runnerExit(r, EXIT_WORDS[r.exit])} of ${levelTitle(rom, r.tl)}` : 'this event';
 }
 // a level tile another event destroys (#378): "Already crumbles when the normal exit of Iggy's Castle is beaten"
 export function crumblesByOtherText(rom: Rom, e: number): string {
@@ -111,8 +111,6 @@ export function refusalWords(rom: Rom, r: OwRefusalData): RefusalWords {
     case 'pieceSame': return w('Not replaced', 'the new piece is the one to replace', 'Pick another piece to put in its place.');
     case 'pieceNoneInside': return w('Not replaced', 'no piece lies wholly inside the selection', 'Select a larger area.');
     case 'pieceNotFound': return w('Not replaced', `the piece is not ${r.selection ? 'in the selection' : 'on this map'}`);
-    case 'nameNoChar': return w(`“${r.ch}” can't be typed`, 'the font of level names has no such character');
-    case 'nameFull': return w('No more characters fit', `the name has its ${r.max} tiles`);
     case 'deadEndNoStopTile': return w('No stop tile can be added here', 'the overworld has no stop tile to put there');
     case 'deadEndEventTile': return w('No stop tile can be added here', 'an event puts the tile there', 'Paint a stop tile into that event.');
     case 'customSpritesPerSubmap': return w('No more custom sprites fit on this submap',

@@ -8,15 +8,13 @@ import { OW_EVENTS, MAX_TRANSLEVEL, translevelToLevel, sharedTranslevels, readL1
 import { readEvents, cellsBecoming, eventChanges, eventRunners, eventPieces, drawPiece, l2XY, type EventData, type EventChanges, type EventRunner } from './owevents.ts';
 import { reach, inputWithout, type Reach } from './owreach.ts';
 import { starsWithoutTranslevel, ownsTranslevel, isStar } from './owstars.ts';
-import { readSecondaryEntrance, mainTranslevel, OW_NORMAL, OW_SECRET } from './level.ts';
+import { mainTranslevel } from './level.ts';
 import type { ExitGraph } from './exitgraph.ts';
 import { hex2, hex3 } from './names.ts';
 import type { CheckedAt, WorldProblem } from './worldcheck.ts';
 import { misplacedInRom, misplacedText, endTile } from './owlinkends.ts';
 import { tileText } from './owteleport.ts';
 import type { Rect } from './owevents.ts';
-
-const SECONDARY_ENTRANCES = 0x200;
 
 // the layer 1 tile (l1Index) a layer 2 tilemap entry (readL2 index) is on
 const l2Tile = (i: number): number => { const { r, x, y } = l2XY(i); return l1Index(r, x >> 1, y >> 1); };
@@ -41,14 +39,10 @@ export function checkContext(rom: Rom, all: CheckedAt, place: (tile: number) => 
 // ---- events never run ----
 
 // The events that change the map (layer 1 or 2) but that no level exit runs – owevents.ts eventRunners: a level's
-// normal exit, a secret exit only where the level can have it – and no entrance to the overworld with its own event
-// (normal exit: the event, secret exit: + 1)
+// normal exit, a secret exit only where the level can have it, an exit to the overworld with its own event that an
+// exit of a level played from a level tile takes (#429; one no exit takes, or in a level not played, runs nothing)
 export function eventsNeverRun(c: CheckContext): WorldProblem[] {
-  const { rom } = c, run = new Set(c.runners.keys());
-  for (let i = 0; i < SECONDARY_ENTRANCES; i++) {
-    const o = readSecondaryEntrance(rom, i).overworld;
-    if (o?.ownEvent && (o.action === OW_NORMAL || o.action === OW_SECRET)) run.add(o.event + (o.action === OW_SECRET ? 1 : 0));
-  }
+  const run = new Set(c.runners.keys());
   const out: WorldProblem[] = [];
   for (let e = 0; e < OW_EVENTS; e++) {
     const tile = run.has(e) ? -1 : firstTile(c.changes[e]);

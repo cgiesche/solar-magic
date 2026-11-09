@@ -59,12 +59,13 @@ const blend = (a: number, b: number) => {
   return (0xff000000 | (ch(16) << 16) | (ch(8) << 8) | ch(0)) >>> 0;
 };
 
-// the name field's rows for translevel tl, drawn with the map's load r (null: the border not shown yet)
-export function levelNameField(app: App, tl: number, r: OwRender | null): HTMLElement[] {
-  const rom = app.rom, lvl = translevelToLevel(tl);
+// the name field's rows for translevel tl, drawn with the map's load r (null: the border not shown yet); edit: the name
+// of the ROM edit writing it (a star's or pipe's name: its own)
+export function levelNameField(app: App, tl: number, r: OwRender | null, edit = `Level name ${hex3(translevelToLevel(tl))}`): HTMLElement[] {
+  const rom = app.rom;
   const text = () => decodeName(levelNameTiles(rom, tl), multiChar);
   const input = h('input', { type: 'text', class: 'ln-input', spellcheck: false, autocomplete: 'off', value: text(), 'aria-label': 'Level name',
-    title: `The name the overworld's border shows on this level's tiles: up to ${NAME_LEN} tiles; \\XX types tile XX (a click on the font below)` });
+    title: `The name the overworld's border shows while Mario stands here: up to ${NAME_LEN} tiles; \\XX types tile XX (a click on the font below)` });
   const canvas = h('canvas', { width: W, height: H, class: 'ln-border', title: 'As the overworld\'s border shows it (this map\'s font)' });
   const note = h('div', { class: 'hint' });
   let enc: EncodedName = encodeName(input.value, multiChar);
@@ -87,7 +88,7 @@ export function levelNameField(app: App, tl: number, r: OwRender | null): HTMLEl
     update();
     if (problem()) return;
     if (levelNameTiles(rom, tl).every((t, k) => t === (enc.tiles[k] ?? NAME_SPACE))) return;
-    app.romEdit(`Level name ${hex3(lvl)}`, () => setLevelNameTiles(rom, tl, enc.tiles));
+    app.romEdit(edit, () => setLevelNameTiles(rom, tl, enc.tiles));
   };
   input.addEventListener('input', update);
   input.addEventListener('change', commit);

@@ -82,7 +82,8 @@ export type ProbeReply = ProbeDone | KindsDone | KindsShown | ScanDone | CameraD
 // layer2Pointer: the level's layer 2 objects as the probe loads take them); the overworld's map at an event progress
 // (overworld.ts overworldMapJob), it with the event triggers of its animations switched and the colors the game keeps
 // setting there (owanimview.ts), the submaps' views (owevents.ts submapViews), the overworld sprites' images at a map
-// and event progress (owsprites.ts owSpriteImages) and the save at an event progress (owprogress.ts progressSaves),
+// and event progress (owsprites.ts owSpriteImages), the steps of a map's animation (owanimsteps.ts) and the save at an
+// event progress (owprogress.ts progressSaves),
 // layer 1 as after an event without its layer 1 changes (owevents.ts layer1Without), the World check's part the same at
 // every progress shown (worldcheck.ts worldCheckJob; open: the open level with its exits as edited); whether the game
 // draws the editor's messages (messagedraw.ts messageRoutine); a level's game BG as its load as saved has it
@@ -120,6 +121,7 @@ export type LearnJob =
   | { kind: 'owLooks'; ids: number[] }
   | { kind: 'owSave'; progress: EventProgress }
   | { kind: 'owAnimated'; map: number; progress: EventProgress }
+  | { kind: 'owAnimSteps'; map: number; progress: EventProgress }
   | { kind: 'owL1Without'; event: number }
   | { kind: 'owExitEdges'; kinds: PathKind[]; shapes: PathShapes }
   | { kind: 'owWorldCheck'; kinds: PathKind[]; shapes: PathShapes; open?: { number: number; exits: ScreenExit[] } }
@@ -192,6 +194,7 @@ export const LEARN_KINDS: { [K in LearnJob['kind']]: { keep: Keep; picture: bool
   owLooks: { keep: 'memory', picture: true, boot: false },
   owSave: { keep: 'memory', picture: true, boot: false },
   owAnimated: { keep: 'memory', picture: true, boot: false },
+  owAnimSteps: { keep: 'memory', picture: true, boot: false },
   owL1Without: { keep: 'memory', picture: true, boot: false },
   owExitEdges: { keep: 'memory', picture: true, boot: false },
   owWorldCheck: { keep: 'memory', picture: true, boot: false },
@@ -218,7 +221,7 @@ export type LearnLane =
   | 'sprites' | 'variants' | 'bytes' | 'spritemem' | 'animated' | 'layer3' | 'l2' | 'lt' | 'uses' | 'arcs' | 'thumbs'
   | 'placement' | 'sizes' | 'prefab-suggest' | 'msgr' | 'level-png' | 'level-images' | 'gamebg' | 'prefab-places'
   | 'breakup' | 'slippery' | 'otab'
-  | 'ow' | 'owpick' | 'owpk1' | 'owsh' | 'owreach' | 'owrw' | 'owlw' | 'owmb' | 'owps' | 'owpn' | 'owpa' | 'owxe' | 'owwc' | 'owv' | 'owt' | 'owgc' | 'ows' | 'owbs' | 'owbt' | 'owl' | 'owan' | `owc${number}`;
+  | 'ow' | 'owpick' | 'owpk1' | 'owsh' | 'owreach' | 'owrw' | 'owlw' | 'owmb' | 'owps' | 'owpn' | 'owpa' | 'owxe' | 'owwc' | 'owv' | 'owt' | 'owgc' | 'ows' | 'owbs' | 'owbt' | 'owl' | 'owan' | 'owas' | `owc${number}`;
 
 // Who asks for the save at an event progress (owSave, App.progressSave) and the lane it is asked in (#388): a test play
 // (owps: it waits for its own), the event progress shown (owpn: a new one replaces the one asked before, clicking
@@ -228,8 +231,8 @@ export const SAVE_LANES: Record<SaveAsker, { lane: LearnLane; replace: boolean }
   test: { lane: 'owps', replace: false }, shown: { lane: 'owpn', replace: true }, every: { lane: 'owpa', replace: false },
 };
 // the overworld view's lanes of seconds of work, unlearned when the overworld is left (App.overworldLeft): the shown
-// progress's saves, the World check, the exits' arrows (not a test play's save)
-export const OW_LEFT_LANES: LearnLane[] = ['owpn', 'owpa', 'owwc', 'owxe'];
+// progress's saves, the World check, the exits' arrows, the map's animation (not a test play's save)
+export const OW_LEFT_LANES: LearnLane[] = ['owpn', 'owpa', 'owwc', 'owxe', 'owas'];
 
 // what the probe client shows as busy: the probes, the tasks, the learn jobs' lanes
 export type ProbeBusyKey = 'probe' | TaskType | LearnLane;

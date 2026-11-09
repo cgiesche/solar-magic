@@ -343,6 +343,8 @@ canvas.sheet-fill { width: 100%; height: auto; image-rendering: auto; }
 .ow-side { display: flex; flex-direction: column; flex: 1; min-height: 0; }
 .ow-pal-panel { flex: 1; min-height: 0; overflow-y: auto; scrollbar-gutter: stable; }
 .ow-side .props { max-height: 65%; }
+.ow-pal-panel[hidden] { display: none; }
+.ow-pal-panel[hidden] + .props { max-height: none; flex: 1 1 auto; border-top: none; } /* (a level tile selected: its properties alone, #421) */
 .ow-badge { position: absolute; left: 10px; top: 10px; padding: 3px 9px; border-radius: 10px; background: rgba(0,0,0,.7); color: #ffd27a; font-size: 12px; pointer-events: none; display: none; }
 .ow-badge .hint { color: #c8c8c8; }
 .ow-event-list .ow-ev-head { display: flex; gap: 4px; padding: 4px 6px; position: sticky; top: 0; background: var(--panel); z-index: 1; }
@@ -433,10 +435,6 @@ canvas.sheet-fill { width: 100%; height: auto; image-rendering: auto; }
 .ow-cpal-none { display: inline-block; width: 32px; text-align: center; font-family: monospace; opacity: .7; }
 .ln-input { flex: 1; min-width: 0; font-family: monospace; }
 .ln-input.bad { border-color: var(--warn, #e05050); }
-.ow-name-pop { position: absolute; z-index: 20; display: flex; flex-direction: column; gap: 4px; padding: 6px; background: var(--panel); border: 1px solid var(--border); border-radius: 4px; box-shadow: 0 4px 16px rgba(0, 0, 0, .5); }
-.ow-name-box { position: relative; }
-.ow-name-canvas { display: block; width: 320px; image-rendering: pixelated; border: 1px solid var(--border); }
-.ow-name-rest { display: flex; flex-direction: column; gap: 2px; }
 .ln-border { display: block; width: 100%; image-rendering: pixelated; border: 1px solid var(--border); }
 .level-item { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .level-item .lname { font-family: system-ui, sans-serif; font-size: 11px; color: var(--muted); }

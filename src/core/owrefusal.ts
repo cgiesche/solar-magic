@@ -52,9 +52,6 @@ export type OwRefusalData =
   | { kind: 'pieceSame' } // the new piece is the one to replace
   | { kind: 'pieceNoneInside' } // no piece lies wholly inside the selection
   | { kind: 'pieceNotFound'; selection: boolean } // the piece is not in the selection (on the map: false)
-  // ---- a level name typed (levelnames.ts typeNameChar) ----
-  | { kind: 'nameNoChar'; ch: string } // the font has no tile for ch
-  | { kind: 'nameFull'; max: number }
   // ---- the World check's fixes (worldcheck.ts) ----
   | { kind: 'deadEndNoStopTile' } // a dead end's stop tile: the overworld has none to put there
   | { kind: 'deadEndEventTile'; cell: number } // the tile Mario is stuck on is put there by an event
@@ -119,8 +116,6 @@ export function refusalDetails(r: OwRefusalData): string {
     case 'pieceSame': return 'The new piece is the one to replace.';
     case 'pieceNoneInside': return 'No piece lies wholly inside the selection (2x2 blocks on the 16-pixel grid).';
     case 'pieceNotFound': return `The piece is not ${r.selection ? 'in the selection' : 'on this map'}.`;
-    case 'nameNoChar': return `The level name font has no tile for “${r.ch}”.`;
-    case 'nameFull': return `A level name has ${r.max} tiles.`;
     case 'deadEndNoStopTile': return 'No layer 1 tile is a stop tile (the star and pipe tiles left out).';
     case 'deadEndEventTile': return `The tile at ${cellText(r.cell)} is an event's layer 1 change, not the map before events'.`;
     case 'customSpritesPerSubmap': return `Submap ${r.submap} has ${r.count} custom sprites, at most ${r.max}.`;

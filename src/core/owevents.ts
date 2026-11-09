@@ -31,7 +31,7 @@ import {
 } from './overworld.ts';
 import { RAM, getS16 } from './ram.ts';
 import { record, countReads } from './romdeps.ts';
-import { shownSecretExits } from './secretexits.ts';
+import { shownSecretExits, ownEventExits, type OwnEventExit } from './secretexits.ts';
 import { runJob, type Job } from './jobrunner.ts';
 import { isPassed, type EventProgress } from './eventset.ts';
 import { layer1AtEveryProgress, layer1AfterEvent } from './owcellhistory.ts';
@@ -388,8 +388,11 @@ export const exitEvent = (base: number, exit: number): number =>
   base === NO_EVENT ? (exit === 1 ? 0 : -1) : base + exit < OW_EVENTS ? base + exit : -1;
 
 // a level exit that runs an event: the translevel, the exit (0 normal, 1–3 the secret exits: exitEvent), the
-// layer 1 tile entering the level (l1Index: the first the translevel table gives it, levelTileLevels)
-export interface EventRunner { tl: number; exit: number; tile: number }
+// layer 1 tile entering the level (l1Index: the first the translevel table gives it, levelTileLevels); overworld: an
+// exit to the overworld with a base event of its own (secretexits.ts OwnEventExit) in a level played from the
+// translevel – its level and that base event (the event: exitEvent of it and the exit its action passes) – instead of
+// the level's own exit with the tile's base event
+export interface EventRunner { tl: number; exit: number; tile: number; overworld?: Pick<OwnEventExit, 'level' | 'base'> }
 // The level exits running each event, of the levels with a tile (the one rule every text naming an event by its
 // level exit goes through), the event an exit runs as exitEvent gives it (a level with "No event": its secret exit 1
 // runs 00): every level's normal exit; a secret exit where the ROM shows the level has it
@@ -402,6 +405,9 @@ export interface EventRunner { tl: number; exit: number; tile: number }
 // changes turn the cell into one – the clean game's six stars (translevels 4D 52 53 57 5B 5C) and the four revealed
 // ones with a base event (1E 30 48 55) run none of their base events (64 56 53 59 50 5C, 36 44 6D 5F, which change
 // nothing): A on a star takes Mario to another place (docs/research/star-tile-translevels.md).
+// An exit to the overworld with a base event of its own (#429, level.ts OverworldExit) runs that event + the exit its
+// action passes the level by – the exit's code sets $1DEA and $0DD5, the overworld's runs the event (levelheight.ts
+// OverworldExit) – from the translevel its level is played from: a runner after the level tiles' own exits.
 export function eventRunners(rom: Rom): Map<number, EventRunner[]> {
   const tls = readTranslevels(rom), out = new Map<number, EventRunner[]>(), shown = shownSecretExits(rom), starPipe = cellsBecoming(rom, isStarPipeTile);
   const tileOf = new Map<number, number>();
@@ -415,10 +421,21 @@ export function eventRunners(rom: Rom): Map<number, EventRunner[]> {
       if (e < 0 || (exit && !shown.get(tl)?.has(exit) && (exit > 1 || bases.has(e) || !does(e)))) continue;
       (out.get(e) ?? out.set(e, []).get(e)!).push({ tl, exit, tile });
     }
+    for (const { level, exit, base } of ownEventExits(rom).get(tl) ?? []) {
+      const e = exitEvent(base, exit);
+      if (e >= 0) (out.get(e) ?? out.set(e, []).get(e)!).push({ tl, exit, tile, overworld: { level, base } });
+    }
   }
-  // the normal exits first
-  for (const l of out.values()) l.sort((a, b) => a.exit - b.exit || a.tl - b.tl);
+  // the normal exits first, a level tile's own before an exit to the overworld
+  for (const l of out.values()) l.sort((a, b) => a.exit - b.exit || +!!a.overworld - +!!b.overworld || a.tl - b.tl);
   return out;
+}
+// Whether translevel r.tl is also passed by exit r.exit (opening its direction) running another event than e, runner r
+// of e: the level's own exit (the normal exit, a secret exit it shows) for an exit to the overworld with its own event,
+// such an exit with the same exit for the level's own exit
+export function exitPassedOtherwise(rom: Rom, r: EventRunner, e: number): boolean {
+  if (r.overworld) return (r.exit === 0 || !!shownSecretExits(rom).get(r.tl)?.has(r.exit)) && exitEvent(baseEvent(rom, r.tl), r.exit) !== e;
+  return (ownEventExits(rom).get(r.tl) ?? []).some((x) => x.exit === r.exit && exitEvent(x.base, x.exit) !== e);
 }
 // the cells (l1Index) that hold a layer 1 tile `test` takes at some event progress: on the map before events, the tile
 // the reveal list turns it into, an event's layer 1 change (a ROM whose events can't be read: those of the map and
@@ -449,7 +466,7 @@ export function exitChanges(rom: Rom, tl: number, d: EventData = readEvents(rom)
   const b = baseEvent(rom, tl), changes = eventChanges(rom, d), out: ExitChanges[] = [];
   for (let exit = 0; exit < 4; exit++) {
     const e = exitEvent(b, exit), r = runners.get(e)?.[0];
-    if (e < 0 || r?.tl !== tl || r.exit !== exit) continue;
+    if (e < 0 || r?.tl !== tl || r.exit !== exit || r.overworld) continue;
     out.push({ exit, ...changes(e) });
   }
   return out;
@@ -476,15 +493,23 @@ export function eventChanges(rom: Rom, d: EventData = readEvents(rom)): (e: numb
 const EXIT_SHORT = ['normal exit', 'secret exit 1', 'secret exit 2', 'secret exit 3'];
 const hex3 = (n: number) => n.toString(16).toUpperCase().padStart(3, '0');
 const hex2 = (n: number) => n.toString(16).toUpperCase().padStart(2, '0');
-// "Level 105 · secret exit 1", "Event 4A" for one no level exit on the map runs
+// a runner's exit named (exit: its words, "normal exit"): an exit to the overworld's "exit to overworld (normal exit)"
+// (every text naming an event's runner words it so)
+export const runnerExit = (r: Pick<EventRunner, 'overworld'>, exit: string): string => (r.overworld ? `exit to overworld (${exit})` : exit);
+// the level of a runner's exit: an exit to the overworld's own, else the translevel's
+export const runnerLevel = (r: Pick<EventRunner, 'tl' | 'overworld'>): number => r.overworld?.level ?? translevelToLevel(r.tl);
+// "Level 105 · secret exit 1", "Level 1C3 · exit to overworld (normal exit)" (its own level), "Event 4A" for one no
+// level exit on the map runs
 export function eventTitle(runners: Map<number, EventRunner[]>, e: number): string {
   const r = runners.get(e)?.[0];
-  return r ? `Level ${hex3(translevelToLevel(r.tl))} · ${EXIT_SHORT[r.exit]}` : `Event ${hex2(e)}`;
+  return r ? `Level ${hex3(runnerLevel(r))} · ${runnerExit(r, EXIT_SHORT[r.exit])}` : `Event ${hex2(e)}`;
 }
 
-// a level exit in the player's words: "Yoshi's Island 2 · secret exit" (name: the level's name by translevel)
-const EXIT_WORDS = ['normal exit', 'secret exit', 'secret exit 2', 'secret exit 3'];
-export const exitWords = (r: { tl: number; exit: number }, name: (tl: number) => string): string => `${name(r.tl)} · ${EXIT_WORDS[r.exit]}`;
+// a level exit in the player's words: "Yoshi's Island 2 · secret exit", "Yoshi's Island 2 · exit to overworld (secret
+// exit)" (name: the level's name by translevel)
+export const EXIT_WORDS = ['normal exit', 'secret exit', 'secret exit 2', 'secret exit 3'];
+export const exitWords = (r: Pick<EventRunner, 'tl' | 'exit' | 'overworld'>, name: (tl: number) => string): string =>
+  `${name(r.tl)} · ${runnerExit(r, EXIT_WORDS[r.exit])}`;
 // an event in the player's words: by the level exit running it (exitWords), one no level exit runs as "Event 4F (run
 // by no level exit)"
 export function eventWords(runners: Map<number, EventRunner[]>, e: number, name: (tl: number) => string): string {
