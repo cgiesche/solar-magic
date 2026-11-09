@@ -16,7 +16,8 @@ import { hasOwnContent } from './level.ts';
 import { hasMessages, clearMessages } from './messages.ts';
 import { levelName, hasLevelName, clearLevelName, levelNameRanges } from './levelnames.ts';
 import { submapPaletteRanges } from './submapgfx.ts';
-import { eventDataRanges, eventRunners } from './owevents.ts';
+import { eventDataRanges, eventRunners, runnerExit, runnerLevel, EXIT_WORDS } from './owevents.ts';
+import { hex3 } from './names.ts';
 import { teleportDataRanges } from './owteleport.ts';
 import { KOOPA_X, KOOPA_Y, KOOPAS } from './owlinks.ts';
 import { START, OW_SPRITES, OW_SPRITE_SLOTS, KOOPA_KID, KOOPA_KIDS, hasOwSpriteSlots, hasKoopaKidTable } from './owsprites.ts';
@@ -773,13 +774,17 @@ export function destroySettings(rom: Rom, l1: ArrayLike<number>, shown: ArrayLik
   };
 }
 
-// the overworld's events by the level exits that run them ("105 YOSHI'S ISLAND 1 – normal exit"), of the levels on
+// the overworld's events by the level exits that run them ("105 YOSHI'S ISLAND 1 – normal exit", an exit to the
+// overworld by its own level: "1C3 (from 105 YOSHI'S ISLAND 1) – exit to overworld (normal exit)"), of the levels on
 // the map (owevents.ts eventRunners): by the normal exits running one, else by the secret exits that do
 export function eventNames(rom: Rom): Map<number, string> {
   const out = new Map<number, string>();
   for (const [e, rs] of eventRunners(rom)) {
     const by = rs.some((r) => !r.exit) ? rs.filter((r) => !r.exit) : rs;
-    out.set(e, by.map((r) => `${translevelToLevel(r.tl).toString(16).toUpperCase().padStart(3, '0')} ${levelName(rom, r.tl)} – ${r.exit ? `secret exit${r.exit > 1 ? ` ${r.exit}` : ''}` : 'normal exit'}`).join(' · '));
+    out.set(e, by.map((r) => {
+      const level = runnerLevel(r), main = translevelToLevel(r.tl), name = levelName(rom, r.tl);
+      return `${hex3(level)} ${level === main ? name : `(from ${hex3(main)} ${name})`} – ${runnerExit(r, EXIT_WORDS[r.exit])}`;
+    }).join(' · '));
   }
   return out;
 }

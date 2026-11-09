@@ -2,10 +2,11 @@
 // a new file's – the level flags ($1EA2: passed, the directions open), the switch palaces pressed ($1F27) and the
 // count of events triggered ($1F2E) – learned by emulation, not by a rule: a new game is played on the overworld
 // emulator, and for each event in its number order the level whose exit runs it (owevents.ts eventRunners, the first
-// one: the normal exit before a secret one) is left with that exit, as the game leaves a level, so that the game's own
-// code sets the level's flags, runs the event and counts it. Two levels running the same event: only the one left is
-// passed (the game doesn't run an event twice). An event the game doesn't run so (no level runs it, the level's exit
-// runs another one) is set as the overworld view sets it (eventBits), counted by nothing.
+// one: the normal exit before a secret one; an exit to the overworld with a base event of its own sets that one) is
+// left with that exit, as the game leaves a level, so that the game's own code sets the level's flags, runs the event
+// and counts it. Two levels running the same event: only the one left is passed (the game doesn't run an event twice).
+// An event the game doesn't run so (no level runs it, the level's exit runs another one) is set as the overworld view
+// sets it (eventBits), counted by nothing.
 // The switch palaces are pressed in a level, not when it is left: Mario landing on a switch tile ($00F55E sets $1423
 // by the tile, $00EEAE presses its switch). Which tiles press which switch is learned by the block probe (each tile
 // once, in the tileset of a level placing it: BlockProber.probePress), which levels place them by loading the levels
@@ -185,11 +186,11 @@ function* learnSaves(loads: OverworldLoads): Generator<void, ProgressSave[]> {
   return out;
 
   // the level left with the runner's exit, as the level leaves it ($13BF its translevel, $1DEA its base event as its
-  // load sets them; the overworld's process 0 as from there, the exit in $0DD5, passed: $13CE and $1DE9), the overworld
-  // loaded after it
+  // load sets them – an exit to the overworld with a base event of its own sets that one, levelheight.ts OverworldExit;
+  // the overworld's process 0 as from there, the exit in $0DD5, passed: $13CE and $1DE9), the overworld loaded after it
   function* leave(r: EventRunner, e: number): Generator<void, boolean> {
     onTile(r);
-    w[RAM.translevel] = r.tl; w[RAM.owEvent] = baseEvent(rom, r.tl); w[RAM.owProcess] = 0;
+    w[RAM.translevel] = r.tl; w[RAM.owEvent] = r.overworld?.base ?? baseEvent(rom, r.tl); w[RAM.owProcess] = 0;
     w[RAM.levelExit] = r.exit + 1; w[RAM.midwayTouched] = 1; w[RAM.levelBeaten] = 1;
     w[RAM.gameMode] = GM.overworldReturn;
     return yield* back(e);
