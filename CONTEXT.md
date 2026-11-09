@@ -136,7 +136,7 @@ A screen exit with Lunar Magic's u flag: its own number (with the high bit) is t
 _Avoid_: LM exit, exit format 2
 
 **Exit to the overworld**:
-A secondary entrance that leads back to the overworld instead of into a level (Lunar Magic 3.00's): passing its level with the normal or the secret exit, or nothing, or ending the player's turn; optionally with another base event (the event of passing, + 1 for the secret exit) and teleporting Mario to a location of the overworld's star/pipe table (a star's or pipe's destination, or a location of its own). It belongs to a level, but is not one of its entrances.
+A secondary entrance that leads back to the overworld instead of into a level (Lunar Magic 3.00's): passing its level with the normal or the secret exit, or nothing, or ending the player's turn; optionally with another base event (the event of passing, + 1 for the secret exit) and teleporting Mario to a location of the overworld's star/pipe table (a star's or pipe's destination, or a location of its own). It belongs to a level, but is not one of its entrances. One with another base event that an exit of a level played from a level tile takes runs that event (+ the secret exit) from the level tile: the event is named by the exit's own level ("Level 105 · exit to overworld (normal exit)"), shown on that tile's submap, and the save at an event progress passes it by leaving through that exit; one no exit takes runs nothing.
 _Avoid_: overworld entrance (Mario leaves the level by it), warp
 
 **Camera start**:

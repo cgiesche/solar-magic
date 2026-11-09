@@ -9,7 +9,7 @@
 
 import type { Rom } from './rom.ts';
 import { OW_EVENTS, DIR_FLAGS, exitDirections, readL1, readDestroyList, destroyEffects, destroyedCells, type OverworldLoads } from './overworld.ts';
-import { eventChanges, eventRunners, exitChanges, readEvents, submapViewsJob, submapOf, type EventChanges, type EventRunner, type ExitChanges } from './owevents.ts';
+import { eventChanges, eventRunners, readEvents, submapViewsJob, submapOf, type EventChanges, type EventRunner } from './owevents.ts';
 import { progressSavesJob, progressSearches, progressInput, progressMapsFromEvents } from './owprogress.ts';
 import { inputWithout, reach, waysFrom, neighbor, type Reach, type Reached, type ReachInput } from './owreach.ts';
 import { ExitGraph } from './exitgraph.ts';
@@ -62,7 +62,7 @@ export function exitEdges(rom: Rom, at: (progress: number) => Reached, submapAt:
 
 // exitEdges a step per exit (a job's); passable: without the exit's event the events still passable (passableWithout)
 function* exitEdgeSteps(rom: Rom, at: (progress: number) => Reached, submapAt: (tile: number) => number, passable: boolean): Generator<void, ExitEdge[]> {
-  const out: ExitEdge[] = [], d = readEvents(rom), runners = eventRunners(rom), changes = new Map<number, ExitChanges[]>(), eventChange = eventChanges(rom, d);
+  const out: ExitEdge[] = [], d = readEvents(rom), runners = eventRunners(rom), eventChange = eventChanges(rom, d);
   const before = readL1(rom), effects = destroyEffects(rom), destroyed = new Set<number>();
   for (const x of readDestroyList(rom)) if (x.event < OW_EVENTS) for (const i of destroyedCells(effects, before, x.tile)) destroyed.add(i);
   const progress = new Map<number, Searched>();
@@ -75,10 +75,8 @@ function* exitEdgeSteps(rom: Rom, at: (progress: number) => Reached, submapAt: (
   const all = search(OW_EVENTS);
   yield; // (the search with every event passed a step, passableWithout's rounds the next)
   const without = passable ? passableWithout(rom, at, runners, eventChange, before) : null;
-  const changesNothing = (tl: number, exit: number) => {
-    const c = (changes.get(tl) ?? changes.set(tl, exitChanges(rom, tl, d, runners)).get(tl)!).find((x) => x.exit === exit);
-    return !c || (!c.l1.length && !c.l2.length);
-  };
+  // (the event's changes: the exit's own as exitChanges has them – the first runner's –, an exit to the overworld's too)
+  const changesNothing = (event: number) => { const c = eventChange(event); return !c.l1.length && !c.l2.length; };
   for (const [event, eventRuns] of [...runners].sort((a, b) => a[0] - b[0])) {
     const run = eventRuns[0];
     if (!run || event >= OW_EVENTS) continue;
@@ -98,7 +96,7 @@ function* exitEdgeSteps(rom: Rom, at: (progress: number) => Reached, submapAt: (
     add(post, search(event));
     add(all, searched(without ? without(event) : inputWithout(rom, all.inp, eventChange(event), eventRuns, before), destroyed));
     yield;
-    if (run.exit > 0 && !opens.length && changesNothing(run.tl, run.exit)) continue;
+    if (run.exit > 0 && !opens.length && changesNothing(event)) continue;
     out.push({ tl: run.tl, exit: run.exit, event, from: run.tile, reached: all.r.stops.has(run.tile) || post.r.stops.has(run.tile), opens });
   }
   return out;

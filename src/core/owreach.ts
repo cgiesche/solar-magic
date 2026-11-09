@@ -24,7 +24,7 @@
 
 import { Rom, snesToPc } from './rom.ts';
 import { isStarPipeTile, l1Index, l1XY, DIR_FLAGS, DIR_NAMES, exitDirections, translevelToLevel, MAX_TRANSLEVEL, initialFlags } from './overworld.ts';
-import { readEvents, eventRunners, exitChanges, eventTitle, type EventChanges, type EventRunner } from './owevents.ts';
+import { readEvents, eventRunners, exitChanges, eventTitle, exitPassedOtherwise, type EventChanges, type EventRunner } from './owevents.ts';
 import { hex2, hex3 } from './names.ts';
 import type { Severity } from './problems.ts';
 import { readTeleports, readExitPaths, starEntryAt, tileText, type OwTile } from './owteleport.ts';
@@ -339,13 +339,15 @@ export function reachInput(rom: Rom, l1: ArrayLike<number>, tls: ArrayLike<numbe
 
 // The input with every event passed but event e (`all`: the input with every event passed): e's layer 1 changes undone
 // (the tiles as on the map before events, `before`: readL1) and the way its levels' exits open closed in the level
-// flags (the direction of each exit running e – runners: eventRunners' entry of e – unless open from the start or
-// another exit of the level opens it too). `changes`: what e changes (owevents.ts eventChanges)
+// flags (the direction of each exit running e – runners: eventRunners' entry of e – unless open from the start, another
+// exit of the level opens it too, or the same exit passes the level running another event: the level's own exit and an
+// exit to the overworld with its own event, owevents.ts exitPassedOtherwise). `changes`: what e changes (eventChanges)
 export function inputWithout(rom: Rom, all: ReachInput, changes: EventChanges, runners: readonly EventRunner[], before: ArrayLike<number>): ReachInput {
   const l1 = Uint16Array.from(all.l1), flags = Uint8Array.from(all.flags);
   for (const i of changes.l1) l1[i] = before[i];
-  for (const { tl, exit } of runners) {
-    const dirs = exitDirections(rom, tl), d = dirs[exit];
+  for (const r of runners) {
+    const { tl, exit } = r, dirs = exitDirections(rom, tl), d = dirs[exit];
+    if (exitPassedOtherwise(rom, r, changes.event)) continue;
     if (!dirs.some((o, x) => x !== exit && o === d)) flags[tl] &= ~(DIR_FLAGS[d] & ~initialFlags(rom, tl));
   }
   return { ...all, l1, flags };
