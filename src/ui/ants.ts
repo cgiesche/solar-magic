@@ -77,7 +77,7 @@ export function drawAnts(ctx: CanvasRenderingContext2D, marks: readonly AntsMark
 }
 
 // ---------------- the ticker ----------------
-type AnyCanvas = HTMLCanvasElement | OffscreenCanvas;
+type AnyCanvas = HTMLCanvasElement; // (an overlay's)
 // (weakly: a sheet's canvas built anew lets the old one go)
 const repaints = new WeakMap<AnyCanvas, () => void>();
 const registered = new Set<WeakRef<AnyCanvas>>(); // (to repaint them all when the switch changes)
@@ -90,7 +90,6 @@ const doc = (): Document | undefined => (globalThis as { document?: Document }).
 const onScreen = new WeakMap<AnyCanvas, boolean>();
 const parked = new WeakSet<AnyCanvas>(); // off the screen when it was to be repainted: repainted when back on it
 let observer: IntersectionObserver | null | undefined;
-const offscreen = (c: AnyCanvas): c is OffscreenCanvas => typeof OffscreenCanvas !== 'undefined' && c instanceof OffscreenCanvas;
 function observe(c: AnyCanvas): void {
   if (observer === undefined) {
     const IO = (globalThis as { IntersectionObserver?: typeof IntersectionObserver }).IntersectionObserver;
@@ -104,7 +103,7 @@ function observe(c: AnyCanvas): void {
       }
     }) : null;
   }
-  if (observer && !offscreen(c)) observer.observe(c);
+  observer?.observe(c);
 }
 function visible(c: AnyCanvas): boolean {
   const e = c as HTMLCanvasElement & { checkVisibility?: () => boolean };
@@ -126,7 +125,7 @@ export function onAntsTick(canvas: AnyCanvas, repaint: () => void): () => void {
     repaints.delete(canvas);
     wanted.delete(canvas);
     parked.delete(canvas);
-    if (observer && !offscreen(canvas)) observer.unobserve(canvas);
+    observer?.unobserve(canvas);
   };
 }
 
@@ -164,6 +163,14 @@ function switched(): void {
 }
 animateAnts.onChange(switched);
 try { globalThis.matchMedia?.('(prefers-reduced-motion: reduce)').addEventListener('change', switched); } catch { /* none */ }
+// the devicePixelRatio changed (the browser's zoom, another screen): every overlay laid out anew – also where the
+// ResizeObserver can't tell (a sheet of a fixed CSS size, no device-pixel-content-box)
+function watchRatio(): void {
+  try {
+    globalThis.matchMedia?.(`(resolution: ${globalThis.devicePixelRatio || 1}dppx)`).addEventListener('change', () => { switched(); watchRatio(); }, { once: true });
+  } catch { /* none */ }
+}
+watchRatio();
 
 // ---------------- the overlay ----------------
 // A transparent canvas over a sheet canvas, the size of the sheet's box on the page in device pixels (following it by
@@ -221,7 +228,9 @@ export class AntsOverlay {
     const st = this.over.style;
     st.width = `${rc.width}px`;
     st.height = `${rc.height}px`;
-    st.transform = `translate(${rc.left - host.left}px, ${rc.top - host.top}px)`;
+    // (started on a whole device pixel, so the marks' pixels are the screen's even where the sheet's box is not)
+    const snap = (v: number) => Math.round(v * dpr) / dpr;
+    st.transform = `translate(${snap(rc.left) - host.left}px, ${snap(rc.top) - host.top}px)`;
     this.draw();
   }
   private draw(): void {

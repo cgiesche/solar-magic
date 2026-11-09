@@ -117,7 +117,7 @@ export class Map16Tab implements WsPanel {
   // all pages of 256 tiles in one list, each drawn once it scrolls into view
   private scroll = h('div', { class: 'mt-scroll' });
   private pages: HTMLCanvasElement[] = [];
-  private pageMarks: AntsOverlay[] = []; // (each page's selection and move target, running on its overlay)
+  private pageAnts: AntsOverlay[] = []; // (each page's selection and move target, running on its overlay)
   private heads: HTMLElement[] = [];
   private near = new Set<number>(); // pages in or near the view
   private dirty = new Set<number>(); // pages to draw once they come near the view
@@ -147,8 +147,8 @@ export class Map16Tab implements WsPanel {
   private gfxTitle = h('div', { class: 'panel-title' });
   private gfxLabels = h('div', { class: 'mt-gfx-labels' });
   private gfxCanvas = h('canvas', { class: 'mt-gfx-canvas' });
-  private gfxMarks = new AntsOverlay(this.gfxCanvas); // (the chosen 8x8 tiles, remap's marked ones, running)
-  private gfxScroll = h('div', { class: 'mt-gfx-scroll' }, h('div', { class: 'mt-gfx-wrap' }, this.gfxLabels, this.gfxMarks.root));
+  private gfxAnts = new AntsOverlay(this.gfxCanvas); // (the chosen 8x8 tiles, remap's marked ones, running)
+  private gfxScroll = h('div', { class: 'mt-gfx-scroll' }, h('div', { class: 'mt-gfx-wrap' }, this.gfxLabels, this.gfxAnts.root));
   private gfxCol = h('div', { class: 'mt-col mt-gfx-col' }, this.gfxTitle, this.gfxScroll);
   private remapping: Remapping | null = null;
   private moving: Moving | null = null;
@@ -474,7 +474,7 @@ export class Map16Tab implements WsPanel {
       const head = h('div', { class: 'picker-head' });
       this.pages.push(c);
       const marks = new AntsOverlay(c);
-      this.pageMarks.push(marks);
+      this.pageAnts.push(marks);
       this.heads.push(head);
       this.dirty.add(p);
       observer.observe(c);
@@ -542,7 +542,7 @@ export class Map16Tab implements WsPanel {
     const row = (this.sel >> 4) - p * 16;
     const to = this.moving?.to ?? -1, toRow = (to >> 4) - p * 16;
     const box = (t: number, r: number, color: string): AntsMark => ({ x: M + (t & 15) * 16 * Z, y: r * 16 * Z, w: this.selW * 16 * Z, h: this.selH * 16 * Z, color });
-    this.pageMarks[p].set([
+    this.pageAnts[p].set([
       ...(row < 16 && row + this.selH > 0 ? [box(this.sel, row, '#4cc2ff')] : []),
       ...(to >= 0 && toRow < 16 && toRow + this.selH > 0 ? [box(to, toRow, '#ffb000')] : []),
     ]);
@@ -1396,7 +1396,7 @@ export class Map16Tab implements WsPanel {
     const from = this.remapping ? this.visualFrom : null, to = from && this.visualTo;
     c.style.width = `${W * z}px`; c.style.height = `${Hh * z}px`;
     const box = (x: number, y: number, w: number, hh: number, color: string): AntsMark => ({ x: x * 8 * this.gzPx, y: y * 8 * this.gzPx, w: w * 8 * this.gzPx, h: hh * 8 * this.gzPx, color });
-    this.gfxMarks.set([
+    this.gfxAnts.set([
       ...(r ? [box(r.x, r.y, r.w, r.h, '#4cc2ff')] : []),
       ...(from ? [box(from.x, from.y, from.w, from.h, '#4cc2ff')] : []),
       ...(from && to ? [box(to.x, to.y, from.w, from.h, REMAP_TO)] : []),

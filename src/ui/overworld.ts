@@ -2390,7 +2390,6 @@ export function drawPathMark(ctx: CanvasRenderingContext2D, k: PathKind, px: num
 const KIND_BORDER = Object.fromEntries(Object.entries(KIND_RGB).map(([k, [c]]) => [k, `rgb(${c})`])) as Partial<Record<PathKind, string>>;
 // the background of transparent pixels in the paint sheet: a checkerboard of 4x4 pixel squares (layer 2 shows there)
 const checker = (x: number, y: number): number => (((x >> 2) ^ (y >> 2)) & 1 ? 0xff2a2a2a : 0xff1c1c1c);
-// the brush's rectangle r (cells of `cell` pixels) outlined in a sheet, an eighth of a cell wide
 // piece k's cell in the "Pieces on this map" sheet
 const pieceBox = (k: number) => ({ x: k % PIECE_COLS, y: Math.floor(k / PIECE_COLS), w: 1, h: 1 });
 // a sheet's brush or pick (cells of `cell` pixels) as a running outline on its overlay (ants.ts), in sheet pixels
