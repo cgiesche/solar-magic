@@ -395,6 +395,10 @@ export function sheetCells(first: number, count: number): number[] {
 
 // An image of the animation: the level's VRAM and CGRAM at one of its steps
 export interface AnimStep { vram: Uint8Array; cgram: Uint8Array }
+// the animation's rhythm, the level's and the overworld's (App.startAnimation, owanimsteps.ts): the steps shown a
+// second and the most steps emulated
+export const ANIM_STEPS_PER_SECOND = 7.5;
+export const MAX_ANIM_STEPS = 64;
 
 // Pixels showing the level's Map16 tiles (a picker's page, an object's thumbnail): the pixels (w wide), where each
 // tile is and which (cells: x, y of its top left pixel and its number, one after the other), FG or BG tiles,

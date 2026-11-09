@@ -8,12 +8,10 @@
 
 import type { App } from './app.ts';
 import type { AnimSource } from './pickeranim.ts';
-import type { AnimStep, PictureAnimation } from '../core/render.ts';
+import { ANIM_STEPS_PER_SECOND, type AnimStep, type PictureAnimation } from '../core/render.ts';
 import type { RomRead } from '../core/exanim.ts';
 import type { OwRender } from '../core/overworld.ts';
 import { OwTileAnimation } from '../core/owanimsteps.ts';
-
-export const STEPS_PER_SECOND = 7.5; // the level animation's (App.startAnimation)
 
 const STILL: PictureAnimation = { redraw: () => false };
 
@@ -71,7 +69,7 @@ export class OwAnimPlayer implements AnimSource {
     // (nothing animates: the still map)
     const anim = this.anim;
     if (!anim || !steps.some((s) => anim.stepChanges(s))) { this.stop(); return; }
-    if (!this.timer) this.timer = window.setInterval(() => this.tick(), 1000 / STEPS_PER_SECOND);
+    if (!this.timer) this.timer = window.setInterval(() => this.tick(), 1000 / ANIM_STEPS_PER_SECOND);
   }
 
   private tick(): void {
@@ -95,7 +93,7 @@ export class OwAnimPlayer implements AnimSource {
     return this.timer && this.phase >= 0 ? this.steps?.[this.phase] ?? null : null;
   }
   // what draws the steps on pixels drawn with the load the view draws with
-  tileAnimation(): OwTileAnimation | PictureAnimation {
+  tileAnimation(): PictureAnimation {
     return this.anim ?? STILL;
   }
   // the steps' drawing for load r (null: the steps are drawn for another one)

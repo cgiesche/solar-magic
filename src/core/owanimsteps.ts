@@ -8,11 +8,10 @@
 // animates too and the steps hold while only the tilemaps change (owTilemapRanges left out of what they read).
 
 import { loadKey, owCharBase, owTileCaches, owTileWords, l1Index, l2Index, owTilemapRanges, type OverworldLoads, type OwRender, type OwTileCaches } from './overworld.ts';
-import { blit8, clearCell, drawMap16, stepChanges, type AnimStep, type PictureAnimation, type TilePixels } from './render.ts';
+import { blit8, clearCell, drawMap16, stepChanges, MAX_ANIM_STEPS, type AnimStep, type PictureAnimation, type TilePixels } from './render.ts';
 import type { RomRead } from './exanim.ts';
 
 export const ANIM_STEP_FRAMES = 8; // the frames of a step: the level animation's (App.startAnimation)
-export const MAX_ANIM_STEPS = 64; // the steps emulated (the level's at most too)
 const BG_COLORS = 128; // the colors layers 1 and 2 draw with: 8 palettes of 16 (4bpp)
 const CHAR_BYTES = 0x400 * 32; // a layer's 8x8 tiles (4bpp, tile numbers 000–3FF)
 
@@ -40,14 +39,15 @@ export function animPeriod(keys: readonly number[]): number {
 
 // The animation's steps on map `map` at event progress `progress`, from `loads` (the learner's own): the console after
 // the load run on MAX_ANIM_STEPS steps of ANIM_STEP_FRAMES frames, the steps until they repeat (animPeriod; fewer when
-// the game fails). A step per step of the job, each yielding its progress ("Animations n/m"); kept for the map and
+// the game fails). A step per step of the job, each saying the step it makes ("Animations n/m": the first after the
+// load, m the steps emulated – how many repeat is known once all are); kept for the map and
 // progress while the ROM bytes they read are unchanged, the tilemaps' left out (they show no 8x8 tile or color)
 export function* owAnimStepsJob(loads: OverworldLoads, map: number, progress: number): Generator<string | void, AnimStep[]> {
   return yield* loads.deriveSteps<AnimStep[], string | void>('owAnimSteps', function* () {
     loads.restore(map, progress);
     const r = loads.get(map, progress), s = loads.emu.snes, steps: AnimStep[] = [], keys: number[] = [];
     for (let i = 0; i < MAX_ANIM_STEPS; i++) {
-      if (i) yield `Animations ${i + 1}/${MAX_ANIM_STEPS}`;
+      yield `Animations ${i + 1}/${MAX_ANIM_STEPS}`;
       try {
         for (let f = 0; f < ANIM_STEP_FRAMES; f++) s.runFrame();
       } catch (e) { console.error(e); break; }

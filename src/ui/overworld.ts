@@ -393,21 +393,22 @@ export class OverworldView {
     this.check.update();
   }
 
-  // the layers on their canvases, as the animation's step shown has them (the still map when none is): whether they
-  // changed (always: they are put anyway)
-  private shownStep: unknown = null;
+  // the layers on their canvases, as the animation's step shown has them (the still map when none is): whether one
+  // changed (always: both are put anyway); a layer that shows as before is not put again
   private putLayers(always = false): boolean {
     const p = this.layerPx;
     if (!p) return false;
     const step = this.anim.animStep(), anim = step && this.anim.animationFor(p.r);
-    if (!always && step === this.shownStep) return false;
-    this.shownStep = step;
-    const l1 = anim && step ? anim.stepLayer(p.l1, 1, this.region, this.shown.l1, step) : null;
-    const l2 = anim && step ? anim.stepLayer(p.l2, 2, this.region, this.shown.l2, step) : null;
-    putImage(this.l1Canvas, l1 ?? p.l1, 512, 0);
-    putImage(this.l2Canvas, l2 ?? p.l2);
-    return true;
+    const l1 = (anim && step && anim.stepLayer(p.l1, 1, this.region, this.shown.l1, step)) || p.l1;
+    const l2 = (anim && step && anim.stepLayer(p.l2, 2, this.region, this.shown.l2, step)) || p.l2;
+    const was = this.layersPut;
+    this.layersPut = { l1, l2 };
+    const put1 = always || was?.l1 !== l1, put2 = always || was?.l2 !== l2;
+    if (put1) putImage(this.l1Canvas, l1, 512, 0);
+    if (put2) putImage(this.l2Canvas, l2);
+    return put1 || put2;
   }
+  private layersPut: { l1: Uint32Array; l2: Uint32Array } | null = null; // what putLayers put last
 
   // the map image from its layers, each at the strength the mode, Q and the view switches give it (layerStrengths)
   private composeMap(): void {

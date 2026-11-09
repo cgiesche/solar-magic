@@ -12,8 +12,8 @@
 // node tools/testowanimsteps.ts
 import { Rom } from '../src/core/rom.ts';
 import { OverworldEmulator, OverworldLoads, owCharBase, owTileCaches, owTileWords, drawOwMap, readL2, writeL2, readL1, writeL1, l1Index, l2Index, type OwRender } from '../src/core/overworld.ts';
-import { owAnimStepsJob, animPeriod, OwTileAnimation, ANIM_STEP_FRAMES, MAX_ANIM_STEPS } from '../src/core/owanimsteps.ts';
-import { drawMap16, blit8, type AnimStep, type TilePixels } from '../src/core/render.ts';
+import { owAnimStepsJob, animPeriod, OwTileAnimation, ANIM_STEP_FRAMES } from '../src/core/owanimsteps.ts';
+import { drawMap16, blit8, MAX_ANIM_STEPS, type AnimStep, type TilePixels } from '../src/core/render.ts';
 import { runJob } from '../src/core/jobrunner.ts';
 import { ProbeHost } from '../src/core/probehost.ts';
 import { ProbeClient } from '../src/core/probeclient.ts';
@@ -61,7 +61,7 @@ const yi = (() => {
 })();
 const r1 = loads.get(1, 0);
 check(yi.length > 1 && yi.length <= MAX_ANIM_STEPS, `Yoshi's Island: ${yi.length} steps`);
-check(labels.length === MAX_ANIM_STEPS - 1 && labels[0] === `Animations 2/${MAX_ANIM_STEPS}` && labels.at(-1) === `Animations ${MAX_ANIM_STEPS}/${MAX_ANIM_STEPS}`,
+check(labels.length === MAX_ANIM_STEPS && labels[0] === `Animations 1/${MAX_ANIM_STEPS}` && labels.at(-1) === `Animations ${MAX_ANIM_STEPS}/${MAX_ANIM_STEPS}`,
   `the job's progress: ${labels[0]} … ${labels.at(-1)}`);
 {
   const p = yi.length, ran = runSteps(1, 2 * p + 1);

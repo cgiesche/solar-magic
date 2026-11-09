@@ -81,7 +81,8 @@ export type ProbeReply = ProbeDone | KindsDone | KindsShown | ScanDone | CameraD
 // layer2Pointer: the level's layer 2 objects as the probe loads take them); the overworld's map at an event progress
 // (overworld.ts overworldMapJob), it with the event triggers of its animations switched and the colors the game keeps
 // setting there (owanimview.ts), the submaps' views (owevents.ts submapViews), the overworld sprites' images at a map
-// and event progress (owsprites.ts owSpriteImages), the steps of a map's animation (owanimsteps.ts) and the save at an event progress (owprogress.ts progressSaves),
+// and event progress (owsprites.ts owSpriteImages), the steps of a map's animation (owanimsteps.ts) and the save at an
+// event progress (owprogress.ts progressSaves),
 // layer 1 as after an event without its layer 1 changes (owevents.ts layer1Without), the World check's part the same at
 // every progress shown (worldcheck.ts worldCheckJob; open: the open level with its exits as edited); whether the game
 // draws the editor's messages (messagedraw.ts messageRoutine); a level's game BG as its load as saved has it

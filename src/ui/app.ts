@@ -17,7 +17,7 @@ import { objectTableKey, objectName, objectNameKey, setObjectName, namedPerTable
 import { layerBoxes, boxAt } from '../core/objboxes.ts';
 import { objectUserNames } from '../core/usernames.ts';
 import { loadPixiProject, customSpriteList, type CustomSprite } from '../core/pixi.ts';
-import { renderLevel, type LevelImages, composite, animatedPixels, TileAnimation, type AnimStep } from '../core/render.ts';
+import { renderLevel, type LevelImages, composite, animatedPixels, TileAnimation, ANIM_STEPS_PER_SECOND, MAX_ANIM_STEPS, type AnimStep } from '../core/render.ts';
 import type { SpriteImage } from '../core/spritegfx.ts';
 import { usedSpriteMemory, spriteMemSpec, lostSprites, missingSprites, type SpriteMemResult } from '../core/spritemem.ts';
 import { DM16_EXT, levelGfx, levelExtGfx, customPalette, levelMusic } from '../core/patches.ts';
@@ -423,7 +423,7 @@ export class App {
       // the background (startAnimation)
       const anim = this.view.show.anim && r.ok;
       this.anim.snaps = [];
-      this.anim.count = anim ? exanimPeriod([readLevelList(this.rom, lv.number), readGlobalList(this.rom)], 64, 8) : 0;
+      this.anim.count = anim ? exanimPeriod([readLevelList(this.rom, lv.number), readGlobalList(this.rom)], MAX_ANIM_STEPS, 8) : 0;
       this.anim.next = anim ? this.emu.animationSteps() : null;
       this.render = r;
       this.images = renderLevel(this.rom, r, lv.header.mode, lv.header.screens, levelRows(lv.secondary));
@@ -486,7 +486,7 @@ export class App {
       }
       if (i < a.count) { this.setBusy('anim', `Animations ${i + 1}/${a.count}`); this.scheduler.later('anim', step); return; }
       this.setBusy('anim', null);
-      if (a.frames.length && !a.timer) a.timer = window.setInterval(() => this.animTick(), 1000 / 7.5);
+      if (a.frames.length && !a.timer) a.timer = window.setInterval(() => this.animTick(), 1000 / ANIM_STEPS_PER_SECOND);
     };
     this.setBusy('anim', `Animations 1/${a.count}`);
     this.scheduler.later('anim', step);
@@ -1618,10 +1618,11 @@ export class App {
     this.emit('animation');
   }
 
-  // changes the view's triggers (and test play's); the level loads anew with them, its animation shown
+  // changes the view's triggers (and test play's); the level loads anew with them, its animation shown (View →
+  // "Animation" switched on, the overworld's too)
   setTriggers(fn: (v: TriggerView) => void): void {
     fn(this.view.exTriggers);
-    this.view.show.anim = true;
+    if (!this.view.show.anim) { this.setAnimation(true); return; }
     this.refresh();
   }
 
