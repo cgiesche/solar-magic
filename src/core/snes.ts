@@ -22,6 +22,9 @@ export interface MemHook {
   onWramWrite?(addr: number, value: number): void;
   onWramRead?(addr: number): void; // analysis tools and test play's slot meter (slotwatch.ts)
   onOverlayRead?(offset: number): void;
+  onVramWrite?(addr: number): void; // a VRAM byte written (through its port, a DMA's too)
+  onCgramWrite?(addr: number): void; // a CGRAM byte written
+  onVideoRead?(): void; // VRAM, CGRAM or OAM read through its port
 }
 
 // several hooks as one, each called in turn
@@ -30,7 +33,8 @@ export function joinHooks(...hooks: MemHook[]): MemHook {
     const fs = hooks.map((h) => h[k]?.bind(h)).filter((f) => !!f) as ((...a: number[]) => void)[];
     return fs.length ? (...a: number[]) => { for (const f of fs) f(...a); } : undefined;
   };
-  return { onRomRead: all('onRomRead'), onWramWrite: all('onWramWrite'), onWramRead: all('onWramRead'), onOverlayRead: all('onOverlayRead') };
+  return { onRomRead: all('onRomRead'), onWramWrite: all('onWramWrite'), onWramRead: all('onWramRead'), onOverlayRead: all('onOverlayRead'),
+    onVramWrite: all('onVramWrite'), onCgramWrite: all('onCgramWrite'), onVideoRead: all('onVideoRead') };
 }
 
 export interface SnesState {
@@ -275,18 +279,21 @@ export class Snes implements Bus {
       case 0x2135: { const r = (this.m7a * ((this.m7b << 24) >> 24)) & 0xffffff; return (r >> 8) & 0xff; }
       case 0x2136: { const r = (this.m7a * ((this.m7b << 24) >> 24)) & 0xffffff; return (r >> 16) & 0xff; }
       case 0x2137: return this.openBus;
-      case 0x2138: { const v = this.oam[this.oamaddr % 0x220]; this.oamaddr = (this.oamaddr + 1) % 0x220; return v; }
+      case 0x2138: { this.hook?.onVideoRead?.(); const v = this.oam[this.oamaddr % 0x220]; this.oamaddr = (this.oamaddr + 1) % 0x220; return v; }
       case 0x2139: {
+        this.hook?.onVideoRead?.();
         const v = this.vreadLatch & 0xff;
         if (!(this.vmain & 0x80)) this.vramPrefetchAdvance();
         return v;
       }
       case 0x213a: {
+        this.hook?.onVideoRead?.();
         const v = (this.vreadLatch >> 8) & 0xff;
         if (this.vmain & 0x80) this.vramPrefetchAdvance();
         return v;
       }
       case 0x213b: {
+        this.hook?.onVideoRead?.();
         let v: number;
         if (!this.cgReadHigh) v = this.cgram[(this.cgaddr * 2) & 0x1ff];
         else { v = this.cgram[(this.cgaddr * 2 + 1) & 0x1ff]; this.cgaddr = (this.cgaddr + 1) & 0xff; }
@@ -296,7 +303,7 @@ export class Snes implements Bus {
       case 0x213c: case 0x213d: return 0;
       case 0x213e: return 0x01;
       case 0x213f: return 0x03;
-      case 0x2180: { const v = this.wram[this.wmaddr]; this.wmaddr = (this.wmaddr + 1) & 0x1ffff; return v; }
+      case 0x2180: { this.hook?.onWramRead?.(this.wmaddr); const v = this.wram[this.wmaddr]; this.wmaddr = (this.wmaddr + 1) & 0x1ffff; return v; }
       case 0x4016: case 0x4017: return 0;
       case 0x4210: { const v = (this.nmiFlag ? 0x80 : 0) | 0x02; this.nmiFlag = false; return v; }
       case 0x4211: { const v = this.irqFlag ? 0x80 : 0; this.irqFlag = false; this.cpu.irqLine = false; return v; }
@@ -355,12 +362,14 @@ export class Snes implements Bus {
       case 0x2118: {
         const m = this.vramAddrMapped() & 0x7fff;
         this.vram[m * 2] = v;
+        this.hook?.onVramWrite?.(m * 2);
         if (!(this.vmain & 0x80)) this.vaddr = (this.vaddr + this.vramStep()) & 0xffff;
         return;
       }
       case 0x2119: {
         const m = this.vramAddrMapped() & 0x7fff;
         this.vram[m * 2 + 1] = v;
+        this.hook?.onVramWrite?.(m * 2 + 1);
         if (this.vmain & 0x80) this.vaddr = (this.vaddr + this.vramStep()) & 0xffff;
         return;
       }
@@ -373,6 +382,8 @@ export class Snes implements Bus {
           if (this.taintOn) { this.cgTaint[this.cgaddr * 2] = this.cgLatchTaint; this.cgTaint[this.cgaddr * 2 + 1] = this.wtag; }
           this.cgram[this.cgaddr * 2] = this.cgLatch;
           this.cgram[this.cgaddr * 2 + 1] = v & 0x7f;
+          this.hook?.onCgramWrite?.(this.cgaddr * 2);
+          this.hook?.onCgramWrite?.(this.cgaddr * 2 + 1);
           this.cgaddr = (this.cgaddr + 1) & 0xff;
           this.cgLatch = -1;
         }

@@ -6,6 +6,7 @@ import { ViewSettings } from '../core/viewsettings.ts';
 import { Rom } from '../core/rom.ts';
 import { OBJ_2D } from '../core/obj2d.ts';
 import { LevelEmulator, type LevelRender, type LevelOverride, type Animated } from '../core/levelemu.ts';
+import { LevelAnimSteps } from '../core/levelanimsteps.ts';
 import {
   type Level, type LevelObject, type LevelSprite, type ScreenExit, loadLevel, spriteLoadOrder, serializeSprites, serializeLevelSprites, spriteId,
   isL1Vertical, hasLayer2Objects, hasObjects, SEC_HDR,
@@ -227,10 +228,12 @@ export class App {
   private cacheTimer = 0;
   private closed = false; // project closed: nothing is written to the browser any more
   reveal = { x: 0, y: 0 }; // pixel the level view scrolls to on 'reveal'
-  // tile/palette animation: frames stored as pixel diffs against the static composite
-  // snaps: the images emulated so far, of count; next emulates the next one (null when there are no more)
-  anim = { gen: 0, snaps: [] as { vram: Uint8Array; cgram: Uint8Array }[], count: 0, next: null as (() => { vram: Uint8Array; cgram: Uint8Array } | null) | null, base: null as Uint32Array | null,
-    frames: [] as { idx: Uint32Array; val: Uint32Array }[], phase: -1, timer: 0 };
+  // tile/palette animation: frames stored as pixel diffs against the static composite (base), one per step
+  // steps: the steps of the render (null: no animation), emulated in the background, carried over to a new render
+  // while what they read is unchanged (levelanimsteps.ts); phase: the step shown (-1 none yet), kept while the steps
+  // are; ready: the frames are those of the composite shown
+  anim = { gen: 0, steps: null as LevelAnimSteps | null, base: null as Uint32Array | null,
+    frames: [] as { idx: Uint32Array; val: Uint32Array }[], phase: -1, timer: 0, ready: false };
 
   constructor(rom: Rom, name: string) {
     this.rom = rom;
@@ -405,14 +408,17 @@ export class App {
 
   // what the render was made from: its inputs, the ROM generation and the ROM bytes it read
   private rendered: (Recorded<void> & { key: string }) | null = null;
+  private composedGhost = -1; // the ghosting the composite was made with (compose: it follows the edit mode)
 
   // the level emulated and drawn anew – unless its inputs and the ROM bytes the last render read are unchanged
-  // (a ROM edit elsewhere: the overworld, another level's data)
+  // (a ROM edit elsewhere: the overworld, another level's data). The edit mode is no input: only the composite's
+  // ghosting depends on it (compose), made anew when that changed
   refresh(): void {
     const lv = this.level, ov = this.buildOverrides();
-    const key = inputHash({ level: lv.number, ov, header: lv.header, secondary: lv.secondary, show: this.view.show, mode: this.model.mode });
+    const key = inputHash({ level: lv.number, ov, header: lv.header, secondary: lv.secondary, show: this.view.show });
     const was = this.rendered;
     if (was?.key === key && holds(this.rom, was)) {
+      if (this.composedGhost !== this.ghost()) this.recomposite();
       this.scheduleScan();
       this.updateGameViewCamera(ov);
       return;
@@ -421,18 +427,21 @@ export class App {
       const r = this.emu.load(lv.number, ov);
       this.renderError = r.ok ? null : r.error ?? 'Error';
       // as many steps as the level's own animations take to repeat (the game's repeat after 8), emulated in
-      // the background (startAnimation)
-      const anim = this.view.show.anim && r.ok;
-      this.anim.snaps = [];
-      this.anim.count = anim ? exanimPeriod([readLevelList(this.rom, lv.number), readGlobalList(this.rom)], MAX_ANIM_STEPS, 8) : 0;
-      this.anim.next = anim ? this.emu.animationSteps() : null;
+      // the background (startAnimation) – or the last render's, carried over while nothing they read changed (an
+      // object moved: no emulation, the phase kept)
+      const count = this.view.show.anim && r.ok ? exanimPeriod([readLevelList(this.rom, lv.number), readGlobalList(this.rom)], MAX_ANIM_STEPS, 8) : 0;
+      const kept = count ? this.anim.steps?.carry(this.emu, count) ?? null : null;
+      if (!kept) this.anim.phase = -1;
+      this.anim.steps = count ? kept ?? new LevelAnimSteps(this.emu, count) : null;
       this.render = r;
       this.images = renderLevel(this.rom, r, lv.header.mode, lv.header.screens, levelRows(lv.secondary));
     }) };
+    if (this.anim.steps) this.rendered.reads.add(this.anim.steps.reads); // (the steps carried over)
     // picker thumbnails are transparent: shown on the level's backdrop as in the game
     const c = this.images.backdrop;
     document.documentElement.style.setProperty('--level-backdrop', `rgb(${c & 0xff},${(c >> 8) & 0xff},${(c >> 16) & 0xff})`);
     this.compositeImg = this.compose();
+    this.composedGhost = this.ghost();
     this.query = new RenderQuery(this.render, this.images.geom1, this.images.geom2);
     this.startAnimation();
     this.emit('render');
@@ -442,54 +451,72 @@ export class App {
 
   recomposite(): void {
     this.compositeImg = this.compose();
+    this.composedGhost = this.ghost();
     this.startAnimation();
     this.emit('render');
   }
 
   // the object layer not being edited is ghosted (only in levels with two object layers), editing layer 3 both
   compose(images = this.images): Uint32Array {
-    const ghost = !this.view.show.ghost ? 0 : this.model.mode === 'l3' ? 3 : this.model.mode === 'bg' ? 1 : this.level.layer2Objects ? (this.model.mode === 'l1' ? 2 : this.model.mode === 'l2' ? 1 : 0) : 0;
-    return composite(images, this.view.show.layer1, this.view.show.layer2, ghost, this.view.show.layer3);
+    return composite(images, this.view.show.layer1, this.view.show.layer2, this.ghost(), this.view.show.layer3);
+  }
+  private ghost(): number {
+    const m = this.model.mode;
+    return !this.view.show.ghost ? 0 : m === 'l3' ? 3 : m === 'bg' ? 1 : this.level.layer2Objects ? (m === 'l1' ? 2 : m === 'l2' ? 1 : 0) : 0;
   }
 
-  // emulates and renders the animation snapshots in the background, then cycles them (8 game frames each)
+  // the animation's frames for the composite shown, built in the background from its steps (those not yet emulated
+  // emulated then: "Animations i/n"), then cycled (8 game frames each) – on from the step shown when the steps are
+  // the same as before (a recomposite, an edit the steps carry over): its frame built first and shown at once, the
+  // level as the pickers (animStep) while the others are built
   startAnimation(): void {
-    const a = this.anim;
+    const a = this.anim, steps = a.steps;
     const gen = ++a.gen;
     a.frames = [];
-    a.phase = -1;
+    a.ready = false;
     a.base = this.compositeImg;
-    if (!a.count) { this.stopAnimation(); this.setBusy('anim', null); return; }
-    const base = a.base, snaps = a.snaps, lv = this.level;
+    if (!steps?.count) { a.phase = -1; this.stopAnimation(); this.setBusy('anim', null); return; }
+    const base = a.base, lv = this.level, made = steps.steps;
+    const busy = () => this.setBusy('anim', steps.done ? null : `Animations ${made.length + 1}/${steps.count}`);
+    // (a step is shown only once all are made: phase >= 0 means all are)
+    const first = a.phase >= 0 && made.length ? a.phase % made.length : 0;
+    if (a.phase >= 0) a.phase = made.length ? first : -1;
     let i = 0;
     const step = () => {
       if (gen !== a.gen) return;
-      if (i === snaps.length) {
-        // the next image emulated, what it reads counting for the render (refresh)
-        const { result, reads } = this.emu.recordAll(() => a.next?.() ?? null);
-        this.rendered?.reads.add(reads);
-        if (result) snaps.push(result);
-        else a.count = snaps.length;
+      if (i === made.length && !steps.done) {
+        // the next step emulated, what it reads counting for the render (refresh)
+        steps.next();
+        this.rendered?.reads.add(steps.reads);
       }
-      if (i < a.count) {
+      if (i < made.length) {
+        const n = (first + i) % made.length, s = made[n];
         // only the cells the step changes drawn anew; all of them when it changes every cell
-        const changed = animatedPixels(this.rom, this.render, this.images, base, snaps[i].vram, snaps[i].cgram, (cell) => this.compose(cell));
-        if (changed) a.frames.push(changed);
-        else {
-          const li = renderLevel(this.rom, { ...this.render, vram: snaps[i].vram, cgram: snaps[i].cgram }, lv.header.mode, lv.header.screens, levelRows(lv.secondary));
+        let f = animatedPixels(this.rom, this.render, this.images, base, s.vram, s.cgram, (cell) => this.compose(cell));
+        if (!f) {
+          const li = renderLevel(this.rom, { ...this.render, vram: s.vram, cgram: s.cgram }, lv.header.mode, lv.header.screens, levelRows(lv.secondary));
           const img = this.compose(li);
           const idx: number[] = [];
           for (let k = 0; k < img.length; k++) if (img[k] !== base[k]) idx.push(k);
           const ix = Uint32Array.from(idx);
-          a.frames.push({ idx: ix, val: ix.map((k) => img[k]) });
+          f = { idx: ix, val: ix.map((k) => img[k]) };
+        }
+        a.frames[n] = f;
+        if (n === a.phase) {
+          const img = base.slice();
+          for (let j = 0; j < f.idx.length; j++) img[f.idx[j]] = f.val[j];
+          this.compositeImg = img;
+          this.emit('anim-frame');
         }
         i++;
       }
-      if (i < a.count) { this.setBusy('anim', `Animations ${i + 1}/${a.count}`); this.scheduler.later('anim', step); return; }
-      this.setBusy('anim', null);
-      if (a.frames.length && !a.timer) a.timer = window.setInterval(() => this.animTick(), 1000 / ANIM_STEPS_PER_SECOND);
+      busy();
+      if (i < made.length || !steps.done) { this.scheduler.later('anim', step); return; }
+      a.ready = true;
+      if (!a.frames.length) { a.phase = -1; this.stopAnimation(); return; }
+      if (!a.timer) a.timer = window.setInterval(() => this.animTick(), 1000 / ANIM_STEPS_PER_SECOND);
     };
-    this.setBusy('anim', `Animations 1/${a.count}`);
+    busy();
     this.scheduler.later('anim', step);
   }
 
@@ -505,7 +532,7 @@ export class App {
   // the step of the animation shown now; null when none is (the level as rendered)
   animStep(): AnimStep | null {
     const a = this.anim;
-    return this.view.show.anim && a.timer && a.phase >= 0 ? a.snaps[a.phase] ?? null : null;
+    return this.view.show.anim && a.timer && a.phase >= 0 ? a.steps?.steps[a.phase] ?? null : null;
   }
 
   // the animation's steps on canvases of the level's Map16 tiles (the pickers'), for the render shown
@@ -517,7 +544,7 @@ export class App {
 
   animTick(): void {
     const a = this.anim;
-    if (!a.frames.length || !a.base) return;
+    if (!a.ready || !a.frames.length || !a.base) return;
     if (!this.view.show.anim) { this.stopAnimation(); return; }
     if (this.scheduler.held()) return;
     const img = this.compositeImg === a.base ? a.base.slice() : this.compositeImg;

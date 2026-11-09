@@ -1,6 +1,6 @@
 // Cost of the level view's render and of its animation slices (App.refresh, App.startAnimation), on the main thread
 // today (#186): per level the load and draw at once, then per background slice one animation step – 8 game frames
-// emulated (LevelEmulator.animationSteps) and drawn as the pixels it changes (animatedPixels, or the whole level
+// emulated (LevelAnimSteps.next) and drawn as the pixels it changes (animatedPixels, or the whole level
 // drawn again when the step changes the backdrop). Reports the slices' time per level and over all levels: a slice
 // above 50 ms is a long task (input waits for it), above 16.7 ms it costs a display frame. --each: every step's
 // emulation and drawing. Measured for ADR 0010 (editor ROM, Node 24): a slice's emulation 3.5 ms median, the first
@@ -9,6 +9,7 @@
 //   node tools/animcost.ts [--levels=105,106,...] [--editor] [--each]
 import { Rom } from '../src/core/rom.ts';
 import { LevelEmulator } from '../src/core/levelemu.ts';
+import { LevelAnimSteps } from '../src/core/levelanimsteps.ts';
 import { renderLevel, composite, animatedPixels } from '../src/core/render.ts';
 import { loadLevel, levelRows, hasOwnContent } from '../src/core/level.ts';
 import { exanimPeriod, readLevelList, readGlobalList } from '../src/core/exanim.ts';
@@ -30,14 +31,14 @@ for (const n of levels) {
   const r = emu.load(n, {});
   if (!r.ok) continue;
   const count = exanimPeriod([readLevelList(rom, n), readGlobalList(rom)], 64, 8);
-  const next = emu.animationSteps();
+  const steps = new LevelAnimSteps(emu, count);
   const li = renderLevel(rom, r, lv.header.mode, lv.header.screens, levelRows(lv.secondary));
   const base = composite(li);
   renders.push(performance.now() - t0);
   let total = 0, max = 0;
   for (let i = 0; i < count; i++) {
     const s0 = performance.now();
-    const snap = next();
+    const snap = steps.next();
     if (!snap) break;
     emus.push(performance.now() - s0);
     const changed = animatedPixels(rom, r, li, base, snap.vram, snap.cgram, (cell) => composite(cell));
