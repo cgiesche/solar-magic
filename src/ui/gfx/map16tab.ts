@@ -1,7 +1,8 @@
 // Map16 tab: the tile sheet (pages, labelled ranges, multi-selection, copy/paste), a builder showing the
 // whole selection (quarters marked as a set; palette dots, flips mirroring them as a whole, the priority
 // toggle and acts-like for the marked ones; Ctrl+wheel zoom, middle button pan) and the level's 8x8 graphics grouped by GFX slot. The
-// graphics view uses the palette of the quarter under the mouse, else of the first marked one. Clicking or
+// graphics view uses the palette of the quarter under the mouse, else of the first marked one; hovering a palette
+// dot previews it on the marked quarters and the graphics view (their orange tint hidden meanwhile). Clicking or
 // dragging there chooses 8x8 tiles; a right click in the builder puts them with their top-left corner on
 // the quarter under the mouse (right drag paints), as does dropping them there; Enter puts a single one
 // into every marked quarter, a block from the first marked one. Move takes the selected tiles to other
@@ -45,6 +46,7 @@ import { drawMap16 } from '../../core/render.ts';
 import { QuarterGrid, markRect, editMarked, setPalette, setBit, setTileNum, stamp, mirror, summary, wholeTiles, FLIP_X, FLIP_Y, PRIO, type QuarterEdit, type MarkMode, type BitState } from '../../core/quarters.ts';
 import { numberPref } from '../prefs.ts';
 import { AntsOverlay, type AntsMark } from '../ants.ts';
+import { PaletteHover, map16Preview, type Map16Preview } from '../palhover.ts';
 
 const Z = 2; // sheet zoom
 const M = 34; // sheet margin for the ranges and row numbers
@@ -102,6 +104,8 @@ export class Map16Tab implements WsPanel {
   private marks = new Set<number>();
   private marksOf = '';
   private hoverQ: number | null = null; // quarter under the mouse in the builder
+  // the palette dot under the mouse: the marked quarters and the 8x8 graphics shown in its palette (palhover.ts)
+  private palHover = new PaletteHover(() => { this.drawBig(); this.drawGfx(); });
   private bzoom: number | null = null; // builder zoom, null: fitted into the column
   private gfxW = 470;
   private gzoom: number | null = null; // 8x8 graphics zoom, null: fitted into the column
@@ -330,6 +334,10 @@ export class Map16Tab implements WsPanel {
     this.drawGfx();
   }
   private selWords(): number[][] { return this.selection().map((t) => this.words(t)); }
+  // the builder and the 8x8 graphics as shown: while a palette dot is hovered, the marked quarters in its palette
+  private shownView(words = this.selWords()): Map16Preview {
+    return map16Preview(this.grid(), words, this.marked(), (this.wordAt(this.focusQ()) >> 10) & 7, this.palHover.value);
+  }
   // the quarter the graphics view follows: under the mouse, else the first marked (else the first)
   private focusQ(): number {
     const m = this.marked();
@@ -684,6 +692,8 @@ export class Map16Tab implements WsPanel {
     const t = this.sel, one = this.selW * this.selH === 1, d = this.t;
     const tiles = this.selection(), words = tiles.map((x) => d.words(x));
     const g = this.grid(), marks = this.marked();
+    // (the palette dots built again below: the one under the mouse gone without a leave)
+    this.palHover.reset();
     this.drawBig();
     const s = summary(g, words, marks);
     const ws = d.words(t);
@@ -700,13 +710,15 @@ export class Map16Tab implements WsPanel {
       const pp = new Uint32Array(im.data.buffer);
       for (let k = 0; k < 7; k++) pp[k] = allPal[p * 16 + 1 + k * 2] | 0xff000000;
       cx.putImageData(im, 0, 0);
-      return h('button', {
-        class: `mt-pal${s.pals.has(p) ? ' active' : ''}`, title: `Palette ${p} (key ${p + 1})${d.palettes ? ' · Ctrl+click: open in the Palettes tab' : ''}`,
+      const btn = h('button', {
+        class: `mt-pal${s.pals.has(p) ? ' active' : ''}`, title: `Palette ${p} (key ${p + 1}) · hover: preview on the marked quarters${d.palettes ? ' · Ctrl+click: open in the Palettes tab' : ''}`,
         onclick: (e: MouseEvent) => {
           if ((e.ctrlKey || e.metaKey) && d.palettes) { this.ws.showPalette(p, 1); return; }
           this.editQuarters(setPalette(p), `Palette ${p}`);
         },
       }, c, h('span', null, String(p)));
+      this.palHover.bind(btn, p);
+      return btn;
     };
     // own animations on the quarters, each once
     const all = words.flat();
@@ -783,7 +795,7 @@ export class Map16Tab implements WsPanel {
   // where the chosen or dragged 8x8 tiles would land (dashed)
   private drawBig(): void {
     const g = this.grid(), marks = this.marked(), z = this.bigZoom();
-    const words = this.selWords(), cache = this.tc();
+    const view = this.shownView(), words = view.words, cache = this.tc();
     const W = g.cols * 8, H = g.rows * 8;
     const img = new ImageData(W, H);
     const px = new Uint32Array(img.data.buffer);
@@ -828,9 +840,11 @@ export class Map16Tab implements WsPanel {
         ctx.beginPath(); ctx.moveTo(rx, ry); ctx.lineTo(rx, ry + a); ctx.lineTo(rx - a, ry); ctx.fill();
       }
     }
-    // marks: tinted, the outline of the marked area
-    ctx.fillStyle = 'rgba(255,176,0,0.22)';
-    for (const k of marks) { const { x, y } = g.pos(k); ctx.fillRect(x * sx, y * sy, sx, sy); }
+    // marks: tinted (not while a palette is previewed on them), the outline of the marked area
+    if (view.fills) {
+      ctx.fillStyle = 'rgba(255,176,0,0.22)';
+      for (const k of marks) { const { x, y } = g.pos(k); ctx.fillRect(x * sx, y * sy, sx, sy); }
+    }
     ctx.strokeStyle = '#ffb000';
     ctx.lineWidth = 2;
     ctx.beginPath();
@@ -1344,7 +1358,7 @@ export class Map16Tab implements WsPanel {
     const z = this.gfxZoom();
     this.gzPx = Math.ceil(z);
     const fq = this.focusQ(), fw = this.wordAt(fq);
-    const pal = (fw >> 10) & 7;
+    const view = this.shownView(), pal = view.gfxPal;
     const slots = layerSlots(this.t.vram());
     const rows = slots.length * 8;
     const W = 128, Hh = rows * 8;
@@ -1390,7 +1404,7 @@ export class Map16Tab implements WsPanel {
         }
       });
     }
-    if (this.remapping) this.drawRemapMarks(ctx, slots);
+    if (this.remapping && view.fills) this.drawRemapMarks(ctx, slots);
     // the chosen 8x8 tiles, or those being chosen; remap's marked tiles and where they are dragged (running)
     const d = this.drag, r = d ? { x: Math.min(d.a.x, d.b.x), y: Math.min(d.a.y, d.b.y), w: Math.abs(d.a.x - d.b.x) + 1, h: Math.abs(d.a.y - d.b.y) + 1 } : this.remapping ? null : this.pick;
     const from = this.remapping ? this.visualFrom : null, to = from && this.visualTo;
@@ -1406,8 +1420,8 @@ export class Map16Tab implements WsPanel {
       h('a', { href: '#', class: 'mt-slot-file', title: 'Open in the Graphics tab (sheet and pixel editor)', onclick: (e: Event) => { e.preventDefault(); this.ws.showGfx(s.file); } }, gfxName(s.file)),
       s.custom ? h('span', { class: 'hint' }, 'custom') : '',
       h('span', { class: 'hint mono' }, `${hex(s.first, 3)}–${hex(s.first + 0x7f, 3)}`))));
-    this.gfxTitle.replaceChildren(`8x8 graphics in palette ${pal}`);
-    this.gfxTitle.title = 'The palette follows the quarter under the mouse, else the first marked · Ctrl+wheel: zoom · middle button: pan';
+    this.gfxTitle.replaceChildren(`8x8 graphics in palette ${pal}${view.preview ? ' (preview)' : ''}`);
+    this.gfxTitle.title = 'The palette follows the hovered palette dot, else the quarter under the mouse, else the first marked · Ctrl+wheel: zoom · middle button: pan';
   }
 
   // zoom of the 8x8 graphics: as set by Ctrl+wheel, else 16 tiles fitted into the column

@@ -2,7 +2,7 @@
 // the list of GFX/ExGFX files, the file's sheet as a navigator (picks 8x8 tiles and pastes them, as the
 // other editors do) and the pixel editor beside it, the only place pixels are painted (pen, eraser, fill,
 // pipette, selection with move, copy/paste, flip/rotate) with the colors of a palette row, after
-// Lunar Magic's 8x8 tile editor and Aseprite. Each stroke is one undoable ROM edit: the file is encoded
+// Lunar Magic's 8x8 tile editor and Aseprite; hovering a palette row previews the sheet and the swatches in it. Each stroke is one undoable ROM edit: the file is encoded
 // again and written in place when it fits, otherwise moved to free space.
 
 import type { App } from '../app.ts';
@@ -41,6 +41,7 @@ import { layerSlots, slotOfTile, type GfxSlot as Slot } from '../../core/gfxslot
 import type { GfxTarget } from './target.ts';
 import { slotRemapLine } from '../../core/remap.ts';
 import { AntsOverlay } from '../ants.ts';
+import { PaletteHover, previewRow } from '../palhover.ts';
 
 
 const spriteRange = (first: number) => first < 0x100 ? `${hex(first, 2)}–${hex(first + 0x7f, 2)}` : `${hex(first, 3)}–${hex(first + 0x7f, 3)}`;
@@ -82,6 +83,8 @@ export class GfxTab implements WsPanel {
   private bppOverride: number | null = null;
   private bppOk = -1; // file confirmed to be edited in a format other than the detected one
   private palRow = -1; // -1: automatic for the file
+  // the palette row under the mouse: the sheet and the color swatches shown in it (palhover.ts)
+  private rowHover = new PaletteHover(() => { this.draw(); this.paintSwatches(); });
   private fg = 1; // color of the left button
   private bg = 0; // of the right button
   private tool: Tool = 'select'; // also after every jump here and file change: the first click selects
@@ -269,10 +272,11 @@ export class GfxTab implements WsPanel {
   private row(): number {
     return this.palRow >= 0 ? this.palRow : this.autoRow(this.cur);
   }
-  private colors(): Uint32Array {
+  // the row the sheet and the swatches show: a hovered one, else the chosen one
+  private shownRow(): number { return previewRow(this.rowHover.value, this.row()); }
+  private colors(r = this.row()): Uint32Array {
     const all = cgramToRGBA(this.cgram());
     const n = 1 << (this.file?.bpp ?? 4);
-    const r = this.row();
     return Uint32Array.from({ length: n }, (_, k) => all[(r * 16 + k) & 0xff]);
   }
 
@@ -606,22 +610,25 @@ export class GfxTab implements WsPanel {
     const s = this.side;
     clear(s);
     if (!f) return;
-    const cols = this.colors();
+    // (the row buttons built again below: the one under the mouse gone without a leave)
+    this.rowHover.reset();
+    const cols = this.colors(this.shownRow());
     const row = this.row();
     const all = cgramToRGBA(this.cgram());
     const css = (v: number) => `rgb(${v & 255},${(v >> 8) & 255},${(v >> 16) & 255})`;
     const rowSel = h('div', { class: 'gt-rows' }, Array.from({ length: 16 }, (_, r) => h('button', {
-      class: `gt-row${r === row ? ' active' : ''}`, title: `Palette ${hex(r, 1)}`,
+      class: `gt-row${r === row ? ' active' : ''}`, title: `Palette ${hex(r, 1)} · hover: preview`,
       onclick: () => { this.palRow = r; this.draw(); this.buildSide(); },
     }, h('span', { class: 'mono' }, hex(r, 1)), h('span', { class: 'gt-row-strip' }, Array.from({ length: 15 }, (_, k) => h('i', { style: { background: css(all[r * 16 + 1 + k]) } }))))));
+    rowSel.querySelectorAll<HTMLElement>('.gt-row').forEach((b, r) => this.rowHover.bind(b, r));
     const sw = h('div', { class: 'gt-colors' }, Array.from(cols, (v, k) => h('div', {
-      class: `gt-color${k === this.fg ? ' sel' : ''}${k === this.bg ? ' bg' : ''}${k === 0 ? ' transp' : ''}`,
+      class: `gt-color${k === this.fg ? ' sel' : ''}${k === this.bg ? ' bg' : ''}${k === 0 ? ' transp' : ''}`, 'data-k': String(k),
       title: `${k === 0 ? 'Color 0: transparent' : `Color ${k}`} – click: left button's color, right click: right button's`,
       style: k ? { background: css(v) } : {},
       onclick: () => { this.fg = k; this.buildSide(); },
       oncontextmenu: (e: Event) => { e.preventDefault(); this.bg = k; this.buildSide(); },
     }, String(k))));
-    const chip = (k: number, label: string) => h('span', { class: 'gt-fgbg-chip' }, h('i', { class: `gt-color${k === 0 ? ' transp' : ''}`, style: k ? { background: css(cols[k] ?? 0) } : {} }), `${label} ${k}`);
+    const chip = (k: number, label: string) => h('span', { class: 'gt-fgbg-chip' }, h('i', { class: `gt-color${k === 0 ? ' transp' : ''}`, 'data-k': String(k), style: k ? { background: css(cols[k] ?? 0) } : {} }), `${label} ${k}`);
     const used = this.gfxSlots().filter((x) => x.file === f.num).map((x) => x.name);
     s.append(
       h('div', { class: 'prop-title' }, gfxName(f.num), f.empty ? h('span', { class: 'hint' }, ' (empty)') : ''),
@@ -641,6 +648,16 @@ export class GfxTab implements WsPanel {
       rowSel,
       this.usageUi(),
     );
+  }
+
+  // the color swatches and the buttons' chips in the row shown (a hovered row changes them in place: building the
+  // side again would take the row button from under the mouse)
+  private paintSwatches(): void {
+    const cols = this.colors(this.shownRow());
+    for (const el of this.side.querySelectorAll<HTMLElement>('.gt-color[data-k]')) {
+      const k = Number(el.dataset.k);
+      if (k) el.style.background = `rgb(${cols[k] & 255},${(cols[k] >> 8) & 255},${(cols[k] >> 16) & 255})`;
+    }
   }
 
   // the user's name of the file (exported as ExGFX###_Name.bin); without one, the package's
@@ -750,7 +767,7 @@ export class GfxTab implements WsPanel {
       this.img = new ImageData(W, H);
       this.px = new Uint32Array(this.img.data.buffer);
     }
-    this.cols = this.colors();
+    this.cols = this.colors(this.shownRow());
     const px = this.px!;
     for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) px[y * W + x] = this.rgba(x, y, this.get(x, y));
     this.present();
