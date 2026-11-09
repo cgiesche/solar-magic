@@ -65,7 +65,7 @@ import { WorldCheck } from './worldcheck.ts';
 import { layerStrengths, isLayerMode, type OwMode, type LayerStrengths } from '../core/owlayers.ts';
 import { OW_OPTIONS, owOption, owOptionValue, setOwOption, revealSpeed, setRevealSpeed, revealStepFrames, MAX_REVEAL_SPEED, DEFAULT_REVEAL_SPEED, submapLightning, setSubmapLightning, LIGHTNING_TITLE, lightningEditLabel } from '../core/owoptions.ts';
 import { boolPref, numberPref, prefFamily } from './prefs.ts';
-import { antsMenuItem, antsRect, onAntsTick, strokeAnts } from './ants.ts';
+import { antsMenuItem, AntsOverlay, type AntsMark } from './ants.ts';
 
 // a w×h block of L1 tiles (16x16) or L2 tilemap entries (8x8), row-major; a L1 brush has no level tiles (NO_TILE
 // where one was picked: they are objects on layer 1, placed with a look from the picker's "Levels", ADR 0012)
@@ -2043,27 +2043,19 @@ export class OverworldView {
     preview: (ctx: CanvasRenderingContext2D) => void, describe: (r: { x: number; y: number; w: number; h: number }) => string[],
     locate: () => SheetMark | null, marks?: (ctx: CanvasRenderingContext2D) => void): HTMLElement {
     const b = this.brush;
-    const { c, ctx, k, scale } = this.sheetCanvas(sheet, cls);
+    const { c, ctx, k, scale, ants } = this.sheetCanvas(sheet, cls);
     // (the route brush or a look chosen: no tile brush marked)
     const tileBrush = b.kind === this.mode && !this.routeBrush && this.lookBrush < 0;
     const mark = tileBrush ? locate() : null;
     const at = mark?.kind === 'rect' ? mark : null;
-    // r: the rectangle being picked (null: the brush's mark); drawn again as shown on the ants' ticks
-    let shown: { x: number; y: number; w: number; h: number } | null = null;
+    ctx.drawImage(sheet, 0, 0);
+    marks?.(ctx);
+    // r: the rectangle being picked (null: the brush's mark: its rectangle, or its 8x8 tiles each), running on the overlay
     const draw = (r: { x: number; y: number; w: number; h: number } | null) => {
-      shown = r;
-      ctx.drawImage(sheet, 0, 0);
-      marks?.(ctx);
-      if (!r && mark?.kind === 'tiles') {
-        ctx.lineWidth = 1 / k; // (one canvas pixel)
-        ctx.beginPath();
-        for (const t of mark.cells) ctx.rect(t.x * cell + ctx.lineWidth / 2, t.y * cell + ctx.lineWidth / 2, cell - ctx.lineWidth, cell - ctx.lineWidth);
-        strokeAnts(ctx, '#4cc2ff');
-      }
+      if (!r && mark?.kind === 'tiles') { ants.set(mark.cells.map((t) => cellMark({ x: t.x, y: t.y, w: 1, h: 1 }, cell))); return; }
       r ??= at;
-      if (r) outlineCells(ctx, r, cell);
+      ants.set(r ? [cellMark(r, cell)] : []);
     };
-    onAntsTick(c, () => draw(shown));
     draw(null);
     attachRectPick(c, cols, rows, draw, (r) => {
       // (a reveal being added: the tile it becomes)
@@ -2089,7 +2081,7 @@ export class OverworldView {
       sized(p, fitScale(b.w * cell, b.h * cell, sheet.width * scale, sheet.width * scale, scale) / k);
       out.append(h('div', { class: 'hint' }, `Brush ${b.w}×${b.h}:`), h('div', { class: 'row' }, p));
     }
-    out.append(c);
+    out.append(ants.root);
     // a brush picked from the map: the panel scrolled to its mark when it is out of sight (laid out on the next frame)
     if (mark && this.revealMark) {
       this.revealMark = false;
@@ -2251,18 +2243,13 @@ export class OverworldView {
     const list = new Array<number>(w * rows * 2).fill(-1);
     pieces.forEach((p, i) => p.entries.forEach((v, k) => { list[(Math.floor(i / PIECE_COLS) * 2 + (k >> 1)) * w + (i % PIECE_COLS) * 2 + (k & 1)] = v; }));
     const sheet = drawEntries(list, w, w * 8, rows * 16);
-    const { c, ctx } = this.sheetCanvas(sheet, 'ow-pal8');
+    const { c, ctx, ants } = this.sheetCanvas(sheet, 'ow-pal8');
     const b = this.brush;
     const at = b.kind === 'l2' && b.w === 2 && b.h === 2 ? pieces.findIndex((p) => p.entries.every((v, j) => v === b.entries[j])) : -1;
     // (the piece to replace, picked: in its own colour, both running)
     const from = this.replacing?.from, fi = from ? pieces.findIndex((p) => samePiece(p.entries, from)) : -1;
-    const draw = () => {
-      ctx.drawImage(sheet, 0, 0);
-      if (at >= 0) outlineCells(ctx, pieceBox(at), 16);
-      if (fi >= 0) outlineCells(ctx, pieceBox(fi), 16, REPLACED_PIECE);
-    };
-    onAntsTick(c, draw);
-    draw();
+    ctx.drawImage(sheet, 0, 0);
+    ants.set([...(at >= 0 ? [cellMark(pieceBox(at), 16)] : []), ...(fi >= 0 ? [cellMark(pieceBox(fi), 16, REPLACED_PIECE)] : [])]);
     const cellAt = (e: MouseEvent) => {
       const rc = c.getBoundingClientRect();
       const x = Math.floor((e.clientX - rc.left) / (rc.width / PIECE_COLS)), y = Math.floor((e.clientY - rc.top) / (rc.height / rows));
@@ -2284,17 +2271,18 @@ export class OverworldView {
       showPickerPreview(c, e, crop(sheet, x * 16, y * 16, 16, 16), [`Piece used ${p.count} time${p.count === 1 ? '' : 's'} on this map`, p.entries.map((v) => hex(v, 4)).join(' ')]);
     });
     c.addEventListener('mouseleave', () => hidePickerPreview(c));
-    return c;
+    return ants.root;
   }
 
   // a sheet's canvas filling the paint panel (in whole pixels of the sheet's), drawn in the sheet's pixels
-  private sheetCanvas(sheet: HTMLCanvasElement, cls: string): { c: HTMLCanvasElement; ctx: CanvasRenderingContext2D; k: number; scale: number } {
+  // (ants: the running outlines' overlay, marks in sheet pixels; its root goes onto the page)
+  private sheetCanvas(sheet: HTMLCanvasElement, cls: string): { c: HTMLCanvasElement; ctx: CanvasRenderingContext2D; k: number; scale: number; ants: AntsOverlay } {
     const k = this.palPixels = fillPixels(this.palWidth(), sheet.width), scale = this.palWidth() / sheet.width;
     const c = h('canvas', { width: sheet.width * k, height: sheet.height * k, class: `${cls} sheet-fill` });
     const ctx = c.getContext('2d')!;
     ctx.imageSmoothingEnabled = false;
     ctx.setTransform(k, 0, 0, k, 0, 0);
-    return { c, ctx, k, scale };
+    return { c, ctx, k, scale, ants: new AntsOverlay(c, () => ({ w: sheet.width, h: sheet.height })) };
   }
 
   // a button flipping the brush of layer `kind` (tilemap entries): X-flip mirrors every row of the block, Y-flip the
@@ -2405,10 +2393,9 @@ const checker = (x: number, y: number): number => (((x >> 2) ^ (y >> 2)) & 1 ? 0
 // the brush's rectangle r (cells of `cell` pixels) outlined in a sheet, an eighth of a cell wide
 // piece k's cell in the "Pieces on this map" sheet
 const pieceBox = (k: number) => ({ x: k % PIECE_COLS, y: Math.floor(k / PIECE_COLS), w: 1, h: 1 });
-// a sheet's brush or pick outlined, running (ants.ts)
-function outlineCells(ctx: CanvasRenderingContext2D, r: { x: number; y: number; w: number; h: number }, cell: number, color = '#4cc2ff'): void {
-  ctx.lineWidth = cell / 8;
-  antsRect(ctx, r.x * cell + ctx.lineWidth / 2, r.y * cell + ctx.lineWidth / 2, r.w * cell - ctx.lineWidth, r.h * cell - ctx.lineWidth, color);
+// a sheet's brush or pick (cells of `cell` pixels) as a running outline on its overlay (ants.ts), in sheet pixels
+function cellMark(r: { x: number; y: number; w: number; h: number }, cell: number, color = '#4cc2ff'): AntsMark {
+  return { x: r.x * cell, y: r.y * cell, w: r.w * cell, h: r.h * cell, color };
 }
 const REPLACED_PIECE = '#ffb000'; // the piece "Replace piece…" replaces, in the pieces sheet
 

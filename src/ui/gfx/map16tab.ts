@@ -44,7 +44,7 @@ import { gfxTarget, type GfxTarget, type Map16Target } from './target.ts';
 import { drawMap16 } from '../../core/render.ts';
 import { QuarterGrid, markRect, editMarked, setPalette, setBit, setTileNum, stamp, mirror, summary, wholeTiles, FLIP_X, FLIP_Y, PRIO, type QuarterEdit, type MarkMode, type BitState } from '../../core/quarters.ts';
 import { numberPref } from '../prefs.ts';
-import { AntsMarks, antsRect, onAntsTick } from '../ants.ts';
+import { AntsOverlay, type AntsMark } from '../ants.ts';
 
 const Z = 2; // sheet zoom
 const M = 34; // sheet margin for the ranges and row numbers
@@ -117,7 +117,7 @@ export class Map16Tab implements WsPanel {
   // all pages of 256 tiles in one list, each drawn once it scrolls into view
   private scroll = h('div', { class: 'mt-scroll' });
   private pages: HTMLCanvasElement[] = [];
-  private pageMarks: AntsMarks[] = []; // (each page's selection and move target, running over the page)
+  private pageMarks: AntsOverlay[] = []; // (each page's selection and move target, running on its overlay)
   private heads: HTMLElement[] = [];
   private near = new Set<number>(); // pages in or near the view
   private dirty = new Set<number>(); // pages to draw once they come near the view
@@ -147,8 +147,8 @@ export class Map16Tab implements WsPanel {
   private gfxTitle = h('div', { class: 'panel-title' });
   private gfxLabels = h('div', { class: 'mt-gfx-labels' });
   private gfxCanvas = h('canvas', { class: 'mt-gfx-canvas' });
-  private gfxMarks = new AntsMarks(this.gfxCanvas); // (the chosen 8x8 tiles, remap's marked ones, running)
-  private gfxScroll = h('div', { class: 'mt-gfx-scroll' }, h('div', { class: 'mt-gfx-wrap' }, this.gfxLabels, this.gfxCanvas));
+  private gfxMarks = new AntsOverlay(this.gfxCanvas); // (the chosen 8x8 tiles, remap's marked ones, running)
+  private gfxScroll = h('div', { class: 'mt-gfx-scroll' }, h('div', { class: 'mt-gfx-wrap' }, this.gfxLabels, this.gfxMarks.root));
   private gfxCol = h('div', { class: 'mt-col mt-gfx-col' }, this.gfxTitle, this.gfxScroll);
   private remapping: Remapping | null = null;
   private moving: Moving | null = null;
@@ -473,11 +473,12 @@ export class Map16Tab implements WsPanel {
       const c = h('canvas', { class: 'mt-sheet', width: 256 * Z + M, height: 256 * Z });
       const head = h('div', { class: 'picker-head' });
       this.pages.push(c);
-      this.pageMarks.push(new AntsMarks(c));
+      const marks = new AntsOverlay(c);
+      this.pageMarks.push(marks);
       this.heads.push(head);
       this.dirty.add(p);
       observer.observe(c);
-      this.scroll.append(head, c);
+      this.scroll.append(head, marks.root);
     }
     this.scroll.addEventListener('scroll', () => this.pageScrolled());
   }
@@ -540,11 +541,11 @@ export class Map16Tab implements WsPanel {
     // the selection may reach over several pages, each draws its part; the move's target (both running)
     const row = (this.sel >> 4) - p * 16;
     const to = this.moving?.to ?? -1, toRow = (to >> 4) - p * 16;
-    this.pageMarks[p].over((mc) => {
-      mc.lineWidth = 2;
-      if (row < 16 && row + this.selH > 0) antsRect(mc, M + (this.sel & 15) * 16 * Z + 1, row * 16 * Z + 1, this.selW * 16 * Z - 2, this.selH * 16 * Z - 2, '#4cc2ff');
-      if (to >= 0 && toRow < 16 && toRow + this.selH > 0) antsRect(mc, M + (to & 15) * 16 * Z + 1, toRow * 16 * Z + 1, this.selW * 16 * Z - 2, this.selH * 16 * Z - 2, '#ffb000');
-    });
+    const box = (t: number, r: number, color: string): AntsMark => ({ x: M + (t & 15) * 16 * Z, y: r * 16 * Z, w: this.selW * 16 * Z, h: this.selH * 16 * Z, color });
+    this.pageMarks[p].set([
+      ...(row < 16 && row + this.selH > 0 ? [box(this.sel, row, '#4cc2ff')] : []),
+      ...(to >= 0 && toRow < 16 && toRow + this.selH > 0 ? [box(to, toRow, '#ffb000')] : []),
+    ]);
   }
 
   // the overworld's tiles as a sheet of 256 (past C0 none)
@@ -1012,7 +1013,9 @@ export class Map16Tab implements WsPanel {
     ctx.imageSmoothingEnabled = false;
     const sheet = renderMap16Sheet(app, false, 0);
     const cur = actsLike(app.rom, tiles[0]);
-    const scroll = h('div', { class: 'mt-acts-scroll' }, c);
+    const ants = new AntsOverlay(c);
+    ants.set([{ x: (cur & 15) * 32, y: (cur >> 4) * 32, w: 32, h: 32, color: '#ffb000' }]);
+    const scroll = h('div', { class: 'mt-acts-scroll' }, ants.root);
     const tip = `Click a tile or type its number, name or behavior: the ${tiles.length > 1 ? 'marked tiles then act' : 'tile then acts'} like this one.`;
     const info = h('div', { class: 'hint mt-acts-info' }, tip);
     const say = (text: string) => { info.textContent = text; info.title = text; };
@@ -1022,10 +1025,7 @@ export class Map16Tab implements WsPanel {
     const draw = () => {
       ctx.drawImage(sheet, 0, 0, 512, 1024);
       drawTileMatches(ctx, matches, 0, 0x200, 32);
-      ctx.lineWidth = 2;
-      antsRect(ctx, (cur & 15) * 32 + 1, (cur >> 4) * 32 + 1, 30, 30, '#ffb000');
     };
-    onAntsTick(c, draw);
     const update = (scrollTo = true) => {
       const behaviors = tileBehaviors(app, input.value, 0x200);
       pending = behaviors.pending;
@@ -1394,14 +1394,13 @@ export class Map16Tab implements WsPanel {
     // the chosen 8x8 tiles, or those being chosen; remap's marked tiles and where they are dragged (running)
     const d = this.drag, r = d ? { x: Math.min(d.a.x, d.b.x), y: Math.min(d.a.y, d.b.y), w: Math.abs(d.a.x - d.b.x) + 1, h: Math.abs(d.a.y - d.b.y) + 1 } : this.remapping ? null : this.pick;
     const from = this.remapping ? this.visualFrom : null, to = from && this.visualTo;
-    c.style.width = `${W * z}px`; c.style.height = `${Hh * z}px`; // (before the marks: their dashes are in screen pixels)
-    this.gfxMarks.over((mc) => {
-      mc.lineWidth = 2;
-      const box = (x: number, y: number, w: number, hh: number, color: string) => antsRect(mc, x * 8 * this.gzPx + 1, y * 8 * this.gzPx + 1, w * 8 * this.gzPx - 2, hh * 8 * this.gzPx - 2, color);
-      if (r) box(r.x, r.y, r.w, r.h, '#4cc2ff');
-      if (from) box(from.x, from.y, from.w, from.h, '#4cc2ff');
-      if (from && to) box(to.x, to.y, from.w, from.h, REMAP_TO);
-    });
+    c.style.width = `${W * z}px`; c.style.height = `${Hh * z}px`;
+    const box = (x: number, y: number, w: number, hh: number, color: string): AntsMark => ({ x: x * 8 * this.gzPx, y: y * 8 * this.gzPx, w: w * 8 * this.gzPx, h: hh * 8 * this.gzPx, color });
+    this.gfxMarks.set([
+      ...(r ? [box(r.x, r.y, r.w, r.h, '#4cc2ff')] : []),
+      ...(from ? [box(from.x, from.y, from.w, from.h, '#4cc2ff')] : []),
+      ...(from && to ? [box(to.x, to.y, from.w, from.h, REMAP_TO)] : []),
+    ]);
     this.gfxLabels.replaceChildren(...slots.map((s) => h('div', { class: 'mt-slot', style: { height: `${64 * z}px` } },
       h('span', { class: 'mt-slot-name' }, s.name),
       h('a', { href: '#', class: 'mt-slot-file', title: 'Open in the Graphics tab (sheet and pixel editor)', onclick: (e: Event) => { e.preventDefault(); this.ws.showGfx(s.file); } }, gfxName(s.file)),

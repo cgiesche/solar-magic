@@ -36,7 +36,7 @@ import { matchesAll, type SearchProvider, type SearchResult } from './search.ts'
 import { blockFilesByTile } from './blockdialog.ts';
 import { contextMenu } from './menu.ts';
 import { collisionMarks, markCanvas, switchMarks, switchCanvas, MARK_TEXT, type CollisionMark } from './collisionmarks.ts';
-import { antsRect, onAntsTick } from './ants.ts';
+import { AntsOverlay } from './ants.ts';
 
 // behaviour of the given Map16 tiles when hit from below or entered (only tiles with an effect);
 // undefined while probes are still pending (asked for; without ask only those known: a picker tab's come with its prefetch)
@@ -343,19 +343,15 @@ export class Picker {
       const c = h('canvas', { width: 256 * k, height: 256 * k, class: 'm16-pick sheet-fill', 'data-page': String(p) });
       const ctx = c.getContext('2d')!;
       ctx.imageSmoothingEnabled = false;
+      const ants = new AntsOverlay(c, () => ({ w: 16, h: 16 }));
       let sheet: HTMLCanvasElement | null = null;
-      const pageSheet = () => sheet ??= animateSheet(app, renderMap16Sheet(app, false, base, 256), false, base, c, () => draw(...shownRect));
-      // page plus the chosen rectangle of tiles (x, y, w, h in cells); drawn again as the animation goes on
-      let shownRect: [number, number, number, number] = [-1, 0, 0, 0];
+      const pageSheet = () => sheet ??= animateSheet(app, renderMap16Sheet(app, false, base, 256), false, base, c, paint);
+      const paint = () => { ctx.drawImage(pageSheet(), 0, 0, c.width, c.height); drawTileMatches(ctx, this.m16Match, base, 256, S); };
+      // page plus the chosen rectangle of tiles (x, y, w, h in cells; running on the overlay)
       const draw = (x: number, y: number, w: number, hh: number) => {
-        shownRect = [x, y, w, hh];
-        ctx.drawImage(pageSheet(), 0, 0, c.width, c.height);
-        drawTileMatches(ctx, this.m16Match, base, 256, S);
-        if (x < 0) return;
-        ctx.lineWidth = 2;
-        antsRect(ctx, x * S, y * S, w * S, hh * S, '#4cc2ff');
+        paint();
+        ants.set(x < 0 ? [] : [{ x, y, w, h: hh, color: '#4cc2ff' }]);
       };
-      onAntsTick(c, () => draw(...shownRect));
       const sel = curTile - base;
       const shown = () => (sel >= 0 && sel < 256 ? draw(sel & 15, sel >> 4, bw, bh) : draw(-1, 0, 0, 0));
       draws.set(c, shown);
@@ -376,14 +372,14 @@ export class Picker {
         tiles.forEach((u) => app.probes.collision(u)); // asked for; shown once known (the next move of the mouse)
         return entryLegend(app, { items: blockSprites(app, tiles), enter: blockEnter(app, tiles), marks: blockMarks(app, tiles), switches: blockSwitches(app, tiles) });
       });
-      if (scale < PREVIEW_BELOW) { this.body.append(h('div', { class: 'picker-head m16-page-head', 'data-page': String(p) }, `Page ${p.toString(16).toUpperCase()}`), c); continue; }
+      if (scale < PREVIEW_BELOW) { this.body.append(h('div', { class: 'picker-head m16-page-head', 'data-page': String(p) }, `Page ${p.toString(16).toUpperCase()}`), ants.root); continue; }
       c.addEventListener('mousemove', (e) => {
         const rc = c.getBoundingClientRect();
         const x = Math.floor((e.clientX - rc.left) / (rc.width / 16)), y = Math.floor((e.clientY - rc.top) / (rc.height / 16));
         const t = base + Math.min(15, y) * 16 + Math.min(15, x);
         if (t !== hoverTile || c !== hoverCanvas) { hoverTile = t; hoverCanvas = c; tip(); }
       });
-      this.body.append(h('div', { class: 'picker-head m16-page-head', 'data-page': String(p) }, `Page ${p.toString(16).toUpperCase()}`), c);
+      this.body.append(h('div', { class: 'picker-head m16-page-head', 'data-page': String(p) }, `Page ${p.toString(16).toUpperCase()}`), ants.root);
     }
     // back to where the list was; the pages in view are drawn right away so nothing flickers
     this.body.scrollTop = this.scrolls.m16;
@@ -449,25 +445,23 @@ export class Picker {
   buildBg(): void {
     const app = this.app;
     const sheet = renderMap16Sheet(app, true, this.bgBase);
-    let shownRect: [number, number, number, number] = [-1, 0, 0, 0];
     const brush = app.bgBrush;
     const t0 = brush.tiles[0] - this.bgBase;
     // a brush that is a rectangle of the sheet is outlined there, one picked from the level is shown separately
     const onSheet = t0 >= 0 && t0 < 0x200 && (t0 & 15) + brush.w <= 16 && (t0 >> 4) + brush.h <= 32
       && brush.tiles.every((t, i) => t === brush.tiles[0] + Math.floor(i / brush.w) * 16 + (i % brush.w));
-    const k = this.builtPixels = this.sheetPixels(), S = 16 * k, scale = this.sheetShown();
+    const k = this.builtPixels = this.sheetPixels(), scale = this.sheetShown();
     const c = h('canvas', { width: 256 * k, height: 512 * k, class: 'm16-pick sheet-fill', title: 'Click/drag: tile(s) as brush · Ctrl+click: edit in the Map16 tab' });
     const ctx = c.getContext('2d')!;
     ctx.imageSmoothingEnabled = false;
+    const ants = new AntsOverlay(c, () => ({ w: 16, h: 32 }));
+    const paint = () => ctx.drawImage(sheet, 0, 0, c.width, c.height);
+    // (the chosen rectangle of tiles running on the overlay)
     const draw = (x: number, y: number, w: number, hh: number) => {
-      shownRect = [x, y, w, hh];
-      ctx.drawImage(sheet, 0, 0, c.width, c.height);
-      if (x < 0) return;
-      ctx.lineWidth = 2;
-      antsRect(ctx, x * S, y * S, w * S, hh * S, '#4cc2ff');
+      paint();
+      ants.set(x < 0 ? [] : [{ x, y, w, h: hh, color: '#4cc2ff' }]);
     };
-    onAntsTick(c, () => draw(...shownRect));
-    animateSheet(app, sheet, true, this.bgBase, c, () => draw(...shownRect));
+    animateSheet(app, sheet, true, this.bgBase, c, paint);
     if (onSheet) draw(t0 & 15, t0 >> 4, brush.w, brush.h); else draw(-1, 0, 0, 0);
     // click picks a tile, dragging picks a rectangle of tiles (as in the Map16 tab)
     attachRectPick(c, 16, 32, (r) => draw(r.x, r.y, r.w, r.h), (r) => {
@@ -497,7 +491,7 @@ export class Picker {
       sized(p, fitScale(p.width, p.height, 256 * scale, 256 * scale, scale));
       this.body.append(h('div', { class: 'row' }, p));
     }
-    this.body.append(c);
+    this.body.append(ants.root);
   }
 
   // layer 3: its 8x8 tiles as brush (l3picker.ts), saved with the level into its LT3 file

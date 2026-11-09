@@ -843,3 +843,7 @@ button.danger:hover:not(:disabled) { border-color: var(--danger); }
 .search-note { padding: 4px 6px; font-style: italic; }
 .ow-legend { display: inline-block; width: 22px; height: 0; margin-right: 6px; vertical-align: middle; }
 .ow-option-sub { margin-left: 22px; }
+/* a sheet with its running selection outlines on an overlay (ants.ts AntsOverlay), stacked in one grid cell */
+.ants-host { display: grid; grid-template-columns: minmax(0, 1fr); justify-items: start; align-items: start; }
+.ants-host > * { grid-area: 1 / 1; }
+.ants-over { pointer-events: none; }

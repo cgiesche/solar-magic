@@ -40,7 +40,7 @@ import { gfxUsage, unusedExGfx, savedHeader, slotMove, type GfxUser } from '../.
 import { layerSlots, slotOfTile, type GfxSlot as Slot } from '../../core/gfxslots.ts';
 import type { GfxTarget } from './target.ts';
 import { slotRemapLine } from '../../core/remap.ts';
-import { antsRect, onAntsTick } from '../ants.ts';
+import { AntsOverlay } from '../ants.ts';
 
 
 const spriteRange = (first: number) => first < 0x100 ? `${hex(first, 2)}–${hex(first + 0x7f, 2)}` : `${hex(first, 3)}–${hex(first + 0x7f, 3)}`;
@@ -104,7 +104,9 @@ export class GfxTab implements WsPanel {
   private cards = h('div', { class: 'gt-cards' });
   private list = h('div', { class: 'gt-list' });
   private canvas = h('canvas', { class: 'gt-canvas' });
-  private view = h('div', { class: 'gt-view' }, this.canvas);
+  // (the area selected in the sheet running on the overlay, in sheet pixels)
+  private ants = new AntsOverlay(this.canvas, () => ({ w: this.W(), h: this.H() }));
+  private view = h('div', { class: 'gt-view' }, this.ants.root);
   private pane = h('canvas', { class: 'gt-pane-canvas', 'data-tool': 'select' });
   private paneView = h('div', { class: 'gt-pane-view' }, this.pane);
   private paneHead = h('div', { class: 'ws-bar gt-pane-head' });
@@ -112,8 +114,6 @@ export class GfxTab implements WsPanel {
   private tools = h('div', { class: 'ws-bar' });
 
   constructor(app: App, ws: GfxWorkspace) {
-    // (the area selected in the sheet running, ants.ts)
-    onAntsTick(this.canvas, () => { if (this.file && this.img) this.presentSheet(); });
     this.app = app;
     this.ws = ws;
     const search = h('input', { placeholder: 'Search (e.g. 14, ExGFX80)', class: 'filter' });
@@ -788,8 +788,7 @@ export class GfxTab implements WsPanel {
       ctx.lineWidth = 2;
       ctx.strokeRect((this.focusTile & 15) * 8 * z + 1, (this.focusTile >> 4) * 8 * z + 1, 8 * z - 2, 8 * z - 2);
     }
-    ctx.lineWidth = 3;
-    antsRect(ctx, a.x * 8 * z - 1.5, a.y * 8 * z - 1.5, a.w * 8 * z + 3, a.h * 8 * z + 3, '#4cc2ff');
+    this.ants.set([{ x: a.x * 8, y: a.y * 8, w: a.w * 8, h: a.h * 8, color: '#4cc2ff', out: true }]);
   }
 
   // the pixel editor: the area of the sheet, as large as its view allows
