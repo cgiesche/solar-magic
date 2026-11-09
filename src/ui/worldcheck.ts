@@ -16,8 +16,8 @@ import { refusalWords, refusedToast } from './owrefusal.ts';
 import { l1XY, OW_EVENTS } from '../core/overworld.ts';
 import { tileText } from '../core/owteleport.ts';
 import { hex2 } from '../core/names.ts';
-import { prefixLength, progressWords } from '../core/eventset.ts';
-import { worldProblems, applyFix, errorCount, checkAgainst, diffText, budgetPlace, isFoundAtEveryProgress, CHECK_GROUPS, type CheckBaseline, type WorldProblem, type CheckSeverity, type WorldCheckLearned } from '../core/worldcheck.ts';
+import { progressWords } from '../core/eventset.ts';
+import { worldProblems, applyFix, errorCount, checkAgainst, diffText, budgetPlace, problemShow, budgetShow, isFoundAtEveryProgress, CHECK_GROUPS, type CheckBaseline, type WorldProblem, type CheckSeverity, type WorldCheckLearned } from '../core/worldcheck.ts';
 import type { Budget } from '../core/owbudget.ts';
 import { budgetGauge } from './budgetgauge.ts';
 
@@ -168,22 +168,25 @@ export class WorldCheck {
     return h('button', { class: 'problem-fix', title: 'Show where the limit applies: the gauge beside the action it stops', onclick: () => this.showBudget(b) }, 'Show');
   }
 
-  // the map at the event progress the problem is found at, its tile shown and outlined; a budget: where it applies
+  // Show (#427): exactly the events of the prefix the problem is found at checked, its last event edited (a problem
+  // naming another event to show it in: that one), its tile shown and outlined; one found at the set shown (not a
+  // prefix): the checks stay, its event edited; a budget: where it applies
   private show(p: WorldProblem): void {
     if (p.budget) { this.showBudget(p.budget); return; }
-    // (found at a set that isn't a prefix: the set shown, the event stays)
-    const v = this.view, n = prefixLength(p.progress), event = p.show ? p.show.event : n >= 0 ? n - 1 : v.event;
-    if (event !== v.event) v.setEvent(event);
+    const v = this.view, to = problemShow(p, v.event);
+    if (to.checked !== null) v.showPrefix(to.checked, to.edit); else v.setEvent(to.edit);
     if (p.show) v.setMode(p.show.mode);
     else if (p.group === 'links') v.setMode('l1'); // (the overworld links are layer 1's, #413)
     v.showTile(p.tile);
   }
-  // the mode (and submap) of the budget's gauge; one beside an event's actions: an event chosen (budgetPlace)
+  // the mode (and submap) of the budget's gauge; one beside an event's actions (budgetPlace): the events up to that one
+  // checked, it edited (#427)
   private showBudget(b: Budget): void {
     const v = this.view, place = budgetPlace(v.app.rom, b, v.event);
     if (place.submap !== undefined) v.setMap(place.submap);
     v.setMode(place.mode);
-    if (place.event !== undefined) v.setEvent(place.event);
+    const to = budgetShow(place, v.event);
+    if (to.checked !== null) v.showPrefix(to.checked, to.edit);
   }
 
   private fix(p: WorldProblem): void {

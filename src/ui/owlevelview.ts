@@ -3,9 +3,9 @@
 // dropped, its translevel with it –, Delete leaves the stop tile, a right click on one opens its menu (Open level,
 // Change look…, Remove). A look chosen as the brush in the layer 1 picker's "Levels" (`look`): a right click on a cell
 // places a level there ("Place level here…": the level chosen, the look preselected); a level without a level tile is
-// dragged from the list onto the map. Each change one ROM edit of the map before events – with event X chosen in the
-// strip a layer 1 change of that event (the level tiles as after it) – (owleveltiles.ts), made once the path kinds, the
-// submaps' views and an event's maps are known.
+// dragged from "Without level tile" (the Levels section) onto the map. Each change one ROM edit of the map before
+// events – with event X edited in the event list a layer 1 change of that event (the level tiles as after it) –
+// (owleveltiles.ts), made once the path kinds, the submaps' views and an event's maps are known.
 
 import type { OverworldView, PickCheck } from './overworld.ts';
 import type { Rom } from '../core/rom.ts';

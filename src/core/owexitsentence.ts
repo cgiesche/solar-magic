@@ -41,7 +41,7 @@ export function exitSentences(rom: Rom, tl: number, words: SentenceWords, telepo
     const opens: Clause[] = opened.map((o) => ({ kind: 'opens', text: `opens ${words.level(o.tl)}`, l1: [o.tile], l2: [] }));
     for (const o of opened) told.add(o.tile);
     // (a reveal or destroy leaving its tiles as they are changes nothing – eventChanges, #391: not told, nor taken away
-    // here – the event's timeline under the strip lists it)
+    // here – the event's timeline under the map lists it)
     const r = eventReveal(rom, c.event), changed = new Set(c.l1);
     if (r >= 0 && changed.has(r)) {
       const into = revealedTile(rom, map[r]), remove = { kind: 'reveal' as const, tile: r };

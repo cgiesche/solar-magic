@@ -1,13 +1,13 @@
 // A layer 1 cell's history over the game (#359) in a popup: the mouse resting on a cell of the overworld map for a
 // moment (no button held – painting and dragging go on as before) shows what each event changes there, in number order
-// and the player's words (core/owcellhistory.ts); a click on an entry sets the playthrough strip there (ADR 0013).
-// The popup stays while the mouse is on it, and goes when the mouse rests on another cell, a button is pressed or the
-// map scrolls.
-// An event's layer 1 change there (its layer 1 changes, reveal, destroy) is moved to another event (#360,
-// core/owmovechange.ts) by dragging its entry onto an event of the strip – the popup staying while dragged – or by its
-// "Move to…" and a click on an event of the strip: the connected tiles the event changes, with Alt held this tile only.
-// The map shows the tiles moving (red: refused), a label by the mouse what the drop does or why it can't; dropped, one
-// ROM edit, the strip on the target event, a toast how many tiles moved. Layer 2 entries aren't moved.
+// and the player's words (core/owcellhistory.ts); a click on an entry edits its event, the checks in the event list
+// staying (ADR 0014; the map before events' entry ends editing). The popup stays while the mouse is on it, and goes
+// when the mouse rests on another cell, a button is pressed or the map scrolls. An event's layer 1 change there (its
+// layer 1 changes, reveal, destroy) is moved to another event (#360, core/owmovechange.ts) by dragging its entry onto
+// an event's row in the event list – the popup staying while dragged – or by its "Move to…" and a click on an event's
+// row: the connected tiles the event changes, with Alt held this tile only. The map shows the tiles moving (red:
+// refused), a label by the mouse what the drop does or why it can't; dropped, one ROM edit, the target event edited, a
+// toast how many tiles moved. Layer 2 entries aren't moved.
 
 import { h, toast } from './dom.ts';
 import type { OverworldView } from './overworld.ts';
@@ -35,8 +35,8 @@ export function tileWords(kinds: readonly PathKind[] | null, t: number): string 
 const cellHistoryOn = boolPref('ow-cell-history', true); // View → Cell history
 
 // a change being moved: the cell and event, dragged (the button held) or picked (after "Move to…"), the event of the
-// strip under the mouse (null none), Alt held; the events, maps and level exits running the events read once (the ROM
-// doesn't change meanwhile), the plans made per target and Alt
+// event list under the mouse (null none), Alt held; the events, maps and level exits running the events read once (the
+// ROM doesn't change meanwhile), the plans made per target and Alt
 interface Moving {
   cell: number; from: number; drag: boolean; to: number | null; alt: boolean;
   d: EventData; maps: Uint16Array[]; runners: Map<number, EventRunner[]>; plans: Map<string, MovePlan>; label: HTMLElement;
@@ -67,7 +67,7 @@ export class CellHistoryPopup {
     }, true);
     window.addEventListener('mousemove', (e) => this.moveOver(e));
     window.addEventListener('mouseup', (e) => { this.pressAt = null; if (this.moving?.drag) this.drop(e); });
-    // (a move picked: a click on an event of the strip moves it there, anywhere else cancels)
+    // (a move picked: a click on an event's row in the event list moves it there, anywhere else cancels)
     window.addEventListener('click', (e) => {
       if (!this.moving || this.moving.drag) return;
       e.preventDefault();
@@ -119,7 +119,7 @@ export class CellHistoryPopup {
     this.el.remove();
   }
 
-  // the popup for cell i, the entry at the strip's event progress marked
+  // the popup for cell i, the entry of the edited event marked (the last changing the cell up to it)
   private show(i: number): void {
     if (!this.view.root.isConnected) return; // (the overworld no longer shown)
     const v = this.view, rom = v.app.rom, runners = eventRunners(rom), kinds = v.pathKinds();
@@ -137,13 +137,13 @@ export class CellHistoryPopup {
         ...entries.map((x, k) => h('div', { class: 'ow-history-row' },
           h('button', {
             class: `ow-history-entry${k === now ? ' active' : ''}${movable(k) ? ' movable' : ''}`,
-            title: x.event < 0 ? 'Show the map before events in the strip'
-              : `Show the map as after this event in the strip (painting goes into it)${movable(k) ? ' – drag it onto another event of the strip to move the change there (the connected tiles the event changes; Alt: this tile only)' : ' – a change of layer 2: its steps stay with the event'}`,
+            title: x.event < 0 ? 'End editing: painting goes into the map before events'
+              : `Edit this event (painting goes into it; the checks in the event list stay)${movable(k) ? ' – drag it onto another event\'s row in the event list to move the change there (the connected tiles the event changes; Alt: this tile only)' : ' – a change of layer 2: its steps stay with the event'}`,
             onclick: () => { if (!this.dragged) { v.setEvent(x.event); build(); } this.dragged = false; },
             onmousedown: (e: MouseEvent) => { if (movable(k) && e.button === 0) this.press(e, i, x.event); },
           }, k ? `→ ${x.text}` : x.text),
           movable(k) ? h('button', {
-            class: 'ow-history-move', title: 'Move this change to another event: then click the event in the strip (Alt held: this tile only; Esc cancels)',
+            class: 'ow-history-move', title: 'Move this change to another event: then click the event\'s row in the event list (Alt held: this tile only; Esc cancels)',
             onclick: (e: MouseEvent) => { e.stopPropagation(); this.startMove(i, x.event, false, e); },
           }, 'Move to…') : null)),
         ...(entries.length === 1 ? [h('div', { class: 'hint' }, 'No event changes it.')] : []),
@@ -173,7 +173,7 @@ export class CellHistoryPopup {
     if (!drag) this.hide();
     this.moveOver(e);
   }
-  // the mouse moved: a press becoming a drag; while moving, the event of the strip under the mouse the target
+  // the mouse moved: a press becoming a drag; while moving, the event list's row under the mouse the target
   private moveOver(e: MouseEvent): void {
     const p = this.pressAt;
     if (p && !this.moving) {
@@ -218,7 +218,7 @@ export class CellHistoryPopup {
   private words(runners: Map<number, EventRunner[]>, e: number): string {
     return e === BEFORE_EVENTS ? 'the map before events' : eventWords(runners, e, this.view.levelWords);
   }
-  // the tiles moving on the map, the label what a drop does, the target event marked in the strip
+  // the tiles moving on the map, the label what a drop does, the target event marked in the event list
   private preview(): void {
     const m = this.moving, v = this.view;
     if (!m) return;
@@ -232,13 +232,13 @@ export class CellHistoryPopup {
       c.classList.toggle('ow-drop-refused', here && refused);
     }
     const n = `${p.cells.length} tile${p.cells.length === 1 ? '' : 's'}${m.alt ? '' : ' (Alt: this one only)'}`;
-    m.label.textContent = to === null ? `Move ${n} from ${words(m.from)}: ${m.drag ? 'drop' : 'click'} on an event of the strip (Esc cancels)`
+    m.label.textContent = to === null ? `Move ${n} from ${words(m.from)}: ${m.drag ? 'drop' : 'click'} on an event in the event list (Esc cancels)`
       : to === m.from ? `Already in ${words(m.from)}`
       : p.refusal ? refusalText(v.app.rom, p.refusal)
       : `Move ${n} from ${words(m.from)} to ${words(to)}${p.layer2 ? ` – the layer 2 look stays in ${words(m.from)}` : ''}`;
     m.label.classList.toggle('refused', refused);
   }
-  // the drop (or the click after "Move to…"): on an event of the strip moved there, one ROM edit (refused: the reason);
+  // the drop (or the click after "Move to…"): on an event's row moved there, one ROM edit (refused: the reason);
   // elsewhere nothing
   private drop(e: MouseEvent): void {
     const m = this.moving;

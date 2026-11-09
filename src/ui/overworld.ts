@@ -1217,6 +1217,13 @@ export class OverworldView {
     this.redrawMap();
     this.updateStatus();
   }
+  // Show of a problem or budget found at an event progress (#427): exactly the events of the prefix checked (events 0 …
+  // n-1), its last event edited (`edit`: another event edited instead, -1 none; by default n-1)
+  showPrefix(n: number, edit = n - 1): void {
+    this.checked = eventBits(n);
+    if (edit !== this.event) this.setEvent(edit); // (stores both, builds the list, the badge and the map)
+    else this.setChecked(this.checked);
+  }
   // event e's check in the event list switched
   toggleChecked(e: number): void {
     if (e >= 0) this.setChecked(withEvent(this.checked, e, !isPassed(this.checked, e)));
@@ -1616,7 +1623,7 @@ export class OverworldView {
           'The overworld\'s sprites as the game shows them at the event progress (always shown in the Sprites mode)'),
         view('Sprite shadows', () => this.sprites.showShadows, (v) => (this.sprites.showShadows = v), 'A shadow on the ground under each sprite'),
         view('Sprite height marks', () => this.sprites.showHeights, (v) => (this.sprites.showHeights = v), 'A line from a flying sprite\'s position up to it'),
-        { label: 'Cell history', title: 'The mouse resting on a cell for a moment shows what each event changes there over the game; a click on an entry shows the map as after it in the strip',
+        { label: 'Cell history', title: 'The mouse resting on a cell for a moment shows what each event changes there over the game; a click on an entry edits its event (the checks in the event list stay)',
           checked: () => this.cellHistory.on, onToggle: (v: boolean) => this.cellHistory.setOn(v) },
         view('Link arrows', () => this.links.show, (v) => (this.links.show = v),
           'Every overworld link as an arrow (else the selected tile\'s): stars, pipes and exit paths leading elsewhere, the locations exits to the overworld teleport to and the Koopa Kids\' places dashed'),
@@ -1851,7 +1858,7 @@ export class OverworldView {
   private levelsSection(): HTMLElement {
     const look = this.lookBrush;
     return h('div', { class: 'ow-info' },
-      h('div', { class: 'hint ow-page', title: 'Level tiles are objects on top of layer 1 – the only place they are changed –, each change one ROM edit of the map before events, or with an event chosen in the strip under the map a layer 1 change of the event (the tile changed from the event on). Click one on the map to select it, drag it to move it (it swaps with the tile there, its level and settings go with it), Delete leaves the stop tile 81 (the level keeps its settings, listed under "Without level tile"), right click for its menu' },
+      h('div', { class: 'hint ow-page', title: 'Level tiles are objects on top of layer 1 – the only place they are changed –, each change one ROM edit of the map before events, or with an event edited (the event list) a layer 1 change of the event (the tile changed from the event on). Click one on the map to select it, drag it to move it (it swaps with the tile there, its level and settings go with it), Delete leaves the stop tile 81 (the level keeps its settings, listed under "Without level tile"), right click for its menu' },
         'Levels', h('span', { class: 'hint' }, look >= 0 ? ` · Right click/Shift+click a cell: Place level here… (look ${l1Hex(look)})` : ' · choose a look, then right click a cell')),
       this.levelTiles.lookPicker(look, (t) => this.setLookBrush(t)),
       budgetRow('Levels with a level tile', this.budget('translevels')),
@@ -1954,7 +1961,7 @@ export class OverworldView {
 
   // "When beaten…": a sentence per exit of what passing it does (owexitsentence.ts; the levels it opens as its arrows,
   // none told while they are learned: said so), in the player's words, the event number after it. Hovering a clause
-  // outlines its tiles on the map, a click shows the map as after the exit's event in the strip, × on a reveal or
+  // outlines its tiles on the map, a click edits the exit's event (the checks stay), × on a reveal or
   // destroy takes it away (one ROM edit); an exit whose event changes nothing "opens nothing yet". Exits to the overworld passing none of the exits (ending the turn) are told below.
   exitResultRows(tl: number): HTMLElement[] {
     const rom = this.app.rom, { teleports } = this.exitResults(tl), runners = eventRunners(rom), kinds = this.pathKinds(), edges = this.exits.edges();
@@ -1962,7 +1969,7 @@ export class OverworldView {
     const sentences = exitSentences(rom, tl, { level: this.levelWords, tile: (t) => tileWords(kinds, t) }, teleports, edges);
     if (!sentences.length && !teleports.length) return [];
     const clause = (c: Clause, e: number) => h('span', {
-      class: 'ow-clause', title: 'Shows the map as after this exit\'s event in the strip',
+      class: 'ow-clause', title: 'Edits this exit\'s event: painted into, its steps under the map (the checks in the event list stay)',
       onmouseenter: () => { this.hoverClause = c; this.paint(); },
       onmouseleave: () => { this.hoverClause = null; this.paint(); },
       onclick: () => this.setEvent(e),
@@ -1976,12 +1983,12 @@ export class OverworldView {
     const move = (t: LevelTeleport) => h('button', { class: 'link-btn', title: `Choose the tile location ${hex(t.location, 2)} teleports to (the next click, on any map; Esc cancels)`,
       onclick: (ev: MouseEvent) => { ev.stopPropagation(); this.links.pending = { move: { sel: { kind: 'location', i: t.location }, target: true } }; this.paint(); this.updateStatus(); } }, 'Move…');
     return [
-      h('div', { class: 'hint' }, 'When beaten… (outlined on the map, a click shows it in the strip):'),
+      h('div', { class: 'hint' }, 'When beaten… (outlined on the map, a click edits its event):'),
       ...(edges ? [] : [h('div', { class: 'hint' }, 'The levels the exits open: being learned …')]),
       ...sentences.map((x) => h('div', { class: 'ow-sentence' },
         h('b', null, `${EXIT_NAMES[x.exit]}: `),
         ...(x.clauses.length ? x.clauses.flatMap((c, k) => (k ? [' · ', clause(c, x.event)] : [clause(c, x.event)]))
-          : [h('span', { class: 'ow-clause', title: 'Its event changes nothing on the map – shows the map as after it in the strip', onclick: () => this.setEvent(x.event) }, 'opens nothing yet')]),
+          : [h('span', { class: 'ow-clause', title: 'Its event changes nothing on the map – a click edits it (the checks in the event list stay)', onclick: () => this.setEvent(x.event) }, 'opens nothing yet')]),
         h('span', { class: 'hint', title: eventTitle(runners, x.event) }, ` · event ${hex(x.event, 2)}`),
         ...teleports.filter((t) => teleportExit(t.action) === x.exit).map((t) => [' ', move(t)]).flat())),
       ...others.map((t) => h('div', { class: 'hint' }, `Exit to the overworld (entrance ${hex(t.entrance, 3)}, ${owActionShort(t.action)}): Mario goes to ${tileText(t.to)} (dashed) `, move(t))),
@@ -2117,9 +2124,9 @@ export class OverworldView {
     ];
   }
 
-  // an event as a link choosing it in the strip (where its reveals and destroys are edited)
+  // an event as a link editing it (its reveals and destroys are edited in its timeline; the checks stay)
   private eventLink(names: Map<number, string>, e: number): HTMLElement {
-    return h('button', { class: 'link-btn', title: 'Show the map after this event – its reveals and destroys are edited in its timeline', onclick: () => this.setEvent(e) }, this.eventLabel(names, e));
+    return h('button', { class: 'link-btn', title: 'Edit this event – its reveals and destroys are edited in its timeline under the map (the checks in the event list stay)', onclick: () => this.setEvent(e) }, this.eventLabel(names, e));
   }
 
   // the events that reveal layer 1 tile i (Lunar Magic's "reveal this tile on events"), each a link to the event:
@@ -2127,7 +2134,7 @@ export class OverworldView {
   revealSettings(i: number): HTMLElement[] {
     const rom = this.app.rom, t = this.l1[i], into = revealedTile(rom, t), names = eventNames(rom);
     const evs = i ? revealEvents(rom, i) : [];
-    if (!evs.length) return [h('div', { class: 'hint' }, 'Revealed on no event (an event reveals a tile: "+ Reveal" in its timeline under the strip).')];
+    if (!evs.length) return [h('div', { class: 'hint' }, 'Revealed on no event (an event reveals a tile: "+ Reveal" in its timeline under the map – edit the event in the event list).')];
     return [
       h('div', { class: 'prop' }, h('label', null, 'Revealed on'), h('div', null, ...evs.map((e) => h('div', null, this.eventLink(names, e))))),
       into < 0 ? h('div', { class: 'hint warn-text' }, `⚠ Tile ${l1Hex(t)} is not in the reveal list: revealing it changes nothing.`)
@@ -2144,7 +2151,7 @@ export class OverworldView {
     const effects = destroyEffects(rom), names = eventNames(rom);
     const { at: j, tile: t } = destroySettingAt(rom, this.l1, this.shown.l1, i);
     const evs = j < 0 ? [] : readDestroyList(rom).filter((d) => d.event !== NO_EVENT && d.tile === j).map((d) => d.event);
-    if (!evs.length) return j < 0 ? [] : [h('div', { class: 'hint' }, 'Destroyed on no event (an event destroys a tile: "+ Destroy" in its timeline under the strip).')];
+    if (!evs.length) return j < 0 ? [] : [h('div', { class: 'hint' }, 'Destroyed on no event (an event destroys a tile: "+ Destroy" in its timeline under the map – edit the event in the event list).')];
     const side = (c: { dx: number; dy: number }) => (c.dy > 0 ? 'below' : c.dy < 0 ? 'above' : c.dx > 0 ? 'right of it' : 'left of it');
     const changes = t === undefined ? [] : effects[t].map((c) => `${c.dx || c.dy ? `the tile ${side(c)} ` : ''}becomes ${l1Hex(c.tile)}`);
     return [
@@ -2368,7 +2375,7 @@ export class OverworldView {
     return h('div', { class: 'row' },
       h('button', {
         class: r ? 'active' : '', onclick: () => { if (!this.cancelReplace()) this.startReplace(); },
-        title: 'Every piece of one kind (on its 16-pixel grid) in the selection becomes another one: click the piece to replace, then the new one – on the map or below. Without a selection: the whole map, after a confirmation. One undo step; with an event chosen in the playthrough strip painted into the event',
+        title: 'Every piece of one kind (on its 16-pixel grid) in the selection becomes another one: click the piece to replace, then the new one – on the map or below. Without a selection: the whole map, after a confirmation. One undo step; with an event edited (the event list) painted into the event',
       }, 'Replace piece…'),
       h('span', { class: 'hint' }, r ? (r.from ? 'now the new piece' : 'click the piece to replace') : sel ? `in the selection ${sel.w}×${sel.h}` : 'on the whole map'),
       ...(sel && !r ? [h('button', { title: 'Drop the selection: replace on the whole map', onclick: () => { this.l2Sel = null; this.buildSide(); this.paint(); } }, '×')] : []));
@@ -2464,7 +2471,7 @@ export class OverworldView {
     this.tls = m.tls;
     this.stopPlay();
     this.syncEvent();
-    this.buildBar(); // (the events' names in the strip, the badge)
+    this.buildBar(); // (the badge naming the edited event)
     this.buildSide();
     this.buildLeft();
     this.redrawMap();

@@ -475,7 +475,7 @@ export function exitChanges(rom: Rom, tl: number, d: EventData = readEvents(rom)
 // its reveal, its destroys – and the layer 2 tilemap entries (readL2 indexes) its steps write. A reveal, a destroy or a
 // layer 1 change leaving the cell's tile as it is changes nothing (#391: a reveal of a tile the reveal list doesn't
 // have, a destroy of a tile without destroy effect, a step writing the tile there). As it is: as the events before e
-// in number order left it (owcellhistory.ts layer1AtEveryProgress: the order a loaded save applies them, the strip's)
+// in number order left it (owcellhistory.ts layer1AtEveryProgress: the order a loaded save applies them)
 // and on the map before events – in play e may pass first (two exits revealing the same star: the second in number
 // order finds it revealed); a change on either counts.
 // (layer 1 through the events walked once, when first asked: ask it for several events)

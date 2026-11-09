@@ -1261,7 +1261,7 @@ export class App {
   // events (eventset.ts): one emulation learns every prefix, another set is learned on its own (owprogress.ts
   // setSavesJob: its events' levels left in number order) and kept per set here (the probe client's memory); shared by
   // the lanes (OverworldLoads.deriveSteps), each asker in its own (SAVE_LANES: a test play waits for its own, the
-  // strip's progress shown replaces the one asked before it, #388). The overworld left, the strip's are dropped
+  // progress shown replaces the one asked before it, #388). The overworld left, the shown progress's are dropped
   // (overworldLeft)
   progressSave(at: EventProgress, asker: SaveAsker = 'test'): ProgressSave | Promise<ProgressSave | null | undefined> {
     const progress = canonicalProgress(at);

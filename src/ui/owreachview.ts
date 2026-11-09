@@ -3,7 +3,7 @@
 // nothing he reaches – are listed by the World check (worldcheck.ts). Searched again when the ROM, the event progress
 // or what it is searched over (path kinds and shapes, the maps at the progress and with every event passed, the saves there)
 // changes; nothing is shown while one of those is learned. The search with every event passed is the same at every
-// progress: kept while the ROM and what it searches are, so a step through the strip searches once (#388).
+// progress: kept while the ROM and what it searches are, so a step through the event list searches once (#388).
 
 import type { OverworldView } from './overworld.ts';
 import { gameL1, l1XY, OW_EVENTS, type OwRender } from '../core/overworld.ts';
@@ -43,7 +43,7 @@ export class ReachLayer {
     if (!(s instanceof Promise)) { this.saves.set(key, s); return s; }
     this.saves.set(key, null);
     void s.then((v) => {
-      // (dropped: asked again if it is still needed, e.g. the strip back at it)
+      // (dropped: asked again if it is still needed, e.g. the event list back at it)
       if (v === null) { if (this.saves.get(key) === null) { this.saves.delete(key); this.learned(); } return; }
       this.saves.set(key, v);
       if (v) this.learned();

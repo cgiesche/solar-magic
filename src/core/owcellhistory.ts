@@ -1,5 +1,5 @@
 // A layer 1 cell's history over the game (#359): what each event changes on it, in number order – the order the game
-// applies the events loading a save (CONTEXT.md "Event progress"), so the strip (ADR 0013) can jump to each. Layer 1
+// applies the events loading a save (CONTEXT.md "Event progress"), so the event list (ADR 0014) can edit each. Layer 1
 // as the events leave it: an event's layer 1 changes (its silent steps), then the tile it reveals (turned into its
 // counterpart of the reveal list), then the tiles it destroys (what destroying the tile there does, learned from the
 // game's code: destroyEffects); layer 2: its steps covering the cell's four 8x8 entries. A level tile placed or
@@ -100,7 +100,7 @@ export function cellHistory(rom: Rom, i: number, isLevelTile?: (t: number) => bo
   return { before, changes };
 }
 
-// The history in the player's words, one entry per event (-1: before events) to jump to in the strip: "6E (before
+// The history in the player's words, one entry per event (-1: before events) to edit in the event list: "6E (before
 // events)", "revealed: 66 (Yoshi's Island 2 · normal exit)", "destroyed: 81, no level tile (Iggy's Castle · normal
 // exit)", "layer 2 changes (…)". tile: a layer 1 tile in words, event: an event in words (owevents.ts eventWords)
 export function historyWords(h: CellHistory, tile: (t: number) => string, event: (e: number) => string): { event: number; text: string }[] {

@@ -18,6 +18,7 @@ import { progressSaves, progressSaveJob, progressMapFromEvents, progressMapsFrom
 import { reach, reachInput } from '../src/core/owreach.ts';
 import { readStart } from '../src/core/owsprites.ts';
 import { shownMaps } from '../src/core/owstroke.ts';
+import { problemShow, budgetShow } from '../src/core/worldcheck.ts';
 import type { Job } from '../src/core/jobrunner.ts';
 import { LevelEmulator } from '../src/core/levelemu.ts';
 import { PlaySession } from '../src/core/playsession.ts';
@@ -139,6 +140,20 @@ const save = run(progressSaveJob(loads, S)) as ProgressSave;
   check(shown.l1[cell] === 0x7f && shown.l2[l2cell] === 0x1234, 'at another set: the tiles painted into the event shown');
   check(shown.l1.every((t, i) => i === cell || t === g1[i]) && [...shown.l2.subarray(0x1000, 0x2000)].every((t, k) => k === 7 || t === g2[k]),
     'the other tiles as the game shows the set (the checked events and the edited one)');
+}
+
+// ---- Show of a problem or budget (#427): the prefix it is found at checked, its last event edited ----
+{
+  const at = (progress: number | Uint8Array, show?: number) => problemShow({ progress, ...(show === undefined ? {} : { show: { event: show, mode: 'l2' as const } }) }, 7);
+  const j = (x: unknown) => JSON.stringify(x);
+  check(j(at(0x10)) === j({ checked: 0x10, edit: 0x0f }) && j(at(0)) === j({ checked: 0, edit: -1 }) && j(at(OW_EVENTS)) === j({ checked: OW_EVENTS, edit: OW_EVENTS - 1 }),
+    'a problem found at a prefix: exactly its events checked, its last one edited (none before events)');
+  check(j(at(0x10, 0x20)) === j({ checked: 0x10, edit: 0x20 }), 'one naming the event to show it in: that one edited');
+  check(j(at(eventBits(0x10))) === j({ checked: 0x10, edit: 0x0f }) && j(at(S)) === j({ checked: null, edit: 7 }) && j(at(S, 3)) === j({ checked: null, edit: 3 }),
+    'a prefix as a set the same; found at the set shown: the checks stay, the edited event (or the one named)');
+  check(j(budgetShow({ mode: 'l1', event: 0x12 }, 7)) === j({ checked: 0x13, edit: 0x12 }) && j(budgetShow({ mode: 'l1' }, 7)) === j({ checked: null, edit: 7 })
+    && j(budgetShow({ mode: 'l1', event: 7 }, 7)) === j({ checked: null, edit: 7 }),
+    'a budget beside an event\'s actions: the events up to it checked, it edited (the edited one\'s: the checks stay); another stays as it is');
 }
 
 // ---- test play with the set ----

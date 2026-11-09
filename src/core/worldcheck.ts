@@ -5,7 +5,7 @@
 // before and after an edit can be compared.
 
 import type { Rom } from './rom.ts';
-import { sameProgress, type EventProgress } from './eventset.ts';
+import { sameProgress, prefixLength, type EventProgress } from './eventset.ts';
 import { readL1, writeL1, readDestroyList, revealEventCount, gameL1, l1XY, NO_EVENT, OW_EVENTS, STAR_PIPE_TILES, type OverworldLoads } from './overworld.ts';
 import { eventReveal } from './oweventtiles.ts';
 import { readEvents, submapViewsJob, submapOf } from './owevents.ts';
@@ -222,6 +222,23 @@ export function* worldCheckJob(rom: Rom, loads: OverworldLoads, kinds: readonly 
   const maps = progressMapsFromEvents(rom, saves.map((s) => s.levelFlags));
   const search = progressSearches(progressInput(rom, maps, kinds, shapes, graph));
   return { checks, budgets, every: [...stuckAtEveryProgress(rom, search, place, (i) => submapOf(views, i)), ...lookProblems({ rom, maps, ownLooks, kinds, views, search, place })] };
+}
+
+// Where Show of a problem goes in the event list (#427, ADR 0014): exactly the events of the prefix it is found at
+// checked (`checked`: their count) and its last event edited – a problem naming the event to show it in (`show`): that
+// one; one found at the set shown (not a prefix): the checks stay (checked null), its `show` event edited, else the
+// event edited now (`edited`) stays
+export interface ShowTarget { checked: number | null; edit: number } // checked: the prefix's count, null: the checks stay
+export function problemShow(p: Pick<WorldProblem, 'progress' | 'show'>, edited: number): ShowTarget {
+  const n = prefixLength(p.progress);
+  if (n >= 0) return { checked: n, edit: p.show ? p.show.event : n - 1 };
+  return { checked: null, edit: p.show ? p.show.event : edited };
+}
+// Where Show of a budget goes (budgetPlace): one beside an event's actions with the events up to that one checked and
+// it edited – the gauge of the event edited now (`edited`) is there already: the checks stay; else the checks and the
+// event edited stay (checked null)
+export function budgetShow(place: BudgetPlace, edited: number): ShowTarget {
+  return place.event === undefined || place.event === edited ? { checked: null, edit: edited } : { checked: place.event + 1, edit: place.event };
 }
 
 // ---- budgets (owbudget.ts) ----

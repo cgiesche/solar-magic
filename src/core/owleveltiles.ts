@@ -5,7 +5,7 @@
 // level), its level keeping its settings (CONTEXT.md "Level tile"); one placed gets a look and the translevel chosen.
 // Which tiles are level tiles and stop tiles the game's code decides (owpaths.ts path kinds), passed in.
 //
-// With an event chosen (in the playthrough strip, LevelTileEvent) the edits are layer 1 changes of that event instead
+// With an event edited (in the event list, LevelTileEvent) the edits are layer 1 changes of that event instead
 // (owevents.ts paintEventL1, as layer 1 painted into an event): the level tile appears, moves or goes from the event
 // on, the map before events stays. The translevel table is per cell for every event progress: a cell entering one
 // level on another map (before events, before the event, by another event or a reveal) can't enter another one after
