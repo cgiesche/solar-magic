@@ -73,6 +73,7 @@ import { type PathKind, type PathShapes, type LevelTileTest, levelTileTest } fro
 import type { RevealWalkSkips } from '../core/revealwalk.ts';
 import { OW_EVENTS, type OwRender } from '../core/overworld.ts';
 import type { OwTriggerSwitches } from '../core/owanimview.ts';
+import { animationPref } from './motion.ts';
 import type { Rect } from '../core/owevents.ts';
 import type { OwSpriteView } from '../core/owsprites.ts';
 import type { ProgressSave } from '../core/owprogress.ts';
@@ -117,6 +118,7 @@ export type AppEvent =
   | 'sprite-mem' // the sprite memory check of the level is known
   | 'animated' // which tiles and colors of the level animate is known
   | 'anim-frame' // the next frame of the level animation is shown, or the level as rendered again when it stops
+  | 'animation' // View → "Animation" was switched (setAnimation)
   | 'prefabs' // the prefab table changed
   | 'object-names' // the user's object names changed (a rename, its undo or redo), or an object table became known
   | 'slippery' // the entrance actions that make a level slippery are known (App.slipperyActions)
@@ -235,6 +237,7 @@ export class App {
     this.romWatch = new RomWatch(rom);
     // made now, outside any ROM edit (undo never takes it away), and stored with the ROM soon
     if (makeProjectId(rom)) this.persistTimer = window.setTimeout(() => { this.persistTimer = 0; this.persist(); }, 1000);
+    this.view.show.anim = animationPref.get();
     this.emu = new LevelEmulator(rom);
     this.emu.skipMask = this.gfxSkipMask;
     this.emu.boot();
@@ -1266,6 +1269,14 @@ export class App {
   }
   // the last submap's tiles and colors learned, shown while the submap's are learned again
   private owAnimatedShown: { map: number; res: Animated } | null = null;
+  // the steps of the animation on submap `map` at event progress `progress` (owanimsteps.ts), learned in the probe
+  // worker and kept in memory while the ROM bytes they read are unchanged (painting the tilemaps keeps them): undefined
+  // while they are emulated (a new request drops the one still waiting; the job's progress in the busy indicator),
+  // then `done` is called
+  owAnimSteps(map: number, progress: number, done: (s: AnimStep[]) => void): AnimStep[] | undefined {
+    return this.probes.learn<AnimStep[]>(`owas1:${map}`, { kind: 'owAnimSteps', map, progress },
+      { lane: 'owas', input: { progress }, replace: true, label: 'Overworld animations', done });
+  }
   submapViews(done: (v: Rect[]) => void): Rect[] | undefined {
     return this.probes.learn<Rect[]>('owv1', { kind: 'owViews' }, { lane: 'owv', label: 'Submap views', done });
   }
@@ -1598,6 +1609,15 @@ export class App {
   triggerInit(): { custom: number; manual: Map<number, number> } {
     return initTriggers(readGlobalList(this.rom), this.level ? readLevelList(this.rom, this.level.number) : null);
   }
+  // View → "Animation" switched (motion.ts animationPref: kept in the browser): the level loads anew, its animation
+  // shown or not; the overworld follows ('animation')
+  setAnimation(on: boolean): void {
+    animationPref.set(on);
+    this.view.show.anim = on;
+    this.refresh();
+    this.emit('animation');
+  }
+
   // changes the view's triggers (and test play's); the level loads anew with them, its animation shown
   setTriggers(fn: (v: TriggerView) => void): void {
     fn(this.view.exTriggers);
