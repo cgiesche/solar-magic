@@ -18,7 +18,7 @@ import { objectTableKey, objectName, objectNameKey, setObjectName, namedPerTable
 import { layerBoxes, boxAt } from '../core/objboxes.ts';
 import { objectUserNames } from '../core/usernames.ts';
 import { loadPixiProject, customSpriteList, type CustomSprite } from '../core/pixi.ts';
-import { renderLevel, type LevelImages, composite, animatedPixels, TileAnimation, ANIM_STEPS_PER_SECOND, MAX_ANIM_STEPS, type AnimStep } from '../core/render.ts';
+import { renderLevel, type LevelImages, composite, composeCells, patchLevel, patchFrame, animatedPixels, type PixelChanges, TileAnimation, ANIM_STEPS_PER_SECOND, MAX_ANIM_STEPS, type AnimStep } from '../core/render.ts';
 import type { SpriteImage } from '../core/spritegfx.ts';
 import { usedSpriteMemory, spriteMemSpec, lostSprites, missingSprites, type SpriteMemResult } from '../core/spritemem.ts';
 import { DM16_EXT, levelGfx, levelExtGfx, customPalette, levelMusic } from '../core/patches.ts';
@@ -233,7 +233,7 @@ export class App {
   // while what they read is unchanged (levelanimsteps.ts); phase: the step shown (-1 none yet), kept while the steps
   // are; ready: the frames are those of the composite shown
   anim = { gen: 0, steps: null as LevelAnimSteps | null, base: null as Uint32Array | null,
-    frames: [] as { idx: Uint32Array; val: Uint32Array }[], phase: -1, timer: 0, ready: false };
+    frames: [] as PixelChanges[], phase: -1, timer: 0, ready: false };
 
   constructor(rom: Rom, name: string) {
     this.rom = rom;
@@ -408,21 +408,29 @@ export class App {
 
   // what the render was made from: its inputs, the ROM generation and the ROM bytes it read
   private rendered: (Recorded<void> & { key: string }) | null = null;
-  private composedGhost = -1; // the ghosting the composite was made with (compose: it follows the edit mode)
+  // what the level image was drawn for: the level's layout and the ROM generation (an edit's load of the same is drawn
+  // only where it looks different: patchLevel)
+  private drawnFor: { level: number; mode: number; screens: number; rows: number; gen: number } | null = null;
+  private composedLook = ''; // the layers shown and the ghosting the composite was made with (compose: it follows the edit mode)
 
   // the level emulated and drawn anew – unless its inputs and the ROM bytes the last render read are unchanged
   // (a ROM edit elsewhere: the overworld, another level's data). The edit mode is no input: only the composite's
-  // ghosting depends on it (compose), made anew when that changed
+  // ghosting depends on it (compose), made anew when that changed. An edit's load (the same level's layout, the same
+  // ROM) is drawn only in the cells that look different from the last one (#445: found by comparing the two loads), the
+  // composite and the animation's frames there too
   refresh(): void {
     const lv = this.level, ov = this.buildOverrides();
     const key = inputHash({ level: lv.number, ov, header: lv.header, secondary: lv.secondary, show: this.view.show });
     const was = this.rendered;
     if (was?.key === key && holds(this.rom, was)) {
-      if (this.composedGhost !== this.ghost()) this.recomposite();
+      if (this.composedLook !== this.look()) this.recomposite();
       this.scheduleScan();
       this.updateGameViewCamera(ov);
       return;
     }
+    const prev = this.drawnFor, prevRender = this.render, prevImages = this.images;
+    const drawn = { level: lv.number, mode: lv.header.mode, screens: lv.header.screens, rows: levelRows(lv.secondary), gen: this.rom.gen };
+    let cells: Uint8Array | null = null, carried = false;
     this.rendered = { key, ...this.emu.recordAll(() => {
       const r = this.emu.load(lv.number, ov);
       this.renderError = r.ok ? null : r.error ?? 'Error';
@@ -432,18 +440,27 @@ export class App {
       const count = this.view.show.anim && r.ok ? exanimPeriod([readLevelList(this.rom, lv.number), readGlobalList(this.rom)], MAX_ANIM_STEPS, 8) : 0;
       const kept = count ? this.anim.steps?.carry(this.emu, count) ?? null : null;
       if (!kept) this.anim.phase = -1;
+      carried = !!kept;
       this.anim.steps = count ? kept ?? new LevelAnimSteps(this.emu, count) : null;
+      const same = !!prev && !!prevRender?.ok && r.ok && prev.level === drawn.level && prev.mode === drawn.mode
+        && prev.screens === drawn.screens && prev.rows === drawn.rows && prev.gen === drawn.gen;
+      const p = same ? patchLevel(this.rom, prevRender, prevImages, r) : null;
       this.render = r;
-      this.images = renderLevel(this.rom, r, lv.header.mode, lv.header.screens, levelRows(lv.secondary));
+      cells = p?.cells ?? null;
+      this.images = p?.images ?? renderLevel(this.rom, r, lv.header.mode, lv.header.screens, drawn.rows);
+      this.drawnFor = drawn;
     }) };
     if (this.anim.steps) this.rendered.reads.add(this.anim.steps.reads); // (the steps carried over)
     // picker thumbnails are transparent: shown on the level's backdrop as in the game
     const c = this.images.backdrop;
     document.documentElement.style.setProperty('--level-backdrop', `rgb(${c & 0xff},${(c >> 8) & 0xff},${(c >> 16) & 0xff})`);
-    this.compositeImg = this.compose();
-    this.composedGhost = this.ghost();
+    // (the composite without the animation patched in place where the level image was)
+    const base = this.anim.base, look = this.look(), patched = !!cells && !!base && this.composedLook === look;
+    if (patched) this.composeInto(base!, cells!);
+    this.compositeImg = patched ? base! : this.compose();
+    this.composedLook = look;
     this.query = new RenderQuery(this.render, this.images.geom1, this.images.geom2);
-    this.startAnimation();
+    this.startAnimation(patched && carried ? cells : null);
     this.emit('render');
     this.scheduleScan();
     this.updateGameViewCamera(ov);
@@ -451,7 +468,7 @@ export class App {
 
   recomposite(): void {
     this.compositeImg = this.compose();
-    this.composedGhost = this.ghost();
+    this.composedLook = this.look();
     this.startAnimation();
     this.emit('render');
   }
@@ -459,6 +476,14 @@ export class App {
   // the object layer not being edited is ghosted (only in levels with two object layers), editing layer 3 both
   compose(images = this.images): Uint32Array {
     return composite(images, this.view.show.layer1, this.view.show.layer2, this.ghost(), this.view.show.layer3);
+  }
+  // a composite of the level image composed anew in its cells marked (patchLevel's)
+  private composeInto(out: Uint32Array, cells: Uint8Array): void {
+    composeCells(this.images, out, cells, this.view.show.layer1, this.view.show.layer2, this.ghost(), this.view.show.layer3);
+  }
+  private look(): string {
+    const s = this.view.show;
+    return `${s.layer1} ${s.layer2} ${s.layer3} ${this.ghost()}`;
   }
   private ghost(): number {
     const m = this.model.mode;
@@ -468,10 +493,12 @@ export class App {
   // the animation's frames for the composite shown, built in the background from its steps (those not yet emulated
   // emulated then: "Animations i/n"), then cycled (8 game frames each) – on from the step shown when the steps are
   // the same as before (a recomposite, an edit the steps carry over): its frame built first and shown at once, the
-  // level as the pickers (animStep) while the others are built
-  startAnimation(): void {
+  // level as the pickers (animStep) while the others are built. cells: the composite was composed anew there (an edit's
+  // load, the steps carried over): the frames built before are patched there (those built)
+  startAnimation(cells: Uint8Array | null = null): void {
     const a = this.anim, steps = a.steps;
     const gen = ++a.gen;
+    const before = cells ? a.frames : [];
     a.frames = [];
     a.ready = false;
     a.base = this.compositeImg;
@@ -491,8 +518,11 @@ export class App {
       }
       if (i < made.length) {
         const n = (first + i) % made.length, s = made[n];
-        // only the cells the step changes drawn anew; all of them when it changes every cell
-        let f = animatedPixels(this.rom, this.render, this.images, base, s.vram, s.cgram, (cell) => this.compose(cell));
+        // only the cells the step changes drawn anew; all of them when it changes every cell. After an edit only those
+        // in the cells composed anew
+        const look = (cell: LevelImages) => this.compose(cell), old = before[n];
+        const inside = old && cells ? animatedPixels(this.rom, this.render, this.images, base, s.vram, s.cgram, look, cells) : null;
+        let f = inside ? patchFrame(old, inside, cells!, this.images.width) : animatedPixels(this.rom, this.render, this.images, base, s.vram, s.cgram, look);
         if (!f) {
           const li = renderLevel(this.rom, { ...this.render, vram: s.vram, cgram: s.cgram }, lv.header.mode, lv.header.screens, levelRows(lv.secondary));
           const img = this.compose(li);

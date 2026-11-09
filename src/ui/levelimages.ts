@@ -12,7 +12,7 @@ import { h, modal, toast, log } from './dom.ts';
 import { downloadBytes } from './platform.ts';
 import { levelNameOf } from './panels.ts';
 import { hex3 } from '../core/names.ts';
-import { composite } from '../core/render.ts';
+import { composite, copyImages } from '../core/render.ts';
 import { loadLevel } from '../core/level.ts';
 import { LevelEmulator } from '../core/levelemu.ts';
 import { paintOverlays, gameViewIn, wholeLevel } from './leveloverlays.ts';
@@ -73,7 +73,8 @@ export async function exportLevelPng(app: App, arcPin: ArcPin = null): Promise<v
   // (the probes run while the dialog is open)
   const release = app.probes.urge();
   try {
-    const p = await levelPicture(app, lv, app.images, app.render, wait, arcPin).finally(() => {
+    // (the images copied: an edit meanwhile draws over the open level's in place)
+    const p = await levelPicture(app, lv, copyImages(app.images), app.render, wait, arcPin).finally(() => {
       ended = true;
       clearTimeout(show);
       release();

@@ -98,8 +98,8 @@ export class LevelView {
     app.on('sprites', () => this.requestPaint());
     app.on('sprite-mem', () => { this.requestPaint(); this.updateStats(); });
     app.on('mode', () => { if (!this.hover) this.idleStatus(); });
-    app.on('rom-change', () => this.problems.update());
-    app.on('message-routine', () => this.problems.update());
+    app.on('rom-change', () => this.updateProblems());
+    app.on('message-routine', () => this.updateProblems());
     app.on('arcs', () => this.requestPaint());
     app.on('sizes', () => {
       // (a resize that started before the sizes were known: its objects' drivers as emulated from now on, the edges
@@ -112,9 +112,9 @@ export class LevelView {
     app.on('placement-preview', () => this.requestPaint());
     app.on('picked-item', () => { this.lastPreview = null; this.requestPaint(); });
     app.on('game-view', () => this.requestPaint());
-    app.on('level-scan', () => { this.problems.update(); this.requestPaint(); });
+    app.on('level-scan', () => { this.updateProblems(); this.requestPaint(); });
     this.idleStatus();
-    app.on('probes', () => { if (this.hover && !this.drag) this.updateStatus(this.hover.tx, this.hover.ty); this.requestPaint(); this.problems.update(); });
+    app.on('probes', () => { if (this.hover && !this.drag) this.updateStatus(this.hover.tx, this.hover.ty); this.requestPaint(); this.updateProblems(); });
   }
 
   setZoom(z: number, anchor?: { ax: number; ay: number }): void {
@@ -637,6 +637,7 @@ export class LevelView {
     const d = this.drag;
     if (!d) return;
     this.drag = null;
+    this.dragEnded();
     if (this.hover) this.updateCursor(this.hover.px, this.hover.py, this.hover.top);
     if (d.kind === 'brush') {
       const picked = this.brushDrag.picking;
@@ -680,6 +681,7 @@ export class LevelView {
     const d = this.drag;
     if (!d || (d.kind === 'marker' && !d.edit)) return false;
     this.drag = null;
+    this.dragEnded();
     if (d.kind === 'move') d.move.cancel();
     else if (d.kind === 'resize') d.resize.cancel();
     else if (d.kind === 'brush') this.brushDrag.cancel();
@@ -926,7 +928,17 @@ export class LevelView {
     const over = lv.sprites.length > 128;
     this.stats.classList.toggle('warn', over);
     this.stats.title = over ? 'More than 128 sprites: the game only loads the first 128.' : '';
-    this.problems.update();
+    this.updateProblems();
+  }
+  // the problems checked anew – while dragging once it ends (the checks take longer than a step of the drag, #445)
+  private problemsStale = false;
+  private updateProblems(): void {
+    this.problemsStale = !!this.drag;
+    if (!this.drag) this.problems.update();
+  }
+  // a drag ended: the problems checked, unless what ended it did (a change)
+  private dragEnded(): void {
+    queueMicrotask(() => { if (this.problemsStale && !this.drag) this.updateProblems(); });
   }
 
   // selects the sprites (sprite mode) and scrolls to the first

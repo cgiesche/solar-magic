@@ -124,7 +124,7 @@ export interface Map16Source {
   bg(tile: number): number[];
 }
 
-export function map16Source(rom: Rom, r: LevelRender): Map16Source {
+export function map16Source(rom: Rom, r: Pick<LevelRender, 'wram'>): Map16Source {
   const w = r.wram;
   return {
     fg(t: number) {
@@ -147,7 +147,7 @@ export function blankTile(rom: Rom, r: LevelRender): number[] {
 
 // where FG Map16 tile t's 4 words are: the level's tileset's (its Map16 pointers in the level's WRAM),
 // an extended tile's in the extended Map16
-export function fgTileAddr(rom: Rom, r: LevelRender, t: number): number {
+export function fgTileAddr(rom: Rom, r: Pick<LevelRender, 'wram'>, t: number): number {
   return t >= EXT_FIRST ? extTileAddr(rom, t) : 0x0d0000 | map16Pointer(r.wram, t);
 }
 // writes FG Map16 tile t's 4 words where map16Source reads them
@@ -180,9 +180,24 @@ export interface LevelImages {
   bgTiles: Uint16Array | null; // BG Map16 numbers of the BG tilemap (32 x 27, repeating), without layer 2 objects
 }
 
-export function backdropColor(r: LevelRender): number {
+export function backdropColor(r: Pick<LevelRender, 'wram'>): number {
   const c = get16(r.wram, RAM.backdrop);
   return snesColorToRGBA(c);
+}
+
+// the BG tilemap of a level's WRAM: 32 x 27 BG Map16 tiles, a row after the other, repeating horizontally ($7EB900 /
+// $7EBD00, two 16-tile halves)
+function bgTilemap(w: Uint8Array): Uint16Array {
+  const out = new Uint16Array(32 * 27);
+  for (let y = 0; y < 27; y++) for (let x = 0; x < 32; x++) out[y * 32 + x] = bgTile(w, (x >> 4) * 0x1b0 + y * 16 + (x & 15));
+  return out;
+}
+
+// a level image's own copy (its layers' pixels): one kept while the level is edited (patchLevel draws over the
+// images in place)
+export function copyImages(li: LevelImages): LevelImages {
+  return { ...li, layer1: li.layer1.slice(), layer2: li.layer2.slice(),
+    layer3: li.layer3 && { ...li.layer3, back: li.layer3.back.slice(), front: li.layer3.front.slice() } };
 }
 
 export function renderLevel(rom: Rom, r: LevelRender, mode: number, screens: number, rows = 27): LevelImages {
@@ -213,21 +228,10 @@ export function renderLevel(rom: Rom, r: LevelRender, mode: number, screens: num
       if (x * 16 < width && y * 16 < height) drawMap16(layer2, width, height, tc2, src.fg(t), x * 16, y * 16);
     }
   } else {
-    // BG tilemap: 32 x 27 tiles, repeating horizontally ($7EB900 / $7EBD00)
-    const bgw = 32, bgh = 27;
-    const bgRows: number[][] = [];
-    for (let y = 0; y < bgh; y++) {
-      const row: number[] = [];
-      for (let x = 0; x < bgw; x++) {
-        const o = (x >> 4) * 0x1b0 + y * 16 + (x & 15);
-        row.push(bgTile(w, o));
-      }
-      bgRows.push(row);
-    }
-    bgTiles = Uint16Array.from(bgRows.flat());
+    bgTiles = bgTilemap(w);
     const rows = Math.ceil(height / 16), cols = Math.ceil(width / 16);
     for (let y = 0; y < rows; y++) for (let x = 0; x < cols; x++) {
-      const t = bgRows[y % bgh][x % bgw];
+      const t = bgTiles[(y % 27) * 32 + (x % 32)];
       drawMap16(layer2, width, height, tc2, src.bg(t), x * 16, y * 16);
     }
   }
@@ -341,9 +345,31 @@ export function renderLayer3(r: LevelRender, width: number, height: number): Lev
 
 // ghost: 1 or 2 draws that layer at 35 % opacity, 3 both; layer 3 in front is drawn half transparent
 export function composite(li: LevelImages, show1 = true, show2 = true, ghost = 0, show3 = true): Uint32Array {
-  const out = new Uint32Array(li.width * li.height).fill(li.backdrop);
+  const out = new Uint32Array(li.width * li.height);
+  composeSpan(li, out, 0, out.length, show1, show2, ghost, show3);
+  return out;
+}
+
+// out (a composite of li) composed anew in the cells marked (a mask of li's 16x16 cells, a row after the other) as
+// composite does it
+export function composeCells(li: LevelImages, out: Uint32Array, cells: Uint8Array, show1 = true, show2 = true, ghost = 0, show3 = true): void {
+  const cols = li.width >> 4, rows = li.height >> 4;
+  for (let cy = 0; cy < rows; cy++) for (let cx = 0; cx < cols; cx++) {
+    if (!cells[cy * cols + cx]) continue;
+    // (a run of marked cells at once)
+    let end = cx + 1;
+    while (end < cols && cells[cy * cols + end]) end++;
+    for (let y = cy * 16; y < cy * 16 + 16; y++) composeSpan(li, out, y * li.width + cx * 16, y * li.width + end * 16, show1, show2, ghost, show3);
+    cx = end;
+  }
+}
+
+// pixels from..to of the composite: the backdrop, layer 3's low priority tiles, layer 2, layer 1, layer 3's high
+// priority ones (a pass each)
+function composeSpan(li: LevelImages, out: Uint32Array, from: number, to: number, show1: boolean, show2: boolean, ghost: number, show3: boolean): void {
+  out.fill(li.backdrop, from, to);
   const put = (src: Uint32Array, faint: boolean) => {
-    for (let i = 0; i < out.length; i++) {
+    for (let i = from; i < to; i++) {
       const c = src[i];
       if (c) out[i] = faint ? blend(c, out[i], 0.35) : c;
     }
@@ -354,9 +380,8 @@ export function composite(li: LevelImages, show1 = true, show2 = true, ghost = 0
   if (show1) put(li.layer1, (ghost & 1) !== 0);
   if (l3) {
     const f = l3.front;
-    for (let i = 0; i < out.length; i++) if (f[i]) out[i] = l3.blend ? blend(f[i], out[i], 0.5) : f[i];
+    for (let i = from; i < to; i++) if (f[i]) out[i] = l3.blend ? blend(f[i], out[i], 0.5) : f[i];
   }
-  return out;
 }
 
 // What an animation step (other VRAM and CGRAM than the render r) changes: whether an 8x8 tile looks different –
@@ -481,41 +506,63 @@ export class TileAnimation implements PictureAnimation {
   }
 }
 
-// An animation step (other VRAM and CGRAM than the render r) as the pixels of the composed level image `base`
-// that change: only the 16x16 cells drawing an 8x8 tile whose graphics or colors differ are drawn anew, each
-// composed by look as the whole image was. null when the step changes what every cell shows (the backdrop
-// color) or a layer 3 the render drew nothing of: then it is drawn whole.
-export function animatedPixels(rom: Rom, r: LevelRender, li: LevelImages, base: Uint32Array, vram: Uint8Array, cgram: Uint8Array, look: (cell: LevelImages) => Uint32Array): { idx: Uint32Array; val: Uint32Array } | null {
-  if (cgram[0] !== r.cgram[0] || cgram[1] !== r.cgram[1]) return null;
-  const tileDiffers = stepChanges(r, vram, cgram);
-  if (!tileDiffers) return { idx: new Uint32Array(0), val: new Uint32Array(0) };
-  const p = r.ppuRegs, base1 = (p[0x0b] & 0x0f) << 13, base2 = (p[0x0b] >> 4) << 13;
-  const src = map16Source(rom, r);
-  const map16Differs = (charBase: number, words: (t: number) => number[]) => {
+// What a cell of the level image shows comes from: the console's state (a load's WRAM for the Map16 words, VRAM, CGRAM,
+// PPU registers) and the Map16 tiles of the layers there (laid out as a LevelImages' tiles1, tiles2, bgTiles)
+export type CellSource = Pick<LevelRender, 'wram' | 'vram' | 'cgram' | 'ppuRegs'>;
+type CellTiles = Pick<LevelImages, 'tiles1' | 'tiles2' | 'bgTiles'>;
+
+// The 16x16 cells of the level image li (drawn from the render r) that another state of the console `to` with the
+// tiles `tiles` may show differently – an animation step (other VRAM and CGRAM, the same tiles) or another load of the
+// level (an edit: its tilemaps and video memory): a cell drawing another Map16 tile, one whose words, graphics or
+// colors differ, or a layer 3 tile whose word or look differs (as a mask, li's cells a row after the other; only those
+// in `within` when given). Found by comparing the two, nothing assumed about what changed them. null when every cell
+// may look different: the backdrop color, the PPU's registers, layer 3 placed elsewhere or drawn where li has none.
+function changedCells(rom: Rom, r: CellSource, li: LevelImages, to: CellSource, tiles: CellTiles, within?: Uint8Array): Uint8Array | null {
+  if (to.cgram[0] !== r.cgram[0] || to.cgram[1] !== r.cgram[1]) return null;
+  if (to.ppuRegs !== r.ppuRegs && !sameBytes(to.ppuRegs, r.ppuRegs)) return null;
+  const p = r.ppuRegs, base1 = charBase(r, false), base2 = charBase(r, true), base3 = (p[0x0c] & 0x0f) << 13;
+  const l3on = (p[0x2c] & 0x04) !== 0 || (p[0x2d] & 0x04) !== 0;
+  const g3 = l3on ? layer3Geometry(r) : null;
+  if (to.wram !== r.wram) {
+    if (backdropColor(to) !== li.backdrop) return null;
+    if (g3 && !sameGeometry(g3, layer3Geometry(to))) return null;
+  }
+  const cols = li.width >> 4, rows = li.height >> 4;
+  const dirty = new Uint8Array(cols * rows);
+  const tileDiffers = stepChanges(r, to.vram, to.cgram);
+  if (!tileDiffers && to.wram === r.wram && tiles === li) return dirty;
+  const src = map16Source(rom, r), srcTo = to.wram === r.wram ? src : map16Source(rom, to);
+  // whether a cell drawing Map16 tile t (FG or BG) draws tTo differently
+  const differs = (cb: number, bg: boolean) => {
     const known = new Map<number, boolean>();
-    return (t: number) => {
+    return (t: number, tTo: number): boolean => {
+      if (t !== tTo) return true;
       let v = known.get(t);
-      if (v === undefined) known.set(t, v = words(t).some((w) => tileDiffers(w, charBase, 4)));
+      if (v === undefined) {
+        const w = bg ? src.bg(t) : src.fg(t), wt = srcTo === src || bg ? w : srcTo.fg(t);
+        v = w.some((x, q) => x !== wt[q]) || (!!tileDiffers && wt.some((x) => tileDiffers(x, cb, 4)));
+        known.set(t, v);
+      }
       return v;
     };
   };
-  const cols = li.width >> 4, rows = li.height >> 4;
-  const dirty = new Uint8Array(cols * rows);
-  const fg1 = map16Differs(base1, (t) => src.fg(t));
-  for (let y = 0; y < rows; y++) for (let x = 0; x < cols; x++) if (fg1(li.tiles1[y * li.geom1.width + x])) dirty[y * cols + x] = 1;
-  const g2 = li.geom2, tiles2 = li.tiles2, bgTiles = li.bgTiles;
-  const layer2At = (x: number, y: number): number[] | null =>
-    g2 && tiles2 ? (x < g2.width && y < g2.height ? src.fg(tiles2[y * g2.width + x]) : null) : bgTiles ? src.bg(bgTiles[(y % 27) * 32 + (x % 32)]) : null;
-  if (g2 && tiles2) {
-    const fg2 = map16Differs(base2, (t) => src.fg(t));
-    for (let y = 0; y < rows; y++) for (let x = 0; x < cols; x++) if (x < g2.width && y < g2.height && fg2(tiles2[y * g2.width + x])) dirty[y * cols + x] = 1;
-  } else if (bgTiles) {
-    const bg = map16Differs(base2, (t) => src.bg(t));
-    for (let y = 0; y < rows; y++) for (let x = 0; x < cols; x++) if (bg(bgTiles[(y % 27) * 32 + (x % 32)])) dirty[y * cols + x] = 1;
-  }
+  const mark = (x: number, y: number) => { if (!within || within[y * cols + x]) dirty[y * cols + x] = 1; };
+  const d1 = differs(base1, false), w1 = li.geom1.width;
+  for (let y = 0; y < rows; y++) for (let x = 0; x < cols; x++) if (d1(li.tiles1[y * w1 + x], tiles.tiles1[y * w1 + x])) mark(x, y);
+  const g2 = li.geom2;
+  if (g2 && li.tiles2 && tiles.tiles2) {
+    const d2 = differs(base2, false), t2 = li.tiles2, t2To = tiles.tiles2;
+    for (let y = 0; y < rows; y++) for (let x = 0; x < cols; x++) {
+      if (x < g2.width && y < g2.height && d2(t2[y * g2.width + x], t2To[y * g2.width + x])) mark(x, y);
+    }
+  } else if (li.bgTiles && tiles.bgTiles) {
+    const db = differs(base2, true), b = li.bgTiles, bTo = tiles.bgTiles;
+    for (let y = 0; y < rows; y++) for (let x = 0; x < cols; x++) {
+      const k = (y % 27) * 32 + (x % 32);
+      if (db(b[k], bTo[k])) mark(x, y);
+    }
+  } else if (!!li.bgTiles !== !!tiles.bgTiles || !!li.tiles2 !== !!tiles.tiles2) return null;
   // layer 3: a tile whose word or look differs marks the cells it covers (placed as renderLayer3 does)
-  const l3on = (p[0x2c] & 0x04) !== 0 || (p[0x2d] & 0x04) !== 0;
-  const g3 = l3on ? layer3Geometry(r) : null, base3 = (p[0x0c] & 0x0f) << 13;
   if (g3) {
     const { mw, mh, dx, dy } = g3;
     for (let ty = LAYER3_STATUS_ROWS; ty < mh / 8; ty++) {
@@ -523,26 +570,50 @@ export function animatedPixels(rom: Rom, r: LevelRender, li: LevelImages, base: 
       if (py + 8 <= 0 || py >= li.height) continue;
       for (let tx = 0; tx < mw / 8; tx++) {
         const a = layer3TileAddr(g3, tx, ty);
-        const was = r.vram[a] | (r.vram[a + 1] << 8), now = vram[a] | (vram[a + 1] << 8);
-        if (was === now && !tileDiffers(now, base3, 2)) continue;
+        const was = r.vram[a] | (r.vram[a + 1] << 8), now = to.vram[a] | (to.vram[a + 1] << 8);
+        if (was === now && !tileDiffers?.(now, base3, 2)) continue;
         if (!li.layer3) return null;
         for (let px = ((((tx * 8 - dx) % mw) + mw) % mw) - mw; px < li.width; px += mw) {
           if (px + 8 <= 0) continue;
           for (let cy = Math.max(0, py >> 4); cy <= Math.min(rows - 1, (py + 7) >> 4); cy++)
-            for (let cx = Math.max(0, px >> 4); cx <= Math.min(cols - 1, (px + 7) >> 4); cx++) dirty[cy * cols + cx] = 1;
+            for (let cx = Math.max(0, px >> 4); cx <= Math.min(cols - 1, (px + 7) >> 4); cx++) mark(cx, cy);
         }
       }
     }
   }
-  // the dirty cells drawn anew, one at a time, as 16x16 level images
-  const tc1 = new TileCache(vram, cgram, base1), tc2 = new TileCache(vram, cgram, base2), tc3 = new TileCache(vram, cgram, base3);
+  return dirty;
+}
+
+function sameBytes(a: Uint8Array, b: Uint8Array): boolean {
+  if (a.length !== b.length) return false;
+  for (let k = 0; k < a.length; k++) if (a[k] !== b[k]) return false;
+  return true;
+}
+function sameGeometry(a: Layer3Geometry, b: Layer3Geometry): boolean {
+  return a.base === b.base && a.wide === b.wide && a.mw === b.mw && a.mh === b.mh && a.dx === b.dx && a.dy === b.dy;
+}
+
+// a 16x16 level image, a cell of li's
+function cellImages(li: LevelImages): LevelImages {
+  return { ...li, width: 16, height: 16, layer1: new Uint32Array(256), layer2: new Uint32Array(256),
+    layer3: li.layer3 && { back: new Uint32Array(256), front: new Uint32Array(256), blend: li.layer3.blend } };
+}
+
+// draws cell (cx, cy) of the level image li as the console state `to` shows it with the tiles `tiles` (the PPU's
+// registers r's) into `cell` (cellImages), each layer as renderLevel draws it
+function cellPainter(rom: Rom, r: Pick<LevelRender, 'ppuRegs'>, li: LevelImages, to: CellSource, tiles: CellTiles): (cell: LevelImages, cx: number, cy: number) => void {
+  const p = r.ppuRegs, base1 = charBase(r, false), base2 = charBase(r, true), base3 = (p[0x0c] & 0x0f) << 13;
+  const tc1 = new TileCache(to.vram, to.cgram, base1), tc2 = new TileCache(to.vram, to.cgram, base2), tc3 = new TileCache(to.vram, to.cgram, base3);
+  const src = map16Source(rom, to);
   const prioFront = (p[0x05] & 0x0f) === 0x09;
-  const cell: LevelImages = { ...li, width: 16, height: 16, layer1: new Uint32Array(256), layer2: new Uint32Array(256), layer3: li.layer3 && { back: new Uint32Array(256), front: new Uint32Array(256), blend: li.layer3.blend } };
-  const idx: number[] = [], val: number[] = [];
-  for (let cy = 0; cy < rows; cy++) for (let cx = 0; cx < cols; cx++) {
-    if (!dirty[cy * cols + cx]) continue;
+  const l3on = (p[0x2c] & 0x04) !== 0 || (p[0x2d] & 0x04) !== 0;
+  const g3 = l3on ? layer3Geometry({ wram: to.wram, ppuRegs: p }) : null;
+  const g2 = li.geom2, tiles2 = tiles.tiles2, bgTiles = tiles.bgTiles;
+  const layer2At = (x: number, y: number): number[] | null =>
+    g2 && tiles2 ? (x < g2.width && y < g2.height ? src.fg(tiles2[y * g2.width + x]) : null) : bgTiles ? src.bg(bgTiles[(y % 27) * 32 + (x % 32)]) : null;
+  return (cell, cx, cy) => {
     cell.layer1.fill(0);
-    drawMap16(cell.layer1, 16, 16, tc1, src.fg(li.tiles1[cy * li.geom1.width + cx]), 0, 0);
+    drawMap16(cell.layer1, 16, 16, tc1, src.fg(tiles.tiles1[cy * li.geom1.width + cx]), 0, 0);
     cell.layer2.fill(0);
     const w2 = layer2At(cx, cy);
     if (w2) drawMap16(cell.layer2, 16, 16, tc2, w2, 0, 0);
@@ -555,12 +626,33 @@ export function animatedPixels(rom: Rom, r: LevelRender, li: LevelImages, base: 
         if (ty < LAYER3_STATUS_ROWS || ty >= mh / 8) continue;
         for (let x = cx * 16; x < cx * 16 + 16;) {
           const m = (((x + dx) % mw) + mw) % mw, px = x - (m & 7);
-          const a = layer3TileAddr(g3, m >> 3, ty), word = vram[a] | (vram[a + 1] << 8);
+          const a = layer3TileAddr(g3, m >> 3, ty), word = to.vram[a] | (to.vram[a + 1] << 8);
           blit8((prioFront && word & 0x2000) ? cell.layer3.front : cell.layer3.back, 16, 16, tc3.get(word, 2), px - cx * 16, ys - dy - cy * 16);
           x = px + 8;
         }
       }
     }
+  };
+}
+
+// pixels of a level composite that a frame of the animation shows otherwise: where (indices, ascending) and as what
+export interface PixelChanges { idx: Uint32Array; val: Uint32Array }
+
+// An animation step (other VRAM and CGRAM than the render r) as the pixels of the composed level image `base`
+// that change: only the 16x16 cells drawing an 8x8 tile whose graphics or colors differ are drawn anew, each
+// composed by look as the whole image was (only the cells in `within` when given). null when the step may change what
+// every cell shows (changedCells: the backdrop color, a layer 3 the render drew nothing of): then it is drawn whole.
+export function animatedPixels(rom: Rom, r: LevelRender, li: LevelImages, base: Uint32Array, vram: Uint8Array, cgram: Uint8Array,
+  look: (cell: LevelImages) => Uint32Array, within?: Uint8Array): PixelChanges | null {
+  const to = { wram: r.wram, vram, cgram, ppuRegs: r.ppuRegs };
+  const dirty = changedCells(rom, r, li, to, li, within);
+  if (!dirty) return null;
+  const cols = li.width >> 4, rows = li.height >> 4;
+  const paint = cellPainter(rom, r, li, to, li), cell = cellImages(li);
+  const idx: number[] = [], val: number[] = [];
+  for (let cy = 0; cy < rows; cy++) for (let cx = 0; cx < cols; cx++) {
+    if (!dirty[cy * cols + cx]) continue;
+    paint(cell, cx, cy);
     const img = look(cell);
     for (let y = 0; y < 16; y++) for (let x = 0; x < 16; x++) {
       const k = (cy * 16 + y) * li.width + cx * 16 + x;
@@ -570,6 +662,54 @@ export function animatedPixels(rom: Rom, r: LevelRender, li: LevelImages, base: 
   // in pixel order, as a scan of the whole image finds them
   const order = idx.map((_, j) => j).sort((a, b) => idx[a] - idx[b]);
   return { idx: Uint32Array.from(order, (j) => idx[j]), val: Uint32Array.from(order, (j) => val[j]) };
+}
+
+// An animation frame (animatedPixels' pixels) of a composite whose cells marked (a mask of the 16x16 cells of an image
+// `width` pixels wide) were composed anew (an edit, patchLevel): its pixels in other cells kept, those in the cells
+// `inside`'s (animatedPixels within them, against the new composite); in pixel order
+export function patchFrame(old: PixelChanges, inside: PixelChanges, cells: Uint8Array, width: number): PixelChanges {
+  const cols = width >> 4, n = old.idx.length, m = inside.idx.length;
+  const idx = new Uint32Array(n + m), val = new Uint32Array(n + m);
+  let i = 0, j = 0, o = 0;
+  for (; i < n; i++) {
+    const k = old.idx[i];
+    if (cells[(((k / width) | 0) >> 4) * cols + ((k % width) >> 4)]) continue;
+    for (; j < m && inside.idx[j] < k; j++, o++) { idx[o] = inside.idx[j]; val[o] = inside.val[j]; }
+    idx[o] = k; val[o] = old.val[i]; o++;
+  }
+  for (; j < m; j++, o++) { idx[o] = inside.idx[j]; val[o] = inside.val[j]; }
+  return { idx: idx.slice(0, o), val: val.slice(0, o) };
+}
+
+// The level image li (drawn from the render r) brought to another load of the same level (to: an edit; laid out as
+// li – its mode, screens and rows): only the cells that look different (changedCells) drawn anew. li's layers are
+// drawn over in place (they are the new images' then); the new images and the cells drawn (a mask, li's cells a row
+// after the other), null when the load must be drawn whole (renderLevel).
+export function patchLevel(rom: Rom, r: LevelRender, li: LevelImages, to: LevelRender): { images: LevelImages; cells: Uint8Array } | null {
+  const w = to.wram, g1 = li.geom1, g2 = li.geom2;
+  const tiles1 = new Uint16Array(li.tiles1.length);
+  for (let y = 0; y < g1.height; y++) for (let x = 0; x < g1.width; x++) tiles1[y * g1.width + x] = map16Tile(w, g1.addr(x, y));
+  let tiles2: Uint16Array | null = null, bgTiles: Uint16Array | null = null;
+  if (g2 && li.tiles2) {
+    tiles2 = new Uint16Array(li.tiles2.length);
+    for (let y = 0; y < g2.height; y++) for (let x = 0; x < g2.width; x++) tiles2[y * g2.width + x] = map16Tile(w, g2.addr(x, y));
+  } else if (li.bgTiles) bgTiles = bgTilemap(w);
+  const tiles = { tiles1, tiles2, bgTiles };
+  const cells = changedCells(rom, r, li, to, tiles);
+  if (!cells) return null;
+  const paint = cellPainter(rom, to, li, to, tiles), cell = cellImages(li);
+  const cols = li.width >> 4, rows = li.height >> 4, l3 = li.layer3, c3 = cell.layer3;
+  const put = (from: Uint32Array, into: Uint32Array, cx: number, cy: number) => {
+    for (let y = 0; y < 16; y++) into.set(from.subarray(y * 16, y * 16 + 16), (cy * 16 + y) * li.width + cx * 16);
+  };
+  for (let cy = 0; cy < rows; cy++) for (let cx = 0; cx < cols; cx++) {
+    if (!cells[cy * cols + cx]) continue;
+    paint(cell, cx, cy);
+    put(cell.layer1, li.layer1, cx, cy);
+    put(cell.layer2, li.layer2, cx, cy);
+    if (l3 && c3) { put(c3.back, l3.back, cx, cy); put(c3.front, l3.front, cx, cy); }
+  }
+  return { images: { ...li, tiles1, tiles2, bgTiles }, cells };
 }
 
 function blend(a: number, b: number, t: number): number {
