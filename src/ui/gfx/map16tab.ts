@@ -692,7 +692,7 @@ export class Map16Tab implements WsPanel {
     const t = this.sel, one = this.selW * this.selH === 1, d = this.t;
     const tiles = this.selection(), words = tiles.map((x) => d.words(x));
     const g = this.grid(), marks = this.marked();
-    // (the palette dots built again below: the one under the mouse gone without a leave)
+    // (the palette dots built again below: a preview kept while the mouse stays on its palette)
     this.palHover.reset();
     this.drawBig();
     const s = summary(g, words, marks);
@@ -841,7 +841,7 @@ export class Map16Tab implements WsPanel {
       }
     }
     // marks: tinted (not while a palette is previewed on them), the outline of the marked area
-    if (view.fills) {
+    if (!view.preview) {
       ctx.fillStyle = 'rgba(255,176,0,0.22)';
       for (const k of marks) { const { x, y } = g.pos(k); ctx.fillRect(x * sx, y * sy, sx, sy); }
     }
@@ -1404,7 +1404,7 @@ export class Map16Tab implements WsPanel {
         }
       });
     }
-    if (this.remapping && view.fills) this.drawRemapMarks(ctx, slots);
+    if (this.remapping && !view.preview) this.drawRemapMarks(ctx, slots);
     // the chosen 8x8 tiles, or those being chosen; remap's marked tiles and where they are dragged (running)
     const d = this.drag, r = d ? { x: Math.min(d.a.x, d.b.x), y: Math.min(d.a.y, d.b.y), w: Math.abs(d.a.x - d.b.x) + 1, h: Math.abs(d.a.y - d.b.y) + 1 } : this.remapping ? null : this.pick;
     const from = this.remapping ? this.visualFrom : null, to = from && this.visualTo;

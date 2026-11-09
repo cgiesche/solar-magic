@@ -2,8 +2,9 @@
 // the list of GFX/ExGFX files, the file's sheet as a navigator (picks 8x8 tiles and pastes them, as the
 // other editors do) and the pixel editor beside it, the only place pixels are painted (pen, eraser, fill,
 // pipette, selection with move, copy/paste, flip/rotate) with the colors of a palette row, after
-// Lunar Magic's 8x8 tile editor and Aseprite; hovering a palette row previews the sheet and the swatches in it. Each stroke is one undoable ROM edit: the file is encoded
-// again and written in place when it fits, otherwise moved to free space.
+// Lunar Magic's 8x8 tile editor and Aseprite; hovering a palette row previews the sheet and the swatches in it.
+// Each stroke is one undoable ROM edit: the file is encoded again and written in place when it fits, otherwise
+// moved to free space.
 
 import type { App } from '../app.ts';
 import type { Watch } from '../../core/romwatch.ts';
@@ -41,9 +42,11 @@ import { layerSlots, slotOfTile, type GfxSlot as Slot } from '../../core/gfxslot
 import type { GfxTarget } from './target.ts';
 import { slotRemapLine } from '../../core/remap.ts';
 import { AntsOverlay } from '../ants.ts';
-import { PaletteHover, previewRow } from '../palhover.ts';
+import { PaletteHover } from '../palhover.ts';
 
 
+// a color as CGRAM's RGBA word gives it, for CSS
+const css = (v: number) => `rgb(${v & 255},${(v >> 8) & 255},${(v >> 16) & 255})`;
 const spriteRange = (first: number) => first < 0x100 ? `${hex(first, 2)}–${hex(first + 0x7f, 2)}` : `${hex(first, 3)}–${hex(first + 0x7f, 3)}`;
 // sprite tile number of tile t of a sprite slot, as patches write it
 const spriteTile = (first: number, t: number) => first + t < 0x100 ? hex(first + t, 2) : `${hex(first + t, 3)} (page 2: ${hex((first + t) & 0xff, 2)} with T bit)`;
@@ -273,7 +276,7 @@ export class GfxTab implements WsPanel {
     return this.palRow >= 0 ? this.palRow : this.autoRow(this.cur);
   }
   // the row the sheet and the swatches show: a hovered one, else the chosen one
-  private shownRow(): number { return previewRow(this.rowHover.value, this.row()); }
+  private shownRow(): number { return this.rowHover.value ?? this.row(); }
   private colors(r = this.row()): Uint32Array {
     const all = cgramToRGBA(this.cgram());
     const n = 1 << (this.file?.bpp ?? 4);
@@ -610,17 +613,19 @@ export class GfxTab implements WsPanel {
     const s = this.side;
     clear(s);
     if (!f) return;
-    // (the row buttons built again below: the one under the mouse gone without a leave)
+    // (the row buttons built again below: a preview kept while the mouse stays on its row)
     this.rowHover.reset();
     const cols = this.colors(this.shownRow());
     const row = this.row();
     const all = cgramToRGBA(this.cgram());
-    const css = (v: number) => `rgb(${v & 255},${(v >> 8) & 255},${(v >> 16) & 255})`;
-    const rowSel = h('div', { class: 'gt-rows' }, Array.from({ length: 16 }, (_, r) => h('button', {
-      class: `gt-row${r === row ? ' active' : ''}`, title: `Palette ${hex(r, 1)} · hover: preview`,
-      onclick: () => { this.palRow = r; this.draw(); this.buildSide(); },
-    }, h('span', { class: 'mono' }, hex(r, 1)), h('span', { class: 'gt-row-strip' }, Array.from({ length: 15 }, (_, k) => h('i', { style: { background: css(all[r * 16 + 1 + k]) } }))))));
-    rowSel.querySelectorAll<HTMLElement>('.gt-row').forEach((b, r) => this.rowHover.bind(b, r));
+    const rowSel = h('div', { class: 'gt-rows' }, Array.from({ length: 16 }, (_, r) => {
+      const b = h('button', {
+        class: `gt-row${r === row ? ' active' : ''}`, title: `Palette ${hex(r, 1)} · hover: preview`,
+        onclick: () => { this.palRow = r; this.draw(); this.buildSide(); },
+      }, h('span', { class: 'mono' }, hex(r, 1)), h('span', { class: 'gt-row-strip' }, Array.from({ length: 15 }, (_, k) => h('i', { style: { background: css(all[r * 16 + 1 + k]) } }))));
+      this.rowHover.bind(b, r);
+      return b;
+    }));
     const sw = h('div', { class: 'gt-colors' }, Array.from(cols, (v, k) => h('div', {
       class: `gt-color${k === this.fg ? ' sel' : ''}${k === this.bg ? ' bg' : ''}${k === 0 ? ' transp' : ''}`, 'data-k': String(k),
       title: `${k === 0 ? 'Color 0: transparent' : `Color ${k}`} – click: left button's color, right click: right button's`,
@@ -656,7 +661,7 @@ export class GfxTab implements WsPanel {
     const cols = this.colors(this.shownRow());
     for (const el of this.side.querySelectorAll<HTMLElement>('.gt-color[data-k]')) {
       const k = Number(el.dataset.k);
-      if (k) el.style.background = `rgb(${cols[k] & 255},${(cols[k] >> 8) & 255},${(cols[k] >> 16) & 255})`;
+      if (k) el.style.background = css(cols[k]);
     }
   }
 
