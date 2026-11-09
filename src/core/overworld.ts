@@ -1011,7 +1011,7 @@ interface KeptLoad { r: OwRender; state: SnesState | null }
 interface ReadDeps { deps: RomDeps; reads: RomReads }
 // a result derived a step at a time (OverworldLoads.deriveSteps) not made yet: its steps, what they read as of gen, the
 // console as the last one left it
-interface Deriving { steps: Generator<void, unknown>; gen: number; reads: RomReads; state: SnesState | null }
+interface Deriving { steps: Generator<unknown, unknown>; gen: number; reads: RomReads; state: SnesState | null }
 // the key of a map at an event progress (a load's, what is derived from one)
 export const loadKey = (map: number, progress: number) => `${map}-${progress}`;
 // results a load's key keeps (of the ROM states they were made on: an undo, a redo); fewer than a derived result's, a
@@ -1065,7 +1065,8 @@ export class OverworldLoads {
   // for the recorders running, the result's all for the job getting it. leaveOut: bytes the result reads but doesn't
   // depend on (owTilemapRanges), left out of what it read once made (an edit of them while it is made starts it over);
   // its steps' reads then count only with the result's
-  *deriveSteps<T>(key: string, make: (load: (map: number, progress: number) => OwRender) => Generator<void, T>, of = '', leaveOut?: (rom: Rom) => RomRange[]): Generator<void, T> {
+  // (a label make's steps yield, its progress: yielded by the step too)
+  *deriveSteps<T, Y extends string | void = void>(key: string, make: (load: (map: number, progress: number) => OwRender) => Generator<Y, T>, of = '', leaveOut?: (rom: Rom) => RomRange[]): Generator<Y, T> {
     const rom = this.emu.rom, id = `${key}\n${of}`;
     for (;;) {
       const d = this.derived.entry<T>(key, of);
@@ -1091,7 +1092,7 @@ export class OverworldLoads {
         return step.result.value as T;
       }
       run.state = this.emu.snes.saveState();
-      yield;
+      yield step.result.value as Y;
     }
   }
   // (fingerprinted on the current ROM: a run's steps each began on it, holds above)

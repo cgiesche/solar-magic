@@ -361,7 +361,7 @@ export function composite(li: LevelImages, show1 = true, show2 = true, ghost = 0
 
 // What an animation step (other VRAM and CGRAM than the render r) changes: whether an 8x8 tile looks different –
 // its graphics (bpp * 8 bytes from charBase) or a color of its palette; null when the step changes nothing
-export function stepChanges(r: LevelRender, vram: Uint8Array, cgram: Uint8Array): ((word: number, charBase: number, bpp: number) => boolean) | null {
+export function stepChanges(r: Pick<LevelRender, 'vram' | 'cgram'>, vram: Uint8Array, cgram: Uint8Array): ((word: number, charBase: number, bpp: number) => boolean) | null {
   // which 16-byte rows of VRAM and which colors differ
   const rowDiff = new Uint8Array(0x1000), colorDiff = new Uint8Array(256);
   let any = false;
@@ -395,15 +395,33 @@ export function sheetCells(first: number, count: number): number[] {
 
 // An image of the animation: the level's VRAM and CGRAM at one of its steps
 export interface AnimStep { vram: Uint8Array; cgram: Uint8Array }
+// the animation's rhythm, the level's and the overworld's (App.startAnimation, owanimsteps.ts): the steps shown a
+// second and the most steps emulated
+export const ANIM_STEPS_PER_SECOND = 7.5;
+export const MAX_ANIM_STEPS = 64;
 
 // Pixels showing the level's Map16 tiles (a picker's page, an object's thumbnail): the pixels (w wide), where each
 // tile is and which (cells: x, y of its top left pixel and its number, one after the other), FG or BG tiles,
-// and the pixel where a tile draws none
-export interface TilePixels { px: Uint32Array; w: number; h: number; cells: number[]; bg: boolean; back: number }
+// and the pixel where a tile draws none (backAt: the pixel at x, y where it varies, a checkerboard)
+export interface TilePixels { px: Uint32Array; w: number; h: number; cells: number[]; bg: boolean; back: number; backAt?: (x: number, y: number) => number }
+
+// the pixels' size×size cell at (x0, y0) cleared to where a tile draws none
+export function clearCell(p: TilePixels, x0: number, y0: number, size: number): void {
+  for (let y = y0; y < y0 + size && y < p.h; y++) {
+    const row = y * p.w;
+    if (!p.backAt) { p.px.fill(p.back, row + x0, row + Math.min(p.w, x0 + size)); continue; }
+    for (let x = x0; x < x0 + size && x < p.w; x++) p.px[row + x] = p.backAt(x, y);
+  }
+}
+
+// what draws an animation's steps on pixels of tiles (TileAnimation: the level's; owanimsteps.ts OwTileAnimation: the
+// overworld's): the pixels, drawn as step `from` showed them (null: as the render shows them), redrawn as step `to`
+// shows them (all: all of them, for pixels drawn with another render); whether a tile was drawn anew
+export interface PictureAnimation { redraw(pixels: TilePixels, from: AnimStep | null, to: AnimStep | null, all?: boolean): boolean }
 
 // The level's animation on pixels of its Map16 tiles: between two steps, only the tiles that look different
 // in one of them are drawn anew; what a step changes is found once per step and tile
-export class TileAnimation {
+export class TileAnimation implements PictureAnimation {
   private rom: Rom;
   private r: LevelRender;
   private src: Map16Source;
@@ -445,7 +463,7 @@ export class TileAnimation {
   redraw(pixels: TilePixels, from: AnimStep | null, to: AnimStep | null, all = false): boolean {
     let tc: TileCache | null = null, any = false;
     const c = pixels.cells;
-    if (all) pixels.px.fill(pixels.back);
+    if (all) clearCell(pixels, 0, 0, Math.max(pixels.w, pixels.h));
     for (let i = 0; i < c.length; i += 3) {
       const t = c[i + 2];
       if (!all && !(from && this.changes(from, t, pixels.bg)) && !(to && this.changes(to, t, pixels.bg))) continue;
@@ -455,7 +473,7 @@ export class TileAnimation {
         tc = pixels.bg ? set.bg : set.fg;
       }
       const x0 = c[i], y0 = c[i + 1];
-      for (let y = y0; y < y0 + 16 && y < pixels.h; y++) pixels.px.fill(pixels.back, y * pixels.w + x0, y * pixels.w + Math.min(pixels.w, x0 + 16));
+      clearCell(pixels, x0, y0, 16);
       drawMap16(pixels.px, pixels.w, pixels.h, tc, this.words(t, pixels.bg), x0, y0);
       any = true;
     }

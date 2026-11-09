@@ -18,8 +18,7 @@ export function viewMenu(app: App, paint: () => void, full = true): HTMLElement 
       app.view.show[k] = v;
       if (k === 'scrollBands' && v) app.view.show.gameView = true;
       if (k === 'gameView' || k === 'scrollBands') app.updateGameViewCamera();
-      if (k === 'anim') app.refresh();
-      else if (k === 'layer1' || k === 'layer2' || k === 'layer3' || k === 'ghost') app.recomposite(); else paint();
+      if (k === 'layer1' || k === 'layer2' || k === 'layer3' || k === 'ghost') app.recomposite(); else paint();
     },
   });
   // view-only game state (re-runs the level load)
@@ -36,7 +35,7 @@ export function viewMenu(app: App, paint: () => void, full = true): HTMLElement 
       app.refresh();
     },
   });
-  const anim = show('anim', 'Animation', 'Play animated tiles and palettes (as in the game, custom animations too)');
+  const anim = animationMenuItem(app);
   // the conditional Direct Map16 flags the level uses, each on or off (cdm16.ts; Lunar Magic: all at once)
   const flags = (): MenuItem[] => {
     const used = app.levelFlags();
@@ -84,4 +83,13 @@ export function viewMenu(app: App, paint: () => void, full = true): HTMLElement 
     anim,
     ...state(),
   ] : [{ heading: 'Level preview' }, anim, ...state()] });
+}
+
+// View → "Animation", the same switch in the level editor's and the overworld's View menu (App.setAnimation, kept in
+// the browser; off by default when the system asks for reduced motion)
+export function animationMenuItem(app: App): MenuItem {
+  return {
+    label: 'Animation', checked: () => app.view.show.anim, onToggle: (v) => app.setAnimation(v),
+    title: 'Play animated tiles and palettes as in the game (custom animations too) – in the level editor and on the overworld, the pickers following; off by default when the system asks for reduced motion. Kept in the browser',
+  };
 }

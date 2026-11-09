@@ -7,6 +7,7 @@
 // "Animate selection outlines" (animateAnts; off by default under prefers-reduced-motion): off, the dashes stand still.
 
 import { boolPref } from './prefs.ts';
+import { reducedMotion } from './motion.ts';
 import type { MenuItem } from './menu.ts';
 
 export const ANTS_DARK = 'rgba(0,0,0,0.85)';
@@ -14,9 +15,6 @@ export const ANTS_PERIOD_MS = 100; // 10 fps
 const DASH = 4; // screen pixels
 const CYCLE = 2 * DASH; // a dash and its gap
 
-const reducedMotion = (): boolean => {
-  try { return globalThis.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false; } catch { return false; }
-};
 export const animateAnts = boolPref('animate-selection-outlines', () => !reducedMotion());
 
 // View → "Animate selection outlines", the same switch in the level editor's and the overworld's View menu
