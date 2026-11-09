@@ -44,7 +44,7 @@ export const RAM = {
 
   // Mario
   powerup: 0x19,
-  marioAnim: 0x71, // animation (MARIO_DYING, 6 = a vertical pipe)
+  marioAnim: 0x71, // animation (MARIO_DYING, MARIO_FROZEN, 6 = a vertical pipe)
   marioAnimTimer: 0x1496, // how long the animation goes on (dying: until the death music)
   pipeTimer: 0x88, pipeAction: 0x89, // a pipe animation's timer; its kind (below 4: going in, else coming out)
   levelDataPtr: 0x65, spriteDataPtr: 0xce, // 24-bit: the level's layer 1 data and sprite data being loaded
@@ -113,6 +113,8 @@ export const RAM = {
   extSprites: 0x170b, // extended sprites (fireballs, hammers …): 10 slots, number
   extXLo: 0x171f, extXHi: 0x1733, extYLo: 0x1715, extYHi: 0x1729, // per extended slot: its position
   clusterSprites: 0x1892, // cluster sprites (Boo ceiling, bonus game 1-Ups …): 20 slots, number
+  generator: 0x18b9, // the level's sprite generator (0: none)
+  shooters: 0x1783, // shooters (Bullet Bill shooter, torpedo launcher …): 8 slots, number
   clusterXLo: 0x1e16, clusterXHi: 0x1e3e, clusterYLo: 0x1e02, clusterYHi: 0x1e2a, // per cluster slot: its position
   bounceSprites: 0x1699, // 4 slots: number
   scoreSprites: 0x16e1, // number
@@ -165,6 +167,9 @@ export const RAM = {
 
 export const SWITCH_PALACES = 4; // $1F27–$1F2A
 export const MARIO_DYING = 9; // Mario's animation while he dies
+// Mario's animation that freezes him: its routine does nothing ($00C592: RTS) – he doesn't move, nor touch the level's
+// tiles or sprites around him (the game's frame counter and its animations go on)
+export const MARIO_FROZEN = 0x0d;
 export const MUSIC_FADE = 0x80; // $1DFB: fade the playing song out (the overworld asks it on entering a level, $0491E0)
 // joypad bits ($4218)
 export const PAD = { b: 0x8000, y: 0x4000, select: 0x2000, start: 0x1000, up: 0x0800, down: 0x0400, left: 0x0200, right: 0x0100, a: 0x0080, x: 0x0040, l: 0x0020, r: 0x0010 } as const;
@@ -223,7 +228,7 @@ export const SCREEN_PTRS: [number, number] = [0x0bf6, 0x100];
 
 // normal sprites: per-slot tables (address + slot)
 export const SPRITE_SLOTS = 12;
-export const EXT_SLOTS = 10, CLUSTER_SLOTS = 20;
+export const EXT_SLOTS = 10, CLUSTER_SLOTS = 20, SHOOTER_SLOTS = 8;
 export const SPR = {
   num: 0x9e,
   speedY: 0xaa, speedX: 0xb6,
@@ -284,4 +289,25 @@ export function setMarioPos(w: Uint8Array, x: number, y: number): void {
 export function standMario(w: Uint8Array, x: number, y: number): void {
   setMarioPos(w, x, y);
   w[RAM.marioSpeedX] = 0; w[RAM.marioSpeedY] = 0; w[RAM.hurtTimer] = 0x40;
+}
+// the level running without its actors (the level animation's frames, #444): Mario frozen (MARIO_FROZEN), the normal,
+// extended, cluster and shooter slots emptied, no generator (sprites the loader brings in run for the frame they come
+// in) – what the level animates by itself (the game's and ExAnimation's tile and
+// palette animations, its own code) goes on, what Mario and the sprites would do to the level's tiles (or read of them)
+// doesn't. The bytes set before every frame
+interface FrozenBytes { at: number; len: number; value: number }
+const FROZEN_ACTORS: readonly FrozenBytes[] = [
+  { at: RAM.marioAnim, len: 1, value: MARIO_FROZEN },
+  { at: SPR.status, len: SPRITE_SLOTS, value: 0 },
+  { at: RAM.extSprites, len: EXT_SLOTS, value: 0 },
+  { at: RAM.clusterSprites, len: CLUSTER_SLOTS, value: 0 },
+  { at: RAM.shooters, len: SHOOTER_SLOTS, value: 0 },
+  { at: RAM.generator, len: 1, value: 0 },
+];
+export function freezeActors(w: Uint8Array): void {
+  for (const b of FROZEN_ACTORS) w.fill(b.value, b.at, b.at + b.len);
+}
+// marks (1) in a WRAM-sized array the bytes freezeActors sets: what was there before isn't read
+export function markFrozenActors(written: Uint8Array): void {
+  for (const b of FROZEN_ACTORS) written.fill(1, b.at, b.at + b.len);
 }

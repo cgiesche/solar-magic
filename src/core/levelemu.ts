@@ -13,7 +13,7 @@ import { RomReads, record, countReads, PAGE_SHIFT, type Recorded } from './romde
 import { findSpriteTables, spriteTablesHold } from './spritetables.ts';
 import { applyTriggers, type TriggerView } from './extrigger.ts';
 import { inputHash, levelInput } from './inputs.ts';
-import { GM, RAM, SPR, MAP_BASE, MAP_SIZE, MAP_HI, CDM16_FLAGS, MUSIC_FADE, getS16, set16, setSpritePos } from './ram.ts';
+import { GM, RAM, SPR, MAP_BASE, MAP_SIZE, MAP_HI, CDM16_FLAGS, MUSIC_FADE, getS16, set16, setSpritePos, freezeActors } from './ram.ts';
 
 export const OV_L1 = 0x0000; // overlay offsets
 export const OV_L2 = 0x4000;
@@ -544,16 +544,19 @@ export class LevelEmulator {
 
   // Continues the live state left by load() into gameplay (GM $14) and snapshots VRAM/CGRAM
   // every `step` frames (tile and palette animation). Must directly follow load().
-  // Mario is kept invulnerable as after a hit: a sprite walking into him would kill him and the game
-  // (its animations included) freeze for the rest of the frames.
+  // The level runs without Mario and its sprites (freezeActors, #444; from the frames that wait for gameplay on, the
+  // load itself done): what it animates by itself, not what they do
+  // – nor what they read of the level's tiles around them, so that moving things near them leaves the level
+  // animation's steps (levelanimsteps.ts) carried; and nothing kills Mario or locks the game (its animations included)
+  // for the rest of the frames.
   animationFrames(count = 8, step = 8): { vram: Uint8Array; cgram: Uint8Array }[] {
     this.sync();
-    const s = this.snes, out: { vram: Uint8Array; cgram: Uint8Array }[] = [];
+    const s = this.snes, w = s.wram, out: { vram: Uint8Array; cgram: Uint8Array }[] = [];
     try {
       let guard = 0;
-      while (s.wram[RAM.gameMode] !== GM.level && guard++ < 80) s.runFrame();
+      while (w[RAM.gameMode] !== GM.level && guard++ < 80) { freezeActors(w); s.runFrame(); }
       for (let i = 0; i < count; i++) {
-        for (let f = 0; f < step; f++) { s.wram[RAM.hurtTimer] = 2; s.runFrame(); }
+        for (let f = 0; f < step; f++) { freezeActors(w); s.runFrame(); }
         out.push({ vram: s.vram.slice(), cgram: s.cgram.slice() });
       }
     } catch { /* keep the frames we have */ }

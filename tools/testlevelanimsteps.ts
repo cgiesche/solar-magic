@@ -3,14 +3,19 @@
 // - emulated one at a time: the images of animationFrames
 // - an object moved: the steps carried (no emulation) wherever nothing they read changed – and every carried set is
 //   exactly the one emulated anew for the new load (VRAM and CGRAM); an object far from the start carries
+// - the steps run without Mario and the sprites (#444): they read none of the level's tiles around Mario's start; the
+//   object under him and a Direct Map16 tile moved onto the ground there carry
 // - the level's ExAnimation list or its graphics changed: emulated anew; another count wanted: emulated anew;
 //   steps not all made yet: emulated anew
 // node tools/testlevelanimsteps.ts
 import { LevelEmulator } from '../src/core/levelemu.ts';
+import { joinHooks } from '../src/core/snes.ts';
 import { LevelAnimSteps } from '../src/core/levelanimsteps.ts';
 import { Rom } from '../src/core/rom.ts';
 import { loadAsar } from '../src/core/asar.ts';
-import { loadLevel, type Level } from '../src/core/level.ts';
+import { loadLevel, newUid, type Level } from '../src/core/level.ts';
+import { DM16_EXT } from '../src/core/patches.ts';
+import { MAP_HI, map16Tile, marioX, marioY, marioTile, mapAddr } from '../src/core/ram.ts';
 import { levelOverride } from '../src/core/levelusage.ts';
 import { installExAnim, exanimInstalled, writeLevelList, writeAltFile, emptyList } from '../src/core/exanim.ts';
 import type { AnimStep } from '../src/core/render.ts';
@@ -44,8 +49,9 @@ const made = (lv: Level) => { emu.load(lv.number, levelOverride(rom, lv)); retur
 }
 
 // ---- objects moved or deleted: carried exactly when nothing they read changed ----
-// (not carried: an object near Mario or a sprite – the steps read the level's tiles there – and the last object,
-// whose position the loader leaves in WRAM where a step reads it as part of a 16-bit value)
+// (not carried: the last object, whose position the loader leaves in WRAM where a step reads it as part of a 16-bit
+// value, one at the camera's edge – the first frames draw a column of the level's tiles there –, one that changes
+// Mario's pose at the start)
 let carried = 0, tried = 0, wrong = 0;
 for (const n of [0x105, 0x002]) {
   const lv = loadLevel(rom, n), s = made(lv);
@@ -62,7 +68,7 @@ for (const n of [0x105, 0x002]) {
       if (c && i % 15 === 0 && !sameSteps(c.steps, made(lv2).steps)) wrong++;
     }
   }
-  // (most objects are far from Mario and the sprites: seen 95–97% carried; 85% leaves room for a ROM's changes)
+  // (seen 97% carried; 85% leaves room for a ROM's changes)
   const of = lv.objects.length * 2;
   check(kept >= of * 0.85, `level ${n.toString(16)}: ${kept} of ${of} objects moved or deleted carry the steps`);
 }
@@ -82,6 +88,54 @@ check(wrong === 0, `the carried sets checked are the ones emulated anew (${carri
   part.next();
   emu.load(0x105, levelOverride(rom, lv));
   check(part.carry(emu, COUNT) === null, 'steps not all made: emulated anew');
+}
+
+// ---- next to Mario's start: objects and a Direct Map16 tile moved carry (#444) ----
+{
+  const lv = loadLevel(rom, 0x105);
+  const r = emu.load(0x105, levelOverride(rom, lv));
+  const { tx, ty } = marioTile(marioX(r.wram), marioY(r.wram));
+  // the steps read none of the tiles around him (before #444 Mario read the one he stands on, and the one his feet
+  // are in)
+  emu.load(0x105, levelOverride(rom, lv));
+  const s = new LevelAnimSteps(emu, COUNT), outer = emu.snes.hook;
+  const around = new Set([mapAddr(tx, ty), mapAddr(tx, ty + 1)].flatMap((a) => [a, a + MAP_HI]));
+  let read = false;
+  const watch = { onWramRead: (a: number) => { if (around.has(a)) read = true; } };
+  emu.snes.hook = outer ? joinHooks(outer, watch) : watch;
+  try { all(s); } finally { emu.snes.hook = outer; }
+  check(!read, `the steps don't read the tiles at Mario's start (${tx}, ${ty}) or under it`);
+  // objects moved: each one drawing a tile next to him (the ground under him, what stands beside him), one tile on
+  // (the last object excepted: see above)
+  const ground = mapAddr(tx, ty + 1);
+  const near = lv.objects.slice(0, -1).flatMap((_, k) => {
+    const l = loadLevel(rom, 0x105);
+    l.objects.splice(k, 1);
+    const w = emu.load(0x105, levelOverride(rom, l)).wram;
+    return [-1, 0, 1, 2, 3].some((d) => [ty, ty + 1].some((y) => map16Tile(w, mapAddr(tx + d, y)) !== map16Tile(r.wram, mapAddr(tx + d, y)))) ? [k] : [];
+  });
+  check(near.length >= 2, `${near.length} objects draw tiles next to Mario's start`);
+  let ok = true;
+  for (const k of near) {
+    const lv2 = loadLevel(rom, 0x105);
+    lv2.objects[k].x += lv2.objects[k].x > 0 ? -1 : 1;
+    emu.load(0x105, levelOverride(rom, lv2));
+    const c = s.carry(emu, COUNT);
+    if (!c || !sameSteps(c.steps, made(lv2).steps)) ok = false;
+  }
+  check(ok, 'each moved one tile: the steps carried, the same as emulated anew');
+  // a Direct Map16 tile moved onto the ground under him
+  // (any tile not the ground's: 0x130, a cement block; put after the first object, the ground, which would draw over it)
+  const at = (x: number) => {
+    const l = loadLevel(rom, 0x105);
+    l.objects.splice(1, 0, { uid: newUid(), num: 0, ext: DM16_EXT, x, y: ty + 1, size: 0, tile: 0x130 });
+    return l;
+  };
+  const sm = made(at(tx + 4));
+  emu.load(0x105, levelOverride(rom, at(tx)));
+  const cm = sm.carry(emu, COUNT);
+  check(map16Tile(emu.snes.wram, ground) === 0x130 && !!cm && sameSteps(cm.steps, made(at(tx)).steps),
+    'a Direct Map16 tile moved onto the ground under Mario\'s start: the steps carried, the same as emulated anew');
 }
 
 // ---- the level's ExAnimation list and graphics: emulated anew ----

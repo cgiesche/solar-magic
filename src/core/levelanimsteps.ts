@@ -5,7 +5,9 @@
 // writing it, the level's data as edited they read (the emulator's overlay), the console's other state (registers,
 // timing, sound), the video memory (all of it when they read it back through its ports, else only where they write
 // it). VRAM and CGRAM bytes they never write are the new load's (a level's tilemaps moved in VRAM). Found by
-// emulation: no list of what can't matter. (Conservative: a byte read counts though the code masks it away – a 16-bit
+// emulation: no list of what can't matter. The level runs without Mario and its sprites
+// (LevelEmulator.animationFrames, #444), so the steps don't read the level's tiles around them: things moved there
+// carry too. (Conservative: a byte read counts though the code masks it away – a 16-bit
 // load of a loader's leftover – and the steps are emulated again.)
 
 import type { LevelEmulator } from './levelemu.ts';
@@ -13,7 +15,7 @@ import type { MemHook, SnesState } from './snes.ts';
 import { joinHooks } from './snes.ts';
 import { RomReads, holds, type Recorded } from './romdeps.ts';
 import type { AnimStep } from './render.ts';
-import { RAM } from './ram.ts';
+import { RAM, markFrozenActors } from './ram.ts';
 
 const STEP_FRAMES = 8; // the frames of a step (the overworld's too: owanimsteps.ts ANIM_STEP_FRAMES)
 
@@ -46,8 +48,11 @@ export class LevelAnimSteps {
     this.state = count > 0 ? this.start : null;
     this.steps = [];
     this.recorded = { result: undefined, reads: new RomReads(emu.rom), gen: emu.rom.gen };
-    // (animationFrames itself looks at the game mode, past the hooks)
-    this.deps = { wramRead: new Set([RAM.gameMode]), wramWritten: new Uint8Array(0x20000), vramWritten: new Uint8Array(0x10000),
+    // (animationFrames itself looks at the game mode, past the hooks, and sets the frozen actors' bytes before every
+    // frame: what the load left there isn't read)
+    const wramWritten = new Uint8Array(0x20000);
+    markFrozenActors(wramWritten);
+    this.deps = { wramRead: new Set([RAM.gameMode]), wramWritten, vramWritten: new Uint8Array(0x10000),
       cgramWritten: new Uint8Array(0x200), videoRead: false, overlayRead: new Set() };
   }
 
