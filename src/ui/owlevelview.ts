@@ -336,7 +336,7 @@ export class LevelTileLayer {
     const rom = this.rom, look = l1Hex(this.defaultLook()), on = this.view.mode === 'l1';
     return tls.map((tl) => h('div', {
       class: 'level-item unused', draggable: on,
-      title: `${levelName(rom, tl)}\n${on ? `Drag onto the map to place it (look ${look}) · or choose a look under "Levels" in the picker and right click on the map` : 'Placed in the layer 1 mode (1)'} · Double click: open in the level editor`,
+      title: `${levelName(rom, tl)}\n${on ? `Drag onto the map to place it (look ${look}) · or choose a look under "Levels" in the Paint panel${this.view.paintHidden() ? ' (Esc shows it again)' : ''} and right click on the map` : 'Placed in the layer 1 mode (1)'} · Double click: open in the level editor`,
       ondragstart: (e: DragEvent) => { this.dragged = tl; e.dataTransfer?.setData('text/plain', levelHex(tl)); },
       ondragend: () => { this.dragged = 0; this.view.hover = null; this.view.paint(); },
       ondblclick: () => this.view.onOpenLevel(translevelToLevel(tl)),

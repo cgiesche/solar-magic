@@ -32,6 +32,8 @@ The Levels mode is gone. Level tiles are objects on top of layer 1 **in the laye
 
 **Names (#422)**: the label under the selected level tile (and star or pipe 5B with a translevel of its own) is display only – small, in the UI's font (sharp at every zoom), kept inside the map in view (shifted sideways at its edges, above the tile where there's no room below). Names are edited in the side panel's properties only (the name field, previewed in the map's font on the border); stars and pipes get the same field. The popover that edited a name in place on the map is gone: two places for one name, and a click on the map meant something else under the label.
 
+**Properties alone (#421)**: while a level tile (or a star or pipe) is selected by a click, the side panel shows only its properties – the Paint panel is hidden (not for a tile's info by Alt/Ctrl+click, nor in the layer 2 mode). A left click on another cell (picked into the brush) or Esc ends the selection and Paint comes back; a right click or Shift+drag still paints with the last brush meanwhile.
+
 Why: a mode of its own kept apart what users see as one map – a click on a level tile while painting paths switched modes, and placing a path to a level meant going back and forth. Level tiles never mix with a brush (a left click on one selects instead of picking, a stroke leaves it alone), so they can live on layer 1 as items, as objects do in the level editor (ADR 0011's exceptions). A step towards one canvas without modes (#372); links and sprites keep their modes for now.
 
 ## Considered options

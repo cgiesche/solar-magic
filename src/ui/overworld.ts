@@ -34,6 +34,7 @@ import type { OwSpriteView } from '../core/owsprites.ts';
 import { LinkLayer } from './owlinkview.ts';
 import { LevelTileLayer, tilePlace } from './owlevelview.ts';
 import { LevelNameLabel } from './owlevelname.ts';
+import { selectionHidesPaint } from './owselection.ts';
 import { ownsTranslevel, starOrPipe, starDirs, giveStarTranslevel, type StarPaths } from '../core/owstars.ts';
 import { levelsWithoutTile, type LevelTileEvent } from '../core/owleveltiles.ts';
 import {
@@ -209,6 +210,8 @@ export class OverworldView {
     pick: (r) => this.pick(this.clampRect(r)),
   });
   selected = -1; // the layer 1 tile shown in the properties (l1Index)
+  private palScroll: number | null = null; // the paint sheet's scroll while Paint is hidden
+  private infoTile = -1; // the tile selected by Alt/Ctrl+click (its info: Paint stays, owselection.ts)
   mapCanvas = document.createElement('canvas'); // the map as shown: its layers at their strengths (composeMap)
   private l1Canvas = document.createElement('canvas'); // layer 1 alone (transparent where it has no pixel)
   get l1Image(): HTMLCanvasElement { return this.l1Canvas; }
@@ -247,7 +250,7 @@ export class OverworldView {
       if (Math.abs(z - this.zoom) > 1e-6) this.setZoom(z); else this.layout();
     })).observe(this.scroller);
     // the paint sheet follows the panel's width, drawn anew when it needs other screen pixels per pixel
-    new ResizeObserver(() => requestAnimationFrame(() => { if (this.palPixels && fillPixels(this.palWidth(), this.mode === 'l1' ? 256 : 128) !== this.palPixels) this.buildSide(); })).observe(this.palPanel);
+    new ResizeObserver(() => requestAnimationFrame(() => { if (!this.palPanel.hidden && this.palPixels && fillPixels(this.palWidth(), this.mode === 'l1' ? 256 : 128) !== this.palPixels) this.buildSide(); })).observe(this.palPanel);
     this.scroller.addEventListener('contextmenu', (e) => e.preventDefault());
     this.scroller.addEventListener('mousedown', (e) => this.onDown(e));
     this.scroller.addEventListener('dblclick', (e) => this.onDouble(e));
@@ -782,8 +785,9 @@ export class OverworldView {
       }
       // a click on a level tile selects it, a drag moves it (a pick starts beside one)
       if (e.button === 0 && level && !e.shiftKey && !e.altKey && !e.ctrlKey) { this.levelTiles.down(c.x, c.y); this.updateStatus(); this.paint(); return; }
-      // (a pick beside one: the level tile selected no longer – Delete would remove it unseen)
-      if (e.button === 0 && !e.shiftKey && !e.altKey && !e.ctrlKey && this.selected >= 0 && this.isLevelTile(this.levelL1()[this.selected])) this.selectTile(-1, false);
+      // (a pick beside one: the level tile, star or pipe selected no longer – Delete would remove it unseen –, Paint shown
+      // again with the brush picked)
+      if (e.button === 0 && !e.shiftKey && !e.altKey && !e.ctrlKey && this.selected >= 0 && (this.isLevelTile(this.levelL1()[this.selected]) || this.paintHidden())) this.selectTile(-1, false);
     }
     if (paintButton(e)) {
       // (the route brush: the route drawn)
@@ -989,7 +993,7 @@ export class OverworldView {
   info(x: number, y: number): void {
     if (this.mode !== 'l1') { toast('Tile settings are available on layer 1'); return; }
     if (x < 0 || y < 0 || x >= 32 || y >= 32) return;
-    this.selectTile(l1Index(this.region, x, y), false);
+    this.selectTile(l1Index(this.region, x, y), false, true);
   }
 
   // shows layer 1 tile i (l1Index) selected, on the submap it is on (only the tile known: submapOf, as the World
@@ -1001,9 +1005,11 @@ export class OverworldView {
     this.selectTile(i, true);
   }
 
-  // selects a layer 1 tile (a level tile in the list, any tile by Alt/Ctrl+click; l1Index); center: scroll the map to it
-  selectTile(i: number, center: boolean): void {
+  // selects a layer 1 tile (a level tile in the list, any tile by Alt/Ctrl+click: byInfo; l1Index); center: scroll the
+  // map to it
+  selectTile(i: number, center: boolean, byInfo = false): void {
     this.selected = i;
+    this.infoTile = byInfo ? i : -1;
     this.links.selectAt(i);
     if (center && i >= 0) {
       const t = l1XY(i), { x, y } = owShownAt(this.region, t.x * 16 + 8, t.y * 16 + 8);
@@ -1012,6 +1018,7 @@ export class OverworldView {
     }
     this.buildProps();
     this.buildLeft();
+    this.updateStatus();
     this.paint();
   }
 
@@ -1061,9 +1068,11 @@ export class OverworldView {
     if (linking) { this.statusText.textContent = linking; return; }
     if (!c) {
       const solo = this.mode === 'l1' ? ' · Hold Q: hide layer 2' : this.mode === 'l2' ? ` · Hold Q: ${this.l1InL2 ? 'hide' : 'show'} layer 1` : '';
-      this.statusText.textContent = this.ev
+      // (a level tile, star or pipe selected: its properties alone – Esc or a click on another cell brings Paint back)
+      const back = this.paintHidden() ? 'Esc: Paint again · ' : '';
+      this.statusText.textContent = back + (this.ev
         ? `Painting layer ${this.mode === 'l1' ? 1 : 2} as after ${eventTitle(this.ev.runners, this.event)} · Click/drag picks up tiles · Right click/Shift+click paints · Esc: the map before events${solo}`
-        : `Click/drag picks up tiles · Right click/Shift+click paints · Alt/Ctrl+click: tile settings${this.mode === 'l1' ? ' · Level tiles: click selects, drag moves, right click: menu, Delete removes' : ''}${solo}`;
+        : `Click/drag picks up tiles · Right click/Shift+click paints · Alt/Ctrl+click: tile settings${this.mode === 'l1' ? ' · Level tiles: click selects, drag moves, right click: menu, Delete removes' : ''}${solo}`);
       return;
     }
     let t = `X ${hex(c.x, 2)}  Y ${hex(c.y, 2)}`;
@@ -1512,7 +1521,7 @@ export class OverworldView {
       h('label', { class: 'row' }, 'Map ', select(MAP_NAMES.map((n, i) => [i, n] as [number, string]), this.map, (v) => this.setMap(v))),
       h('span', { class: 'sep' }),
       h('div', { class: 'btn-group' },
-        h('button', { class: `ow-l1${this.mode === 'l1' ? ' active' : ''}`, title: 'Layer 1 (1): paths painted as tiles, the level tiles objects on top (hatched) – click selects one, drag moves it, right click: its menu, Delete removes it; placed with a look from "Levels" in the picker; the overworld links\' tiles objects too (marked, right click: Link to…, Remove link) · the path tiles marked; layer 2 dimmed (View → Layers), hold Q to hide it', onclick: () => this.setMode('l1') }, 'Layer 1 (paths, levels & links)'),
+        h('button', { class: `ow-l1${this.mode === 'l1' ? ' active' : ''}`, title: 'Layer 1 (1): paths painted as tiles, the level tiles objects on top (hatched) – click selects one, drag moves it, right click: its menu, Delete removes it; placed with a look from "Levels" in the Paint panel; the overworld links\' tiles objects too (marked, right click: Link to…, Remove link) · the path tiles marked; layer 2 dimmed (View → Layers), hold Q to hide it', onclick: () => this.setMode('l1') }, 'Layer 1 (paths, levels & links)'),
         h('button', { class: `ow-l2${this.mode === 'l2' ? ' active' : ''}`, title: 'Layer 2 (2) · layer 1 with its path marks dimmed or hidden (View → Layers), hold Q for the other', onclick: () => this.setMode('l2') }, 'Layer 2 (terrain)'),
         h('button', { class: this.mode === 'sprites' ? 'active' : '', title: 'Sprites (3): the overworld\'s sprites as the game shows them at the event progress, the start positions and the Koopa Kids\' places; drag to move', onclick: () => this.setMode('sprites') }, 'Sprites')),
       h('span', { class: 'sep' }),
@@ -1562,6 +1571,8 @@ export class OverworldView {
     if (e.ctrlKey || e.metaKey || e.altKey) return false;
     if (k === 'escape' && this.mode === 'sprites' && this.sprites.unpick()) return true;
     if (k === 'escape' && this.links.cancelPending()) { this.paint(); return true; }
+    // (Esc layered: a selection ended first – Paint shown again –, then the event)
+    if (k === 'escape' && this.mode !== 'sprites' && this.selected >= 0) { this.selectTile(-1, false); return true; }
     if (k === 'escape' && this.event >= 0) { this.setEvent(-1); return true; }
     if (k === 'p' && this.mode === 'l1') { this.setRouteBrush(!this.pathTool.on); return true; }
     if (k === 'g') { this.showGrid = !this.showGrid; this.paint(); return true; }
@@ -1613,7 +1624,9 @@ export class OverworldView {
     this.watch.add(() => this.buildSideNow());
   }
   private buildSideNow(): void {
-    const scroll = this.palPanel.scrollTop;
+    if (this.palPanel.hidden) { this.buildProps(); return; } // (Paint hidden by the selection: drawn when shown again)
+    const scroll = this.palScroll ?? this.palPanel.scrollTop;
+    this.palScroll = null;
     hidePickerPreview(this.palPanel);
     this.palPixels = 0;
     this.palPanel.replaceChildren(...(this.mode === 'sprites' ? this.sprites.palette() : [
@@ -1623,6 +1636,13 @@ export class OverworldView {
     this.buildProps();
   }
 
+  // whether the selection hides the Paint panel (a level tile, star or pipe clicked in the layer 1 mode: owselection.ts)
+  paintHidden(): boolean {
+    const i = this.selected, t = i >= 0 ? this.levelL1()[i] : 0;
+    return selectionHidesPaint({ mode: this.mode, selected: i, tile: t, byInfo: i === this.infoTile, levelTile: i >= 0 && this.isLevelTile(t),
+      kindsKnown: !!this.pathKinds(), revealPick: (this.eventPick?.at ?? -1) >= 0 });
+  }
+
   // the mode's properties (of what is selected), under them the global settings in two sections shown in every mode:
   // "Map" (the map shown: music, graphics, border; open by default) and "Overworld" (the game's options, the reveal
   // list; collapsed by default) – each open or closed for the session
@@ -1630,6 +1650,13 @@ export class OverworldView {
   private overworldOpen = false;
   private revealListOpen = false;
   buildProps(): void {
+    // (Paint hidden while a level tile, star or pipe is selected; shown again: drawn at its width, scrolled where it was)
+    const hide = this.paintHidden();
+    if (hide !== this.palPanel.hidden) {
+      if (hide) this.palScroll = this.palPanel.scrollTop;
+      this.palPanel.hidden = hide;
+      if (!hide) { this.buildSide(); return; } // (which builds the properties too)
+    }
     const links = this.mode === 'l1' && this.selected >= 0 ? this.links.props() : null;
     const own = this.mode === 'sprites' ? [h('div', { class: 'panel-title' }, 'Sprite'), this.sprites.props()]
       : [h('div', { class: 'panel-title' }, 'Properties'),
