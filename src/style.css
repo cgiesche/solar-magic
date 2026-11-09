@@ -431,10 +431,6 @@ canvas.sheet-fill { width: 100%; height: auto; image-rendering: auto; }
 .ow-cpal-none { display: inline-block; width: 32px; text-align: center; font-family: monospace; opacity: .7; }
 .ln-input { flex: 1; min-width: 0; font-family: monospace; }
 .ln-input.bad { border-color: var(--warn, #e05050); }
-.ow-name-pop { position: absolute; z-index: 20; display: flex; flex-direction: column; gap: 4px; padding: 6px; background: var(--panel); border: 1px solid var(--border); border-radius: 4px; box-shadow: 0 4px 16px rgba(0, 0, 0, .5); }
-.ow-name-box { position: relative; }
-.ow-name-canvas { display: block; width: 320px; image-rendering: pixelated; border: 1px solid var(--border); }
-.ow-name-rest { display: flex; flex-direction: column; gap: 2px; }
 .ln-border { display: block; width: 100%; image-rendering: pixelated; border: 1px solid var(--border); }
 .level-item { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .level-item .lname { font-family: system-ui, sans-serif; font-size: 11px; color: var(--muted); }

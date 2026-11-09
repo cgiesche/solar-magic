@@ -23,12 +23,14 @@ Which tiles are level tiles and which tile Mario stops on are the path kinds' (l
 
 The Levels mode is gone. Level tiles are objects on top of layer 1 **in the layer 1 mode** ("Layer 1 (paths & levels)", key 1; the modes are 1 layer 1, 2 layer 2, 3 overworld links, 4 sprites). The rules above stay – swap on move, the stop tile on remove, strokes never painting or erasing level tiles, edits into the event chosen in the strip, the refusals:
 
-- **Select / move**: a left click on a level tile selects it (its settings in the Properties, its name under it on the map, editable in place); a left drag starting on one moves it (Esc cancels). A pick rectangle starts beside a level tile – no modifier – and leaves level tiles out as before.
+- **Select / move**: a left click on a level tile selects it (its settings in the Properties, its name under it on the map – display only since #422, see below); a left drag starting on one moves it (Esc cancels). A pick rectangle starts beside a level tile – no modifier – and leaves level tiles out as before.
 - **Remove**: Delete removes the selected level tile.
 - **Place**: the layer 1 picker has a section **"Levels"** with the looks (the visible level tiles and the invisible one) and the budget "Levels with a level tile". A look chosen is the brush (beside the tile brushes and the route brush, "Path (auto)"): a right click (or Shift+click) on a cell opens "Place level here…" with that look preselected; a right drag places only on its first cell. A level dragged from "Without level tile" onto the map stays. One level tile picked in the sheet chooses it as the look.
 - **Menu**: a right click on a level tile, with any brush, opens its menu – Open level, Change look…, Remove (with the route brush once released without a drag: a route may start at a level tile).
 - **Exit arrows**: the selected level tile's arrows are always shown; View → "Exit arrows" shows every level tile's (off by default).
 - Level tiles stay lightly hatched on the map and in the sheet; the selected one gets the selection frame and its name label.
+
+**Names (#422)**: the label under the selected level tile (and star or pipe 5B with a translevel of its own) is display only – small, in the UI's font (sharp at every zoom), kept inside the map in view (shifted sideways at its edges, above the tile where there's no room below). Names are edited in the side panel's properties only (the name field, previewed in the map's font on the border); stars and pipes get the same field. The popover that edited a name in place on the map is gone: two places for one name, and a click on the map meant something else under the label.
 
 Why: a mode of its own kept apart what users see as one map – a click on a level tile while painting paths switched modes, and placing a path to a level meant going back and forth. Level tiles never mix with a brush (a left click on one selects instead of picking, a stroke leaves it alone), so they can live on layer 1 as items, as objects do in the level editor (ADR 0011's exceptions). A step towards one canvas without modes (#372); links and sprites keep their modes for now.
 

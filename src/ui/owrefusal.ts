@@ -111,8 +111,6 @@ export function refusalWords(rom: Rom, r: OwRefusalData): RefusalWords {
     case 'pieceSame': return w('Not replaced', 'the new piece is the one to replace', 'Pick another piece to put in its place.');
     case 'pieceNoneInside': return w('Not replaced', 'no piece lies wholly inside the selection', 'Select a larger area.');
     case 'pieceNotFound': return w('Not replaced', `the piece is not ${r.selection ? 'in the selection' : 'on this map'}`);
-    case 'nameNoChar': return w(`“${r.ch}” can't be typed`, 'the font of level names has no such character');
-    case 'nameFull': return w('No more characters fit', `the name has its ${r.max} tiles`);
     case 'deadEndNoStopTile': return w('No stop tile can be added here', 'the overworld has no stop tile to put there');
     case 'deadEndEventTile': return w('No stop tile can be added here', 'an event puts the tile there', 'Paint a stop tile into that event.');
     case 'customSpritesPerSubmap': return w('No more custom sprites fit on this submap',

@@ -54,8 +54,6 @@ const samples: { [K in OwRefusalKind]: Extract<OwRefusalData, { kind: K }> } = {
   pieceSame: { kind: 'pieceSame' },
   pieceNoneInside: { kind: 'pieceNoneInside' },
   pieceNotFound: { kind: 'pieceNotFound', selection: true },
-  nameNoChar: { kind: 'nameNoChar', ch: 'é' },
-  nameFull: { kind: 'nameFull', max: 19 },
   deadEndNoStopTile: { kind: 'deadEndNoStopTile' },
   deadEndEventTile: { kind: 'deadEndEventTile', cell: 0x123 },
   customSpritesPerSubmap: { kind: 'customSpritesPerSubmap', submap: 2, count: 0x19, max: 0x18 },

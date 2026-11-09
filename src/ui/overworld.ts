@@ -16,7 +16,7 @@ import {
 } from '../core/overworld.ts';
 import { isBlank, readMessage } from '../core/messages.ts';
 import { messageRoutineNote, messageRoutineUnknown, MESSAGE_ROUTINE_CHECKING } from '../core/messagedraw.ts';
-import { levelName, hasLevelName, levelNamePatch } from '../core/levelnames.ts';
+import { levelName, hasLevelName } from '../core/levelnames.ts';
 import { levelNameField } from './levelnamefield.ts';
 import {
   readEvents, writeEvents, applyEvents, reorderSteps, eventRunners, exitEvent, eventTitle, eventWords, playthroughStrip, stepEvent, eventPlace, submapOf, submapShown, pieceTiles, isBig, l2XY,
@@ -33,7 +33,7 @@ import { skipsRevealWalk, handledWithoutEvent } from '../core/revealwalk.ts';
 import type { OwSpriteView } from '../core/owsprites.ts';
 import { LinkLayer } from './owlinkview.ts';
 import { LevelTileLayer, tilePlace } from './owlevelview.ts';
-import { LevelNameEditor } from './owlevelname.ts';
+import { LevelNameLabel } from './owlevelname.ts';
 import { ownsTranslevel, starOrPipe, starDirs, giveStarTranslevel, type StarPaths } from '../core/owstars.ts';
 import { levelsWithoutTile, type LevelTileEvent } from '../core/owleveltiles.ts';
 import {
@@ -148,7 +148,7 @@ export class OverworldView {
   showSprites = false; // the sprites also while painting (always in the sprites mode)
   sprites = new SpriteLayer(this);
   levelTiles = new LevelTileLayer(this); // the level tiles as objects on top of layer 1 (the layer 1 mode)
-  nameEditor = new LevelNameEditor(this); // the selected level tile's name, edited in place (the layer 1 mode)
+  nameLabel = new LevelNameLabel(this); // the selected level tile's name under it (the layer 1 mode), display only
   pathTool = new PathTool(this); // the layer 1 mode's route brush, "Path (auto)": routes dragged, their tiles chosen
   reach = new ReachLayer(this); // path validation: the tiles Mario doesn't reach dimmed
   check = new WorldCheck(this); // the World check: the status bar button, the panel of problems
@@ -422,9 +422,9 @@ export class OverworldView {
     ctx.fillStyle = '#1b1d22';
     ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
     ctx.imageSmoothingEnabled = false;
-    ctx.setTransform(z, 0, 0, z, -Math.round(this.scroller.scrollLeft * dpr), -Math.round(this.scroller.scrollTop * dpr));
+    const sx = Math.round(this.scroller.scrollLeft * dpr), sy = Math.round(this.scroller.scrollTop * dpr);
+    ctx.setTransform(z, 0, 0, z, -sx, -sy);
     const lw = 1 / z;
-    this.nameEditor.place();
     // (the map's pixels where owShownAt shows them: the submaps' region moved, wrapping)
     for (const o of owShownCopies(this.region)) {
       ctx.save();
@@ -435,6 +435,10 @@ export class OverworldView {
       this.paintMap(ctx, lw);
       ctx.restore();
     }
+    // (the selected level tile's name: in screen pixels, sharp at every zoom, inside the map in view; at layer 1's
+    // strength, as its marks)
+    const l1 = this.strengths().l1;
+    if (l1) { ctx.globalAlpha = l1; this.nameLabel.paint(ctx, { x: -sx, y: -sy, w: 512 * z, h: 512 * z }, dpr); ctx.globalAlpha = 1; }
   }
   // what paint draws in the map's pixels
   private paintMap(ctx: CanvasRenderingContext2D, lw: number): void {
@@ -472,7 +476,6 @@ export class OverworldView {
     // (the overworld links: layer 1's objects, its marks and the selected tile's arrows, dimmed or gone with it, #413)
     if (this.mode !== 'sprites' && s1.l1) { ctx.globalAlpha = s1.l1; this.links.paint(ctx, lw); ctx.globalAlpha = 1; }
     if (this.mode !== 'sprites' && s1.l1) this.paintSelected(lw);
-    this.nameEditor.paint(ctx, lw);
     this.hatchRefused(ctx, lw);
     this.paintMovePreview(ctx, lw);
     this.paintStep(lw);
@@ -749,8 +752,6 @@ export class OverworldView {
     if (e.button === 0 && this.links.pickPending(c.x, c.y, e.clientX, e.clientY)) return;
     const plain = !e.shiftKey && !e.altKey && !e.ctrlKey;
     if (this.mode === 'l1' && e.button === 0 && plain && this.links.grab(c.x, c.y)) return;
-    // (a name being typed: the click closes it, written; a click on the selected level tile's name edits it)
-    if (this.mode === 'l1' && e.button === 0 && this.nameEditor.down(this.point(e))) return;
     // the level tiles, objects on top of layer 1 (ADR 0012)
     this.menuAt = null;
     if (this.mode === 'l1') {
@@ -1002,7 +1003,6 @@ export class OverworldView {
 
   // selects a layer 1 tile (a level tile in the list, any tile by Alt/Ctrl+click; l1Index); center: scroll the map to it
   selectTile(i: number, center: boolean): void {
-    if (i !== this.selected) this.nameEditor.close(true);
     this.selected = i;
     this.links.selectAt(i);
     if (center && i >= 0) {
@@ -1443,7 +1443,6 @@ export class OverworldView {
 
   setMap(n: number): void {
     if (n === this.map) return;
-    this.nameEditor.close(true);
     this.cellHistory.close();
     this.map = n;
     this.selected = -1;
@@ -1460,7 +1459,6 @@ export class OverworldView {
   // ---------------- context bar (map, layer, view, zoom) ----------------
   setMode(m: OwMode): void {
     if (this.mode === m) return;
-    this.nameEditor.close(true);
     this.cellHistory.close();
     this.mode = m;
     this.links.cancelPending(); // (the next click on the map no longer chooses a link's tile)
@@ -1558,7 +1556,6 @@ export class OverworldView {
     if (k === 'escape' && this.brushDrag.cancel()) { this.paint(); return true; }
     if (k === 'escape' && this.cellHistory.cancelMove()) return true;
     if (k === 'escape' && this.levelTiles.cancel()) return true;
-    if (k === 'escape' && this.nameEditor.cancel()) return true;
     if (k === 'escape' && this.pathTool.cancel()) return true;
     if (k === 'escape' && this.cancelEventPick()) return true;
     if (k === 'escape' && this.cancelReplace()) return true;
@@ -1880,9 +1877,9 @@ export class OverworldView {
     return info;
   }
   // the star or pipe 5B at i (owstars.ts ownsTranslevel): what the game uses its translevel for – the ways Mario walks
-  // off it (its initial flags, each a switch) and the status bar's name (typed in the box under it on the map:
-  // LevelNameEditor); no level settings, it enters no level. Without a translevel of its own: said why that matters,
-  // one given by a button
+  // off it (its initial flags, each a switch) and the status bar's name (the level name field, levelnamefield.ts; shown
+  // under it on the map: owlevelname.ts); no level settings, it enters no level. Without a translevel of its own: said
+  // why that matters, one given by a button
   private starInfo(i: number): HTMLElement {
     const rom = this.app.rom, tl = this.tls[i], { x, y } = l1XY(i), t = this.levelL1()[i], paths = this.starPaths()!;
     const what = starOrPipe(t), What = what === 'star' ? 'Star' : 'Pipe';
@@ -1907,9 +1904,8 @@ export class OverworldView {
     const others = [...this.tls.keys()].filter((k) => k !== i && this.tls[k] === tl);
     return h('div', { class: 'ow-info' }, head,
       h('div', { class: 'prop' }, h('label', { title: `The ways Mario walks off the ${what} in a new game (its translevel's initial flags): arriving by a path opens the way back, the reveal walk of a level whose path leads here too` }, 'Mario walks off'), ...switches),
-      h('div', { class: 'prop' }, h('label', { title: `The name the status bar shows while Mario stands on the ${what} (its translevel's), drawn in the box under it` }, 'Status bar'),
-        h('span', null, hasLevelName(rom, tl) ? levelName(rom, tl) : '(blank)'),
-        levelNamePatch(rom) ? h('button', { title: `Type the name in the box under the ${what}, in the map's font (Enter writes it, Esc drops it)`, onclick: () => this.nameEditor.openStar() }, 'Edit…') : null),
+      ...levelNameField(this.app, tl, this.render(), `${What} ${hex(x, 2)},${hex(y, 2)}: name`),
+      h('div', { class: 'hint' }, `The status bar shows it while Mario stands on the ${what} (its translevel's name)`),
       ...others.map((k) => h('div', { class: 'hint warn-text' }, `⚠ The tile at ${tilePlace(k)} has this translevel too: the ways and the name are both's.`)),
       gauge);
   }
@@ -2319,7 +2315,6 @@ export class OverworldView {
     this.buildLeft();
     this.redrawMap();
     this.updateStatus();
-    this.nameEditor.refresh();
   }
 
   show(): void {
