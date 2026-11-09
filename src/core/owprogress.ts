@@ -1,11 +1,12 @@
-// The save at an event progress (CONTEXT.md "Event progress"): what a game in which events 0 … n-1 passed holds beyond
-// a new file's – the level flags ($1EA2: passed, the directions open), the switch palaces pressed ($1F27) and the
-// count of events triggered ($1F2E) – learned by emulation, not by a rule: a new game is played on the overworld
-// emulator, and for each event in its number order the level whose exit runs it (owevents.ts eventRunners, the first
-// one: the normal exit before a secret one) is left with that exit, as the game leaves a level, so that the game's own
-// code sets the level's flags, runs the event and counts it. Two levels running the same event: only the one left is
-// passed (the game doesn't run an event twice). An event the game doesn't run so (no level runs it, the level's exit
-// runs another one) is set as the overworld view sets it (eventBits), counted by nothing.
+// The save at an event progress (CONTEXT.md "Event progress"): what a game in which a set of events passed (events 0 …
+// n-1, or any set: eventset.ts) holds beyond a new file's – the level flags ($1EA2: passed, the directions open), the
+// switch palaces pressed ($1F27) and the count of events triggered ($1F2E) – learned by emulation, not by a rule: a new
+// game is played on the overworld emulator, and for each event in its number order the level whose exit runs it
+// (owevents.ts eventRunners, the first one: the normal exit before a secret one) is left with that exit, as the game
+// leaves a level, so that the game's own code sets the level's flags, runs the event and counts it; the events of a set
+// not passed are skipped (their levels not left). Two levels running the same event: only the one left is passed (the
+// game doesn't run an event twice). An event the game doesn't run so (no level runs it, the level's exit runs another
+// one) is set as the overworld view sets it (eventBits), counted by nothing.
 // The switch palaces are pressed in a level, not when it is left: Mario landing on a switch tile ($00F55E sets $1423
 // by the tile, $00EEAE presses its switch). Which tiles press which switch is learned by the block probe (each tile
 // once, in the tileset of a level placing it: BlockProber.probePress), which levels place them by loading the levels
@@ -14,7 +15,8 @@
 // of palace levels or switch tiles; a switch tile placed where no exit leads counts as not pressed (#257).
 
 import { OW_EVENTS, FLAG, type OverworldLoads, l1XY, baseEvent, translevelToLevel, readTranslevels } from './overworld.ts';
-import { layer1AtEveryProgress } from './owcellhistory.ts';
+import { layer1AtEveryProgress, layer1AtProgress } from './owcellhistory.ts';
+import { isPassed, prefixLength, progressKey, type EventProgress } from './eventset.ts';
 import { eventRunners, submapViewsJob, submapOf, type EventRunner } from './owevents.ts';
 import { ExitGraph } from './exitgraph.ts';
 import { levelTeleports } from './owlinks.ts';
@@ -70,6 +72,13 @@ export function* progressFlagsJob(loads: OverworldLoads): Job<number[][]> {
 // layer 1 and the translevels (l1Index order) of the map at an event progress, the level flags of the save there
 export interface ProgressMap { l1: Uint16Array; tls: Uint8Array; flags: number[] }
 
+// The map at any event progress (a set too) without emulating it, as progressMapsFromEvents has each prefix: layer 1
+// as the events passed leave it (owcellhistory.ts layer1AtProgress), the ROM's translevels, the level flags of the
+// save there (`flags`, progressSaveJob's)
+export function progressMapFromEvents(rom: Rom, progress: EventProgress, flags: readonly number[]): ProgressMap {
+  return { l1: layer1AtProgress(rom, progress), tls: readTranslevels(rom), flags: [...flags] };
+}
+
 // The maps at every event progress 0 … OW_EVENTS (index: the progress) without emulating them: layer 1 as the events
 // leave it (owcellhistory.ts layer1AtEveryProgress: their layer 1 changes, reveals and destroys in number order, as
 // the game loads a save – the model testowcellhistory checks against the game's at every progress), the translevels
@@ -100,10 +109,11 @@ export function progressSearches(input: (progress: number) => ReachInput): (prog
 export interface PressSource { uses: LevelUses; emu: LevelEmulator; prober: BlockProber }
 
 // the save at event progress `progress` as a job of the result learner (probe worker): the overworld's part a step
-// per event (progressSavesJob), then the switches pressed, a step per level loaded. Without `src` the switches stay a
-// new file's
-export function* progressSaveJob(loads: OverworldLoads, progress: number, src?: PressSource): Job<ProgressSave> {
-  const saves = yield* progressSavesJob(loads), save = saves[Math.max(0, Math.min(OW_EVENTS, progress))];
+// per event (a prefix: progressSavesJob's, learned for every prefix at once; another set: setSaveJob), then the
+// switches pressed, a step per level loaded. Without `src` the switches stay a new file's
+export function* progressSaveJob(loads: OverworldLoads, progress: EventProgress, src?: PressSource): Job<ProgressSave> {
+  const n = prefixLength(progress);
+  const saves = n >= 0 ? yield* progressSavesJob(loads) : yield* setSavesJob(loads, progress), save = saves[n >= 0 ? n : OW_EVENTS];
   if (!src) return save;
   const passed: number[] = [];
   for (let tl = 0; tl < LEVEL_FLAGS; tl++) if (save.levelFlags[tl] & ~saves[0].levelFlags[tl] & FLAG.passed) passed.push(tl);
@@ -134,10 +144,17 @@ export function* switchesPressedJob(rom: Rom, src: PressSource, tls: number[]): 
   return pressed;
 }
 
-// the saves' steps (progressSavesJob): the submaps' views, the map loaded, then a step per event left by its level (a
-// long one's frames in steps of STEP_FRAMES); the console the steps' between them (OverworldLoads.deriveSteps sets it
-// again)
-function* learnSaves(loads: OverworldLoads): Generator<void, ProgressSave[]> {
+// The saves of a set of events not a prefix (index: the events up to which the set was played, OW_EVENTS its save), as
+// progressSavesJob: the set's events left by their levels in number order, the others not. Kept by the loads for the
+// latest set asked for (the editor keeps those it got)
+export function setSavesJob(loads: OverworldLoads, set: EventProgress): Generator<void, ProgressSave[]> {
+  return loads.deriveSteps('setSaves', () => learnSaves(loads, set), progressKey(set));
+}
+
+// the saves' steps (progressSavesJob; passed: the events played, the others skipped – by default all): the submaps'
+// views, the map loaded, then a step per event left by its level (a long one's frames in steps of STEP_FRAMES); the
+// console the steps' between them (OverworldLoads.deriveSteps sets it again)
+function* learnSaves(loads: OverworldLoads, passed: EventProgress = OW_EVENTS): Generator<void, ProgressSave[]> {
   const rom = loads.emu.rom, views = yield* submapViewsJob(loads), runners = eventRunners(rom);
   loads.restore(0, 0);
   const s = loads.emu.snes, w = s.wram;
@@ -171,7 +188,7 @@ function* learnSaves(loads: OverworldLoads): Generator<void, ProgressSave[]> {
   try {
     for (let e = 0; e < OW_EVENTS; e++) {
       out.push(saveOf(w));
-      if (hasEvent(w, e)) continue;
+      if (hasEvent(w, e) || !isPassed(passed, e)) continue;
       const r = runners.get(e)?.[0];
       const before = r && s.saveState();
       if (!r || !(yield* leave(r, e))) {

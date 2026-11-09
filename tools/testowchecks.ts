@@ -34,7 +34,7 @@ function checks(r: Rom): Checks {
   console.log(`     checked in ${Math.round(performance.now() - t0)} ms`);
   return out;
 }
-const list = (ps: WorldProblem[]) => ps.map((p) => `     ${p.severity} ${p.key} @${hx(p.progress)} ${p.tile >= 0 ? at(p.tile) : '-'}: ${p.text}`).join('\n');
+const list = (ps: WorldProblem[]) => ps.map((p) => `     ${p.severity} ${p.key} @${hx(p.progress as number)} ${p.tile >= 0 ? at(p.tile) : '-'}: ${p.text}`).join('\n');
 
 const copy = () => new Rom(rom.data.slice());
 const has = (ps: WorldProblem[], key: string) => ps.find((p) => p.key === key);

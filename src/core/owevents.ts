@@ -33,6 +33,7 @@ import { RAM, getS16 } from './ram.ts';
 import { record, countReads } from './romdeps.ts';
 import { shownSecretExits } from './secretexits.ts';
 import { runJob, type Job } from './jobrunner.ts';
+import { isPassed, type EventProgress } from './eventset.ts';
 import { layer1AtEveryProgress, layer1AfterEvent } from './owcellhistory.ts';
 
 const DIVIDERS = 0x04e359, DIVIDER_WORDS = 0x79; // words: the first step of each event, the end
@@ -151,6 +152,13 @@ export const eventPieces = (d: EventData, e: number): Piece[] =>
 export function applyEvents(l2: Uint16Array, d: EventData, from: number, to: number): Uint16Array {
   const out = l2.slice();
   for (let e = from; e < to; e++) for (const p of eventPieces(d, e)) drawPiece(out, d, p);
+  return out;
+}
+// layer 2 at an event progress (a count or any set, eventset.ts): the events passed drawn in their number order, as the
+// game draws them when a file is loaded
+export function layer2AtProgress(l2: Uint16Array, d: EventData, progress: EventProgress): Uint16Array {
+  const out = l2.slice();
+  for (let e = 0; e < OW_EVENTS; e++) if (isPassed(progress, e)) for (const p of eventPieces(d, e)) drawPiece(out, d, p);
   return out;
 }
 

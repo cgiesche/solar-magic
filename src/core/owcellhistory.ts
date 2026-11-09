@@ -12,6 +12,7 @@ import {
 } from './overworld.ts';
 import { readEvents, eventPieces, drawPiece, type EventData } from './owevents.ts';
 import { eventReveal } from './oweventtiles.ts';
+import { isPassed, type EventProgress } from './eventset.ts';
 
 // how an event changed a cell's layer 1 tile: its layer 1 changes, a reveal, a destroy (several when more act on it)
 export type CellCause = 'tiles' | 'reveal' | 'destroy';
@@ -39,10 +40,11 @@ function eventL1(rom: Rom, d: EventData, map: Uint16Array, e: number, effects: D
 }
 
 // Layer 1 through the events: calls `each` after every event e with the cells changed (and how), the map as after it
-// (map: the map before events, changed in place)
-function walkL1(rom: Rom, d: EventData, map: Uint16Array, each: (e: number, changed: Map<number, CellCause[]>) => void): void {
+// (map: the map before events, changed in place); only the events passed at `progress` (all by default) applied
+function walkL1(rom: Rom, d: EventData, map: Uint16Array, each: (e: number, changed: Map<number, CellCause[]>) => void, progress: EventProgress = OW_EVENTS): void {
   const effects = destroyEffects(rom), destroys = readDestroyList(rom).filter((x) => x.event !== NO_EVENT);
   for (let e = 0; e < OW_EVENTS; e++) {
+    if (!isPassed(progress, e)) continue;
     const changed = new Map<number, CellCause[]>();
     eventL1(rom, d, map, e, effects, destroys, (i, t, by, told = false) => {
       if (map[i] === t && !told) return;
@@ -60,14 +62,12 @@ export function layer1AfterEvent(rom: Rom, map: ArrayLike<number>, e: number, d:
   return out;
 }
 
-// layer 1 as after events 0 … progress-1 passed, as the model above has it (what the test compares with the game's
-// at every progress)
-export function layer1AtProgress(rom: Rom, progress: number, d: EventData = readEvents(rom)): Uint16Array {
-  const map = readL1(rom), last = Math.min(progress, OW_EVENTS) - 1;
-  if (last < 0) return map;
-  const out = map.slice();
-  walkL1(rom, d, map, (e) => { if (e === last) out.set(map); });
-  return out;
+// layer 1 at an event progress (events 0 … progress-1 passed, or any set: eventset.ts), the events passed applied in
+// number order as the model above has it (what the test compares with the game's at every progress and at sets)
+export function layer1AtProgress(rom: Rom, progress: EventProgress, d: EventData = readEvents(rom)): Uint16Array {
+  const map = readL1(rom);
+  walkL1(rom, d, map, () => {}, progress);
+  return map;
 }
 
 // layer 1 at every event progress 0 … OW_EVENTS (index: the progress), as layer1AtProgress has each, in one walk

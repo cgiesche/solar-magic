@@ -8,7 +8,7 @@ import { joinHooks } from './snes.ts';
 import { PPU } from './ppu.ts';
 import { LevelEmulator, type LevelOverride, type LevelRender } from './levelemu.ts';
 import { levelTranslevel, encodeSecondaryHeader, startHeader, entrancePos, mainSpot, type SecondaryHeader, type StartEntrance } from './level.ts';
-import { eventBits } from './overworld.ts';
+import { eventBits, passedCount, type EventProgress } from './eventset.ts';
 import type { ProgressSave } from './owprogress.ts';
 import { GM, RAM, MARIO_DYING, PAD, marioX, marioY, setMarioPos } from './ram.ts';
 import { cpuLoad } from './playlog.ts';
@@ -117,12 +117,12 @@ export class PlaySession {
     return new PlaySession(emu, null, false);
   }
 
-  // test play from the overworld: a new game at event progress `progress` (events 0 … progress-1 passed, as the
-  // overworld view shows it) with the save learned for it (owprogress.ts progressSaves: the level flags, switch
-  // palaces and events triggered; none: a new file's), Mario on layer 1 tile i (< 0: at the start position), the
-  // overworld loaded where he stands. Levels entered from there load from the ROM as the game does
-  static fromOverworld(emu: LevelEmulator, i: number, progress = 0, save?: ProgressSave): PlaySession {
-    const events = progress > 0 ? eventBits(progress) : undefined;
+  // test play from the overworld: a new game at event progress `progress` (events 0 … progress-1 passed or any set,
+  // eventset.ts, as the overworld view shows it) with the save learned for it (owprogress.ts progressSaveJob: the level
+  // flags, switch palaces and events triggered; none: a new file's), Mario on layer 1 tile i (< 0: at the start
+  // position), the overworld loaded where he stands. Levels entered from there load from the ROM as the game does
+  static fromOverworld(emu: LevelEmulator, i: number, progress: EventProgress = 0, save?: ProgressSave): PlaySession {
+    const events = passedCount(progress) > 0 ? eventBits(progress) : undefined;
     emu.startGameAt(i, events);
     const w = emu.snes.wram;
     if (save) {

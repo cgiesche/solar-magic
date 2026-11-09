@@ -12,6 +12,7 @@ import { levelTeleports } from '../core/owlinks.ts';
 import type { OwTile } from '../core/owteleport.ts';
 import { readStart } from '../core/owsprites.ts';
 import type { ProgressSave } from '../core/owprogress.ts';
+import { prefixLength, progressKey, type EventProgress } from '../core/eventset.ts';
 import { RAM } from '../core/ram.ts';
 
 export class ReachLayer {
@@ -35,10 +36,10 @@ export class ReachLayer {
   };
 
   // the save at an event progress, null while it is learned or when it could not be
-  private save(progress: number): ProgressSave | null {
-    const key = `${this.view.app.rom.gen}:${progress}`;
+  private save(progress: EventProgress): ProgressSave | null {
+    const key = `${this.view.app.rom.gen}:${progressKey(progress)}`;
     if (this.saves.has(key)) return this.saves.get(key) ?? null;
-    const s = this.view.app.progressSave(progress, progress === OW_EVENTS ? 'every' : 'shown');
+    const s = this.view.app.progressSave(progress, prefixLength(progress) === OW_EVENTS ? 'every' : 'shown');
     if (!(s instanceof Promise)) { this.saves.set(key, s); return s; }
     this.saves.set(key, null);
     void s.then((v) => {
@@ -54,7 +55,7 @@ export class ReachLayer {
   // while something it needs is learned
   state(): { now: Reached; all: Reached } | null {
     const v = this.view, app = v.app, rom = app.rom;
-    const key = `${rom.gen}:${v.progress}`;
+    const key = `${rom.gen}:${progressKey(v.progress)}`;
     if (this.found?.key === key) return this.found;
     if (this.saves.size > 64) this.saves.clear();
     const kinds = v.pathKinds(), shapes = app.pathShapes(this.learned);

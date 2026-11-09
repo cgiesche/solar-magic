@@ -15,6 +15,7 @@
 import type { Rom } from './rom.ts';
 import { loadKey, type OverworldLoads } from './overworld.ts';
 import type { Job } from './jobrunner.ts';
+import type { EventProgress } from './eventset.ts';
 import { OwRefusal } from './owrefusal.ts';
 import { RAM, set16, getS16 } from './ram.ts';
 import { readPpuOam, drawTiles, tileKey, type SpriteImage } from './spritegfx.ts';
@@ -75,14 +76,14 @@ export interface OwSpriteView { image: SpriteImage | null; z: number }
 const SHOW_FRAMES = 3;
 // every slot of map `map` at event progress `progress`, as the game shows it (run on from the kept load); kept for
 // one map and progress while the ROM edits since changed no byte it read (OverworldLoads.derive)
-export function owSpriteImages(loads: OverworldLoads, map: number, progress: number): OwSpriteView[] {
+export function owSpriteImages(loads: OverworldLoads, map: number, progress: EventProgress): OwSpriteView[] {
   return loads.derive('owSpriteImages', () => runSprites(loads, map, progress), loadKey(map, progress));
 }
 // owSpriteImages as a job of the result learner (probe worker), one step (overworldMapJob)
-export function* owSpritesJob(loads: OverworldLoads, map: number, progress: number): Job<OwSpriteView[]> {
+export function* owSpritesJob(loads: OverworldLoads, map: number, progress: EventProgress): Job<OwSpriteView[]> {
   return owSpriteImages(loads, map, progress);
 }
-function runSprites(loads: OverworldLoads, map: number, progress: number): OwSpriteView[] {
+function runSprites(loads: OverworldLoads, map: number, progress: EventProgress): OwSpriteView[] {
   if (!hasOwSpriteSlots(loads.emu.rom)) return [];
   loads.restore(map, progress);
   const emu = loads.emu, s = emu.snes, w = s.wram, start = s.saveState(), sprites = readOwSprites(emu.rom);
@@ -112,7 +113,7 @@ function runSprites(loads: OverworldLoads, map: number, progress: number): OwSpr
 // address of its entry's extra bytes) and the camera on it (on the main map Mario put there); its own init and main
 // code then draw it, its image the OAM tiles it adds. Without BOWSIE none is shown.
 interface CustomRun { s: CustomOwSprite; extraAt: number }
-function runCustom(loads: OverworldLoads, map: number, progress: number, sprites: CustomRun[]): OwSpriteView[] {
+function runCustom(loads: OverworldLoads, map: number, progress: EventProgress, sprites: CustomRun[]): OwSpriteView[] {
   if (!bowsieInstalled(loads.emu.rom) || !sprites.length) return sprites.map((r) => ({ image: null, z: r.s.z * 8 }));
   loads.restore(map, progress);
   const emu = loads.emu, s = emu.snes, w = s.wram, start = s.saveState();
@@ -140,13 +141,13 @@ function runCustom(loads: OverworldLoads, map: number, progress: number, sprites
 }
 // the custom sprites of map `map` (its list in Lunar Magic's table) as the game shows them at event progress
 // `progress`, in the list's order; kept as owSpriteImages
-export function customSpriteImages(loads: OverworldLoads, map: number, progress: number): OwSpriteView[] {
+export function customSpriteImages(loads: OverworldLoads, map: number, progress: EventProgress): OwSpriteView[] {
   return loads.derive('customSpriteImages', () => {
     const rom = loads.emu.rom, list = readCustomSprites(rom)[map] ?? [], at = customEntryAddrs(rom, map);
     return runCustom(loads, map, progress, list.map((s, k) => ({ s, extraAt: (at[k] ?? 0) + 3 })));
   }, loadKey(map, progress));
 }
-export function* owCustomJob(loads: OverworldLoads, map: number, progress: number): Job<OwSpriteView[]> {
+export function* owCustomJob(loads: OverworldLoads, map: number, progress: EventProgress): Job<OwSpriteView[]> {
   return customSpriteImages(loads, map, progress);
 }
 // how custom sprites `ids` look (the palette): each alone on the main map before any event, its extra bytes 0,

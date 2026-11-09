@@ -52,7 +52,7 @@ function checkRom(r: Rom): { problems: WorldProblem[]; now: CheckedAt; all: Chec
   return { problems: worldProblems(r, now, all, at), now, all };
 }
 const runJob = <T>(job: Job<T>): T => { let st = job.next(); while (!st.done) st = job.next(); return st.value; };
-const list = (ps: WorldProblem[]) => ps.map((p) => `     ${p.severity} [${p.group}] ${p.key} @${hx(p.progress)}: ${p.text}${p.fix ? ` – fix: ${p.fix.label}` : ''}`).join('\n');
+const list = (ps: WorldProblem[]) => ps.map((p) => `     ${p.severity} [${p.group}] ${p.key} @${hx(p.progress as number)}: ${p.text}${p.fix ? ` – fix: ${p.fix.label}` : ''}`).join('\n');
 // the layer 1 tile a fix puts (none: a link end moved)
 const toOf = (f: WorldFix) => ('to' in f ? f.to : undefined);
 const keys = (ps: WorldProblem[]) => ps.map((p) => p.key).sort().join();
@@ -202,7 +202,7 @@ console.log(list(clean.problems));
   writeEvents(r, d);
   const { ps: every, search } = atEvery(r), dead = every.filter((p) => p.key.startsWith('dead-end:'));
   check(dead.length === 1 && dead[0].tile === end && dead[0].progress === e + 1 && dead[0].severity === 'error' && dead[0].group === 'paths',
-    `the path tile at ${at(cut)} taken away by event ${hx(e)}: one dead end at ${at(end)}, found after event ${hx(e)} (${dead.map((p) => `${p.brief} @${hx(p.progress)}`).join('; ')})`);
+    `the path tile at ${at(cut)} taken away by event ${hx(e)}: one dead end at ${at(end)}, found after event ${hx(e)} (${dead.map((p) => `${p.brief} @${hx(p.progress as number)}`).join('; ')})`);
   check(!!dead[0]?.fix && dead[0].fix.tile === end, `its fix: a stop tile at ${at(end)} on the map before events (${dead[0]?.fix?.label ?? dead[0]?.noFix?.kind})`);
   // the playthrough strip at progress 0: the dead end listed (none there), once, with the progress it is found at
   const shown = checkRom(r), ps = worldProblems(r, shown.now, shown.all, at, [], every);
@@ -255,7 +255,7 @@ console.log(list(clean.problems));
     writeL1(r, l1);
     const ps = everyOf(r), p = ps.find((q) => q.key === `exit-off-path:${cell}`);
     check(!!p && p.severity === 'warn' && p.group === 'paths' && p.text === `Mario comes out of the exit at ${at(cell)} walking ${dir}, off the path (${why})`
-      && !ps.some((q) => q.severity === 'error'), `${hx(t)} at ${at(cell)}: a warning of Paths, no error (${p?.text}, found after ${p && hx(p.progress)})`);
+      && !ps.some((q) => q.severity === 'error'), `${hx(t)} at ${at(cell)}: a warning of Paths, no error (${p?.text}, found after ${p && hx(p.progress as number)})`);
     check(p?.fix?.tile === cell && toOf(p.fix) === to, `its fix: ${p?.fix?.label} – tile ${p?.fix && hx(toOf(p.fix) ?? -1, 3)} (${p?.fix?.title})`);
     if (!p?.fix) continue;
     const before = readL1(r);
@@ -354,8 +354,8 @@ console.log(list(clean.problems));
   const ps = everyOf(r), p = stuck(ps)[0];
   check(stuck(ps).length === 1 && p.severity === 'warn' && p.group === 'links' && p.tile === vdi && !p.fix
     && p.text === 'Mario arrives standing on a path tile at Vanilla Dome 05,14 and can\'t move – a star/pipe link must lead to a tile he stops on (a level, stop, star or pipe tile)',
-    `the star at main 11,07 led to Vanilla Dome 05,14: a warning of Links, no fix, found after event ${p && hx(p.progress)}: ${p?.text}`);
-  check(!!p && p.progress < OW_EVENTS && !stuck(everyOf(rom)).length, `found at the first progress the star is reached (${p && hx(p.progress)}), Show: the target (${p && at(p.tile)})`);
+    `the star at main 11,07 led to Vanilla Dome 05,14: a warning of Links, no fix, found after event ${p && hx(p.progress as number)}: ${p?.text}`);
+  check(!!p && (p.progress as number) < OW_EVENTS && !stuck(everyOf(rom)).length, `found at the first progress the star is reached (${p && hx(p.progress as number)}), Show: the target (${p && at(p.tile)})`);
   const shown = checkRom(r), listed = worldProblems(r, shown.now, shown.all, at, [], ps);
   check(listed.filter((q) => q.key === p?.key).length === 1, 'listed once with the problems at every progress');
   // a stop tile without translevel there (81 on the map before events): Mario walking onto it by the main map's exit path

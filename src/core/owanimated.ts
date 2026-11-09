@@ -7,6 +7,7 @@
 
 import type { Animated } from './levelemu.ts';
 import type { Job } from './jobrunner.ts';
+import type { EventProgress } from './eventset.ts';
 import { loadKey, type OverworldLoads } from './overworld.ts';
 import { owExanimTiles } from './exanim.ts';
 
@@ -15,7 +16,7 @@ const STEP = 4; // compared every STEP frames
 
 // the tiles and colors animated on submap `map` at event progress `progress`, from `loads` (the learner's own), kept
 // there while what it read is unchanged
-export function owAnimated(loads: OverworldLoads, map: number, progress: number): Animated {
+export function owAnimated(loads: OverworldLoads, map: number, progress: EventProgress): Animated {
   return loads.derive('owAnimated', () => {
     // (the console right after the load, which is kept: get runs nothing)
     loads.restore(map, progress);
@@ -37,6 +38,6 @@ export function owAnimated(loads: OverworldLoads, map: number, progress: number)
   }, loadKey(map, progress));
 }
 // owAnimated as a job of the result learner (probe worker), one step: the loads' emulator is shared
-export function* owAnimatedJob(loads: OverworldLoads, map: number, progress: number): Job<Animated> {
+export function* owAnimatedJob(loads: OverworldLoads, map: number, progress: EventProgress): Job<Animated> {
   return owAnimated(loads, map, progress);
 }

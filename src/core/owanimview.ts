@@ -16,6 +16,7 @@ import { eventManual, isEventTrigger, NO_LEVEL_LIST, NO_GLOBAL_LIST } from './ex
 import { submapPalette } from './submapgfx.ts';
 import { loadKey, type OverworldLoads, type OwRender } from './overworld.ts';
 import type { Job } from './jobrunner.ts';
+import type { EventProgress } from './eventset.ts';
 
 const W = (a: number) => a - 0x7e0000; // a long WRAM address as an index of the console's WRAM
 const MANUAL = W(EXTRIGGER_RAM.manual);
@@ -40,7 +41,7 @@ const switchesKey = (sw: OwTriggerSwitches) => sw.map(([t, on]) => `${t}${on ? '
 // after the load, the triggers' Manual bytes set (one switched on names an event passed that no trigger left as it is
 // names – passed for it when none is –, one switched off names none), then TRIGGER_FRAMES frames. Kept for the map,
 // progress and switches while the ROM edits since changed no byte it read (OverworldLoads.derive).
-export function owTriggerRender(loads: OverworldLoads, map: number, progress: number, special: boolean, sw: OwTriggerSwitches): OwRender {
+export function owTriggerRender(loads: OverworldLoads, map: number, progress: EventProgress, special: boolean, sw: OwTriggerSwitches): OwRender {
   return loads.derive('owTriggerRender', () => {
     loads.restore(map, progress, special);
     const s = loads.emu.snes, w = s.wram;
@@ -54,7 +55,7 @@ export function owTriggerRender(loads: OverworldLoads, map: number, progress: nu
     return { vram: s.vram.slice(), cgram: s.cgram.slice(), wram: s.wram.slice(), ppuRegs: s.ppuRegs.slice(), ok: true };
   }, `${loadKey(map, progress)}${special ? ':special' : ''}:${switchesKey(sw)}`);
 }
-export function* owTriggerJob(loads: OverworldLoads, map: number, progress: number, special: boolean, sw: OwTriggerSwitches): Job<OwRender> {
+export function* owTriggerJob(loads: OverworldLoads, map: number, progress: EventProgress, special: boolean, sw: OwTriggerSwitches): Job<OwRender> {
   return owTriggerRender(loads, map, progress, special, sw);
 }
 
@@ -65,7 +66,7 @@ export const GAME_COLOR_FRAMES = 64;
 // settings in RAM) and its colors (CGRAM and the palette buffer $0703) as its palette has them, the game's lightning
 // due in a frame (its timer, where the game's mask lets it flash), GAME_COLOR_FRAMES frames; a color whose CGRAM
 // differs from the palette after any of them. Kept as owTriggerRender.
-export function owGameColors(loads: OverworldLoads, map: number, progress: number, special: boolean): number[] {
+export function owGameColors(loads: OverworldLoads, map: number, progress: EventProgress, special: boolean): number[] {
   return loads.derive('owGameColors', () => {
     loads.restore(map, progress, special);
     const rom: Rom = loads.emu.rom, s = loads.emu.snes, w = s.wram, pal = submapPalette(rom, map, special);
@@ -81,6 +82,6 @@ export function owGameColors(loads: OverworldLoads, map: number, progress: numbe
     return [...out].sort((a, b) => a - b);
   }, `${loadKey(map, progress)}${special ? ':special' : ''}`);
 }
-export function* owGameColorsJob(loads: OverworldLoads, map: number, progress: number, special: boolean): Job<number[]> {
+export function* owGameColorsJob(loads: OverworldLoads, map: number, progress: EventProgress, special: boolean): Job<number[]> {
   return owGameColors(loads, map, progress, special);
 }

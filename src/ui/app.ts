@@ -76,6 +76,7 @@ import type { OwTriggerSwitches } from '../core/owanimview.ts';
 import type { Rect } from '../core/owevents.ts';
 import type { OwSpriteView } from '../core/owsprites.ts';
 import type { ProgressSave } from '../core/owprogress.ts';
+import { canonicalProgress, type EventProgress } from '../core/eventset.ts';
 import type { ExitEdge } from '../core/owexitedges.ts';
 import type { WorldCheckLearned } from '../core/worldcheck.ts';
 import type { Map16Target } from './gfx/target.ts';
@@ -1172,7 +1173,8 @@ export class App {
   // at a map and progress (a new request drops the one still waiting). The maps' requests replace those of their
   // lane only: a dialog's (the exit dialog's map picker) asks in its own, urgent (runs while it is open), told when
   // the load failed. special: the map after the special world (its colors then, kept apart from the map before it)
-  overworldMap(map: number, progress: number, done: (r: OwRender) => void, dialog?: { lane: LearnLane; failed: () => void }, special = false): OwRender | undefined {
+  overworldMap(map: number, at: EventProgress, done: (r: OwRender) => void, dialog?: { lane: LearnLane; failed: () => void }, special = false): OwRender | undefined {
+    const progress = canonicalProgress(at);
     return this.probes.learn<OwRender>(`owm1:${map}${special ? ':special' : ''}`, { kind: 'owMap', map, progress, ...(special ? { special } : {}) },
       { lane: dialog?.lane ?? 'ow', urgent: !!dialog, failed: dialog?.failed, input: { progress }, replace: true, label: 'Overworld', done });
   }
@@ -1180,7 +1182,8 @@ export class App {
   // animations switched for the graphics workspace's preview (owanimview.ts owTriggerRender), learned in the probe
   // worker and kept in memory while the ROM bytes it read are unchanged: undefined while it runs (a new request drops
   // the one still waiting), then `done` is called
-  overworldTriggers(map: number, progress: number, special: boolean, switches: OwTriggerSwitches, done: (r: OwRender) => void): OwRender | undefined {
+  overworldTriggers(map: number, at: EventProgress, special: boolean, switches: OwTriggerSwitches, done: (r: OwRender) => void): OwRender | undefined {
+    const progress = canonicalProgress(at);
     return this.probes.learn<OwRender>(`owt1:${map}${special ? ':special' : ''}`, { kind: 'owTriggers', map, progress, special, switches },
       { lane: 'owt', input: { progress, switches }, replace: true, label: 'Overworld animations', done });
   }
@@ -1192,7 +1195,8 @@ export class App {
   }
   // the colors the game keeps setting on map `map` at event progress `progress` (owanimview.ts owGameColors), learned
   // and kept as overworldTriggers
-  overworldGameColors(map: number, progress: number, special: boolean, done: (c: number[]) => void): number[] | undefined {
+  overworldGameColors(map: number, at: EventProgress, special: boolean, done: (c: number[]) => void): number[] | undefined {
+    const progress = canonicalProgress(at);
     return this.probes.learn<number[]>(`owgc1:${map}${special ? ':special' : ''}`, { kind: 'owGameColors', map, progress, special },
       { lane: 'owgc', input: { progress }, replace: true, label: 'Overworld colors', done });
   }
@@ -1244,11 +1248,14 @@ export class App {
 
   // the save at an event progress (owprogress.ts progressSaves: the level flags, switch palaces and events triggered
   // the game has then), learned in the probe worker and kept in memory while the ROM bytes it read are unchanged:
-  // known, else what gives it once learned (undefined: it could not be; null: the request was dropped). One emulation
-  // learns every progress, shared by the lanes (OverworldLoads.deriveSteps), each asker in its own (SAVE_LANES: a test
-  // play waits for its own, the strip's progress shown replaces the one asked before it, #388). The overworld left, the
-  // strip's are dropped (overworldLeft)
-  progressSave(progress: number, asker: SaveAsker = 'test'): ProgressSave | Promise<ProgressSave | null | undefined> {
+  // known, else what gives it once learned (undefined: it could not be; null: the request was dropped). Any set of
+  // events (eventset.ts): one emulation learns every prefix, another set is learned on its own (owprogress.ts
+  // setSavesJob: its events' levels left in number order) and kept per set here (the probe client's memory); shared by
+  // the lanes (OverworldLoads.deriveSteps), each asker in its own (SAVE_LANES: a test play waits for its own, the
+  // strip's progress shown replaces the one asked before it, #388). The overworld left, the strip's are dropped
+  // (overworldLeft)
+  progressSave(at: EventProgress, asker: SaveAsker = 'test'): ProgressSave | Promise<ProgressSave | null | undefined> {
+    const progress = canonicalProgress(at);
     let learned!: (v: ProgressSave | null | undefined) => void;
     const later = new Promise<ProgressSave | null | undefined>((ok) => { learned = ok; });
     return this.probes.learn<ProgressSave>('owps1', { kind: 'owSave', progress }, {
@@ -1258,7 +1265,8 @@ export class App {
   // the 8x8 tiles (layer 1 tile numbers) and colors the game keeps rewriting on submap `map` at event progress
   // `progress` (owanimated.ts), learned in the probe worker and kept in memory while the ROM bytes it read are
   // unchanged: null until known ('animated' when done), the submap's previous ones meanwhile
-  owAnimated(map: number, progress: number): Animated | null {
+  owAnimated(map: number, at: EventProgress): Animated | null {
+    const progress = canonicalProgress(at);
     const res = this.probes.learn<Animated>(`owan1:${map}`, { kind: 'owAnimated', map, progress },
       { lane: 'owan', input: { progress }, replace: true, label: 'Overworld animations', done: this.animatedLearned });
     if (res) this.owAnimatedShown = { map, res };
@@ -1269,12 +1277,14 @@ export class App {
   submapViews(done: (v: Rect[]) => void): Rect[] | undefined {
     return this.probes.learn<Rect[]>('owv1', { kind: 'owViews' }, { lane: 'owv', label: 'Submap views', done });
   }
-  overworldSprites(map: number, progress: number, done: (v: OwSpriteView[]) => void): OwSpriteView[] | undefined {
+  overworldSprites(map: number, at: EventProgress, done: (v: OwSpriteView[]) => void): OwSpriteView[] | undefined {
+    const progress = canonicalProgress(at);
     return this.probes.learn<OwSpriteView[]>(`ows1:${map}`, { kind: 'owSprites', map, progress }, { lane: 'ows', input: { progress }, replace: true, label: 'Overworld sprites', done });
   }
   // the custom overworld sprites' images at a map and progress (BOWSIE's, owsprites.ts customSpriteImages), and how the
   // installed ones look (the palette)
-  overworldCustomSprites(map: number, progress: number, done: (v: OwSpriteView[]) => void): OwSpriteView[] | undefined {
+  overworldCustomSprites(map: number, at: EventProgress, done: (v: OwSpriteView[]) => void): OwSpriteView[] | undefined {
+    const progress = canonicalProgress(at);
     return this.probes.learn<OwSpriteView[]>(`owc1:${map}`, { kind: 'owCustom', map, progress }, { lane: `owc${map}`, input: { progress }, replace: true, label: 'Overworld sprites', done });
   }
   overworldSpriteLooks(ids: number[], done: (v: (SpriteImage | null)[]) => void): (SpriteImage | null)[] | undefined {

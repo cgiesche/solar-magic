@@ -43,6 +43,7 @@ import { NAME_MAX, namesOf, setName, cleanName, type NameKind } from '../../core
 import { overworldReplacement, MAP_NAMES, type OwRender } from '../../core/overworld.ts';
 import { gfxTarget, type GfxTarget, type Map16Target } from './target.ts';
 import { drawMap16 } from '../../core/render.ts';
+import { sameProgress } from '../../core/eventset.ts';
 import { QuarterGrid, markRect, editMarked, setPalette, setBit, setTileNum, stamp, mirror, summary, wholeTiles, FLIP_X, FLIP_Y, PRIO, type QuarterEdit, type MarkMode, type BitState } from '../../core/quarters.ts';
 import { numberPref } from '../prefs.ts';
 import { AntsOverlay, type AntsMark } from '../ants.ts';
@@ -253,7 +254,7 @@ export class Map16Tab implements WsPanel {
     const { submap, progress } = this.ws.target;
     if (submap === null) return this.app.render;
     const r = this.app.overworldMap(submap, progress, (x) => {
-      if (this.ws.target.submap !== submap || this.ws.target.progress !== progress) return;
+      if (this.ws.target.submap !== submap || !sameProgress(this.ws.target.progress, progress)) return;
       this.owR = x;
       if (this.visible) this.redraw();
     });

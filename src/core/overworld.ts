@@ -23,6 +23,7 @@ import { START, OW_SPRITES, OW_SPRITE_SLOTS, KOOPA_KID, KOOPA_KIDS, hasOwSpriteS
 import { customSpriteRanges } from './owcustom.ts';
 import { LF_SAVE_SWITCH } from './owoptions.ts';
 import { runJob, type Job } from './jobrunner.ts';
+import { OW_EVENTS, eventBits, progressKey, type EventProgress } from './eventset.ts';
 import type { LevelTileTest } from './owpaths.ts';
 
 export const OW_L1 = 0x0cf7df; // 0x800 bytes: 2 maps × 32×32 16x16 tiles (quadrant layout)
@@ -568,14 +569,8 @@ export function resetTranslevel(rom: Rom, tl: number): void {
 // ---- events ----
 // per translevel: the event its normal exit runs (the secret exit's the next one; $FF none), $1DEA (ram.ts)
 export const BASE_EVENTS = 0x05d608;
-export const OW_EVENTS = 0x78; // 15 bytes of event bits
-// the event bits ($1F02) of a game in which events 0 … n-1 passed: event e is bit $80 >> e%8 of byte e/8 (the
-// game's masks at $04E44B)
-export function eventBits(n: number): Uint8Array {
-  const b = new Uint8Array(OW_EVENTS / 8);
-  for (let e = 0; e < Math.min(n, OW_EVENTS); e++) b[e >> 3] |= 0x80 >> (e & 7);
-  return b;
-}
+// (the event bits ($1F02) of an event progress: eventset.ts)
+export { OW_EVENTS, eventBits };
 export const baseEvent = (rom: Rom, tl: number): number => rom.r8(BASE_EVENTS + tl);
 export function setBaseEvent(rom: Rom, tl: number, e: number): void {
   rom.w8(BASE_EVENTS + tl, e);
@@ -924,11 +919,11 @@ export class OverworldEmulator {
     this.romGen = this.rom.gen;
     if (this.title?.reads.differ(this.title.rom, this.rom.data)) { this.titleState = null; this.title = null; }
   }
-  // map `map` at event progress `progress` (events 0 … progress-1 passed), as after loading a save: the game draws
-  // their layer 2 tiles when the file is loaded (file select) and applies them to layer 1 in their number order
-  // while it loads the overworld (a new file's events are set again there). special: the special world passed (its
-  // last translevel's passed flag, set as the overworld loads)
-  load(map: number, progress: number, special = false): OwRender {
+  // map `map` at event progress `progress` (eventset.ts: events 0 … progress-1 passed, or a set), as after loading a
+  // save: the game draws their layer 2 tiles when the file is loaded (file select) and applies them to layer 1 in their
+  // number order while it loads the overworld (a new file's events are set again there). special: the special world
+  // passed (its last translevel's passed flag, set as the overworld loads)
+  load(map: number, progress: EventProgress, special = false): OwRender {
     this.sync();
     const s = this.snes;
     this.after = null;
@@ -978,7 +973,7 @@ export class OverworldEmulator {
     return r;
   }
   // load, with the ROM bytes it read (reaching the title screen, too): what the map shown depends on
-  loadRecorded(map: number, progress: number, special = false): { result: OwRender; reads: RomReads } {
+  loadRecorded(map: number, progress: EventProgress, special = false): { result: OwRender; reads: RomReads } {
     const result = this.load(map, progress, special);
     return { result, reads: this.lastReads! };
   }
@@ -1008,7 +1003,7 @@ interface ReadDeps { deps: RomDeps; reads: RomReads }
 // console as the last one left it
 interface Deriving { steps: Generator<void, unknown>; gen: number; reads: RomReads; state: SnesState | null }
 // the key of a map at an event progress (a load's, what is derived from one)
-export const loadKey = (map: number, progress: number) => `${map}-${progress}`;
+export const loadKey = (map: number, progress: EventProgress) => `${map}-${progressKey(progress)}`;
 // results a load's key keeps (of the ROM states they were made on: an undo, a redo); fewer than a derived result's, a
 // load and the console after it are about 400 KB
 export const LOAD_CONTENTS = 2;
@@ -1035,13 +1030,13 @@ export class OverworldLoads {
     this.derived = new KeptResults({ validity, inputsPerKey: 1, contents: DERIVED_CONTENTS });
   }
   // (special: after the special world, OverworldEmulator.load)
-  get(map: number, progress: number, special = false): OwRender {
+  get(map: number, progress: EventProgress, special = false): OwRender {
     return this.load(map, progress, true, special).r;
   }
   // the emulator's console as right after loading map `map` at event progress `progress` (to run the game on); the
   // load keeps it from the first time it is asked for (taken while the console is still right after the load, else
   // loaded again). special: after the special world (OverworldEmulator.load)
-  restore(map: number, progress: number, special = false): void {
+  restore(map: number, progress: EventProgress, special = false): void {
     const k = this.load(map, progress, true, special), emu = this.emu;
     if (k.state) { emu.restore(k.state); return; }
     k.state = emu.stateAfter(k.r) ?? emu.stateAfter(emu.loadRecorded(map, progress, special).result)!;
@@ -1049,7 +1044,7 @@ export class OverworldLoads {
   // `make`'s result from the loads it asks for (`load`, or restore to run the game on), kept under `key` for `of`
   // (one per key) while the bytes it read are as they were: the loads', the frames it runs on from them and the editor code's; a
   // load not kept yet isn't kept for `load` (the slider's stay)
-  derive<T>(key: string, make: (load: (map: number, progress: number) => OwRender) => T, of = ''): T {
+  derive<T>(key: string, make: (load: (map: number, progress: EventProgress) => OwRender) => T, of = ''): T {
     // (one step)
     return runJob(this.deriveSteps(key, function* (load) { return make(load); }, of));
   }
@@ -1060,7 +1055,7 @@ export class OverworldLoads {
   // for the recorders running, the result's all for the job getting it. leaveOut: bytes the result reads but doesn't
   // depend on (owTilemapRanges), left out of what it read once made (an edit of them while it is made starts it over);
   // its steps' reads then count only with the result's
-  *deriveSteps<T>(key: string, make: (load: (map: number, progress: number) => OwRender) => Generator<void, T>, of = '', leaveOut?: (rom: Rom) => RomRange[]): Generator<void, T> {
+  *deriveSteps<T>(key: string, make: (load: (map: number, progress: EventProgress) => OwRender) => Generator<void, T>, of = '', leaveOut?: (rom: Rom) => RomRange[]): Generator<void, T> {
     const rom = this.emu.rom, id = `${key}\n${of}`;
     for (;;) {
       const d = this.derived.entry<T>(key, of);
@@ -1096,7 +1091,7 @@ export class OverworldLoads {
     countReads(this.emu.rom, this.emu.snes, reads);
   }
   // the kept load, else a new one (kept when `keep`; one kept is kept as the latest used)
-  private load(map: number, progress: number, keep = true, special = false): KeptLoad {
+  private load(map: number, progress: EventProgress, keep = true, special = false): KeptLoad {
     const key = `${loadKey(map, progress)}${special ? ':special' : ''}`;
     let k = this.kept.entry<KeptLoad>(key);
     if (!k) {
@@ -1114,7 +1109,7 @@ export class OverworldLoads {
 // the overworld's jobs (owSpritesJob, submapViewsJob), so one of more steps sets the console again for each
 // (OverworldLoads.deriveSteps). Its reads go to the job's (the ROM's recorder, OverworldLoads.count). special: after
 // the special world (the graphics workspace's preview of a submap).
-export function* overworldMapJob(loads: OverworldLoads, map: number, progress: number, special = false): Job<OwRender> {
+export function* overworldMapJob(loads: OverworldLoads, map: number, progress: EventProgress, special = false): Job<OwRender> {
   return loads.get(map, progress, special);
 }
 export const OW_LOADS_KEPT = 16; // emulated overworlds kept (map and event progress: a slider moved through them)

@@ -42,7 +42,7 @@ function checkLooks(what: string): Checked {
   t = performance.now();
   const problems = lookProblems({ rom, maps, ownLooks: own, kinds, views, search, place: at });
   console.log(`     ${what}: the saves and maps at every progress and the looks in ${Math.round(learned)} ms, the rules in ${Math.round(performance.now() - t)} ms`);
-  for (const p of problems.slice(0, 4)) console.log(`     ${p.key} @${hx(p.progress)}: ${p.text}`);
+  for (const p of problems.slice(0, 4)) console.log(`     ${p.key} @${hx(p.progress as number)}: ${p.text}`);
   return { maps, views, problems };
 }
 

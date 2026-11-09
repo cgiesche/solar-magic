@@ -16,6 +16,7 @@ import { refusalWords, refusedToast } from './owrefusal.ts';
 import { l1XY, OW_EVENTS } from '../core/overworld.ts';
 import { tileText } from '../core/owteleport.ts';
 import { hex2 } from '../core/names.ts';
+import { prefixLength, progressWords } from '../core/eventset.ts';
 import { worldProblems, applyFix, errorCount, checkAgainst, diffText, budgetPlace, isFoundAtEveryProgress, CHECK_GROUPS, type CheckBaseline, type WorldProblem, type CheckSeverity, type WorldCheckLearned } from '../core/worldcheck.ts';
 import type { Budget } from '../core/owbudget.ts';
 import { budgetGauge } from './budgetgauge.ts';
@@ -145,7 +146,7 @@ export class WorldCheck {
         budgetGauge(p.budget),
         this.budgetShow(p.budget));
     }
-    const map = p.progress === OW_EVENTS ? 'with every event passed' : p.progress ? `after event ${hex2(p.progress - 1)}` : 'before events';
+    const map = progressWords(p.progress);
     const noFix = p.noFix && refusalWords(this.view.app.rom, p.noFix), why = noFix ? `${noFix.reason}${noFix.instead ? ` – ${noFix.instead}` : ''}` : '';
     return h('div', { class: `problem problem-${p.severity}`, title: `${p.title ? `${p.title}\n` : ''}Found on the map ${map}${why ? `\nNo fix: ${why}` : ''}` },
       h('span', { class: 'problem-icon' }, ICON[p.severity]),
@@ -170,7 +171,8 @@ export class WorldCheck {
   // the map at the event progress the problem is found at, its tile shown and outlined; a budget: where it applies
   private show(p: WorldProblem): void {
     if (p.budget) { this.showBudget(p.budget); return; }
-    const v = this.view, event = p.show ? p.show.event : p.progress - 1;
+    // (found at a set that isn't a prefix: the set shown, the event stays)
+    const v = this.view, n = prefixLength(p.progress), event = p.show ? p.show.event : n >= 0 ? n - 1 : v.event;
     if (event !== v.event) v.setEvent(event);
     if (p.show) v.setMode(p.show.mode);
     else if (p.group === 'links') v.setMode('l1'); // (the overworld links are layer 1's, #413)

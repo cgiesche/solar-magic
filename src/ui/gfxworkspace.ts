@@ -14,6 +14,7 @@ import { GfxTab } from './gfx/gfxtab.ts';
 import { AnimTab } from './gfx/animtab.ts';
 import { MAP_NAMES, gameL2, owTileAt, drawOwMap, owShownAt, owMapAt, type OwRender } from '../core/overworld.ts';
 import { cgramToRGBA } from '../core/gfx.ts';
+import { sameProgress, type EventProgress } from '../core/eventset.ts';
 
 export type WsTab = 'pal' | 'map16' | 'gfx' | 'anim';
 
@@ -34,9 +35,9 @@ export interface WsPanel {
 }
 
 // what the workspace edits: the open level's graphics (submap null) or those of a submap (0–6); progress: the
-// overworld's event progress its preview is shown at; special: a submap shown (and its colors edited) after the
-// special world
-export interface WsTarget { submap: number | null; progress: number; special?: boolean }
+// overworld's event progress its preview is shown at (eventset.ts); special: a submap shown (and its colors edited)
+// after the special world
+export interface WsTarget { submap: number | null; progress: EventProgress; special?: boolean }
 
 // the current level image, scaled; marks every place of the highlighted Map16 tiles
 export class LevelPreview {
@@ -57,7 +58,7 @@ export class LevelPreview {
   private app: App;
   // a submap shown instead of the level: its map at the event progress (its load, the image drawn from it; null while
   // it is emulated); switched: the console with the event triggers switched (null: none switched, or still emulated)
-  private ow: { submap: number; progress: number; special: boolean; r: OwRender | null; switched: OwRender | null; img: Uint32Array | null; fresh: boolean } | null = null;
+  private ow: { submap: number; progress: EventProgress; special: boolean; r: OwRender | null; switched: OwRender | null; img: Uint32Array | null; fresh: boolean } | null = null;
   // the event triggers 01–08 of the submap's animations switched for the preview (holds or not; the others as the
   // event progress has them): the Animations tab's, never saved; kept while the submap stays
   private switches = new Map<number, boolean>();
@@ -389,7 +390,7 @@ export class GfxWorkspace {
     const locked = gfxTarget(this.app, t).locked();
     if (locked) { toast(`The overworld is replaced by ${locked}: its graphics can't be edited here`); t = { ...t, submap: null }; }
     t = { ...t, special: t.submap !== null && !!t.special };
-    const same = t.submap === this.target.submap && t.progress === this.target.progress && t.special === !!this.target.special;
+    const same = t.submap === this.target.submap && sameProgress(t.progress, this.target.progress) && t.special === !!this.target.special;
     this.target = t;
     this.targetSel.value = t.submap === null ? 'level' : String(t.submap);
     this.specialBox.checked = t.special!;

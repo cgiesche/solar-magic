@@ -9,8 +9,9 @@ import type { PPU } from '../core/ppu.ts';
 import { PlaySession } from '../core/playsession.ts';
 import { hex } from '../core/names.ts';
 import type { StartEntrance } from '../core/level.ts';
-import { l1XY, OW_EVENTS } from '../core/overworld.ts';
+import { l1XY } from '../core/overworld.ts';
 import type { ProgressSave } from '../core/owprogress.ts';
+import { progressKey, progressWords, type EventProgress } from '../core/eventset.ts';
 import { Apu, apuReady, loadApu } from '../core/apu.ts';
 import { AudioOut } from './audio.ts';
 import { musicPlayer } from './musicplayer.ts';
@@ -89,17 +90,17 @@ const saveSlot = new SaveSlot<SnesState>();
 type Start = { tx: number; ty: number; entrance?: StartEntrance };
 type ShowMessage = { message: number; yoshi: boolean };
 type ShowLevel = (level: number, at: { x: number; y: number }) => void;
-type Origin = { kind: 'level'; at?: Start; show?: ShowMessage } | { kind: 'overworld'; tile: number; progress: number; save?: ProgressSave; showLevel: ShowLevel };
+type Origin = { kind: 'level'; at?: Start; show?: ShowMessage } | { kind: 'overworld'; tile: number; progress: EventProgress; save?: ProgressSave; showLevel: ShowLevel };
 
 // fromSave: from the savestate instead of the start (when there is a usable one)
 export function openTestPlay(app: App, at?: Start, fromSave = false, show?: ShowMessage): void {
   begin(app, { kind: 'level', at, show }, fromSave);
 }
-// the game from the overworld: events 0 … progress-1 passed (the overworld view's event progress) with the save
+// the game from the overworld: the events of the overworld view's event progress passed (eventset.ts) with the save
 // learned for it (App.progressSave), Mario on layer 1 tile `tile` (l1Index; < 0: at the start position); the levels
 // entered from there are the ROM's
 // (save: while it is being learned, what gives it: the test starts then, the sound started within the key press)
-export function openOverworldTestPlay(app: App, tile: number, progress: number, save: ProgressSave | Promise<ProgressSave | null | undefined>, showLevel: ShowLevel, fromSave = false): void {
+export function openOverworldTestPlay(app: App, tile: number, progress: EventProgress, save: ProgressSave | Promise<ProgressSave | null | undefined>, showLevel: ShowLevel, fromSave = false): void {
   const o: Origin = { kind: 'overworld', tile, progress, showLevel };
   if (save instanceof Promise) begin(app, o, fromSave, save.then((v) => { o.save = v ?? undefined; }));
   else begin(app, { ...o, save }, fromSave);
@@ -121,8 +122,8 @@ function begin(app: App, o: Origin, fromSave: boolean, ready?: Promise<void>): v
   start(app, o, audio, fromSave);
 }
 
-// the savestate's place: a level's number, a test from the overworld's below 0, by its tile and event progress
-const slotOf = (app: App, o: Origin) => (o.kind === 'level' ? app.level.number : -1 - ((o.tile + 1) * 0x100 + o.progress));
+// the savestate's place: a level's number, a test from the overworld's by its tile and event progress
+const slotOf = (app: App, o: Origin) => (o.kind === 'level' ? app.level.number : `ow:${o.tile}:${progressKey(o.progress)}`);
 
 function start(app: App, o: Origin, audio: AudioOut, fromSave: boolean): void {
   if (!testEmu || testEmu.rom !== app.rom) {
@@ -153,8 +154,8 @@ function start(app: App, o: Origin, audio: AudioOut, fromSave: boolean): void {
 // what the title says the test starts from
 function originText(app: App, o: Origin): string {
   if (o.kind === 'level') return `Test level – ${hex(app.level.number, 3)}${o.at ? ` from ${hex(o.at.tx, 2)}/${hex(o.at.ty, 2)}` : ''}`;
-  const { x, y } = l1XY(o.tile), progress = o.progress === 0 ? 'none' : o.progress >= OW_EVENTS ? 'all' : `up to ${hex(o.progress - 1, 2)}`;
-  return `Test play – overworld, ${o.tile < 0 ? 'start position' : `tile ${hex(x, 2)},${hex(y, 2)} (${o.tile >= 0x400 ? 'submaps' : 'main map'})`}, event progress: ${progress}`;
+  const { x, y } = l1XY(o.tile);
+  return `Test play – overworld, ${o.tile < 0 ? 'start position' : `tile ${hex(x, 2)},${hex(y, 2)} (${o.tile >= 0x400 ? 'submaps' : 'main map'})`}, the map ${progressWords(o.progress)}`;
 }
 
 function play(app: App, o: Origin, audio: AudioOut, p: PlaySession, ppu: PPU, ok: boolean, fromSave: boolean): void {

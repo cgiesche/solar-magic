@@ -13,6 +13,7 @@ import {
 } from '../core/extrigger.ts';
 import { isEventTrigger, eventTriggerOf, eventManual, kindOf, triggerName, type ExList } from '../core/exanim.ts';
 import { eventTriggerState } from '../core/owanimview.ts';
+import { progressWords, type EventProgress } from '../core/eventset.ts';
 
 // the switches shown: those the level's and the global slots (and Trigger Inits) use, and those the view sets
 export function shownSwitches(app: App): Map<number, SlotRef[]> {
@@ -104,7 +105,7 @@ export function triggerMenu(app: App): MenuItem[] {
 export interface OwTriggers {
   lists: [submap: ExList | null, global: ExList | null];
   loaded: Uint8Array | null; // the WRAM after the submap's load, null while it is emulated
-  progress: number;
+  progress: EventProgress;
   switched: ReadonlyMap<number, boolean>;
   pending: boolean; // the map with the switched triggers is still emulated
   switchTrigger(t: number, holds: boolean | null): void;
@@ -128,14 +129,14 @@ export function owTriggerPanel(p: OwTriggers): HTMLElement {
     box.append(h('p', { class: 'hint' }, 'No animation of this submap or the overworld global list waits for an event (Event Manual 8–F). Your code\'s triggers (custom, manual) are set by it in the game.'));
     return box;
   }
-  box.append(h('p', { class: 'hint' }, `The map is loaded at event progress ${p.progress} (the events before it passed). An event trigger holds while the event its Manual byte names is passed (the Trigger Init's, else what was there before the load); switched here, the map shows its slots as then – the events and the ROM stay as they are.${p.pending ? ' The map is being emulated …' : ''}`));
+  box.append(h('p', { class: 'hint' }, `The map is loaded ${progressWords(p.progress)}. An event trigger holds while the event its Manual byte names is passed (the Trigger Init's, else what was there before the load); switched here, the map shows its slots as then – the events and the ROM stay as they are.${p.pending ? ' The map is being emulated …' : ''}`));
   for (const [t, slots] of [...used].sort((a, b) => a[0] - b[0])) {
     const st = p.loaded ? eventTriggerState(p.loaded, t) : null, sw = p.switched.get(t);
     // a Manual byte no Trigger Init names keeps what was there before the load (#311): in the game the level played
     // before decides, the preview shows what its load left
     const init = p.lists.some((l) => l?.manual.has(eventManual(t)));
     const kept = init ? '' : `no event in the Trigger Init: Manual ${hex(eventManual(t), 1)} keeps what the level before left – in this load: `;
-    const at = !st ? 'the map is being loaded …' : `${kept}${st.event === null ? 'past the overworld\'s events, never holds' : `event ${hex(st.event, 2)}, ${st.holds ? 'passed' : 'not passed'} at progress ${p.progress}`}`;
+    const at = !st ? 'the map is being loaded …' : `${kept}${st.event === null ? 'past the overworld\'s events, never holds' : `event ${hex(st.event, 2)}, ${st.holds ? 'passed' : 'not passed'} as loaded`}`;
     const sel = h('select', { title: 'For the map preview only: as the event progress has it, or switched' },
       h('option', { value: '', selected: sw === undefined }, `as the progress${st ? ` (${st.holds ? 'holds' : 'doesn\'t hold'})` : ''}`),
       h('option', { value: 'on', selected: sw === true }, 'holds'),

@@ -22,6 +22,7 @@ import type { Prefab } from './prefabs.ts';
 import type { PrefabSkip } from './prefabplaces.ts';
 import type { OwTriggerSwitches } from './owanimview.ts';
 import type { PathKind, PathShapes } from './owpaths.ts';
+import type { EventProgress } from './eventset.ts';
 
 // a probe in tileset ts: what a Map16 tile does, how Mario collides with it, what a sprite does, Mario's
 // run speeds, the scroll bands in a level of that mode and vertical scroll setting
@@ -109,16 +110,16 @@ export type LearnJob =
   | { kind: 'revealWalks' }
   | { kind: 'suggest'; levels: number[]; open?: Level }
   | { kind: 'sizes'; level: KindLevel; layer2Pointer: number; specs: SizeSpec[] }
-  | { kind: 'owMap'; map: number; progress: number; special?: boolean }
-  | { kind: 'owTriggers'; map: number; progress: number; special: boolean; switches: OwTriggerSwitches }
-  | { kind: 'owGameColors'; map: number; progress: number; special: boolean }
+  | { kind: 'owMap'; map: number; progress: EventProgress; special?: boolean }
+  | { kind: 'owTriggers'; map: number; progress: EventProgress; special: boolean; switches: OwTriggerSwitches }
+  | { kind: 'owGameColors'; map: number; progress: EventProgress; special: boolean }
   | { kind: 'owScreen'; map: number; special: boolean }
   | { kind: 'owViews' }
-  | { kind: 'owSprites'; map: number; progress: number }
-  | { kind: 'owCustom'; map: number; progress: number }
+  | { kind: 'owSprites'; map: number; progress: EventProgress }
+  | { kind: 'owCustom'; map: number; progress: EventProgress }
   | { kind: 'owLooks'; ids: number[] }
-  | { kind: 'owSave'; progress: number }
-  | { kind: 'owAnimated'; map: number; progress: number }
+  | { kind: 'owSave'; progress: EventProgress }
+  | { kind: 'owAnimated'; map: number; progress: EventProgress }
   | { kind: 'owL1Without'; event: number }
   | { kind: 'owExitEdges'; kinds: PathKind[]; shapes: PathShapes }
   | { kind: 'owWorldCheck'; kinds: PathKind[]; shapes: PathShapes; open?: { number: number; exits: ScreenExit[] } }

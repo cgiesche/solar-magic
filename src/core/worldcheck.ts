@@ -5,6 +5,7 @@
 // before and after an edit can be compared.
 
 import type { Rom } from './rom.ts';
+import { sameProgress, type EventProgress } from './eventset.ts';
 import { readL1, writeL1, readDestroyList, revealEventCount, gameL1, l1XY, NO_EVENT, OW_EVENTS, STAR_PIPE_TILES, type OverworldLoads } from './overworld.ts';
 import { eventReveal } from './oweventtiles.ts';
 import { readEvents, submapViewsJob, submapOf } from './owevents.ts';
@@ -54,15 +55,15 @@ export interface WorldProblem {
   brief: string; // in a few words, to go on in a sentence ("dead end at Main map 0C,09")
   title?: string; // longer explanation
   tile: number; // where it is (l1Index): shown and outlined
-  progress: number; // the event progress it is found at (OW_EVENTS: every event passed)
+  progress: EventProgress; // the event progress it is found at (OW_EVENTS: every event passed; the set shown: eventset.ts)
   fix?: WorldFix;
   noFix?: OwRefusalData; // why a problem a fix exists for has none here (owrefusal.ts)
   budget?: Budget; // a budget amber or full (tile -1: Show goes to where the limit applies, budgetPlace)
   show?: { event: number; mode: OwMode }; // where Show goes instead of the progress found at: an event in a mode
 }
 
-// a search of owreach.ts at an event progress
-export interface CheckedAt extends Reached { progress: number }
+// a search of owreach.ts at an event progress (a prefix, or the set shown)
+export interface CheckedAt extends Reached { progress: EventProgress }
 
 const GROUP_OF: Record<ReachKind, CheckGroup> = {
   'dead-end': 'paths', 'exit-nowhere': 'links', 'exit-off-path': 'paths', 'arrival-stuck': 'links', 'unreached-level': 'progress', 'event-reveals-nothing': 'progress',
@@ -304,13 +305,13 @@ export function diffProblems(before: readonly WorldProblem[], after: readonly Wo
 }
 
 // the problems last checked: of a ROM generation, at an event progress
-export interface CheckBaseline { gen: number; progress: number; problems: WorldProblem[] }
+export interface CheckBaseline { gen: number; progress: EventProgress; problems: WorldProblem[] }
 // The problems checked (`ps`, of ROM generation `gen` at event progress `progress`) against the baseline: what the ROM
 // edits since changed (null: nothing to say – no baseline, no edit, or another event progress, whose problems no
 // edit made), and the new baseline. Checked again without an edit (the places named anew) it only takes the new list
-export function checkAgainst(last: CheckBaseline | null, gen: number, progress: number, ps: WorldProblem[]): { baseline: CheckBaseline; change: CheckDiff | null } {
+export function checkAgainst(last: CheckBaseline | null, gen: number, progress: EventProgress, ps: WorldProblem[]): { baseline: CheckBaseline; change: CheckDiff | null } {
   const baseline = { gen, progress, problems: ps };
-  const change = last && last.gen !== gen && last.progress === progress ? diffProblems(last.problems, ps) : null;
+  const change = last && last.gen !== gen && sameProgress(last.progress, progress) ? diffProblems(last.problems, ps) : null;
   return { baseline, change };
 }
 
