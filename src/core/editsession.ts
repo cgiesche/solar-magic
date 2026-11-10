@@ -40,6 +40,9 @@ export interface SessionHooks {
   // a ROM edit or undo/redo is done with its follow-ups (see EditHooks.settled), or the open level was saved outside
   // a ROM edit: the ROM and the open level are as they stay
   settled?(): void;
+  // a level edit begun (dragging) is no longer open: committed, cancelled, or ended by undo/redo or opening a level;
+  // told after the change it made is shown
+  editEnded?(): void;
 }
 
 export class EditSession {
@@ -85,10 +88,12 @@ export class EditSession {
 
   // opens level n (the dirty one saved first, or its changes dropped with discard) with a new level history
   open(n: number, discard = false): void {
+    const was = this.editing;
     if (this.level && this.dirty && !discard) this.save(true);
     this.current = loadLevel(this.rom, n);
     this.levelHistory.clear();
     this.markSaved();
+    if (was) this.hooks.editEnded?.();
   }
 
   // saves the open level and loads it again (addresses and sizes); objects and sprites keep their ids
@@ -128,11 +133,13 @@ export class EditSession {
         if (!live()) return;
         this.commitLevelEdit();
         this.changed(rerender);
+        this.hooks.editEnded?.();
       },
       cancel: (restore = false) => {
         if (!live()) return;
         const was = this.levelHistory.cancel();
         if (restore && was) { this.current = was; this.show(true, !this.atSaved); }
+        this.hooks.editEnded?.();
       },
     };
   }
@@ -184,6 +191,10 @@ export class EditSession {
   // ------------- undo / redo -------------
   // undoes the latest level or ROM edit
   undo(): StepResult | null {
+    const was = this.editing;
+    try { return this.undoStep(); } finally { if (was) this.hooks.editEnded?.(); }
+  }
+  private undoStep(): StepResult | null {
     this.commitLevelEdit(); // (an edit still open, e.g. while dragging)
     while (this.undoOrder.length) {
       const o = this.undoOrder.pop()!;
@@ -202,6 +213,10 @@ export class EditSession {
   }
 
   redo(): StepResult | null {
+    const was = this.editing;
+    try { return this.redoStep(); } finally { if (was) this.hooks.editEnded?.(); }
+  }
+  private redoStep(): StepResult | null {
     this.commitLevelEdit();
     while (this.redoOrder.length) {
       const k = this.redoOrder.pop()!;

@@ -232,8 +232,10 @@ export class App {
   // steps: the steps of the render (null: no animation), emulated in the background, carried over to a new render
   // while what they read is unchanged (levelanimsteps.ts); phase: the step shown (-1 none yet), kept while the steps
   // are; ready: the frames are those of the composite shown
+  // paused: the next slice of building the frames, held while a level edit is open (dragging, #452: each drag step
+  // would emulate steps that don't carry over to the next one); it goes on once the edit ended
   anim = { gen: 0, steps: null as LevelAnimSteps | null, base: null as Uint32Array | null,
-    frames: [] as PixelChanges[], phase: -1, timer: 0, ready: false };
+    frames: [] as PixelChanges[], phase: -1, timer: 0, ready: false, paused: null as (() => void) | null };
 
   constructor(rom: Rom, name: string) {
     this.rom = rom;
@@ -266,6 +268,7 @@ export class App {
       saved: (log, silent) => this.levelSaved(log, silent),
       saveFailed: (e) => toast(`Save failed: ${e}`, 'error'),
       written: () => this.romChanged(),
+      editEnded: () => this.resumeAnimation(),
       // (each told when the edit changed a ROM byte its read read)
       followUps: [
         // the open level as stored (a patch rewrote its sprite data, a package its sample …): loaded again (not when it
@@ -501,6 +504,7 @@ export class App {
     const a = this.anim, steps = a.steps;
     const gen = ++a.gen;
     const before = cells ? a.frames : [];
+    a.paused = null;
     a.frames = [];
     a.ready = false;
     a.base = this.compositeImg;
@@ -514,6 +518,8 @@ export class App {
     const step = () => {
       if (gen !== a.gen) return;
       if (i === made.length && !steps.done) {
+        // (not while dragging: the steps wait for the edit's end)
+        if (this.edits.editing) { a.paused = step; this.setBusy('anim', null); return; }
         // the next step emulated, what it reads counting for the render (refresh)
         steps.next();
         this.rendered?.reads.add(steps.reads);
@@ -550,6 +556,13 @@ export class App {
     };
     busy();
     this.scheduler.later('anim', step);
+  }
+
+  // the animation's steps emulated on after a level edit ended (dragging: paused in startAnimation)
+  private resumeAnimation(): void {
+    const a = this.anim, step = a.paused;
+    a.paused = null;
+    if (step) this.scheduler.later('anim', step);
   }
 
   // the canvases following the animation (pickeranim.ts) go back to the level as rendered

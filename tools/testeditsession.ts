@@ -87,6 +87,41 @@ const setMem = (s: EditSession, m: number) => s.editLevel(() => { s.level.sprite
   check(s.levelGen === 1, 'committed level edits counted');
 }
 
+// the end of a level edit is told (editEnded: the edit no longer open then, after the change it made is shown):
+// committed, cancelled, committed by undo/redo or by opening a level – not while it is open (#452)
+{
+  const rom = new Rom(image.slice());
+  const told: string[] = [];
+  const s: EditSession = new EditSession(rom, {
+    changed: () => { told.push('changed'); },
+    editEnded: () => { told.push(s.editing ? 'ended while open' : 'ended'); },
+  });
+  s.open(N);
+  const e = s.beginLevelEdit();
+  s.level.spriteHeader ^= 1; s.changed(true);
+  check(told.join() === 'changed', 'a change while dragging: no end told');
+  e.commit();
+  check(told.join() === 'changed,changed,ended', 'commit: told after the change is shown, the edit closed');
+  told.length = 0;
+  s.beginLevelEdit().cancel();
+  check(told.join() === 'ended', 'cancel: told');
+  told.length = 0;
+  s.beginLevelEdit().cancel(true);
+  check(told.join() === 'changed,ended', 'cancel(restore): told after the level is shown again');
+  told.length = 0;
+  s.beginLevelEdit();
+  s.level.spriteHeader ^= 1;
+  s.undo();
+  check(told.at(-1) === 'ended' && told.filter((t) => t.startsWith('ended')).length === 1, 'undo while dragging: told once, after');
+  told.length = 0;
+  s.beginLevelEdit();
+  s.open(N, true);
+  check(told.join() === 'ended', 'opening a level while dragging: told');
+  told.length = 0;
+  s.undo();
+  check(!told.includes('ended'), 'undo without an open edit: none told');
+}
+
 // the order is limited to 400 steps: a level edit, then 450 ROM edits (the ROM history keeps 200). The
 // level edit's place is dropped; once the ROM history is full every ROM step has the same length in the
 // order (200), so undo reaches the latest one and the 149 from before it filled up, then falls back to the
