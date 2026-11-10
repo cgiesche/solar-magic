@@ -49,6 +49,11 @@ const STATE_SCALARS = ['vmain', 'vaddr', 'vreadLatch', 'cgaddr', 'cgLatch', 'cgR
 const CPU_SCALARS = ['a', 'x', 'y', 's', 'd', 'dbr', 'pbr', 'pc', 'p', 'e', 'cycles', 'stopped', 'waiting', 'nmiPending', 'irqLine',
   'lastOp', 'lastOpPc'] as const;
 
+// the console's state without its large memories (WRAM, SRAM, VRAM, CGRAM), the sound unit and the PPU's renderer: what
+// a frame of a level load is compared and replayed by (loadframes.ts)
+export interface SmallState { mem: Uint8Array; vals: unknown[] }
+const SMALL_ARRAYS = ['oam', 'ppuRegs', 'dma', 'apuIn', 'apuOut'] as const;
+
 export class Snes implements Bus {
   private romData!: Uint8Array;
   private romMask = 0; // size - 1 for power-of-two sizes (mirroring by masking), else 0
@@ -572,6 +577,40 @@ export class Snes implements Bus {
       if (st.apu) this.apu.load(st.apu as Uint8Array);
       else this.apu.reset();
     }
+  }
+
+  saveSmall(): SmallState {
+    const self = this as unknown as Record<string, Uint8Array>, cpu = this.cpu as unknown as Record<string, unknown>;
+    let n = 0;
+    for (const k of SMALL_ARRAYS) n += self[k].length;
+    const mem = new Uint8Array(n), vals: unknown[] = [];
+    n = 0;
+    for (const k of SMALL_ARRAYS) { mem.set(self[k], n); n += self[k].length; }
+    for (const k of STATE_SCALARS) vals.push(self[k]);
+    for (const k of CPU_SCALARS) vals.push(cpu[k]);
+    return { mem, vals };
+  }
+  loadSmall(st: SmallState): void {
+    const self = this as unknown as Record<string, unknown>, cpu = this.cpu as unknown as Record<string, unknown>;
+    let n = 0;
+    for (const k of SMALL_ARRAYS) { const a = self[k] as Uint8Array; a.set(st.mem.subarray(n, n + a.length)); n += a.length; }
+    let i = 0;
+    for (const k of STATE_SCALARS) self[k] = st.vals[i++];
+    for (const k of CPU_SCALARS) cpu[k] = st.vals[i++];
+  }
+  // the console is in this small state
+  sameSmall(st: SmallState): boolean {
+    const self = this as unknown as Record<string, unknown>, cpu = this.cpu as unknown as Record<string, unknown>;
+    let i = 0;
+    for (const k of STATE_SCALARS) if (self[k] !== st.vals[i++]) return false;
+    for (const k of CPU_SCALARS) if (cpu[k] !== st.vals[i++]) return false;
+    let n = 0;
+    for (const k of SMALL_ARRAYS) {
+      const a = self[k] as Uint8Array;
+      for (let j = 0; j < a.length; j++) if (a[j] !== st.mem[n + j]) return false;
+      n += a.length;
+    }
+    return true;
   }
 
   // --------------- timing ---------------

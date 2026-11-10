@@ -9,7 +9,8 @@ import { translevelToLevel, l1XY } from './overworld.ts';
 import { OW_SPRITES, OW_SPRITE_SLOTS, hasOwSpriteSlots } from './owsprites.ts';
 import { editorPatch, musicPatch, BG_HOOK, HEADER_MUSIC_TABLE } from './patches.ts';
 import { lt3Patches, type Lt3Place } from './layer3gfx.ts';
-import { RomReads, record, countReads, PAGE_SHIFT, type Recorded } from './romdeps.ts';
+import { RomReads, record, countReads, holds, PAGE_SHIFT, type Recorded } from './romdeps.ts';
+import { FrameRecorder, sameKey, type FrameOwner, type LoadFrame, type LoadFrames, type LoadFramesKey } from './loadframes.ts';
 import { findSpriteTables, spriteTablesHold } from './spritetables.ts';
 import { applyTriggers, type TriggerView } from './extrigger.ts';
 import { inputHash, levelInput } from './inputs.ts';
@@ -91,6 +92,19 @@ export interface LevelRender {
 
 export { MAP_BASE, MAP_SIZE };
 
+// the ROM bytes a load's frames read are unchanged (they are then as of the current generation)
+function stillRead(rom: Rom, f: LoadFrames): boolean {
+  const a = { gen: f.gen, reads: f.reads }, b = { gen: f.gen, reads: f.masked };
+  if (!holds(rom, a) || !holds(rom, b)) return false;
+  f.gen = rom.gen;
+  return true;
+}
+const sameBytes = (a: Uint8Array, b: Uint8Array): boolean => {
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return false;
+  return true;
+};
+
 export class LevelEmulator {
   rom: Rom;
   snes: Snes;
@@ -100,6 +114,12 @@ export class LevelEmulator {
   // gfxSkipMask; for results that are no pictures the display data too, gfxDisplaySkipMask)
   skipMask: (() => Uint8Array | null) | null = null;
   overlay = new Uint8Array(0x10000);
+  // a load takes over the frames of the previous load that read the same (loadframes.ts, #448): for the emulator of a
+  // view loading one level again and again (an edit, a drag's steps); emulatedFrames: how many the last load emulated
+  reuseLoads = false;
+  emulatedFrames = 0;
+  private lastLoad: LoadFrames | null = null;
+  private recorder: FrameRecorder | null = null;
 
   constructor(rom: Rom) {
     this.rom = rom;
@@ -261,10 +281,23 @@ export class LevelEmulator {
     // out for as long as the game's fade lasts before the level's music bank is uploaded. Still playing, the song
     // would go on reading its data where the upload put the new bank's, which can crash the sound driver (silent,
     // and every later upload waits for it: the overworld after dying stays black)
+    // the frames of the previous load taken over where they read the same (#448): with reuse on, not for a game in
+    // progress, a traced or source-tracked load, a watched fade-in, the sound unit or the PPU's renderer
+    const reuse = this.reuseLoads && !ov.continueState && !ov.trace && !ov.trackSources && !ov.fadeHook && !s.apu && !s.ppu;
+    const rec = reuse ? (this.recorder ??= new FrameRecorder(s, this.overlay)) : null;
+    let before: LoadFrame[] | null = null, at = 0, emulated = 0, took = false;
+    const kept: LoadFrame[] = [];
+    const frame = () => {
+      if (!rec) { s.runFrame(); emulated++; return; }
+      const f = before?.[at++];
+      if (f && rec.fits(f, own)) { rec.replay(f, own); kept.push(f); took = true; return; }
+      kept.push(rec.record(own));
+      emulated++;
+    };
     if (musicCall >= 0) {
       w[RAM.musicRequest] = MUSIC_FADE;
       w[RAM.gameMode] = GM.levelFade;
-      for (let f = 0; f < 120 && w[RAM.gameMode] === GM.levelFade; f++) s.runFrame();
+      for (let f = 0; f < 120 && w[RAM.gameMode] === GM.levelFade; f++) frame();
     }
     w[RAM.gameMode] = GM.levelLoad;
 
@@ -323,28 +356,31 @@ export class LevelEmulator {
     const owner = new Int32Array(MAP_SIZE).fill(-1);
     const touched = new Map<number, Set<number>>();
     const touch = (k: number, o: number) => {
+      rec?.touched(k, o);
       owner[o] = k;
       let set = touched.get(k);
       if (!set) { set = new Set(); touched.set(k, set); }
       set.add(o);
     };
-    let current = -1;
     const byteOwner = ov.byteOwner;
+    // the object map writes are attributed to: the owner of the level data byte read last (a frame taken over sets it)
+    const own: FrameOwner = { current: -1, byteOwner, touch: (k, o) => touch(k, o) };
     const trace: ObjectTrace | undefined = ov.trace ? { code: new Set(), reads: new Map(), writes: new Map(), rom: new Set() } : undefined;
     const cpu = s.cpu;
     let sublevels = 1; // $141A as the load set it, while the music call sees 0
     const skip = trace ? this.skipMask?.() ?? null : null; // not dependencies of the result (GFX, ExAnimation data)
     const put = (o: number, v: number, hi: boolean) => {
-      let m = trace!.writes.get(current);
-      if (!m) { m = new Map(); trace!.writes.set(current, m); }
+      let m = trace!.writes.get(own.current);
+      if (!m) { m = new Map(); trace!.writes.set(own.current, m); }
       const old = m.get(o) ?? 0;
       m.set(o, hi ? (old & 0xff) | (v << 8) : (old & 0xff00) | v);
     };
     s.hook = {
       onOverlayRead(o: number) {
-        if (byteOwner && o < byteOwner.length) current = byteOwner[o];
+        if (byteOwner && o < byteOwner.length) own.current = byteOwner[o];
       },
       onWramWrite(a: number, v: number) {
+        const current = own.current;
         if (current < 0) return;
         if (a >= MAP_BASE && a < MAP_BASE + MAP_SIZE) { touch(current, a - MAP_BASE); if (trace) put(a - MAP_BASE, v, false); }
         else if (a >= MAP_HI + MAP_BASE && a < MAP_HI + MAP_BASE + MAP_SIZE) { touch(current, a - MAP_HI - MAP_BASE); if (trace) put(a - MAP_HI - MAP_BASE, v, true); }
@@ -357,9 +393,9 @@ export class LevelEmulator {
         if (!trace) return;
         if (skip === null || skip[ro] !== 1) trace.rom.add(ro);
         if (cpu.inFetch) { trace.code.add(ro); return; }
-        if (current < 0) return;
-        let r = trace.reads.get(current);
-        if (!r) { r = new Set(); trace.reads.set(current, r); }
+        if (own.current < 0) return;
+        let r = trace.reads.get(own.current);
+        if (!r) { r = new Set(); trace.reads.set(own.current, r); }
         r.add(cpu.opPc * 0x800000 + ro);
       } : undefined,
     };
@@ -367,20 +403,49 @@ export class LevelEmulator {
     let frames = 0;
     let ok = true;
     let error: string | undefined;
-    try {
+    let key: LoadFramesKey | null = null;
+    const run = () => {
+      if (rec) {
+        // (the mask the frames' reads are recorded with: the enclosing recording's, else the emulator's)
+        key = { data: rom.data, base: this.baseState, patches: saved.map(([o]) => `${o}:${rom.data[o]}`).join(), mask: s.romSkipMask };
+        const last = this.lastLoad;
+        if (last && sameKey(last.key, key) && stillRead(rom, last)) before = last.frames;
+      }
       // GM $11 loads the level; hooks only needed there. With the sound unit emulated, the upload of
       // the level music bank takes some 40 frames of it
       const loadLimit = musicCall >= 0 ? 120 : 30;
-      while (w[RAM.gameMode] === GM.levelLoad && frames < loadLimit) { s.runFrame(); frames++; }
+      while (w[RAM.gameMode] === GM.levelLoad && frames < loadLimit) { frame(); frames++; }
       if (ov.timer !== undefined) { w[RAM.timer] = ov.timer; w[RAM.timer + 1] = 0; w[RAM.timer + 2] = 0; }
       if (ov.exTriggers) applyTriggers(w, ov.exTriggers);
       s.hook = ov.fadeHook?.() ?? null;
       // with the sound unit emulated, the fade-in also waits for the song's upload (AddmusicK sends a
       // song with its samples then: well over 100 frames for big ones)
       const limit = s.apu ? 600 : 120;
-      while (w[RAM.gameMode] < 0x13 && frames < limit) { s.runFrame(); frames++; }
-      s.runFrame(); frames++;
+      while (w[RAM.gameMode] < 0x13 && frames < limit) { frame(); frames++; }
+      frame(); frames++;
       if (w[RAM.gameMode] < 0x13) { ok = false; error = `level load stalled in game mode ${w[RAM.gameMode].toString(16)}`; }
+    };
+    let read: { reads: RomReads; masked: RomReads; gen: number } | null = null;
+    try {
+      if (!rec) run();
+      else {
+        // the ROM bytes the frames read, kept with them: those of frames taken over count as read again
+        const outerMasked = s.romMasked, masked = new RomReads(rom);
+        s.romMasked = masked;
+        try {
+          const r = this.tracked(run, null);
+          read = { reads: r.reads, masked, gen: r.gen };
+        } finally {
+          s.romMasked = outerMasked;
+          outerMasked?.add(masked);
+        }
+        if (took && this.lastLoad) {
+          read!.reads.add(this.lastLoad.reads);
+          read!.masked.add(this.lastLoad.masked);
+          this.count(this.lastLoad.reads);
+          outerMasked?.add(this.lastLoad.masked);
+        }
+      }
     } catch (e) {
       ok = false;
       error = String(e);
@@ -390,6 +455,10 @@ export class LevelEmulator {
       for (let i = saved.length - 1; i >= 0; i--) rom.data[saved[i][0]] = saved[i][1];
       s.romSkip.clear();
     }
+    this.emulatedFrames = emulated;
+    // (kept for the next load: a whole load that didn't write SRAM, which the frames don't record)
+    this.lastLoad = rec && ok && read && key && sameBytes(s.sram, this.baseState!.sram as Uint8Array)
+      ? { key, frames: kept, ...read } : null;
     return {
       wram: s.wram.slice(),
       vram: s.vram.slice(),
