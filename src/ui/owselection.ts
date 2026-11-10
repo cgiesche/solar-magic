@@ -1,27 +1,28 @@
-// Whether the overworld's Paint panel is hidden for the selection (#421): a level tile, star or pipe 5B (owstars.ts
-// ownsTranslevel; a click selects one with or without a link, #434: clickSelects) selected in the layer 1 mode shows
-// only its properties – the paint sheet, "Path (auto)" and the Levels section go, the properties move up (the pipe 82,
-// no translevel of its own: Paint stays). Not for a tile's info shown by Alt/Ctrl+click, nor in another mode
-// (there the user paints), nor while a reveal's new tile is picked in the sheet. The selection ends by a left click on
-// another cell (picked into the brush) or Esc, and Paint comes back.
+// The overworld's side panel holds the tool and the selection as two tabs (ADR 0015, #460): "Paint | Properties" ("Sprites |
+// Sprite" in the sprites mode), one shown. A selection switches to Properties (overworld.ts showProps: a tile clicked or
+// Alt/Ctrl+clicked, a sprite clicked); when it ends (Esc, a click beside it) Paint comes back. Paint can be clicked
+// with the selection kept (a right click paints with it meanwhile). Nothing selected: Properties disabled, its tooltip
+// says how to select. While a reveal's new tile is picked in the layer 1 sheet, Paint is shown (the sheet).
 
-import { ownsTranslevel } from '../core/owstars.ts';
 import type { OwMode } from '../core/owlayers.ts';
 import type { PathKind } from '../core/owpaths.ts';
 
-export interface OwSelection {
-  mode: OwMode;
-  selected: number; // the layer 1 tile selected (l1Index; -1: none)
-  tile: number; // its layer 1 tile number (as after the event chosen)
-  byInfo: boolean; // selected by Alt/Ctrl+click (its info)
-  levelTile: boolean; // a level tile (the path kinds say so)
-  kinds: readonly PathKind[] | null; // the path kinds (null while they are learned: until then not even a star is known)
-  revealPick: boolean; // a reveal's new tile is being picked in the layer 1 sheet
+export type SideTab = 'paint' | 'props';
+
+export interface SideTabs {
+  shown: SideTab; // the tab shown
+  labels: Record<SideTab, string>;
+  propsEnabled: boolean; // something is selected
 }
 
-export function selectionHidesPaint(s: OwSelection): boolean {
-  if (s.mode !== 'l1' || s.selected < 0 || s.byInfo || s.revealPick) return false;
-  return s.levelTile || (!!s.kinds && ownsTranslevel(s.kinds, s.tile));
+// the side panel's tabs in mode `mode`, the tab chosen last `chosen` (by a selection or a click on a tab), whether
+// something is selected and whether a reveal's new tile is being picked in the layer 1 sheet
+export function sideTabs(mode: OwMode, chosen: SideTab, selected: boolean, revealPick: boolean): SideTabs {
+  return {
+    shown: selected && !revealPick ? chosen : 'paint',
+    labels: mode === 'sprites' ? { paint: 'Sprites', props: 'Sprite' } : { paint: 'Paint', props: 'Properties' },
+    propsEnabled: selected,
+  };
 }
 
 // Whether a plain click on layer 1 tile `tile` in the layer 1 mode selects it rather than picking it into the brush

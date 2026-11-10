@@ -1,10 +1,9 @@
-// The overworld's Paint panel hidden for a selection (#421, ui/owselection.ts selectionHidesPaint): a level tile, star
-// or pipe 5B selected by a click in the layer 1 mode shows only its properties; Paint stays for a tile's info
-// (Alt/Ctrl+click), in the other modes, for other tiles (the pipe 82, a path), while the path kinds are learned (a star
-// not known yet) and while a reveal's new tile is picked in the sheet; nothing selected: Paint. And what a plain click
-// selects rather than picking into the brush (#434, clickSelects): a link end, a star or pipe with or without a link.
+// The overworld's side panel tabs (ADR 0015, #460, ui/owselection.ts sideTabs): "Paint | Properties" ("Sprites |
+// Sprite" in the sprites mode); the tab chosen shown while something is selected, Paint otherwise and while a reveal's
+// new tile is picked in the layer 1 sheet; Properties disabled without a selection. And what a plain click selects
+// rather than picking into the brush (#434, clickSelects): a link end, a star or pipe with or without a link.
 // node tools/testowselection.ts
-import { selectionHidesPaint, clickSelects, type OwSelection } from '../src/ui/owselection.ts';
+import { sideTabs, clickSelects } from '../src/ui/owselection.ts';
 import { STAR_TILE, PIPE_TILE } from '../src/core/owstars.ts';
 import { ANY_WAY_TILE } from '../src/core/owreach.ts';
 import type { PathKind } from '../src/core/owpaths.ts';
@@ -14,19 +13,15 @@ const check = (ok: boolean, what: string) => { console.log((ok ? 'ok   ' : 'FAIL
 
 // path kinds as learned in the clean game (owpaths.ts): the stars and pipes 5B, 5F, 82 warp on both pages
 const kinds: PathKind[] = Array.from({ length: 0x200 }, (_, t) => ([0x5b, 0x5f, 0x82].includes(t & 0xff) ? 'warp' : (t & 0xff) === 0x56 ? 'level' : 'walk'));
-const level: OwSelection = { mode: 'l1', selected: 0x123, tile: 0x56, byInfo: false, levelTile: true, kinds, revealPick: false };
-const star = { ...level, tile: STAR_TILE, levelTile: false };
-check(selectionHidesPaint(level), 'a level tile clicked in the layer 1 mode: Paint hidden');
-check(selectionHidesPaint(star), 'a star: hidden');
-check(selectionHidesPaint({ ...star, tile: PIPE_TILE }), 'a pipe 5B: hidden');
-check(selectionHidesPaint({ ...star, tile: 0x100 | STAR_TILE }), 'a star 15F: hidden');
-check(!selectionHidesPaint({ ...star, tile: ANY_WAY_TILE }), 'the pipe 82 (no translevel of its own): Paint stays');
-check(!selectionHidesPaint({ ...star, tile: 0x04 }), 'another tile (a link end, a path): Paint stays');
-check(!selectionHidesPaint({ ...level, byInfo: true }) && !selectionHidesPaint({ ...star, byInfo: true }), 'a tile\'s info by Alt/Ctrl+click: Paint stays');
-check(!selectionHidesPaint({ ...level, mode: 'l2' }) && !selectionHidesPaint({ ...level, mode: 'sprites' }), 'the layer 2 and sprite modes: Paint stays');
-check(!selectionHidesPaint({ ...level, selected: -1 }), 'nothing selected: Paint');
-check(!selectionHidesPaint({ ...star, kinds: null }), 'the path kinds still learned (a star not known): Paint stays');
-check(!selectionHidesPaint({ ...level, revealPick: true }), 'a reveal\'s new tile picked in the sheet: Paint shown');
+
+check(sideTabs('l1', 'props', true, false).shown === 'props', 'a selection with Properties chosen: Properties shown');
+check(sideTabs('l1', 'paint', true, false).shown === 'paint', 'Paint clicked with the selection kept: Paint shown');
+check(sideTabs('l2', 'props', false, false).shown === 'paint', 'nothing selected: Paint');
+check(!sideTabs('l1', 'paint', false, false).propsEnabled && sideTabs('l2', 'paint', true, false).propsEnabled, 'Properties enabled only with a selection');
+check(sideTabs('l1', 'props', true, true).shown === 'paint', 'a reveal\'s new tile picked in the sheet: Paint shown');
+const l = sideTabs('l1', 'paint', false, false).labels, s = sideTabs('sprites', 'paint', false, false).labels;
+check(l.paint === 'Paint' && l.props === 'Properties', 'the layer modes: Paint | Properties');
+check(s.paint === 'Sprites' && s.props === 'Sprite', 'the sprites mode: Sprites | Sprite');
 
 // what a plain click (and a right click: its menu) on layer 1 takes as an object rather than a brush tile (#434)
 check(clickSelects(STAR_TILE, false, kinds) && clickSelects(PIPE_TILE, false, kinds), 'a star or pipe 5B without a link: selected (Link to… reachable)');

@@ -348,9 +348,9 @@ canvas.sheet-fill { width: 100%; height: auto; image-rendering: auto; }
 .grid4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px 14px; } .grid4 .prop label { width: 36px; }
 .ow-side { display: flex; flex-direction: column; flex: 1; min-height: 0; }
 .ow-pal-panel { flex: 1; min-height: 0; overflow-y: auto; scrollbar-gutter: stable; }
-.ow-side .props { max-height: 65%; }
-.ow-pal-panel[hidden] { display: none; }
-.ow-pal-panel[hidden] + .props { max-height: none; flex: 1 1 auto; border-top: none; } /* (a level tile selected: its properties alone, #421) */
+.ow-side .props { max-height: none; flex: 1 1 auto; border-top: none; } /* (one tab shown: Paint or Properties, ADR 0015) */
+.ow-pal-panel[hidden], .ow-side .props[hidden] { display: none; }
+.ow-side-tabs { flex: 0 0 auto; padding: 6px 6px 0; }
 .ow-badge { position: absolute; left: 10px; top: 10px; padding: 3px 9px; border-radius: 10px; background: rgba(0,0,0,.7); color: #ffd27a; font-size: 12px; pointer-events: none; display: none; }
 .ow-badge .hint { color: #c8c8c8; }
 .ow-event-list .ow-ev-head { display: flex; gap: 4px; padding: 4px 6px; position: sticky; top: 0; background: var(--panel); z-index: 1; }

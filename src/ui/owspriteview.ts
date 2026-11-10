@@ -121,7 +121,8 @@ export class SpriteLayer {
     this.sel = it;
     this.drag = it ? { item: it, x0: x, y0: y, dx: 0, dy: 0 } : null;
     this.view.paint();
-    this.view.buildProps();
+    // (one clicked: its properties shown, the Sprite tab – one placed or pasted is selected without leaving the palette)
+    if (it) this.view.showProps(); else this.view.buildProps();
   }
   // where an item is (pixels; a start: its tile's)
   private pos(it: Item): { x: number; y: number } {
@@ -192,6 +193,13 @@ export class SpriteLayer {
     return true;
   }
 
+  // the selection ended (Escape); false: none was selected
+  deselect(): boolean {
+    if (!this.sel) return false;
+    this.select(null);
+    return true;
+  }
+
   // the selected sprite removed (its slot none)
   remove(): boolean {
     const s = this.sel;
@@ -212,12 +220,16 @@ export class SpriteLayer {
     return out;
   }
   // ---- properties ----
+  // how a sprite is selected (the Sprite tab's tooltip while nothing is)
+  howToSelect(): string {
+    return 'Click a sprite, a start position (M, L) or where a Koopa Kid jumps out (K1–K3) to select it – again for the next one under it; drag to move it (8 pixels, 1 with Shift). ' +
+      (hasOwSpriteSlots(this.rom) ? 'The sprite slots are the same on every submap: each sprite shows where its code lets it. ' : '') + 'Custom sprites: pick one in the palette and click on the map to place it; Ctrl+C / Ctrl+V copy one, Delete removes it.';
+  }
   props(): HTMLElement {
     if (this.sel?.kind === 'custom' && !this.custom.has(this.sel)) this.sel = null; // (gone: undone, deleted)
     if (this.sel?.kind === 'koopa' && !hasKoopaKidTable(this.rom)) this.sel = null; // (gone: BOWSIE's MaxTile)
     const s = this.sel, rom = this.rom;
-    if (!s) return h('div', { class: 'ow-info' }, emptyState('Click a sprite, a start position (M, L) or where a Koopa Kid jumps out (K1–K3) to select it – again for the next one under it; drag to move it (8 pixels, 1 with Shift). ' +
-      (hasOwSpriteSlots(rom) ? 'The sprite slots are the same on every submap: each sprite shows where its code lets it. ' : '') + 'Custom sprites: pick one in the palette and click on the map to place it; Ctrl+C / Ctrl+V copy one, Delete removes it.'));
+    if (!s) return h('div', { class: 'ow-info' }, emptyState(this.howToSelect()));
     if (s.kind === 'custom') return this.custom.props(s);
     const pos = (x: number, y: number, set: (x: number, y: number) => void) => h('div', { class: 'row' },
       h('label', null, 'X '), hexInput(x, 4, (v) => set(v, y)), h('label', null, ' Y '), hexInput(y, 4, (v) => set(x, v)));

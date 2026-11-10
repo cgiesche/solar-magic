@@ -33,7 +33,7 @@ import type { OwSpriteView } from '../core/owsprites.ts';
 import { LinkLayer, type OffMapEnd } from './owlinkview.ts';
 import { LevelTileLayer, tilePlace } from './owlevelview.ts';
 import { TileLabels } from './owlevelname.ts';
-import { selectionHidesPaint, clickSelects } from './owselection.ts';
+import { sideTabs, clickSelects, type SideTab } from './owselection.ts';
 import { ownsTranslevel, starOrPipe, starDirs, giveStarTranslevel, type StarPaths } from '../core/owstars.ts';
 import { levelsWithoutTile, type LevelTileEvent } from '../core/owleveltiles.ts';
 import {
@@ -127,7 +127,10 @@ export class OverworldView {
   private statusStats = h('span', { class: 'status-stats' });
   private palPanel = h('div', { class: 'panel ow-pal-panel' });
   private palPixels = 0; // the screen pixels per pixel the paint sheet is drawn at (0: none shown)
-  private props = h('div', { class: 'panel props' });
+  private props = h('div', { class: 'panel props', hidden: true });
+  // the side panel's tabs "Paint | Properties" (ADR 0015, owselection.ts): the tab chosen (a selection chooses Properties)
+  private sideTab: SideTab = 'paint';
+  private tabBar = h('div', { class: 'tabs seg ow-side-tabs' });
   private evList = h('div', { class: 'level-list ow-event-list' }); // the event list (buildLeft)
   private evCount = h('span', { class: 'hint' });
   private unrunOpen = false; // the event list's "Run by no level exit" group open (for the session)
@@ -228,8 +231,8 @@ export class OverworldView {
     pick: (r) => this.pick(this.clampRect(r)),
   });
   selected = -1; // the layer 1 tile shown in the properties (l1Index)
-  private palScroll: number | null = null; // the paint sheet's scroll while Paint is hidden
-  private infoTile = -1; // the tile selected by Alt/Ctrl+click (its info: Paint stays, owselection.ts)
+  private palScroll: number | null = null; // the paint sheet's scroll while Paint is hidden (the Properties tab shown)
+  private infoTile = -1; // the tile selected by Alt/Ctrl+click (its info)
   mapCanvas = document.createElement('canvas'); // the map as shown: its layers at their strengths (composeMap)
   private l1Canvas = document.createElement('canvas'); // layer 1 alone (transparent where it has no pixel)
   get l1Image(): HTMLCanvasElement { return this.l1Canvas; }
@@ -259,7 +262,7 @@ export class OverworldView {
     this.sizer = h('div', { class: 'level-sizer' });
     this.scroller = h('div', { class: 'level-scroller', tabIndex: 0 }, this.canvas, this.sizer);
     this.status = h('div', { class: 'statusbar' }, this.statusText, this.statusStats, this.check.button);
-    this.side = h('div', { class: 'ow-side' }, this.check.root, this.palPanel, this.props);
+    this.side = h('div', { class: 'ow-side' }, this.check.root, this.tabBar, this.palPanel, this.props);
     this.bar = h('div', { class: 'ctxbar' });
     this.left = h('div', { class: 'left' }, h('div', { class: 'panel levels ow-events' },
       h('div', { class: 'panel-title' }, 'Events ', this.evCount), this.evList));
@@ -855,9 +858,6 @@ export class OverworldView {
       }
       // a click on a level tile selects it, a drag moves it (a pick starts beside one)
       if (e.button === 0 && level && !e.shiftKey && !e.altKey && !e.ctrlKey) { this.levelTiles.down(c.x, c.y); this.updateStatus(); this.paint(); return; }
-      // (a pick beside one: the level tile, star or pipe selected no longer – Delete would remove it unseen –, Paint shown
-      // again with the brush picked; the pipe 82 too, whose selection keeps Paint, #434)
-      if (e.button === 0 && !e.shiftKey && !e.altKey && !e.ctrlKey && this.selected >= 0 && (this.isLevelTile(this.levelL1()[this.selected]) || this.paintHidden() || clickSelects(this.shown.l1[this.selected], false, this.pathKinds()))) this.selectTile(-1, false);
     }
     if (paintButton(e)) {
       // (the route brush: the route drawn)
@@ -872,6 +872,9 @@ export class OverworldView {
     }
     if (e.button !== 0) return;
     if (e.altKey || e.ctrlKey) { this.info(c.x, c.y); return; }
+    // (a pick beside the selection ends it – Delete would remove a level tile unseen –, Paint shown again with the brush
+    // picked, ADR 0015)
+    if (this.selected >= 0) this.selectTile(-1, false);
     this.brushDrag.startPick(c);
     this.paint();
   }
@@ -1083,6 +1086,7 @@ export class OverworldView {
   // to it
   selectTile(i: number, center: boolean, byInfo = false): void {
     this.selected = i;
+    if (i >= 0) this.sideTab = 'props'; // (a selection shows its properties, ADR 0015)
     this.infoTile = byInfo ? i : -1;
     this.links.selectAt(i);
     if (center && i >= 0) {
@@ -1143,8 +1147,8 @@ export class OverworldView {
     if (linking) { this.statusText.textContent = linking; return; }
     if (!c) {
       const solo = this.mode === 'l1' ? ' · Hold Q: hide layer 2' : this.mode === 'l2' ? ` · Hold Q: ${this.l1InL2 ? 'hide' : 'show'} layer 1` : '';
-      // (a level tile, star or pipe selected: its properties alone – Esc or a click on another cell brings Paint back)
-      const back = this.paintHidden() ? 'Esc: Paint again · ' : '';
+      // (the selection's properties shown: Esc or a click on another cell brings Paint back)
+      const back = this.selected >= 0 && this.palPanel.hidden ? 'Esc: Paint again · ' : '';
       this.statusText.textContent = back + (this.ev
         ? `Painting layer ${this.mode === 'l1' ? 1 : 2} as after ${eventTitle(this.ev.runners, this.event)} · Click/drag picks up tiles · Right click/Shift+click paints · Alt/Ctrl+click: tile settings · Esc: end editing${solo}`
         : `Click/drag picks up tiles · Right click/Shift+click paints · Alt/Ctrl+click: tile settings${this.mode === 'l1' ? ' · Level tiles: click selects, drag moves, right click: menu, Delete removes' : ''}${solo}`);
@@ -1680,6 +1684,7 @@ export class OverworldView {
     if (k === 'escape' && this.cancelReplace()) return true;
     if (e.ctrlKey || e.metaKey || e.altKey) return false;
     if (k === 'escape' && this.mode === 'sprites' && this.sprites.unpick()) return true;
+    if (k === 'escape' && this.mode === 'sprites' && this.sprites.deselect()) return true;
     if (k === 'escape' && this.links.cancelPending()) { this.paint(); return true; }
     // (Esc layered: a selection ended first – Paint shown again –, then the event)
     if (k === 'escape' && this.mode !== 'sprites' && this.selected >= 0) { this.selectTile(-1, false); return true; }
@@ -1769,43 +1774,52 @@ export class OverworldView {
     this.watch.add(() => this.buildSideNow());
   }
   private buildSideNow(): void {
-    if (this.palPanel.hidden) { this.buildProps(); return; } // (Paint hidden by the selection: drawn when shown again)
+    if (this.palPanel.hidden) { this.buildProps(); return; } // (the Properties tab shown: Paint drawn when shown again)
     const scroll = this.palScroll ?? this.palPanel.scrollTop;
     this.palScroll = null;
     hidePickerPreview(this.palPanel);
     this.palPixels = 0;
     this.palPanel.replaceChildren(...(this.mode === 'sprites' ? this.sprites.palette() : [
-      h('div', { class: 'panel-title' }, 'Paint', h('span', { class: 'hint' }, 'Right click/Shift+click paints')),
-      this.mode === 'l1' ? this.l1Palette() : this.l2Palette()]));
+      h('div', { class: 'hint' }, 'Right click/Shift+click paints'),
+      ...this.mode === 'l1' ? [this.l1Palette(), this.linkLegend()] : [this.l2Palette()]]));
     this.palPanel.scrollTop = scroll;
     this.buildProps();
   }
 
-  // whether the selection hides the Paint panel (a level tile, star or pipe clicked in the layer 1 mode: owselection.ts)
-  paintHidden(): boolean {
-    const i = this.selected, t = i >= 0 ? this.levelL1()[i] : 0;
-    return selectionHidesPaint({ mode: this.mode, selected: i, tile: t, byInfo: i === this.infoTile, levelTile: i >= 0 && this.isLevelTile(t),
-      kinds: this.pathKinds(), revealPick: (this.eventPick?.at ?? -1) >= 0 });
+  // the selection shown in the Properties tab (ADR 0015): a tile clicked or Alt/Ctrl+clicked, a sprite clicked
+  showProps(): void {
+    this.sideTab = 'props';
+    this.buildProps();
   }
-
-  // the mode's properties (of what is selected). What concerns the whole map or overworld is out of the side panel
-  // (ADR 0015): the map shown's settings in a popover beside the map select (mapPop), the overworld's options and
-  // reveal list in the "Overworld options …" dialog (openOptions)
+  // the side panel's tabs (owselection.ts sideTabs): Paint (the tool) or Properties (of what is selected, in one fixed
+  // order). What concerns the whole map or overworld is out of the side panel (ADR 0015): the map shown's settings in a
+  // popover beside the map select (mapPop), the overworld's options and reveal list in the "Overworld options …" dialog
+  // (openOptions)
   buildProps(): void {
-    // (Paint hidden while a level tile, star or pipe is selected; shown again: drawn at its width, scrolled where it was)
-    const hide = this.paintHidden();
+    const sprites = this.mode === 'sprites', own = sprites ? this.sprites.props() : null; // (a sprite gone: no longer selected)
+    const selected = sprites ? !!this.sprites.sel : this.selected >= 0;
+    if (!selected) this.sideTab = 'paint'; // (the selection ended: Paint again, the next selection shows its properties)
+    const tabs = sideTabs(this.mode, this.sideTab, selected, (this.eventPick?.at ?? -1) >= 0);
+    const how = sprites ? this.sprites.howToSelect() : this.mode === 'l1' ? 'Click a level tile, star, pipe or link end on the map to select it, any tile with Alt/Ctrl+click'
+      : 'Alt/Ctrl+click a tile on the map – a level tile too – to select it';
+    const tab = (t: SideTab) => h('button', {
+      class: tabs.shown === t ? 'active' : '', disabled: t === 'props' && !tabs.propsEnabled,
+      title: t === 'paint' ? (sprites ? 'The sprites to place' : 'The tiles to paint with (right click/Shift+click on the map)') + (selected ? ' – the selection stays' : '')
+        : tabs.propsEnabled ? 'The settings of what is selected' : `Nothing selected: ${how}`,
+      onclick: () => { this.sideTab = t; this.buildProps(); },
+    }, tabs.labels[t]);
+    this.tabBar.replaceChildren(tab('paint'), tab('props'));
+    // (Paint shown again: drawn at its width, scrolled where it was)
+    const hide = tabs.shown !== 'paint';
+    this.props.hidden = !hide;
     if (hide !== this.palPanel.hidden) {
       if (hide) this.palScroll = this.palPanel.scrollTop;
       this.palPanel.hidden = hide;
-      if (!hide) { this.buildSide(); return; } // (which builds the properties too)
+      if (!hide) { this.props.replaceChildren(); this.buildSide(); return; }
     }
-    const links = this.mode === 'l1' && this.selected >= 0 ? this.links.props() : null;
-    const own = this.mode === 'sprites' ? [h('div', { class: 'panel-title' }, 'Sprite'), this.sprites.props()]
-      : [h('div', { class: 'panel-title' }, 'Properties'),
-        this.selected >= 0 ? this.tileInfo(this.selected) : emptyState(this.mode === 'l1' ? 'Click a level tile on the map, or any tile with Alt/Ctrl+click.'
-          : 'Select a tile – a level tile too – with Alt/Ctrl+click on the map.'),
-        ...links ? [links] : [], ...this.mode === 'l1' ? [this.linkLegend()] : []];
-    this.props.replaceChildren(...own);
+    if (!hide) { this.props.replaceChildren(); return; }
+    const links = this.mode === 'l1' ? this.links.props() : null;
+    this.props.replaceChildren(...own ? [own] : [this.tileInfo(this.selected), ...links ? [links] : []]);
   }
 
   // the settings of the map shown, in the popover from "⚙" beside the map select (ADR 0015): its song (one ROM edit),
@@ -1891,22 +1905,26 @@ export class OverworldView {
       next[i] = t;
       this.app.romEdit(`Level tile ${hex(x, 2)},${hex(y, 2)}: level ${hex(translevelToLevel(t), 3)}`, () => writeTranslevels(rom, next));
     });
-    const head = [
-      h('div', { class: 'prop' }, h('label', null, 'Enters level'), choose),
-      h('div', { class: 'hint' }, `Tile ${hex(x, 2)},${hex(y, 2)}${tl ? ` · translevel ${hex(tl, 2)}` : ''}`),
-      ...others.map((k) => h('div', { class: 'hint warn-text' }, `⚠ The level tile at ${tilePlace(k)} enters this level too.`)),
+    // (one fixed order, ADR 0015: the name, the level it enters and opening it, the look, the switches; the other tiles
+    // entering the same level last – the links below)
+    const lvl = tl ? translevelToLevel(tl) : -1;
+    const enters = h('div', { class: 'prop' }, h('label', null, 'Enters level'), choose,
+      tl ? h('button', { onclick: () => this.onOpenLevel(lvl), title: 'Open in the level editor (also by double click on the tile)' }, `Edit level ${hex(lvl, 3)}`) : null);
+    const look = [
       h('div', { class: 'prop' }, h('label', { title: 'The level tiles\' looks: the visible tiles the game enters a level on, and one drawn on layer 2 – the tile changes, its level stays' }, 'Look')),
       this.levelTiles.lookPicker(this.levelL1()[i], (t) => this.levelTiles.setLook(i, t)),
     ];
-    if (!tl) return h('div', { class: 'ow-info' }, ...head, h('div', { class: 'hint warn-text' }, '⚠ This level tile enters no level.'));
-    head.push(...this.levelTiles.crumbleRow(i, tl));
-    const lvl = translevelToLevel(tl);
+    const place = h('div', { class: 'hint' }, `Tile ${hex(x, 2)},${hex(y, 2)}${tl ? ` · translevel ${hex(tl, 2)}` : ''}`);
+    const alsoHere = others.map((k) => h('div', { class: 'hint warn-text' }, `⚠ The level tile at ${tilePlace(k)} enters this level too.`));
+    if (!tl) return h('div', { class: 'ow-info' }, enters, place, h('div', { class: 'hint warn-text' }, '⚠ This level tile enters no level.'), ...look, ...alsoHere);
     const ev = baseEvent(rom, tl), msgs = [1, 2].filter((n) => !isBlank(readMessage(rom, tl, n)));
     // (a package drawing the message boxes: the editor's messages are not what players see; checked meanwhile)
     const routine = this.app.messageRoutine();
     const shown = msgs.length ? msgs.map((n) => `message ${n}`).join(', ') : 'none';
-    return h('div', { class: 'ow-info' }, ...head,
+    return h('div', { class: 'ow-info' },
       ...levelNameField(this.app, tl, this.render()),
+      enters, place, ...look,
+      ...this.levelTiles.crumbleRow(i, tl),
       // the level's other settings (kept when its tiles are painted over, shown to every new tile entering it)
       ...this.levelSettings(tl),
       ...this.exitResultRows(tl),
@@ -1915,11 +1933,10 @@ export class OverworldView {
         : routine.game === null ? h('span', { class: 'warn-text', title: messageRoutineUnknown(routine) }, `${shown} · ⚠ not checked`)
         : h('span', null, shown),
         h('button', { onclick: () => { this.onOpenLevel(lvl); this.app.openMessages(tl, 1); }, title: 'Edit the level\'s two messages beside the level' }, 'Edit …')),
-      h('div', { class: 'row' },
-        h('button', { onclick: () => this.onOpenLevel(lvl), title: 'Open in the level editor (also by double click in the list)' }, `Edit level ${hex(lvl, 3)}`),
-        hasLevelName(rom, tl) || ev !== NO_EVENT || msgs.length || exitDirections(rom, tl).some((d) => d) || initialFlags(rom, tl)
-          ? h('button', { onclick: () => this.app.romEdit(`Level ${hex(lvl, 3)}: settings reset`, () => resetTranslevel(rom, tl)),
-            title: 'No name, no base event, every exit enabling up, no message box, no initial flags – the level\'s data stays' }, 'Reset settings') : null),
+      hasLevelName(rom, tl) || ev !== NO_EVENT || msgs.length || exitDirections(rom, tl).some((d) => d) || initialFlags(rom, tl)
+        ? h('div', { class: 'row' }, h('button', { onclick: () => this.app.romEdit(`Level ${hex(lvl, 3)}: settings reset`, () => resetTranslevel(rom, tl)),
+          title: 'No name, no base event, every exit enabling up, no message box, no initial flags – the level\'s data stays' }, 'Reset settings')) : null,
+      ...alsoHere,
     );
   }
 
