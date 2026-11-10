@@ -11,7 +11,7 @@ import { entrancesInto } from '../src/core/exitgraph.ts';
 import { entranceMarkers } from '../src/core/entrances.ts';
 import { map16Tile } from '../src/core/ram.ts';
 import { hex3 } from '../src/core/names.ts';
-import { levelOverlay, overlayPending, paintOverlays, wholeLevel } from '../src/ui/leveloverlays.ts';
+import { levelOverlay, overlayPending, paintOverlays, paintItems, wholeLevel } from '../src/ui/leveloverlays.ts';
 import type { App } from '../src/ui/app.ts';
 import type { Shown } from '../src/core/viewsettings.ts';
 import { editorImage } from './fixture.ts';
@@ -118,6 +118,21 @@ paintOverlays(ctx, app, src, {
   });
   check(!k2.some((c) => c.style.fill === 'rgba(0,0,0,0.45)' && c.op === 'fillRect'), 'collision off: not drawn');
   check(k2.some((c) => c.op === 'fillText' && c.args[0] === 'M'), 'collision off: the markers drawn');
+}
+
+// items: a tile's block probe looked up once per paint, however often it is in view (#452: a lookup per visible tile
+// took a drag step's milliseconds)
+{
+  const g1 = r.images.geom1, tiles = new Set<number>();
+  let cells = 0;
+  for (let y = 0; y < g1.height; y++) for (let x = 0; x < g1.width; x++) {
+    const a = g1.addr(x, y);
+    if (a >= 0) { cells++; tiles.add(map16Tile(r.render.wram, a)); }
+  }
+  let asks = 0;
+  const counted = { ...src, block: (t: number) => { asks++; return src.block(t); } };
+  paintItems(recCtx().ctx, counted, wholeLevel(g1));
+  check(asks === tiles.size, `block probes asked: ${asks} for ${tiles.size} tiles in ${cells} cells`);
 }
 
 console.log(bad ? `${bad} FAILED` : 'all ok');

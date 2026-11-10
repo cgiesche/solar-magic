@@ -439,14 +439,21 @@ export function paintTide(ctx: CanvasRenderingContext2D, src: OverlayLevel, coll
 }
 
 // translucent image of the item a block (visible part of layer 1) gives, drawn over it; arrows for the directions
-// it can be entered in
+// it can be entered in. (Each tile's probe looked up once: the view repeats few tiles, #452.)
 export function paintItems(ctx: CanvasRenderingContext2D, src: OverlayLevel, area: TileArea): void {
   const g = src.images.geom1, w = src.render.wram;
+  const probes = new Map<number, BlockProbe | null | undefined>();
+  const block = (t: number) => {
+    if (probes.has(t)) return probes.get(t);
+    const p = src.block(t);
+    probes.set(t, p);
+    return p;
+  };
   ctx.globalAlpha = 0.65;
   for (let y = area.y0; y < area.y1; y++) for (let x = area.x0; x < area.x1; x++) {
     const a = g.addr(x, y);
     if (a < 0) continue;
-    const p = src.block(map16Tile(w, a));
+    const p = block(map16Tile(w, a));
     if (!p) continue;
     if (p.summary !== null) drawItem(ctx, src, probeAt(p, x), x * 16, y * 16);
     if (p.enter) drawEnter(ctx, p.enter, x * 16, y * 16);
