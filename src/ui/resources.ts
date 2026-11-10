@@ -5,7 +5,7 @@
 // undo and redo it (ADR 0001).
 
 import type { App } from './app.ts';
-import { h, modal, clear, toast, choose } from './dom.ts';
+import { h, modal, clear, toast, choose, dialogUndoKeys } from './dom.ts';
 import { pickFile } from './platform.ts';
 import { hex } from '../core/names.ts';
 import { openLevelImportDialog } from './levelimport.ts';
@@ -32,22 +32,11 @@ const TAB_LABEL: Record<ResourceTab, string> = { packages: 'Packages', uberasm: 
 
 export async function openResources(app: App, tab: ResourceTab = 'packages', opts: ResourceOptions = {}): Promise<void> {
   const body = h('div', { class: 'resources' }, h('p', { class: 'hint' }, 'Loading Asar …'));
-  // undo/redo while the dialog is the topmost one (the editor's own keys wait while a dialog is open);
-  // the tabs show the ROM afterwards
+  // undo/redo while the dialog is the topmost one; the tabs show the ROM afterwards
   let afterUndo = () => {};
-  const keys = (e: KeyboardEvent) => {
-    const t = e.target as HTMLElement;
-    if (t && (t.tagName === 'INPUT' || t.tagName === 'SELECT' || t.tagName === 'TEXTAREA')) return;
-    if (!(e.ctrlKey || e.metaKey) || ![...document.querySelectorAll('.modal-back')].pop()?.contains(body)) return;
-    const k = e.key.toLowerCase();
-    if (k !== 'z' && k !== 'y') return;
-    e.preventDefault();
-    if (k === 'y' || e.shiftKey) app.redo(); else app.undo();
-    afterUndo();
-  };
-  window.addEventListener('keydown', keys);
+  const offKeys = dialogUndoKeys(body, () => app.undo(), () => app.redo(), () => afterUndo());
   const dlg = modal('Packages', body, [{ label: 'Close', primary: true }], () => {
-    window.removeEventListener('keydown', keys);
+    offKeys();
     if (musicPlayer.label?.startsWith('song:')) musicPlayer.stop();
   });
 

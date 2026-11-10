@@ -1,10 +1,10 @@
-// The "Overworld options…" dialog (ADR 0015): what concerns the whole overworld, out of the side panel. Two tabs:
+// The "Overworld options …" dialog (ADR 0015): what concerns the whole overworld, out of the side panel. Two tabs:
 // Options (the game's overworld options – Lunar Magic's "Extra Options" –, each switch one ROM edit) and Reveal list
 // (Lunar Magic's "Edit Reveal Tile List": which tile a revealed tile becomes). Drawn again after every ROM change while
 // open (its own edits, undo/redo – Ctrl+Z / Ctrl+Y work in it, as in the Packages dialog); one open at a time.
 
 import type { App } from './app.ts';
-import { h, modal, toast, checkbox, hexInput } from './dom.ts';
+import { h, modal, toast, checkbox, hexInput, dialogUndoKeys } from './dom.ts';
 import { syncBowsieMaxTile } from '../core/bowsie.ts';
 import { MAP_NAMES, readRevealList, writeRevealList } from '../core/overworld.ts';
 import { OW_OPTIONS, owOption, owOptionValue, setOwOption, revealSpeed, setRevealSpeed, MAX_REVEAL_SPEED, DEFAULT_REVEAL_SPEED, submapLightning, setSubmapLightning, LIGHTNING_TITLE, lightningEditLabel } from '../core/owoptions.ts';
@@ -19,11 +19,11 @@ export interface OwOptionsContext {
   selectedTile: () => number; // the layer 1 tile whose reveal list entry is marked (being revealed, or selected), -1: none
 }
 
-let shown: { show: (tab: OwOptionsTab) => void } | null = null;
+let shown: { show: (tab: OwOptionsTab, ctx: OwOptionsContext) => void } | null = null;
 
 // opens the dialog on tab (the one open: switched to it)
 export function openOwOptions(app: App, ctx: OwOptionsContext, tab: OwOptionsTab = 'options'): void {
-  if (shown) { shown.show(tab); return; }
+  if (shown) { shown.show(tab, ctx); return; }
   const tabBar = h('div', { class: 'tabs seg ow-options-tabs' });
   const content = h('div', { class: 'ow-options-content' });
   const body = h('div', { class: 'ow-options' }, tabBar, content);
@@ -37,24 +37,14 @@ export function openOwOptions(app: App, ctx: OwOptionsContext, tab: OwOptionsTab
     content.scrollTop = scroll;
     if (at >= 0) fields()[at]?.focus();
   };
-  const show = (k: OwOptionsTab) => { if (k !== tab) content.scrollTop = 0; tab = k; draw(); };
-  // undo/redo while the dialog is the topmost one (the editor's own keys wait while a dialog is open)
-  const keys = (e: KeyboardEvent) => {
-    // (a text field's own undo stays its own; a switch just clicked has the focus and isn't one)
-    const t = e.target;
-    if (t instanceof HTMLInputElement && t.type !== 'checkbox') return;
-    if (!(e.ctrlKey || e.metaKey) || ![...document.querySelectorAll('.modal-back')].pop()?.contains(body)) return;
-    const k = e.key.toLowerCase();
-    if (k !== 'z' && k !== 'y') return;
-    e.preventDefault();
-    if (k === 'y' || e.shiftKey) app.redo(); else app.undo();
-  };
-  window.addEventListener('keydown', keys);
+  const show = (k: OwOptionsTab, c = ctx) => { if (k !== tab) content.scrollTop = 0; tab = k; ctx = c; draw(); };
+  // undo/redo while the dialog is the topmost one (drawn again by the ROM change)
+  const offKeys = dialogUndoKeys(body, () => app.undo(), () => app.redo());
   const off = app.on('rom-change', draw);
   shown = { show };
   draw();
   modal('Overworld options', body, [{ label: 'Close', primary: true }], () => {
-    window.removeEventListener('keydown', keys);
+    offKeys();
     off();
     shown = null;
   });
@@ -108,8 +98,8 @@ function revealList(app: App, ctx: OwOptionsContext): HTMLElement {
   const set = (k: number, p: { from?: number; to?: number }) =>
     app.romEdit('Reveal list', () => writeRevealList(rom, list.map((q, n) => (n === k ? { ...q, ...p } : q))));
   const last = (t: number) => { for (let k = list.length - 1; k >= 0; k--) if (list[k].from === t) return k; return -1; };
-  return h('div', { class: 'ow-info ow-reveals' },
-    h('div', { class: 'hint' }, 'Which tile a tile an event reveals becomes (the first of a pair: the tile on the map, the second: what it becomes)'),
+  return h('div', { class: 'ow-info' },
+    h('div', { class: 'hint' }, 'What a tile becomes when an event reveals it (first the tile on the map, then the tile it becomes)'),
     h('div', { class: 'ow-reveal-rows' }, ...list.map((p, k) => h('div', {
       class: `row ow-reveal${k === last(sel) ? ' current' : ''}`,
       title: last(p.from) !== k ? `Tile ${hex(p.from, 2)} has a later entry: this one is not used` : `A tile ${hex(p.from, 2)} an event reveals becomes ${hex(p.to, 2)}`,

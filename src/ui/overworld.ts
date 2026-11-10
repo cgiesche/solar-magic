@@ -1790,7 +1790,7 @@ export class OverworldView {
 
   // the mode's properties (of what is selected). What concerns the whole map or overworld is out of the side panel
   // (ADR 0015): the map shown's settings in a popover beside the map select (mapPop), the overworld's options and
-  // reveal list in the "Overworld options…" dialog (openOptions)
+  // reveal list in the "Overworld options …" dialog (openOptions)
   buildProps(): void {
     // (Paint hidden while a level tile, star or pipe is selected; shown again: drawn at its width, scrolled where it was)
     const hide = this.paintHidden();

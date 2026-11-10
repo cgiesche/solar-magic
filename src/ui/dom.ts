@@ -250,6 +250,24 @@ export function onModalsChange(fn: () => void): () => void {
 }
 const modalsChanged = (d: number) => { openModals += d; for (const f of modalWatchers) f(); };
 
+// Ctrl+Z / Ctrl+Y (Ctrl+Shift+Z) in a dialog: the editor's undo and redo while the dialog holding body is the topmost
+// one (the editor's own keys wait while a dialog is open). A text field, select or text area keeps its own keys; a
+// switch just clicked has the focus and isn't one. Returns what takes the keys off again (on the dialog's close)
+export function dialogUndoKeys(body: HTMLElement, undo: () => void, redo: () => void, after?: () => void): () => void {
+  const keys = (e: KeyboardEvent) => {
+    const t = e.target;
+    if ((t instanceof HTMLInputElement && t.type !== 'checkbox' && t.type !== 'radio') || t instanceof HTMLSelectElement || t instanceof HTMLTextAreaElement) return;
+    if (!(e.ctrlKey || e.metaKey) || ![...document.querySelectorAll('.modal-back')].pop()?.contains(body)) return;
+    const k = e.key.toLowerCase();
+    if (k !== 'z' && k !== 'y') return;
+    e.preventDefault();
+    if (k === 'y' || e.shiftKey) redo(); else undo();
+    after?.();
+  };
+  window.addEventListener('keydown', keys);
+  return () => window.removeEventListener('keydown', keys);
+}
+
 // buttons: the elements of the given buttons, in order (e.g. to show one only at times)
 export function modal(title: string, body: HTMLElement, buttons: { label: string; primary?: boolean; danger?: boolean; onClick?: () => boolean | void }[], onClose?: () => void, beforeClose?: () => boolean): { close: (force?: boolean) => void; buttons: HTMLButtonElement[] } {
   const back = h('div', { class: 'modal-back' });
