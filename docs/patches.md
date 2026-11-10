@@ -812,7 +812,7 @@ The rest of what an event changes, painted and set without a mode of its own:
   Magic's layer 1 event editor: for other submaps and tiles not seen). The user paints layer 1 while the event is
   chosen; its changes are the tiles that differ from layer 1 as after it without them (emulated on a copy of the
   ROM). A level tile painted where no tile entered a level gets a free translevel.
-- the **reveal list** (*Overworld*, properties, *Reveal list*; Lunar Magic's "Edit Reveal Tile List"): the game's
+- the **reveal list** (*Overworld*, *Overworld options …*, tab *Reveal list*; Lunar Magic's "Edit Reveal Tile List"): the game's
   0x16 pairs in place (`$04DA1D` → `$04DA33`), also those for tiles 52–54 the game doesn't use.
 - **destroyed level tiles** (a tile's properties, *Destroyed on*; Lunar Magic's "Destroy Level Tile Settings"):
   the game has 0x10 entries of an event and a tile (`$04E5D6`, `$04E5B6`; its loop at `$04E677` reads 0x18, the
@@ -833,7 +833,7 @@ the clean game's layer 1 changes painted as they are change no byte.
 ### Overworld options
 
 Lunar Magic's "Extra Options" of the overworld that the community uses are switches in the overworld editor's
-*Overworld* section under the properties (shown in every mode), each one ROM edit (`src/core/owoptions.ts`). A
+*Overworld options …* dialog (tab *Options*; the button at the right of the context bar, or the *Overworld* menu), each one ROM edit (`src/core/owoptions.ts`). A
 switch writes the bytes Lunar Magic writes in its places, turned back the clean game's – read from Lunar Magic 3.71's
 code (its table of ROM places and the routine that writes the options; ROMs Lunar Magic saved with options set show
 the same):

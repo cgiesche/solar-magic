@@ -3,15 +3,14 @@
 import type { App } from './app.ts';
 import type { Watch } from '../core/romwatch.ts';
 import { StateMemo } from '../core/romdeps.ts';
-import { syncBowsieMaxTile } from '../core/bowsie.ts';
-import { h, toast, choose, select, checkbox, hexInput, attachPanZoom, zoomControl, pixelZoomSteps, snapZoom, attachRectPick, emptyState, putImage, type CellRect } from './dom.ts';
+import { h, toast, choose, select, checkbox, attachPanZoom, zoomControl, pixelZoomSteps, snapZoom, attachRectPick, emptyState, putImage, type CellRect } from './dom.ts';
 import { BrushDrag, drawBrushFrame, paintButton } from './brushsurface.ts';
 import {
   type OwRender, gameL1, gameL2, readL1, readL2, l1Index, l1XY, l2Index, readTranslevels, writeTranslevels, readMaps,
   sharedTranslevels, translevelToLevel, MAP_NAMES,
   resetTranslevel, baseEvent, setBaseEvent, eventNames, exitDirections, setExitDirection, DIR_ARROWS, DIR_NAMES, EXIT_NAMES, NO_EVENT,
   initialFlags, setInitialFlags, FLAG, DIR_FLAGS, OW_EVENTS, revealEvents, revealedTile, revealEventCount,
-  readRevealList, writeRevealList, destroyEffects, destroySettingAt, readDestroyList, hasDestroyPatch, levelTilesOf, OW_L1_TILES,
+  destroyEffects, destroySettingAt, readDestroyList, hasDestroyPatch, levelTilesOf, OW_L1_TILES,
   eventBits, drawOwMap, drawL1Tile, owTileCaches, owShownAt, owMapAt, owShownCopies,
 } from '../core/overworld.ts';
 import { isBlank, readMessage } from '../core/messages.ts';
@@ -66,7 +65,8 @@ import { ReachLayer } from './owreachview.ts';
 import { ExitArrowLayer } from './owexitarrows.ts';
 import { WorldCheck } from './worldcheck.ts';
 import { layerStrengths, isLayerMode, type OwMode, type LayerStrengths } from '../core/owlayers.ts';
-import { OW_OPTIONS, owOption, owOptionValue, setOwOption, revealSpeed, setRevealSpeed, revealStepFrames, MAX_REVEAL_SPEED, DEFAULT_REVEAL_SPEED, submapLightning, setSubmapLightning, LIGHTNING_TITLE, lightningEditLabel } from '../core/owoptions.ts';
+import { owOptionValue, revealStepFrames } from '../core/owoptions.ts';
+import { openOwOptions, type OwOptionsTab } from './owoptionsdialog.ts';
 import { boolPref, jsonPref, prefFamily } from './prefs.ts';
 import { layer1AtProgress } from '../core/owcellhistory.ts';
 import {
@@ -1363,6 +1363,7 @@ export class OverworldView {
         h('span', { class: 'hint' }, at < 0 ? `Click the tile on the map the event ${pick.kind === 'reveal' ? 'reveals' : 'destroys'}`
           : `Pick in the layer 1 sheet the tile ${l1Hex(this.l1[at])} at ${cellText(at)} becomes when revealed`),
         at >= 0 && into >= 0 ? h('button', { title: 'Reveal it into what the reveal list turns its tile into', onclick: () => this.pickReveal(into) }, `Becomes ${l1Hex(into)} (as the reveal list has it)`) : null,
+        at >= 0 ? h('button', { class: 'link-btn', title: 'Which tile a revealed tile becomes: the reveal list in the overworld options', onclick: () => this.openOptions('reveals') }, 'Reveal list …') : null,
         h('button', { title: 'Add nothing (Esc)', onclick: () => this.cancelEventPick() }, 'Cancel'),
       ];
     }
@@ -1650,7 +1651,16 @@ export class OverworldView {
       ] }),
       h('span', { class: 'sep' }),
       this.zoomCtl.root,
+      h('span', { class: 'spacer' }),
+      h('button', { class: 'ow-options-btn', onclick: () => this.openOptions(), title: 'The settings of the whole overworld: the game\'s overworld options and the reveal list (which tile a revealed tile becomes)' }, 'Overworld options …'),
     );
+  }
+
+  // the "Overworld options …" dialog (owoptionsdialog.ts, ADR 0015) on tab: the reveal list's tiles drawn as the map,
+  // the entry of the tile a reveal is being added to marked (else the selected tile's)
+  openOptions(tab: OwOptionsTab = 'options'): void {
+    const tile = () => { const i = this.eventPick?.at ?? -1; return i >= 0 ? this.l1[i] : this.selected >= 0 ? this.l1[this.selected] : -1; };
+    openOwOptions(this.app, { tileImage: (t) => this.tileImage(t), selectedTile: tile }, tab);
   }
 
   // keys while the overworld is shown; false: not handled
@@ -1778,11 +1788,9 @@ export class OverworldView {
       kinds: this.pathKinds(), revealPick: (this.eventPick?.at ?? -1) >= 0 });
   }
 
-  // the mode's properties (of what is selected), under them the global settings in a section shown in every mode:
-  // "Overworld" (the game's options, the reveal list; collapsed by default, open or closed for the session). The map
-  // shown's settings are in a popover beside the map select (mapPop, ADR 0015)
-  private overworldOpen = false;
-  private revealListOpen = false;
+  // the mode's properties (of what is selected). What concerns the whole map or overworld is out of the side panel
+  // (ADR 0015): the map shown's settings in a popover beside the map select (mapPop), the overworld's options and
+  // reveal list in the "Overworld options…" dialog (openOptions)
   buildProps(): void {
     // (Paint hidden while a level tile, star or pipe is selected; shown again: drawn at its width, scrolled where it was)
     const hide = this.paintHidden();
@@ -1797,51 +1805,7 @@ export class OverworldView {
         this.selected >= 0 ? this.tileInfo(this.selected) : emptyState(this.mode === 'l1' ? 'Click a level tile on the map, or any tile with Alt/Ctrl+click.'
           : 'Select a tile – a level tile too – with Alt/Ctrl+click on the map.'),
         ...links ? [links] : [], ...this.mode === 'l1' ? [this.linkLegend()] : []];
-    const ow = h('details', { class: 'ow-section', open: this.overworldOpen, ontoggle: () => (this.overworldOpen = ow.open) },
-      h('summary', { title: 'The settings of the whole overworld' }, 'Overworld'),
-      this.optionsPanel(), this.revealList());
-    this.props.replaceChildren(...own, ow);
-  }
-
-  // the game's overworld options (Lunar Magic's "Extra Options", core/owoptions.ts): each switch one ROM edit
-  private optionsPanel(): HTMLElement {
-    const rom = this.app.rom;
-    const rows: HTMLElement[] = [];
-    for (const o of OW_OPTIONS) {
-      if (o.sub && owOptionValue(rom, o.sub.of) !== o.sub.when) continue;
-      const v = owOptionValue(rom, o.id);
-      if (v === null) { rows.push(h('div', { class: 'row hint warn-text', title: o.title }, `⚠ ${o.label}: its code was changed by a patch`)); continue; }
-      // (the path fade: BOWSIE re-inserted with or without MaxTile; refused when that fails)
-      const c = checkbox(o.label, o.title, v, (on) => {
-        try {
-          const warnings = this.app.romEdit(`${o.label}: ${on ? 'on' : 'off'}`, () => { setOwOption(rom, o.id, on); return o.id === 'pathFade' ? syncBowsieMaxTile(rom) : []; });
-          if (warnings.length) toast(warnings.join(' '));
-        } catch (e) { refusedToast(rom, e); this.buildProps(); }
-      });
-      if (o.needs && owOptionValue(rom, o.needs) === false) {
-        c.querySelector('input')!.disabled = true;
-        c.title += ` – no effect while "${owOption(o.needs).label}" is off`;
-      }
-      if (o.sub) c.classList.add('ow-option-sub');
-      rows.push(c);
-      const speed = o.id === 'pathFade' ? revealSpeed(rom) : null;
-      if (speed !== null) {
-        const inp = hexInput(speed, 2, (n) => this.app.romEdit('Path reveal speed', () => setRevealSpeed(rom, n)), MAX_REVEAL_SPEED, (n) => n >= 1 || 'at least 1');
-        inp.title = `How fast each step of an event's path appears: added to a counter every frame, a step at 40 (${DEFAULT_REVEAL_SPEED.toString(16).toUpperCase()}: Lunar Magic's default; 40: a step every 3 frames)`;
-        rows.push(h('div', { class: 'prop ow-option-sub' }, h('label', null, 'Path reveal speed'), inp));
-      }
-    }
-    // the game's lightning (color 4·7), per submap: each one ROM edit of the same byte
-    if (submapLightning(rom, 0) === null) rows.push(h('div', { class: 'row hint warn-text', title: LIGHTNING_TITLE }, '⚠ Lightning: its code was changed by a patch'));
-    else {
-      rows.push(h('div', { class: 'row hint' }, 'Lightning (color 4·7) on'));
-      MAP_NAMES.forEach((name, m) => {
-        const c = checkbox(name, LIGHTNING_TITLE, !!submapLightning(rom, m), (on) => this.app.romEdit(lightningEditLabel(name, on), () => setSubmapLightning(rom, m, on)));
-        c.classList.add('ow-option-sub');
-        rows.push(c);
-      });
-    }
-    return h('div', { class: 'ow-info' }, h('div', { class: 'hint' }, 'Options · the game\'s switches'), ...rows);
+    this.props.replaceChildren(...own);
   }
 
   // the settings of the map shown, in the popover from "⚙" beside the map select (ADR 0015): its song (one ROM edit),
@@ -1915,23 +1879,6 @@ export class OverworldView {
     if (r) this.drawL1Tile(px, owTileCaches(r).l1, t, 0, 0, 16, 16);
     ctx.putImageData(id, 0, 0);
     return c;
-  }
-
-  // the overworld's reveal list (Lunar Magic's "Edit Reveal Tile List"): which tile a revealed tile becomes; the
-  // selected tile's entry marked
-  revealList(): HTMLElement {
-    const rom = this.app.rom, list = readRevealList(rom), sel = this.selected >= 0 ? this.l1[this.selected] : -1;
-    const set = (k: number, p: { from?: number; to?: number }) =>
-      this.app.romEdit('Reveal list', () => writeRevealList(rom, list.map((q, n) => (n === k ? { ...q, ...p } : q))));
-    const last = (t: number) => { for (let k = list.length - 1; k >= 0; k--) if (list[k].from === t) return k; return -1; };
-    const d = h('details', { class: 'ow-reveals', open: this.revealListOpen, ontoggle: () => (this.revealListOpen = d.open) },
-      h('summary', null, 'Reveal list', h('span', { class: 'hint' }, ' · which tile a revealed tile becomes')),
-      h('div', { class: 'ow-reveal-rows' }, ...list.map((p, k) => h('div', {
-        class: `row ow-reveal${k === last(sel) ? ' current' : ''}`,
-        title: last(p.from) !== k ? `Tile ${hex(p.from, 2)} has a later entry: this one is not used` : `A tile ${hex(p.from, 2)} an event reveals becomes ${hex(p.to, 2)}`,
-      }, this.tileImage(p.from), hexInput(p.from, 2, (v) => set(k, { from: v })), '→', this.tileImage(p.to), hexInput(p.to, 2, (v) => set(k, { to: v })),
-      last(p.from) !== k ? h('span', { class: 'hint warn-text' }, '⚠') : null))));
-    return d;
   }
 
   // the level tile at i: the level it enters (chosen from the levels; the translevel only shown), its name

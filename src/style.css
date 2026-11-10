@@ -417,11 +417,8 @@ canvas.sheet-fill { width: 100%; height: auto; image-rendering: auto; }
 .ow-pick-body { display: flex; flex-direction: column; gap: 6px; }
 .ow-pick { width: 512px; max-width: 100%; aspect-ratio: 1; image-rendering: pixelated; cursor: crosshair; border: 1px solid var(--border); }
 /* the overworld's global settings under the mode's properties (overworld.ts buildProps): "Overworld" */
-.ow-section { margin-top: 10px; border-top: 1px solid var(--border); padding-top: 6px; }
-.ow-section > summary { cursor: pointer; font-weight: 600; text-transform: uppercase; font-size: 11px; letter-spacing: .06em; color: var(--muted); margin-bottom: 6px; }
-.ow-section > summary .hint { text-transform: none; letter-spacing: 0; font-weight: 400; }
-.ow-reveals { margin-top: 8px; }
-.ow-reveals summary { cursor: pointer; }
+.ow-options { width: 380px; max-width: 100%; display: flex; flex-direction: column; gap: 8px; }
+.ow-options-content { max-height: 60vh; overflow: auto; }
 .ow-reveal-rows { display: flex; flex-direction: column; gap: 2px; margin-top: 4px; }
 .ow-reveal { gap: 4px; padding: 1px 2px; border-radius: 4px; }
 .ow-reveal.current { background: rgba(76,194,255,0.18); }

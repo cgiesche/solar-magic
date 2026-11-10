@@ -212,6 +212,10 @@ function buildUi(app: App): { start: (at: NavLoc | null) => Promise<void> } {
       { label: 'Secondary entrances …', onClick: () => openEntrancesDialog(app) },
       { label: 'Message boxes', title: 'Edit the level\'s two messages (those of its overworld level) and Yoshi\'s thank-you beside the level (also: double click a message box)', onClick: () => app.openMessages(levelMessages(app), 1) },
     ] },
+    { label: 'Overworld', disabled: () => workspace !== 'ow' || !!owLocked, items: [
+      { label: 'Overworld options …', title: 'The settings of the whole overworld: the game\'s overworld options (Lunar Magic\'s Extra Options)', onClick: () => ow?.openOptions() },
+      { label: 'Reveal list …', title: 'Which tile a tile an event reveals becomes (Lunar Magic\'s Edit Reveal Tile List)', onClick: () => ow?.openOptions('reveals') },
+    ] },
     { label: 'ROM', items: [
       { label: 'ROM information …', onClick: () => openRomInfo(app) },
       { label: 'Expand ROM …', disabled: () => app.rom.size >= 0x400000, onClick: () => openExpandDialog(app) },

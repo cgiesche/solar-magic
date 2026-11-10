@@ -381,7 +381,7 @@ export class PaletteTab implements WsPanel {
         : this.animatedColor(i) ? h('div', { class: 'warn-box' }, fixed
           ? `Animated: the game rewrites this color as the ${this.t.where} loads (emulated). A change here is barely or not at all visible in the game.`
           : 'Animated: the game keeps rewriting this color (flashing coins, ?-blocks etc.). A change here is barely or not at all visible in the game.') : '',
-      this.fadedColor(i) ? h('div', { class: 'warn-box' }, 'The event path fade rewrites this color while a path fades in (the overworld editor\'s Overworld section: "Event path fade effect").') : '',
+      this.fadedColor(i) ? h('div', { class: 'warn-box' }, 'The event path fade rewrites this color while a path fades in (the overworld editor\'s Overworld options … dialog: "Event path fade effect").') : '',
     );
     if (!editable) {
       d.append(
@@ -427,7 +427,7 @@ export class PaletteTab implements WsPanel {
     if (this.fixed !== null) {
       // (with the fade off, or its code a patch's, nothing is known to rewrite them)
       if (pathFadeColors(app.rom).size) {
-        box.append(h('p', { class: 'hint' }, 'Colors marked in the lower left corner are rewritten while an event\'s path fades in (the overworld editor\'s Overworld section: '
+        box.append(h('p', { class: 'hint' }, 'Colors marked in the lower left corner are rewritten while an event\'s path fades in (the overworld editor\'s Overworld options … dialog: '
           + '"Event path fade effect"): tiles drawn in them change color then.'));
       }
       return;
