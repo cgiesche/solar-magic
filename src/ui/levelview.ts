@@ -93,7 +93,8 @@ export class LevelView {
     });
     app.on('render', () => { this.updateLevelImage(); this.updateStats(); });
     app.on('anim-frame', () => { this.updateLevelImage(false); });
-    app.on('change', () => { this.paint(); this.updateStats(); });
+    // (painted once per display frame: a drag step renders and changes, the mouse moves, #452)
+    app.on('change', () => { this.requestPaint(); this.updateStats(); });
     app.on('reveal', () => this.scrollToTile(app.reveal.x >> 4, app.reveal.y >> 4));
     app.on('sprites', () => this.requestPaint());
     app.on('sprite-mem', () => { this.requestPaint(); this.updateStats(); });
@@ -147,21 +148,27 @@ export class LevelView {
     if (relayout) this.layout(); else this.requestPaint();
   }
 
+  // the scroll area sized to the level, the canvas to the view: painted at once when that cleared it (its size
+  // changed), else with the next display frame
   layout(): void {
     const im = this.app.images;
     if (!im) return;
     const z = this.app.view.zoom;
-    this.sizer.style.width = `${im.width * z}px`;
-    this.sizer.style.height = `${im.height * z}px`;
+    const sw = `${im.width * z}px`, sh = `${im.height * z}px`;
+    if (this.sizer.style.width !== sw) this.sizer.style.width = sw;
+    if (this.sizer.style.height !== sh) this.sizer.style.height = sh;
     const dpr = window.devicePixelRatio || 1;
     const w = this.scroller.clientWidth, hh = this.scroller.clientHeight;
-    this.canvas.style.width = `${w}px`;
-    this.canvas.style.height = `${hh}px`;
-    this.canvas.width = Math.floor(w * dpr);
-    this.canvas.height = Math.floor(hh * dpr);
+    const cw = Math.floor(w * dpr), ch = Math.floor(hh * dpr);
+    if (this.canvas.style.width !== `${w}px`) this.canvas.style.width = `${w}px`;
+    if (this.canvas.style.height !== `${hh}px`) this.canvas.style.height = `${hh}px`;
+    if (this.canvas.width === cw && this.canvas.height === ch) { this.requestPaint(); return; }
+    this.canvas.width = cw;
+    this.canvas.height = ch;
     this.paint();
   }
 
+  // painted with the next display frame (once, however often asked before)
   requestPaint(): void {
     if (this.pendingFrame) return;
     this.pendingFrame = requestAnimationFrame(() => { this.pendingFrame = 0; this.paint(); });
@@ -216,9 +223,11 @@ export class LevelView {
   }
 
   // ---------------- painting ----------------
+  // painted now (a paint requested for the next display frame is then not needed)
   paint(): void {
     const app = this.app;
     if (!app.images) return;
+    if (this.pendingFrame) { cancelAnimationFrame(this.pendingFrame); this.pendingFrame = 0; }
     const ctx = this.ctx;
     const dpr = window.devicePixelRatio || 1;
     const z = app.view.zoom * dpr;
