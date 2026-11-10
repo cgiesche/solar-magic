@@ -25,6 +25,7 @@ export interface MemHook {
   onVramWrite?(addr: number): void; // a VRAM byte written (through its port, a DMA's too)
   onCgramWrite?(addr: number): void; // a CGRAM byte written
   onVideoRead?(): void; // VRAM, CGRAM or OAM read through its port
+  onVramRead?(addr: number): void; // a VRAM byte read into the port's latch as its address is set
 }
 
 // several hooks as one, each called in turn
@@ -34,7 +35,7 @@ export function joinHooks(...hooks: MemHook[]): MemHook {
     return fs.length ? (...a: number[]) => { for (const f of fs) f(...a); } : undefined;
   };
   return { onRomRead: all('onRomRead'), onWramWrite: all('onWramWrite'), onWramRead: all('onWramRead'), onOverlayRead: all('onOverlayRead'),
-    onVramWrite: all('onVramWrite'), onCgramWrite: all('onCgramWrite'), onVideoRead: all('onVideoRead') };
+    onVramWrite: all('onVramWrite'), onCgramWrite: all('onCgramWrite'), onVideoRead: all('onVideoRead'), onVramRead: all('onVramRead') };
 }
 
 export interface SnesState {
@@ -71,6 +72,7 @@ export class Snes implements Bus {
   hook: MemHook | null = null;
   romReads: RomReads | null = null; // records the ROM reads (see romdeps.ts)
   romSkip = new Set<number>(); // ROM offsets whose reads aren't recorded
+  sramWrites = 0; // SRAM bytes written since power-on, counted (not part of the state: loadframes.ts)
   romSkipMask: Uint8Array | null = null; // the same per byte (1 = not recorded), e.g. GFX file data
   romMasked: RomReads | null = null; // when set: records the reads romSkipMask leaves out
   // data provenance tracking (ROM offset each WRAM/CGRAM byte was copied from, see trackSources)
@@ -233,6 +235,7 @@ export class Snes implements Bus {
     if (off >= 0x8000) return; // ROM
     if (b >= 0x70 && b < 0x7e) {
       this.sram[off & 0x7fff] = v;
+      this.sramWrites++;
       return;
     }
     if (b < 0x40) {
@@ -419,6 +422,7 @@ export class Snes implements Bus {
 
   vramPrefetchLoad(): void {
     const m = this.vramAddrMapped() & 0x7fff;
+    if (this.hook?.onVramRead) { this.hook.onVramRead(m * 2); this.hook.onVramRead(m * 2 + 1); }
     this.vreadLatch = this.vram[m * 2] | (this.vram[m * 2 + 1] << 8);
   }
 

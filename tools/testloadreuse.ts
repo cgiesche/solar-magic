@@ -3,12 +3,19 @@
 // - every load is exactly a whole load on an emulator without reuse: the LevelRender (WRAM, VRAM, CGRAM, the PPU
 //   registers, the objects' tiles, the frames) and the console's state after it
 // - the same input again: no frame emulated
+// - every object of 105 moved a tile as a drag's steps: few frames emulated; the ROM bytes the load counts as read
+//   (recordAll, what App.refresh keeps its render by) cover all a whole load reads
+// - other kinds of levels (layer 2 BG, vertical, layer 2 objects, layer 3, tides): objects of both layers moved and
+//   deleted, sprites moved, the header changed
+// - another level loaded in between; a ROM byte the load read changed, and changed back
+// - reuse off: every frame emulated
 // node tools/testloadreuse.ts
 import { LevelEmulator, type LevelRender } from '../src/core/levelemu.ts';
 import { Rom } from '../src/core/rom.ts';
 import { loadLevel, type Level } from '../src/core/level.ts';
 import { levelOverride } from '../src/core/levelusage.ts';
 import type { SnesState } from '../src/core/snes.ts';
+import { PAGE_SHIFT, type RomReads } from '../src/core/romdeps.ts';
 import { FG_PALS, PAL_SIZE } from '../src/core/sharedpal.ts';
 import { editorImage } from './fixture.ts';
 
@@ -36,6 +43,12 @@ function differs(a: LevelRender, sa: SnesState, b: LevelRender, sb: SnesState): 
   }
   return out.join(', ');
 }
+// the first ROM read of b that a doesn't record ('' when a covers all)
+function uncoveredReads(a: RomReads, b: RomReads): string {
+  for (let p = 0; p < b.pages.length; p++) if (b.pages[p] && !a.pages[p]) return `page ${p.toString(16)}`;
+  for (const o of b.bytes) if (!a.bytes.has(o) && !a.pages[o >> PAGE_SHIFT]) return `byte ${o.toString(16)}`;
+  return '';
+}
 // loads lv on both emulators: what differs, and how many frames the reusing one emulated
 function load(lv: Level): { diff: string; emulated: number; frames: number } {
   const ov = levelOverride(rom, lv);
@@ -60,13 +73,22 @@ function load(lv: Level): { diff: string; emulated: number; frames: number } {
   load(lv);
   const counts: number[] = [];
   let wrong = '';
-  for (const o of lv.objects) {
+  let uncovered = '';
+  for (const [i, o] of lv.objects.entries()) {
     o.x++;
     const r = load(lv);
+    if (i % 5 === 0 && !uncovered) {
+      // (the move loaded again from the load before it, its ROM reads recorded as App.refresh does)
+      o.x--; emu.load(0x105, levelOverride(rom, lv)); o.x++;
+      const ov = levelOverride(rom, lv), a = emu.recordAll(() => emu.load(0x105, ov)).reads, b = whole.recordAll(() => whole.load(0x105, ov)).reads;
+      const missing = uncoveredReads(a, b);
+      if (missing) uncovered = `object ${i}: ${missing}`;
+    }
     o.x--;
     if (r.diff && !wrong) wrong = `${o.num.toString(16)}/${o.ext.toString(16)} at ${o.x},${o.y}: ${r.diff}`;
     counts.push(r.emulated);
   }
+  check(!uncovered, `105: the ROM bytes a move's load counts as read cover a whole load's ${uncovered}`);
   const sorted = counts.slice().sort((a, b) => a - b), median = sorted[sorted.length >> 1];
   check(!wrong, `105: each of its ${lv.objects.length} objects moved a tile, every load the same as a whole load ${wrong}`);
   check(median <= 8, `105: a move emulates few frames (median ${median}, most ${sorted.at(-1)} of ${load(lv).frames})`);
