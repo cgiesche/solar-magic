@@ -1,7 +1,8 @@
 // A level's name in the properties of its level tile (overworld): typed as text (Lunar Magic's table, `\XX` for a
 // tile without a character, its MultiChar tiles for "YELLOW" and " ILLUSI" when chosen), previewed in place on the
 // overworld's border as the map shown has it in VRAM – a character the font lacks is marked there and in a note, a
-// name too long is refused. Enter or leaving the field writes it: one ROM edit.
+// name too long is refused. Enter or leaving the field writes it: one ROM edit. The map font's character table is a
+// popover at the field while it has the focus (ADR 0015, #462): a click types a character at the caret.
 
 import type { App } from './app.ts';
 import { h, checkbox } from './dom.ts';
@@ -11,6 +12,8 @@ import { translevelToLevel } from '../core/overworld.ts';
 import { TileCache, blit8 } from '../core/render.ts';
 import { levelNameTiles, setLevelNameTiles, decodeName, encodeName, tileChar, tileEscape, NAME_LEN, NAME_VRAM, NAME_ATTR, NAME_SPACE, type EncodedName } from '../core/levelnames.ts';
 import { boolPref } from './prefs.ts';
+import { closeMenus } from './menu.ts';
+import { placeLabel } from './owlevelname.ts';
 
 const COLS = 32, ROWS = 3, FIRST_ROW = 3; // the border's rows shown: the name's (4) with the one above and below
 const W = COLS * 8, H = ROWS * 8;
@@ -65,14 +68,14 @@ export function levelNameField(app: App, tl: number, r: OwRender | null, edit = 
   const rom = app.rom;
   const text = () => decodeName(levelNameTiles(rom, tl), multiChar);
   const input = h('input', { type: 'text', class: 'ln-input', spellcheck: false, autocomplete: 'off', value: text(), 'aria-label': 'Level name',
-    title: `The name the overworld's border shows while Mario stands here: up to ${NAME_LEN} tiles; \\XX types tile XX (a click on the font below)` });
+    title: `The name the overworld's border shows while Mario stands here: up to ${NAME_LEN} tiles; \\XX types tile XX (or a click on the map's font, shown while typing)` });
   const canvas = h('canvas', { width: W, height: H, class: 'ln-border', title: 'As the overworld\'s border shows it (this map\'s font)' });
   const note = h('div', { class: 'hint' });
   let enc: EncodedName = encodeName(input.value, multiChar);
   const problem = (): string => {
     const m = [...new Set(enc.missing.map((x) => x.ch))];
     return [
-      m.length ? `The font has no ${m.map((x) => `“${x}”`).join(' ')} (marked) – \\XX types a tile by number, or click one below` : '',
+      m.length ? `The font has no ${m.map((x) => `“${x}”`).join(' ')} (marked) – \\XX types a tile by number, or click one in the font at the field` : '',
       enc.tiles.length > NAME_LEN ? `${enc.tiles.length - NAME_LEN} tile${enc.tiles.length - NAME_LEN > 1 ? 's' : ''} too long (${NAME_LEN} fit)` : '',
     ].filter(Boolean).join('. ');
   };
@@ -92,13 +95,21 @@ export function levelNameField(app: App, tl: number, r: OwRender | null, edit = 
   };
   input.addEventListener('input', update);
   input.addEventListener('change', commit);
+  const chars = charTable(input, note, r, (t) => {
+    const ch = tileChar(t) ?? tileEscape(t), a = input.selectionStart ?? input.value.length, b = input.selectionEnd ?? a;
+    input.value = input.value.slice(0, a) + ch + input.value.slice(b);
+    input.setSelectionRange(a + ch.length, a + ch.length);
+    update();
+  });
   input.addEventListener('keydown', (e) => {
     if (e.key === 'Enter') { e.preventDefault(); commit(); }
+    // (Esc layered: the character table closed first, the field keeps the focus; then the typing undone)
+    if (e.key === 'Escape' && chars.close()) { e.preventDefault(); e.stopPropagation(); return; }
     if (e.key === 'Escape') { e.preventDefault(); input.value = text(); update(); input.blur(); }
   });
   update();
   return [
-    h('div', { class: 'prop' }, h('label', null, 'Name'), input),
+    h('div', { class: 'prop' }, h('label', null, 'Name'), input, chars.box),
     canvas,
     note,
     h('div', { class: 'row' },
@@ -107,19 +118,51 @@ export function levelNameField(app: App, tl: number, r: OwRender | null, edit = 
         if (!enc.missing.length) input.value = decodeName(enc.tiles, on);
         update();
       })),
-    r ? fontPicker(r, (t) => {
-      const ch = tileChar(t) ?? tileEscape(t), a = input.selectionStart ?? input.value.length, b = input.selectionEnd ?? a;
-      input.value = input.value.slice(0, a) + ch + input.value.slice(b);
-      input.setSelectionRange(a + ch.length, a + ch.length);
-      input.focus();
-      update();
-    }) : h('div', { class: 'hint' }, 'The font is shown once the map is loaded.'),
   ];
+}
+
+// the map's font as a popover at the name field (fixed: out of the side panel's scrolling), shown while the field has
+// the focus – under it and its preview down to `last` (the preview stays seen while typing), above the field where
+// there is no room below; none while the field is scrolled out of its panel. A click types a character and the focus
+// stays in the field. close(): false when it was not shown
+function charTable(input: HTMLInputElement, last: HTMLElement, r: OwRender | null, pick: (t: number) => void): { box: HTMLElement; close: () => boolean } {
+  const box = h('div', { class: 'popover ln-chars', role: 'dialog', 'aria-label': 'The map\'s font: a click types a character', hidden: true },
+    r ? fontPicker(r, pick) : h('div', { class: 'hint' }, 'The font is shown once the map is loaded.'));
+  // (a click in it beside the font: the focus stays in the field too)
+  box.addEventListener('mousedown', (e) => e.preventDefault());
+  const place = () => {
+    if (!input.isConnected || document.activeElement !== input) { close(); return; }
+    const f = input.getBoundingClientRect(), clip = (input.closest('.props') ?? document.documentElement).getBoundingClientRect();
+    const seen = f.bottom > clip.top && f.top < clip.bottom;
+    const at = seen ? placeLabel({ x: f.left, y: f.top, w: f.width, h: Math.max(f.height, last.getBoundingClientRect().bottom - f.top) }, box.offsetWidth, box.offsetHeight, { x: 0, y: 0, w: window.innerWidth, h: window.innerHeight }, 3) : null;
+    box.style.visibility = at ? '' : 'hidden';
+    if (at) { box.style.left = `${at.x}px`; box.style.top = `${at.y}px`; }
+  };
+  const open = () => {
+    if (!box.hidden) return;
+    closeMenus(); // (one popover at a time)
+    box.hidden = false;
+    place();
+    window.addEventListener('scroll', place, true);
+    window.addEventListener('resize', place);
+  };
+  const close = (): boolean => {
+    if (box.hidden) return false;
+    box.hidden = true;
+    window.removeEventListener('scroll', place, true);
+    window.removeEventListener('resize', place);
+    return true;
+  };
+  input.addEventListener('focus', open);
+  input.addEventListener('blur', () => close());
+  // (closed by Esc: a click in the field shows it again)
+  input.addEventListener('mousedown', () => { if (document.activeElement === input) open(); });
+  return { box, close };
 }
 
 // the map's font, 16 × 16 tiles; a click types one
 function fontPicker(r: OwRender, pick: (t: number) => void): HTMLCanvasElement {
-  const c = h('canvas', { width: 16 * 8, height: (FONT_TILES / 16) * 8, class: 'msg-font' });
+  const c = h('canvas', { width: 16 * 8, height: (FONT_TILES / 16) * 8, class: 'msg-font ln-font' });
   const ctx = c.getContext('2d')!, img = ctx.createImageData(c.width, c.height), px = new Uint32Array(img.data.buffer).fill(0xff000000);
   const g = nameFont(r);
   for (let k = 0; k < FONT_TILES; k++) blit8(px, c.width, c.height, g(k), (k & 15) * 8, (k >> 4) * 8);

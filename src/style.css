@@ -439,6 +439,10 @@ canvas.sheet-fill { width: 100%; height: auto; image-rendering: auto; }
 .ln-input { flex: 1; min-width: 0; font-family: monospace; }
 .ln-input.bad { border-color: var(--warn, #e05050); }
 .ln-border { display: block; width: 100%; image-rendering: pixelated; border: 1px solid var(--border); }
+/* the map font's character table: a popover at the name field while it has the focus (levelnamefield.ts, ADR 0015) */
+.ln-chars { position: fixed; top: 0; left: 0; min-width: 0; }
+.ln-chars[hidden] { display: none; }
+.msg-font.ln-font { width: 256px; max-width: calc(100vw - 48px); }
 .level-item { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .level-item .lname { font-family: system-ui, sans-serif; font-size: 11px; color: var(--muted); }
 .level-item.current .lname { color: #dfefff; }
