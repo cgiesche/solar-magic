@@ -46,14 +46,18 @@ type Source = { kind: LinkKind | 'koopa'; why?: undefined } | { kind: null; why:
 export type OffMapEnd = { i: number; text: string; link: OwLink | null; there: OwTile };
 
 const COLORS = { star: '#c58cff', exit: '#ff6b6b', location: '#4cc2ff', koopa: '#ffa94c' };
-// what each colour of the link marks and arrows means: the legend's rows (the "?" popover, ADR 0015), the words the
-// status bar starts a hovered mark's meaning with (markText); dashed: its arrows dashed (from the tiles it belongs to)
-export const LINK_LEGEND: { color: string; text: string; dashed: boolean }[] = [
-  { color: COLORS.star, text: 'Star / pipe', dashed: false },
-  { color: COLORS.exit, text: 'Exit path to another submap', dashed: false },
-  { color: COLORS.location, text: 'Location an exit to the overworld teleports to', dashed: true },
-  { color: COLORS.koopa, text: 'Where a Koopa Kid puts Mario', dashed: true },
-];
+// what each colour of the link marks and arrows means, by kind: the legend's rows (the "?" popover, ADR 0015), the
+// words the status bar starts a hovered mark's meaning with (markText); dashed: its arrows dashed (from the tiles it
+// belongs to)
+type LegendKind = keyof typeof COLORS;
+export const LINK_LEGEND: Record<LegendKind, { color: string; text: string; dashed: boolean }> = {
+  star: { color: COLORS.star, text: 'Star / pipe', dashed: false },
+  exit: { color: COLORS.exit, text: 'Exit path to another submap', dashed: false },
+  location: { color: COLORS.location, text: 'Location an exit to the overworld teleports to', dashed: true },
+  koopa: { color: COLORS.koopa, text: 'Where a Koopa Kid puts Mario', dashed: true },
+};
+// the legend kind of a link mark: its colour and words
+const markKind = (m: LinkMark): LegendKind => m.kind === 'link' ? m.link.kind : m.kind === 'location' ? 'location' : 'koopa';
 export const LINK_ARROWS_HINT = 'One head: one-way, two heads: both ways.';
 const center = (t: { x: number; y: number }) => ({ x: t.x * 16 + 8, y: t.y * 16 + 8 });
 
@@ -102,32 +106,37 @@ export class LinkLayer {
   }
 
   // what ends at each layer 1 cell of the map shown (owlinks.ts linkMarks): objects there, left alone by painting
-  private marksOf: { gen: number; l1: ArrayLike<number>; marks: Map<number, LinkMark[]>; cells: Set<number> } | null = null;
-  private ends(): NonNullable<LinkLayer['marksOf']> {
+  private endsOf: { gen: number; l1: ArrayLike<number>; marks: Map<number, LinkMark[]>; cells: Set<number> } | null = null;
+  private endsHere(): NonNullable<LinkLayer['endsOf']> {
     const gen = this.rom.gen, l1 = this.view.shown.l1;
-    if (this.marksOf?.gen !== gen || this.marksOf.l1 !== l1) {
+    if (this.endsOf?.gen !== gen || this.endsOf.l1 !== l1) {
       const marks = linkMarks(this.rom, l1, this.info().links);
-      this.marksOf = { gen, l1, marks, cells: new Set(marks.keys()) };
+      this.endsOf = { gen, l1, marks, cells: new Set(marks.keys()) };
     }
-    return this.marksOf;
+    return this.endsOf;
   }
-  private linkMarks(): Map<number, LinkMark[]> { return this.ends().marks; }
   // the layer 1 cells link ends are at on the map shown
-  cells(): ReadonlySet<number> { return this.ends().cells; }
-  // what the marks at cell i (l1Index) mean, for the status bar while it is hovered (ADR 0015): "Star / pipe to Donut
-  // Plains 03,04 and back", "Where Koopa Kid 1 puts Mario"; '' nothing ends there
+  cells(): ReadonlySet<number> { return this.endsHere().cells; }
+  // what the marks at cell i (l1Index) mean, for the status bar while it is hovered (ADR 0015): "Star / pipe: both ways
+  // with Vanilla Dome 03,0B", "Location an exit to the overworld teleports to: of level 105", "Where Koopa Kid 1 puts
+  // Mario"; '' nothing ends there
   markText(i: number): string {
     const words = (m: LinkMark): string => {
+      const name = LINK_LEGEND[markKind(m)].text;
       if (m.kind === 'link') {
-        const l = m.link, name = LINK_LEGEND[l.kind === 'star' ? 0 : 1].text, from = this.endsAt(l.a, i), other = from ? l.b : l.a;
+        // (the end at this cell: a link both of whose ends are here reads from a)
+        const l = m.link, from = this.index(l.a) === i, other = from ? l.b : l.a;
         return `${name}: ${l.both ? 'both ways with' : from ? 'leads to' : 'leads here from'} ${tileText(other)}`;
       }
-      if (m.kind === 'location') return `${LINK_LEGEND[2].text} (set in the level's entrance)`;
-      const p = koopaTeleport(this.rom, m.k);
+      if (m.kind === 'location') {
+        const levels = this.locationLevels(m.i);
+        return `${name}: of level${levels.length > 1 ? 's' : ''} ${levels.map((l) => hex(l, 3)).join(', ')} (set in the level's entrance)`;
+      }
+      const p = koopaTeleport(this.rom, m.k)!; // (a Koopa Kid's tile is a mark only with a place)
       return m.kind === 'koopaPlace' ? `Where Koopa Kid ${m.k + 1} puts Mario (losing to it)`
-        : `Koopa Kid ${m.k + 1}'s tile: losing to it puts Mario at ${p ? `${hex(p.x, 2)},${hex(p.y, 2)}` : 'no place'}`;
+        : `Koopa Kid ${m.k + 1}'s tile: losing to it puts Mario at ${tileText({ submap: this.view.submapAt(i), ...p })}`;
     };
-    return [...new Set((this.linkMarks().get(i) ?? []).map(words))].join(' · ');
+    return [...new Set((this.endsHere().marks.get(i) ?? []).map(words))].join(' · ');
   }
 
   // ---- tiles ----
@@ -282,10 +291,10 @@ export class LinkLayer {
   // a small dot of its kind's colour in the top right corner of each cell a link ends at (the region shown; a Koopa
   // Kid's before the others)
   private marks(ctx: CanvasRenderingContext2D, lw: number): void {
-    const dots = new Map<number, string>(), color = (m: LinkMark) => m.kind === 'link' ? COLORS[m.link.kind] : m.kind === 'location' ? COLORS.location : COLORS.koopa;
-    for (const [i, ms] of this.linkMarks()) {
+    const dots = new Map<number, string>();
+    for (const [i, ms] of this.endsHere().marks) {
       if (i >> 10 !== this.view.region) continue;
-      dots.set(i, color(ms.find((m) => m.kind === 'koopaTile' || m.kind === 'koopaPlace') ?? ms[0]));
+      dots.set(i, COLORS[markKind(ms.find((m) => markKind(m) === 'koopa') ?? ms[0])]);
     }
     for (const [i, c] of dots) {
       const { x, y } = l1XY(i);

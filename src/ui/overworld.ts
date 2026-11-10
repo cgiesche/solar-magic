@@ -62,7 +62,7 @@ import { popover } from './popover.ts';
 import { musicPlayer, submapMusicLabel } from './musicplayer.ts';
 import type { Rom } from '../core/rom.ts';
 import { ReachLayer } from './owreachview.ts';
-import { ExitArrowLayer } from './owexitarrows.ts';
+import { ExitArrowLayer, EXIT_LEGEND } from './owexitarrows.ts';
 import { WorldCheck } from './worldcheck.ts';
 import { layerStrengths, isLayerMode, type OwMode, type LayerStrengths } from '../core/owlayers.ts';
 import { owOptionValue, revealStepFrames } from '../core/owoptions.ts';
@@ -1875,26 +1875,29 @@ export class OverworldView {
   }
 
   // the legend, in the popover from "?" beside View and zoom (ADR 0015; a hovered mark's meaning is in the status bar):
-  // the path marks, what the overworld links' marks and arrows mean, the tables' budgets (what it reads watched: drawn
+  // the path marks, what the overworld links' marks and arrows and the exits' arrows mean, the tables' budgets (what it reads watched: drawn
   // again after undo/redo)
   private readonly legendPop = popover('?', 'Legend: what the marks on the map mean (a mark hovered: its meaning in the status bar)', () => this.watch.add(() => this.legend()));
   private legend(): HTMLElement {
     const row = (sym: HTMLElement, text: string) => h('div', { class: 'row' }, sym, text);
     const line = (color: string, dashed: boolean) => h('span', { class: 'ow-legend', style: `border-top: 2px ${dashed ? 'dashed' : 'solid'} ${color}` });
+    // (drawn at twice its size, shown at 16 pixels: sharp on a high density screen)
     const mark = (k: PathKind) => {
       const c = h('canvas', { width: 32, height: 32, class: 'ow-legend-mark' }), ctx = c.getContext('2d')!;
       ctx.scale(2, 2);
       drawPathMark(ctx, k, 0, 0, 0.5, []);
       return c;
     };
-    const kinds: PathKind[] = ['walk', 'climb', 'swim', 'exit', 'stop', 'warp'];
+    const kinds = (Object.keys(PATH_KIND_NAMES) as PathKind[]).filter(isPathKind);
     return h('div', { class: 'ow-info' },
       h('div', { class: 'gt-list-head' }, 'Path marks (layer 1)'),
       ...kinds.map((k) => row(mark(k), PATH_KIND_NAMES[k])),
       h('div', { class: 'hint' }, 'White lines: where Mario walks over the tile.'),
-      h('div', { class: 'gt-list-head' }, 'Overworld links'),
-      ...LINK_LEGEND.map((l) => row(line(l.color, l.dashed), l.text)),
+      h('div', { class: 'gt-list-head' }, 'Overworld links (layer 1)'),
+      ...Object.values(LINK_LEGEND).map((l) => row(line(l.color, l.dashed), l.text)),
       h('div', { class: 'hint' }, `A dot in a tile's corner: a link ends there. ${LINK_ARROWS_HINT}`),
+      h('div', { class: 'gt-list-head' }, 'Exit arrows (layer 1, View → Exit arrows)'),
+      ...EXIT_LEGEND.map((l) => row(line(l.color, l.dashed), l.text)),
       budgetRow('Star / pipe entries', this.budget('stars')),
       budgetRow('Exit path entries', this.budget('exitPaths')));
   }

@@ -17,6 +17,13 @@ import { levelName } from '../core/levelnames.ts';
 import { hex } from '../core/names.ts';
 
 const COLORS = { normal: '#7ee07e', secret: '#ffe14c', none: '#ff4a4a', unknown: '#9aa0a6' };
+// what the exits' arrows mean: the legend's rows (the "?" popover, ADR 0015); hovering one says its own in the status bar
+export const EXIT_LEGEND: { color: string; text: string; dashed: boolean }[] = [
+  { color: COLORS.normal, text: 'Normal exit: to the level it opens', dashed: false },
+  { color: COLORS.secret, text: 'Secret exit: to the level it opens', dashed: true },
+  { color: COLORS.none, text: 'A stub: the exit opens nothing Mario reaches', dashed: false },
+  { color: COLORS.unknown, text: 'A stub: what it opens can\'t be told (Mario doesn\'t reach the level)', dashed: true },
+];
 // the middle of layer 1 tile i (l1Index) in the map's pixels
 const center = (i: number) => { const { x, y } = l1XY(i); return { x: x * 16 + 8, y: y * 16 + 8 }; };
 type Pt = { x: number; y: number };
