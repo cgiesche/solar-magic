@@ -29,7 +29,6 @@ import { isPathKind, PATH_KIND_NAMES } from '../core/owpaths.ts';
 import { ExitGraph } from '../core/exitgraph.ts';
 import { readSecondaryEntrance, levelTranslevel } from '../core/level.ts';
 import { hex } from '../core/names.ts';
-import { tileLabel } from './owlabel.ts';
 import { stuckOnArrival, stuckOnArrivalText, ARRIVAL_RULE, type ArrivalHow } from '../core/owreach.ts';
 
 // what is selected: a link, a location (a star/pipe entry exits to the overworld teleport to), a Koopa Kid's place,
@@ -42,6 +41,9 @@ type Drag = { from: number; to: number; move: Moved | null };
 // what a tile links by: an exit path, a star/pipe link, a Koopa Kid's place; null with why it doesn't
 type Source = { kind: LinkKind | 'koopa'; why?: undefined } | { kind: null; why: string; refusal?: OwRefusalData };
 
+// a link end shown whose other end lies on another map: its tile (l1Index), the label's text, the link and the end
+export type OffMapEnd = { i: number; text: string; link: OwLink | null; there: OwTile };
+
 const COLORS = { star: '#c58cff', exit: '#ff6b6b', location: '#4cc2ff', koopa: '#ffa94c' };
 const center = (t: { x: number; y: number }) => ({ x: t.x * 16 + 8, y: t.y * 16 + 8 });
 
@@ -52,6 +54,9 @@ export class LinkLayer {
   pending: { from: OwTile } | { move: Moved } | null = null;
   both = true; // new links both ways
   show = false; // every link's arrows (View → "Link arrows"); else the selected tile's
+  // the ends of the links painted whose other end is on another map: labelled under their tile (owlevelname.ts
+  // TileLabels), with a jump there; gathered by paint, cleared by the view before it paints the map
+  offMap: OffMapEnd[] = [];
   private data: { gen: number; links: OwLink[]; uses: Map<number, number[]>; levels: Map<number, number[]> | null } | null = null;
   constructor(private view: OverworldView) {}
 
@@ -197,7 +202,7 @@ export class LinkLayer {
       const on = sel?.kind === 'link' && sel.link === l;
       if (on && moving) continue;
       if (!this.show && !on && !(at >= 0 && (this.endsAt(l.a, at) || this.endsAt(l.b, at)))) continue;
-      this.link(ctx, lw, l.a, l.b, COLORS[l.kind], l.both, on);
+      this.link(ctx, lw, l.a, l.b, COLORS[l.kind], l.both, on, l);
     }
     const teleports = readTeleports(this.rom);
     for (const [i] of uses) {
@@ -252,15 +257,18 @@ export class LinkLayer {
       ctx.stroke();
     }
   }
-  // a link's arrow; an end on the other region shown as a short arrow off its tile, labelled with where it leads
-  private link(ctx: CanvasRenderingContext2D, lw: number, a: OwTile, b: OwTile, color: string, both: boolean, on: boolean): void {
+  // a link's arrow; an end whose other end is on another map: labelled under its tile with where it leads (offMap)
+  private link(ctx: CanvasRenderingContext2D, lw: number, a: OwTile, b: OwTile, color: string, both: boolean, on: boolean, l: OwLink | null = null): void {
     if (this.shown(a) && this.shown(b)) { arrow(ctx, lw, center(a), center(b), color, both, on, false); return; }
     const [here, there, out] = this.shown(a) ? [a, b, true] : this.shown(b) ? [b, a, both] : [null, null, false];
     if (!here || !there) return;
-    const p = center(here), q = { x: p.x + 18, y: p.y - 18 };
-    if (out) arrow(ctx, lw, p, q, color, false, on, false);
-    else arrow(ctx, lw, q, p, color, false, on, false);
-    tileLabel(ctx, `${both ? '↔' : out ? '→' : '←'} ${tileText(there)}`, q.x + 1, q.y - 8);
+    const i = this.index(here), text = `${both ? '↔' : out ? '→' : '←'} ${tileText(there)}`;
+    if (!this.offMap.some((e) => e.i === i && e.text === text)) this.offMap.push({ i, text, link: l, there });
+  }
+  // the map of an off-map end's other end shown, its tile selected, the link selected (a click on its label's jump)
+  jump(e: OffMapEnd): void {
+    if (e.link) this.sel = { kind: 'link', link: e.link };
+    this.goTo(e.there);
   }
 
   // the pick pending (#348): the tiles the link dragged (or chosen to lead to a tile on another map) can lead to, where

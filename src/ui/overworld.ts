@@ -31,9 +31,9 @@ import { findL2Brush, l2BrushPalettes, l2SharedBits, l2SheetEntry, L2_SHEET_COLS
 import { mapPieces, piecesAt, replacePiece, samePiece, gridInside, l2Block, PIECE_COLS } from '../core/owl2pieces.ts';
 import { skipsRevealWalk, handledWithoutEvent } from '../core/revealwalk.ts';
 import type { OwSpriteView } from '../core/owsprites.ts';
-import { LinkLayer } from './owlinkview.ts';
+import { LinkLayer, type OffMapEnd } from './owlinkview.ts';
 import { LevelTileLayer, tilePlace } from './owlevelview.ts';
-import { LevelNameLabel } from './owlevelname.ts';
+import { TileLabels } from './owlevelname.ts';
 import { selectionHidesPaint } from './owselection.ts';
 import { ownsTranslevel, starOrPipe, starDirs, giveStarTranslevel, type StarPaths } from '../core/owstars.ts';
 import { levelsWithoutTile, type LevelTileEvent } from '../core/owleveltiles.ts';
@@ -159,7 +159,10 @@ export class OverworldView {
   showSprites = false; // the sprites also while painting (always in the sprites mode)
   sprites = new SpriteLayer(this);
   levelTiles = new LevelTileLayer(this); // the level tiles as objects on top of layer 1 (the layer 1 mode)
-  nameLabel = new LevelNameLabel(this); // the selected level tile's name under it (the layer 1 mode), display only
+  // the selected level tile's name under it (the layer 1 mode), display only, and where the links shown lead on
+  // another map (a click on a label's link symbol shows the other end)
+  nameLabel = new TileLabels(this);
+  private overJump: OffMapEnd | null = null; // the link symbol under the mouse (its label's link end)
   pathTool = new PathTool(this); // the layer 1 mode's route brush, "Path (auto)": routes dragged, their tiles chosen
   reach = new ReachLayer(this); // path validation: the tiles Mario doesn't reach dimmed
   check = new WorldCheck(this); // the World check: the status bar button, the panel of problems
@@ -281,7 +284,7 @@ export class OverworldView {
       if (this.hover?.x !== c.x || this.hover?.y !== c.y) { this.hover = c; this.updateStatus(); this.paint(); }
     });
     this.scroller.addEventListener('drop', (e) => { if (!this.levelTiles.dragged) return; e.preventDefault(); const c = this.cell(e, 16); this.levelTiles.drop(c.x, c.y); });
-    this.scroller.addEventListener('mouseleave', () => { this.cellHistory.hover(-1, 0, 0, false); this.mouse = null; if (!this.brushDrag.active) { this.hover = null; this.updateStatus(); this.paint(); } });
+    this.scroller.addEventListener('mouseleave', () => { this.cellHistory.hover(-1, 0, 0, false); this.mouse = null; this.overJump = null; if (!this.brushDrag.active) { this.hover = null; this.updateStatus(); this.paint(); } });
     window.addEventListener('mousemove', (e) => this.onMove(e));
     window.addEventListener('mouseup', (e) => this.onUp(e));
     // Q released (or the window left, its keyup never comes): the layer not painted shown again
@@ -492,6 +495,7 @@ export class OverworldView {
     ctx.setTransform(z, 0, 0, z, -sx, -sy);
     const lw = 1 / z;
     // (the map's pixels where owShownAt shows them: the submaps' region moved, wrapping)
+    this.links.offMap = [];
     for (const o of owShownCopies(this.region)) {
       ctx.save();
       ctx.beginPath();
@@ -799,6 +803,9 @@ export class OverworldView {
     if (e.target !== this.scroller && e.target !== this.canvas) return;
     const rc = this.scroller.getBoundingClientRect();
     if (e.clientX - rc.left > this.scroller.clientWidth || e.clientY - rc.top > this.scroller.clientHeight) return;
+    // a link symbol of a label under a tile: where its link leads shown
+    const jump = e.button === 0 ? this.nameLabel.jumpAt(e.clientX, e.clientY) : null;
+    if (jump) { this.links.jump(jump); return; }
     // a reveal or destroy being added: the tile clicked
     if (this.eventPick && this.eventPick.at < 0 && e.button === 0) { const p = this.cell(e, 16); this.pickEventCell(p.x, p.y); return; }
     const c = this.cell(e);
@@ -885,6 +892,8 @@ export class OverworldView {
       this.mouse = this.point(e);
       const c = this.cell(e, 16), on = c.x >= 0 && c.y >= 0 && c.x < 32 && c.y < 32;
       this.cellHistory.hover(on ? l1Index(this.region, c.x, c.y) : -1, e.clientX, e.clientY, e.buttons !== 0 || this.dragging() || !!this.sprites.drag);
+      const jump = e.buttons ? null : this.nameLabel.jumpAt(e.clientX, e.clientY);
+      if ((jump?.there ?? null) !== (this.overJump?.there ?? null)) { this.overJump = jump; this.updateStatus(); }
     }
     if (this.sprites.drag) { const p = this.point(e); this.sprites.move(p.x, p.y, e.shiftKey); return; }
     if (!inside && !this.dragging()) return;
@@ -1097,7 +1106,8 @@ export class OverworldView {
     // (a pick pending: a cell it would refuse says why)
     const refused = this.pickRefusalAtMouse();
     // (a link to a tile on another map pending: the next click on the map chooses it)
-    this.scroller.style.cursor = refused ? 'not-allowed' : this.links.pending ? 'crosshair' : '';
+    this.scroller.style.cursor = refused ? 'not-allowed' : this.links.pending ? 'crosshair' : this.overJump ? 'pointer' : '';
+    if (this.overJump && !refused) this.scroller.title = `Show ${tileText(this.overJump.there)}, the link's other end`;
     if (refused) {
       this.scroller.title = refusalText(this.app.rom, refused);
       this.statusText.textContent = `Can't pick this tile: ${refusalWords(this.app.rom, refused).reason}`;
