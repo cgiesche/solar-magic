@@ -11,7 +11,7 @@ import {
   OverworldEmulator, OverworldLoads, gameL1, translevelToLevel, l1Index, l1XY, OW_EVENTS, MAX_TRANSLEVEL, DIR_NAMES, readL1, writeL1, readTranslevels, writeTranslevels, setExitDirection, setBaseEvent, NO_EVENT,
 } from '../src/core/overworld.ts';
 import { progressSaves } from '../src/core/owprogress.ts';
-import { reach, reachInput, reachProblems, stuckProblems, walkFrom, neighbor, type ReachInput } from '../src/core/owreach.ts';
+import { reach, reachInput, reachProblems, stuckProblems, walkFrom, neighbor, hardPathCells, type ReachInput } from '../src/core/owreach.ts';
 import { stopTile } from '../src/core/worldcheck.ts';
 import { makeLink, exitEntry, readLinks, sidesMatch } from '../src/core/owlinks.ts';
 import { readExitPaths, writeExitPath, exitEntryAt } from '../src/core/owteleport.ts';
@@ -20,7 +20,7 @@ import { RAM, PAD, get16 } from '../src/core/ram.ts';
 import { ResultCache, RomFingerprint } from '../src/core/romdeps.ts';
 import { JobRunner } from '../src/core/jobrunner.ts';
 import { pathShapesJob, DX, DY } from '../src/core/owpaths.ts';
-import { editorImage, pathKinds, pathShapes } from './fixture.ts';
+import { editorImage, pathKinds, pathShapes, hardWalks } from './fixture.ts';
 
 let bad = 0;
 const check = (ok: boolean, what: string) => { console.log((ok ? 'ok   ' : 'FAIL ') + what); if (!ok) bad++; };
@@ -28,11 +28,11 @@ const hx = (v: number, n = 2) => v.toString(16).toUpperCase().padStart(n, '0');
 const at = (i: number) => { const { x, y } = l1XY(i); return `${i >> 10 ? 'submaps' : 'main'} ${hx(x)},${hx(y)}`; };
 
 const rom = new Rom(await editorImage());
-const kinds = pathKinds(rom), shapes = pathShapes(rom);
+const kinds = pathKinds(rom), shapes = pathShapes(rom), hard = hardWalks(rom, kinds);
 const loads = new OverworldLoads(new OverworldEmulator(rom), 4), saves = progressSaves(loads);
 const input = (progress: number): ReachInput => {
   const r = loads.get(0, progress);
-  return reachInput(rom, gameL1(r).slice(), r.wram.slice(RAM.owTranslevels, RAM.owTranslevelsEnd), saves[progress].levelFlags, kinds, shapes, readStart(rom, 0));
+  return reachInput(rom, gameL1(r).slice(), r.wram.slice(RAM.owTranslevels, RAM.owTranslevelsEnd), saves[progress].levelFlags, kinds, shapes, hard, readStart(rom, 0));
 };
 const levelTiles = (inp: ReachInput) => Array.from({ length: 0x800 }, (_, i) => i).filter((i) => kinds[inp.l1[i]] === 'level' && inp.tls[i]);
 const levelHex = (tl: number) => hx(translevelToLevel(tl), 3);
@@ -57,7 +57,7 @@ const all = input(OW_EVENTS), none = input(0);
   // (29) without its event, before any event Mario still stops there and goes no further than with it
   const r1 = new Rom(rom.data.slice());
   setBaseEvent(r1, 0x29, NO_EVENT);
-  const n1 = reach(reachInput(r1, none.l1, none.tls, none.flags, kinds, shapes, readStart(r1, 0)));
+  const n1 = reach(reachInput(r1, none.l1, none.tls, none.flags, kinds, shapes, hard, readStart(r1, 0)));
   check(n1.tiles.join() === r0.tiles.join() && n1.flags[0x29] === r0.flags[0x29],
     `29 with no event: the same tiles reached, its flags not opened (${hx(n1.flags[0x29])})`);
 }
@@ -114,6 +114,24 @@ function playTo(r: Rom, inp: ReachInput, i: number, d: number): { tile: number; 
   check(play(rom, closed, lv, d) === lv, `the flags closed: from ${at(lv)} ${DIR_NAMES[d]} Mario stays, as the search doesn't go`);
 }
 
+// ---- the hardcoded paths' cells (the map's layer 1 view draws them) ----
+{
+  // the clean game's way between Donut Plains 1 (015) and 2 (009): tiles 00 on the map, walked by the game's steps
+  const cells = hardPathCells(all), dp1 = levelTiles(all).find((i) => translevelToLevel(all.tls[i]) === 0x15)!;
+  const open = { ...all, flags: new Uint8Array(MAX_TRANSLEVEL + 1).fill(0x0f) };
+  const w = walkFrom(all, dp1, 2)!, got = play(rom, open, dp1, 2);
+  check(w.path.length > 0 && w.path.every((i) => cells.has(i) && kinds[all.l1[i]] === 'none'),
+    `015 left: ${w.path.length} cells of a hardcoded path, none a path tile (${w.path.map(at).join(' ')})`);
+  check(translevelToLevel(all.tls[w.to]) === 0x9 && got === w.to, `it leads to 009 (the game: ${at(got)})`);
+  // every hardcoded path learned: the search walks it to where the game takes Mario, its cells drawn with the ways he
+  // steps onto and off each
+  const wrong = hard.filter((h) => { const v = walkFrom(open, h.from, h.dir); return !v || v.to !== h.to || play(rom, open, h.from, h.dir) !== h.to; });
+  const drawn = hard.flatMap((h) => h.path).filter((i, k, a) => a.indexOf(i) === k);
+  check(hard.length === 10 && !wrong.length, `the ${hard.length} hardcoded paths searched to where the game stops (wrong: ${wrong.map((h) => `${at(h.from)} ${DIR_NAMES[h.dir]}`).join(', ') || 'none'})`);
+  check(cells.size === drawn.length && drawn.every((i) => cells.get(i)!.ways.every(([a, b]) => a >= 0 && a < 4 && b >= 0 && b < 4)),
+    `${cells.size} cells drawn, those of the paths, each with its ways`);
+}
+
 // ---- exit tiles: the exit tile's way after the warp, the step onto it (docs/research/overworld-submap-exit-tiles.md) ----
 {
   const inp = { ...all, flags: reach(all).flags }, r = reach(inp);
@@ -162,7 +180,7 @@ function playTo(r: Rom, inp: ReachInput, i: number, d: number): { tile: number; 
     writeExitPath(r1, exitEntryAt(readExitPaths(r1), e.from), e);
     const read = readLinks(r1).find((l) => l.kind === 'exit' && l.a.submap === 0 && l.a.x === 2 && l.a.y === 0x14);
     check(!!read && read.b.side === side && !sidesMatch(read), `read as the ROM has it: the target's side ${DIR_NAMES[side]}, not the source's opposite`);
-    const i2 = { ...reachInput(r1, inp.l1, inp.tls, inp.flags, kinds, shapes, readStart(r1, 0)) }, w = walkFrom(i2, kl >> 2, kl & 3)!, got = playTo(r1, i2, kl >> 2, kl & 3);
+    const i2 = { ...reachInput(r1, inp.l1, inp.tls, inp.flags, kinds, shapes, hard, readStart(r1, 0)) }, w = walkFrom(i2, kl >> 2, kl & 3)!, got = playTo(r1, i2, kl >> 2, kl & 3);
     const p = stuckProblems({ inp: i2, r: { ...r, walks: new Map([[kl, w]]) } }, at).find((q) => q.kind === 'exit-off-path');
     check(w.offPath?.at === ladder && !w.offPath.across && got.tile === w.to && off(got) && !!p,
       `the ladder linked with the target's side ${DIR_NAMES[side]}: off the path (the game: ${at(got.tile)} at ${hx(got.x, 3)},${hx(got.y, 3)}); ${p?.text}`);
@@ -170,7 +188,7 @@ function playTo(r: Rom, inp: ReachInput, i: number, d: number): { tile: number; 
   {
     const r1 = new Rom(rom.data.slice());
     makeLink(r1, 'exit', { submap: 0, x: 0x02, y: 0x14, side: 0 }, { submap: 1, x: 0x04, y: 0x00, side: 1 }, false);
-    const w = walkFrom(reachInput(r1, inp.l1, inp.tls, inp.flags, kinds, shapes, readStart(r1, 0)), kl >> 2, kl & 3)!;
+    const w = walkFrom(reachInput(r1, inp.l1, inp.tls, inp.flags, kinds, shapes, hard, readStart(r1, 0)), kl >> 2, kl & 3)!;
     check(!w.offPath && !w.stuck, 'the ladder linked with the target\'s side opposite to the source\'s: on the path');
   }
 }

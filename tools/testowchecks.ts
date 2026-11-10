@@ -13,7 +13,7 @@ import { RAM } from '../src/core/ram.ts';
 import { ExitGraph } from '../src/core/exitgraph.ts';
 import { checkContext, eventsNeeded, eventsNeverRun, stranded, untiledLevelsEntered, eventOrderProblems, starsWithoutTranslevelProblems, sharedOrEmptyLevelTiles, type CheckContext } from '../src/core/owchecks.ts';
 import type { CheckedAt, WorldProblem } from '../src/core/worldcheck.ts';
-import { editorImage, pathKinds, pathShapes } from './fixture.ts';
+import { editorImage, pathKinds, pathShapes, hardWalks } from './fixture.ts';
 
 let bad = 0;
 const check = (ok: boolean, what: string) => { console.log((ok ? 'ok   ' : 'FAIL ') + what); if (!ok) bad++; };
@@ -21,12 +21,13 @@ const hx = (v: number, n = 2) => v.toString(16).toUpperCase().padStart(n, '0');
 const at = (i: number) => { const { x, y } = l1XY(i); return `${i >> 10 ? 'submaps' : 'main'} ${hx(x)},${hx(y)}`; };
 
 const rom = new Rom(await editorImage());
-const kinds = pathKinds(rom), shapes = pathShapes(rom);
+// (the hardcoded paths of the clean game: the ROMs checked here move no level tile they start or end at)
+const kinds = pathKinds(rom), shapes = pathShapes(rom), hard = hardWalks(rom, kinds);
 // every check of a ROM, with every event passed (its loads and saves emulated anew)
 type Checks = { never: WorldProblem[]; stranded: WorldProblem[]; untiled: WorldProblem[]; order: WorldProblem[]; levels: WorldProblem[]; needed: number[][] };
 function checks(r: Rom): Checks {
   const loads = new OverworldLoads(new OverworldEmulator(r), 4), saves = progressSaves(loads), g = loads.get(0, OW_EVENTS);
-  const inp = reachInput(r, gameL1(g).slice(), g.wram.slice(RAM.owTranslevels, RAM.owTranslevelsEnd), saves[OW_EVENTS].levelFlags, kinds, shapes, readStart(r, 0));
+  const inp = reachInput(r, gameL1(g).slice(), g.wram.slice(RAM.owTranslevels, RAM.owTranslevelsEnd), saves[OW_EVENTS].levelFlags, kinds, shapes, hard, readStart(r, 0));
   const all: CheckedAt = { inp, r: reach(inp), progress: OW_EVENTS }, c = checkContext(r, all, at);
   const t0 = performance.now();
   const needed = eventsNeeded(c);

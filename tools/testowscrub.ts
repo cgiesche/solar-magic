@@ -44,8 +44,8 @@ check(q.length === 3 && queued('owpn').length === 1 && (queued('owpn')[0] as { p
 check(dropped.length === 39 && !dropped.includes(50), `the 39 progresses scrubbed past told they were dropped, not the test play's (${dropped.length})`);
 
 // ---- leaving the overworld ----
-client.learn('owwc1', { kind: 'owWorldCheck', kinds, shapes }, { lane: 'owwc', input: [kinds, shapes] });
-client.learn('owxe1', { kind: 'owExitEdges', kinds, shapes }, { lane: 'owxe', input: [kinds, shapes] });
+client.learn('owwc2', { kind: 'owWorldCheck', kinds, shapes, hard: [] }, { lane: 'owwc', input: [kinds, shapes, []] });
+client.learn('owxe2', { kind: 'owExitEdges', kinds, shapes, hard: [] }, { lane: 'owxe', input: [kinds, shapes, []] });
 await settle();
 dropped.length = 0;
 for (const lane of OW_LEFT_LANES) client.unlearn(lane); // (App.overworldLeft)

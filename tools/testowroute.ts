@@ -18,7 +18,7 @@ import { tileWays, WALKED_KINDS } from '../src/core/owpathshape.ts';
 import { routeTiles, type RouteInput } from '../src/core/owroute.ts';
 import { stopTile } from '../src/core/owleveltiles.ts';
 import { refusalDetails } from '../src/core/owrefusal.ts';
-import { editorImage, pathKinds, pathShapes } from './fixture.ts';
+import { editorImage, pathKinds, pathShapes, hardWalks } from './fixture.ts';
 
 let bad = 0;
 const check = (ok: boolean, what: string) => { console.log((ok ? 'ok   ' : 'FAIL ') + what); if (!ok) bad++; };
@@ -26,10 +26,10 @@ const hx = (v: number, n = 2) => v.toString(16).toUpperCase().padStart(n, '0');
 const at = (i: number) => { const { x, y } = l1XY(i); return `${i >> 10 ? 'submaps' : 'main'} ${hx(x)},${hx(y)}`; };
 
 const rom = new Rom(await editorImage());
-const kinds = pathKinds(rom), shapes = pathShapes(rom);
+const kinds = pathKinds(rom), shapes = pathShapes(rom), hard = hardWalks(rom, kinds);
 const loads = new OverworldLoads(new OverworldEmulator(rom), 4), saves = progressSaves(loads);
 const r = loads.get(0, OW_EVENTS);
-const all = reachInput(rom, gameL1(r).slice(), r.wram.slice(RAM.owTranslevels, RAM.owTranslevelsEnd), saves[OW_EVENTS].levelFlags, kinds, shapes, readStart(rom, 0));
+const all = reachInput(rom, gameL1(r).slice(), r.wram.slice(RAM.owTranslevels, RAM.owTranslevelsEnd), saves[OW_EVENTS].levelFlags, kinds, shapes, hard, readStart(rom, 0));
 const game = all.l1, views = submapViews(loads), STOP = stopTile(kinds);
 const shaped = (t: number) => WALKED_KINDS.includes(kinds[t]);
 const stepDir = (a: number, b: number) => [0, 1, 2, 3].find((d) => { const p = l1XY(a), q = l1XY(b); return a >> 10 === b >> 10 && p.x + DX[d] === q.x && p.y + DY[d] === q.y; }) ?? -1;

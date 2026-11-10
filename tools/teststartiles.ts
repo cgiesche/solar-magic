@@ -41,7 +41,7 @@ import { progressSaves } from '../src/core/owprogress.ts';
 import { readStart } from '../src/core/owsprites.ts';
 import { PlaySession } from '../src/core/playsession.ts';
 import { GM, RAM, PAD, get16 } from '../src/core/ram.ts';
-import { cleanImage, editorImage, pathKinds, pathShapes } from './fixture.ts';
+import { cleanImage, editorImage, pathKinds, pathShapes, hardWalks } from './fixture.ts';
 import { stopsOn } from '../src/core/owpaths.ts';
 
 let bad = 0;
@@ -101,9 +101,9 @@ const PADS = [PAD.up, PAD.down, PAD.left, PAD.right];
 
 // ---- walking off a star: its translevel's flags ----
 const loads = new OverworldLoads(new OverworldEmulator(rom), 2);
-const kinds = pathKinds(rom), shapes = pathShapes(rom);
+const kinds = pathKinds(rom), shapes = pathShapes(rom), hard = hardWalks(rom, kinds);
 const allL1 = gameL1(loads.get(0, OW_EVENTS)).slice();
-const open = reachInput(rom, allL1, tls, new Uint8Array(MAX_TRANSLEVEL + 1).fill(0x0f), kinds, shapes, readStart(rom, 0));
+const open = reachInput(rom, allL1, tls, new Uint8Array(MAX_TRANSLEVEL + 1).fill(0x0f), kinds, shapes, hard, readStart(rom, 0));
 const UNUSED = Array.from({ length: MAX_TRANSLEVEL }, (_, k) => k + 1).find((t) => !tls.includes(t) && !initialFlags(rom, t))!;
 {
   const res: string[] = [];

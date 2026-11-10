@@ -1,7 +1,7 @@
 // Path validation on the overworld's map (owreach.ts): the path and level tiles Mario doesn't reach at the event
 // progress dimmed (a view setting); the search's problems – dead ends, level tiles nothing leads to, events revealing
 // nothing he reaches – are listed by the World check (worldcheck.ts). Searched again when the ROM, the event progress
-// or what it is searched over (path kinds and shapes, the maps at the progress and with every event passed, the saves there)
+// or what it is searched over (path kinds and shapes, the hardcoded paths, the maps at the progress and with every event passed, the saves there)
 // changes; nothing is shown while one of those is learned. The search with every event passed is the same at every
 // progress: kept while the ROM and what it searches are, so a step through the event list searches once (#388).
 
@@ -58,19 +58,19 @@ export class ReachLayer {
     const key = `${rom.gen}:${progressKey(v.progress)}`;
     if (this.found?.key === key) return this.found;
     if (this.saves.size > 64) this.saves.clear();
-    const kinds = v.pathKinds(), shapes = app.pathShapes(this.learned);
+    const kinds = v.pathKinds(), shapes = app.pathShapes(this.learned), hard = kinds && app.hardWalks(kinds, this.learned);
     const shown = v.load(), every = app.overworldAllEvents(this.learned);
     const saveNow = this.save(v.progress), saveAll = this.save(OW_EVENTS);
-    if (!kinds || !shapes || !shown || !every || !saveNow || !saveAll) return null;
+    if (!kinds || !shapes || !hard || !shown || !every || !saveNow || !saveAll) return null;
     // where the levels' exits to the overworld teleport (per translevel, as asked)
     const graph = app.entrances.graph(), warps = new Map<number, OwTile[]>();
     const levelWarps = (tl: number) => warps.get(tl) ?? warps.set(tl, levelTeleports(rom, graph, tl).map((t) => t.to)).get(tl)!;
     const start = readStart(rom, 0);
     const search = (r: OwRender, s: ProgressSave): Reached => {
-      const inp = reachInput(rom, gameL1(r), r.wram.subarray(RAM.owTranslevels, RAM.owTranslevelsEnd), s.levelFlags, kinds, shapes, start, levelWarps);
+      const inp = reachInput(rom, gameL1(r), r.wram.subarray(RAM.owTranslevels, RAM.owTranslevelsEnd), s.levelFlags, kinds, shapes, hard, start, levelWarps);
       return { inp, r: reach(inp) };
     };
-    const from = [rom, rom.gen, every, saveAll, kinds, shapes, graph];
+    const from = [rom, rom.gen, every, saveAll, kinds, shapes, hard, graph];
     if (!this.every || this.every.from.some((x, k) => x !== from[k])) this.every = { from, all: search(every, saveAll) };
     this.found = { key, now: search(shown, saveNow), all: this.every.all };
     return this.found;

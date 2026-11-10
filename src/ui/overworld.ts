@@ -23,7 +23,7 @@ import {
 } from '../core/owevents.ts';
 import { OverworldStroke, shownMaps } from '../core/owstroke.ts';
 import { PathTool } from './owpathtool.ts';
-import { isPathKind, PATH_KIND_NAMES, type PathKind, type PathShapes } from '../core/owpaths.ts';
+import { isPathKind, PATH_KIND_NAMES, DX, DY, reverse, type PathKind, type PathShapes } from '../core/owpaths.ts';
 import { mapWays, usualWays, pathTileText, type PathWay } from '../core/owpathshape.ts';
 import { emptyL1Tiles, freeL1Tiles, sheetPages, l1TileLines, l1Hex, l1BrushEntries, NO_TILE, SHEET_COLS, type SheetPage } from '../core/owl1sheet.ts';
 import { findL2Brush, l2BrushPalettes, l2SharedBits, l2SheetEntry, L2_SHEET_COLS, L2_SHEET_ROWS, L2_FLIP_X, L2_FLIP_Y, L2_PRIORITY, type SheetMark } from '../core/owl2sheet.ts';
@@ -62,6 +62,8 @@ import { popover } from './popover.ts';
 import { musicPlayer, submapMusicLabel } from './musicplayer.ts';
 import type { Rom } from '../core/rom.ts';
 import { ReachLayer } from './owreachview.ts';
+import { hardPathCells, type HardCell } from '../core/owreach.ts';
+import type { HardWalk } from '../core/owhardpaths.ts';
 import { ExitArrowLayer, EXIT_LEGEND } from './owexitarrows.ts';
 import { WorldCheck } from './worldcheck.ts';
 import { layerStrengths, isLayerMode, type OwMode, type LayerStrengths } from '../core/owlayers.ts';
@@ -650,6 +652,13 @@ export class OverworldView {
     }
     return this.shapes.shapes;
   }
+  // the game's hardcoded paths (owhardpaths.ts: their cells drawn on layer 1, named in the status bar; null while they
+  // or the path kinds are learned)
+  private hardLearned = () => { if (!this.root.isConnected) return; this.paint(); this.updateStatus(); };
+  hardWalks(): HardWalk[] | null {
+    const kinds = this.pathKinds();
+    return kinds && this.app.hardWalks(kinds, this.hardLearned);
+  }
   // (the selected level tile's settings say which exits skip the reveal walk once that is learned)
   private revealWalksLearned = () => { if (this.root.isConnected) this.buildSide(); };
   // what the stars' translevels follow (owstars.ts): the path kinds and shapes (null while the kinds are learned)
@@ -675,10 +684,33 @@ export class OverworldView {
     const kinds = this.pathKinds();
     if (!kinds) return;
     const ctx = this.canvas.getContext('2d')!, l1 = this.shown.l1, shapes = this.pathShapes(), walked = this.walkedWays();
+    const hard = this.hardCells();
     for (let y = 0; y < 32; y++) for (let x = 0; x < 32; x++) {
-      const i = l1Index(this.region, x, y), t = l1[i], k = kinds[t];
+      const i = l1Index(this.region, x, y), t = l1[i], k = kinds[t], h = hard?.get(i);
       if (isPathKind(k)) drawPathMark(ctx, k, x * 16, y * 16, lw, walked.get(i) ?? usualWays(t, k, shapes, l1, walked));
+      else if (h) drawHardPathMark(ctx, x * 16, y * 16, lw, h);
     }
+  }
+  // the cells the game's hardcoded paths lead Mario over on the maps shown (owreach.ts hardPathCells: its own ways, in
+  // its code, not tiles of the map – drawn where the map's tile is no path tile); null while they or the path kinds are
+  // learned
+  private hardMemo: { l1: Uint16Array; kinds: readonly PathKind[]; hard: readonly HardWalk[]; cells: Map<number, HardCell> } | null = null;
+  hardCells(): Map<number, HardCell> | null {
+    const kinds = this.pathKinds(), hard = this.hardWalks();
+    if (!kinds || !hard) return null;
+    const l1 = this.shown.l1, m = this.hardMemo;
+    if (m?.l1 === l1 && m.kinds === kinds && m.hard === hard) return m.cells;
+    const cells = hardPathCells({ l1, kinds, hard });
+    this.hardMemo = { l1, kinds, hard, cells };
+    return cells;
+  }
+  // a hardcoded path's cell in words: where it leads from and to (the status bar)
+  private hardCellText(h: HardCell): string {
+    const at = (i: number) => {
+      const tl = this.tls[i];
+      return tl ? `Level ${hex(translevelToLevel(tl), 3)}` : `${hex(l1XY(i).x, 2)},${hex(l1XY(i).y, 2)}`;
+    };
+    return `Path: the game's own (hardcoded) · ${at(h.from)} ${DIR_NAMES[h.dir]}${h.to >= 0 ? ` to ${at(h.to)}` : ''} · in the game's code, not layer 1 tiles: Mario walks it where no path tile leads off ${at(h.from)} that way`;
   }
   // the ways Mario takes over each path tile of the maps shown (owpathshape.ts mapWays; none while the path kinds and
   // shapes are learned)
@@ -1167,11 +1199,12 @@ export class OverworldView {
           if (this.mode === 'l1') t += '  ·  Click: select · Drag: move · Right click: menu · Double click: open';
         }
         const s1 = this.strengths(), k = s1.marks ? this.pathKinds()?.[shown] : undefined;
+        const hard = s1.marks && !(k && isPathKind(k)) ? this.hardCells()?.get(i) : undefined;
         if (k && isPathKind(k)) {
           const what = pathTileText(shown, k, this.pathShapes());
           t += `  ·  ${what}`;
           this.scroller.title = what;
-        }
+        } else if (hard) t += `  ·  ${this.hardCellText(hard)}`;
         const unreached = s1.l1 ? this.reach.status(i) : '';
         if (unreached) t += `  ·  ${unreached}`;
         const ends = s1.l1 && this.mode === 'l1' ? this.links.markText(i) : '';
@@ -1888,10 +1921,17 @@ export class OverworldView {
       drawPathMark(ctx, k, 0, 0, 0.5, []);
       return c;
     };
+    const hardMark = () => {
+      const c = h('canvas', { width: 32, height: 32, class: 'ow-legend-mark' }), ctx = c.getContext('2d')!;
+      ctx.scale(2, 2);
+      drawHardPathMark(ctx, 0, 0, 0.5, { from: -1, dir: 2, to: -1, ways: [[2, 2]] });
+      return c;
+    };
     const kinds = (Object.keys(PATH_KIND_NAMES) as PathKind[]).filter(isPathKind);
     return h('div', { class: 'ow-info' },
       h('div', { class: 'gt-list-head' }, 'Path marks (layer 1)'),
       ...kinds.map((k) => row(mark(k), PATH_KIND_NAMES[k])),
+      row(hardMark(), "Path: the game's own (hardcoded, in its code – not editable)"),
       h('div', { class: 'hint' }, 'White lines: where Mario walks over the tile.'),
       h('div', { class: 'gt-list-head' }, 'Overworld links (layer 1)'),
       ...Object.values(LINK_LEGEND).map((l) => row(line(l.color, l.dashed), l.text)),
@@ -2514,7 +2554,7 @@ export class OverworldView {
 // (each kind's colour, r,g,b: the mark's fill with its alpha, the sheet's border opaque; a level tile has no mark)
 const KIND_RGB: Partial<Record<PathKind, [string, number]>> = { walk: ['90,230,100', 0.7], climb: ['90,230,100', 0.7], swim: ['60,140,255', 0.75], exit: ['235,60,60', 0.8], stop: ['255,255,255', 1], warp: ['197,140,255', 1], level: ['255,210,60', 1] };
 const PATH_FILL = Object.fromEntries(Object.entries(KIND_RGB).map(([k, [c, a]]) => [k, `rgba(${c},${a})`])) as Partial<Record<PathKind, string>>;
-export function drawPathMark(ctx: CanvasRenderingContext2D, k: PathKind, px: number, py: number, lw: number, ways: readonly PathWay[]): void {
+export function drawPathMark(ctx: CanvasRenderingContext2D, k: PathKind, px: number, py: number, lw: number, ways: readonly PathWay[], hard = false): void {
   if (k === 'stop') {
     for (const [c, w] of [['rgba(0,0,0,0.8)', 4], ['#fff', 2]] as [string, number][]) {
       ctx.strokeStyle = c;
@@ -2535,11 +2575,13 @@ export function drawPathMark(ctx: CanvasRenderingContext2D, k: PathKind, px: num
     }
     return;
   }
-  ctx.fillStyle = PATH_FILL[k]!;
-  ctx.fillRect(px + 2, py + 2, 12, 12);
-  ctx.strokeStyle = 'rgba(0,0,0,0.85)';
+  // (a hardcoded path's cell: no fill of its own, the outline dashed)
+  if (!hard) { ctx.fillStyle = PATH_FILL[k]!; ctx.fillRect(px + 2, py + 2, 12, 12); }
+  ctx.strokeStyle = hard ? 'rgba(90,230,100,1)' : 'rgba(0,0,0,0.85)';
   ctx.lineWidth = 1.5 * lw;
+  if (hard) ctx.setLineDash([2, 2]);
   ctx.strokeRect(px + 2, py + 2, 12, 12);
+  if (hard) ctx.setLineDash([]);
   if (k === 'climb') {
     ctx.lineWidth = 2 * lw;
     ctx.beginPath();
@@ -2562,6 +2604,17 @@ export function drawPathMark(ctx: CanvasRenderingContext2D, k: PathKind, px: num
     ctx.stroke();
   }
   ctx.restore();
+}
+// the mark of a cell a hardcoded path of the game leads over (owreach.ts HardCell): a walk mark, its outline dashed
+// (the game's own way, not a path tile of the map), its ways from side to side as he steps on and leaves
+export function drawHardPathMark(ctx: CanvasRenderingContext2D, px: number, py: number, lw: number, h: HardCell): void {
+  const side = (d: number): [number, number] => [8 + DX[d] * 8, 8 + DY[d] * 8];
+  const ways = h.ways.map(([dir, out]): PathWay => ({ dir, out, from: side(reverse(dir)), to: side(out) }));
+  ctx.save();
+  ctx.fillStyle = 'rgba(90,230,100,0.35)';
+  ctx.fillRect(px + 2, py + 2, 12, 12);
+  ctx.restore();
+  drawPathMark(ctx, 'walk', px, py, lw, ways, true);
 }
 // the colour of the border a visible tile of kind k gets in the paint sheet (the map's path marks'; a level tile yellow)
 const KIND_BORDER = Object.fromEntries(Object.entries(KIND_RGB).map(([k, [c]]) => [k, `rgb(${c})`])) as Partial<Record<PathKind, string>>;

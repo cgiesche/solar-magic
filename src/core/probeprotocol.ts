@@ -22,6 +22,7 @@ import type { Prefab } from './prefabs.ts';
 import type { PrefabSkip } from './prefabplaces.ts';
 import type { OwTriggerSwitches } from './owanimview.ts';
 import type { PathKind, PathShapes } from './owpaths.ts';
+import type { HardWalk } from './owhardpaths.ts';
 import type { EventProgress } from './eventset.ts';
 
 // a probe in tileset ts: what a Map16 tile does, how Mario collides with it, what a sprite does, Mario's
@@ -109,6 +110,8 @@ export type LearnJob =
   | { kind: 'pathKinds' }
   | { kind: 'pathShapes' }
   | { kind: 'revealWalks' }
+  // the game's hardcoded paths (owhardpaths.ts) on the map with every event passed: layer 1, translevels, the tiles tried
+  | { kind: 'hardWalks'; l1: number[]; tls: number[]; cells: number[] }
   | { kind: 'suggest'; levels: number[]; open?: Level }
   | { kind: 'sizes'; level: KindLevel; layer2Pointer: number; specs: SizeSpec[] }
   | { kind: 'owMap'; map: number; progress: EventProgress; special?: boolean }
@@ -123,8 +126,8 @@ export type LearnJob =
   | { kind: 'owAnimated'; map: number; progress: EventProgress }
   | { kind: 'owAnimSteps'; map: number; progress: EventProgress }
   | { kind: 'owL1Without'; event: number }
-  | { kind: 'owExitEdges'; kinds: PathKind[]; shapes: PathShapes }
-  | { kind: 'owWorldCheck'; kinds: PathKind[]; shapes: PathShapes; open?: { number: number; exits: ScreenExit[] } }
+  | { kind: 'owExitEdges'; kinds: PathKind[]; shapes: PathShapes; hard: HardWalk[] }
+  | { kind: 'owWorldCheck'; kinds: PathKind[]; shapes: PathShapes; hard: HardWalk[]; open?: { number: number; exits: ScreenExit[] } }
   | { kind: 'msgRoutine' }
   | { kind: 'gameBg'; level: number }
   | { kind: 'prefabPlaces'; prefab: Prefab; levels: number[]; open?: Level; skip?: PrefabSkip }
@@ -182,6 +185,7 @@ export const LEARN_KINDS: { [K in LearnJob['kind']]: { keep: Keep; picture: bool
   pathKinds: { keep: true, picture: false },
   pathShapes: { keep: true, picture: false },
   revealWalks: { keep: true, picture: false },
+  hardWalks: { keep: true, picture: false },
   suggest: { keep: false, picture: false },
   sizes: { keep: false, picture: false },
   owMap: { keep: 'memory', picture: true, boot: false },
@@ -221,7 +225,7 @@ export type LearnLane =
   | 'sprites' | 'variants' | 'bytes' | 'spritemem' | 'animated' | 'layer3' | 'l2' | 'lt' | 'uses' | 'arcs' | 'thumbs'
   | 'placement' | 'sizes' | 'prefab-suggest' | 'msgr' | 'level-png' | 'level-images' | 'gamebg' | 'prefab-places'
   | 'breakup' | 'slippery' | 'otab'
-  | 'ow' | 'owpick' | 'owpk2' | 'owsh' | 'owreach' | 'owrw' | 'owlw' | 'owmb' | 'owps' | 'owpn' | 'owpa' | 'owxe' | 'owwc' | 'owv' | 'owt' | 'owgc' | 'ows' | 'owbs' | 'owbt' | 'owl' | 'owan' | 'owas' | `owc${number}`;
+  | 'ow' | 'owpick' | 'owpk2' | 'owsh' | 'owreach' | 'owrw' | 'owhw' | 'owlw' | 'owmb' | 'owps' | 'owpn' | 'owpa' | 'owxe' | 'owwc' | 'owv' | 'owt' | 'owgc' | 'ows' | 'owbs' | 'owbt' | 'owl' | 'owan' | 'owas' | `owc${number}`;
 
 // Who asks for the save at an event progress (owSave, App.progressSave) and the lane it is asked in (#388): a test play
 // (owps: it waits for its own), the event progress shown (owpn: a new one replaces the one asked before, clicking

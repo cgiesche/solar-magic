@@ -30,7 +30,7 @@ import { l1OwnLooks, lookProblems } from '../src/core/owlook.ts';
 import { tileText } from '../src/core/owteleport.ts';
 import { readCustomSprites, writeCustomSprites, OW_CUSTOM_MAX } from '../src/core/owcustom.ts';
 import { makeLink, readLinks } from '../src/core/owlinks.ts';
-import { editorImage, pathKinds, pathShapes, loadedProgressMaps, romDiff } from './fixture.ts';
+import { editorImage, pathKinds, pathShapes, hardWalks, loadedProgressMaps, romDiff } from './fixture.ts';
 
 let bad = 0;
 const check = (ok: boolean, what: string) => { console.log((ok ? 'ok   ' : 'FAIL ') + what); if (!ok) bad++; };
@@ -39,13 +39,15 @@ const at = (i: number) => { const { x, y } = l1XY(i); return `${i >> 10 ? 'subma
 
 const rom = new Rom(await editorImage());
 const kinds = pathKinds(rom), shapes = pathShapes(rom); // (they don't depend on the overworld's data: testowreach)
+// (the hardcoded paths of the clean game: the ROMs checked here move no level tile they start or end at)
+const hard = hardWalks(rom, kinds);
 // the World check of a ROM at progress 0 (the event progress shown) and with every event passed, its loads and saves
 // emulated anew
 function checkRom(r: Rom): { problems: WorldProblem[]; now: CheckedAt; all: CheckedAt } {
   const loads = new OverworldLoads(new OverworldEmulator(r), 4), saves = progressSaves(loads);
   const search = (progress: number): CheckedAt => {
     const g = loads.get(0, progress);
-    const inp = reachInput(r, gameL1(g).slice(), g.wram.slice(RAM.owTranslevels, RAM.owTranslevelsEnd), saves[progress].levelFlags, kinds, shapes, readStart(r, 0));
+    const inp = reachInput(r, gameL1(g).slice(), g.wram.slice(RAM.owTranslevels, RAM.owTranslevelsEnd), saves[progress].levelFlags, kinds, shapes, hard, readStart(r, 0));
     return { inp, r: reach(inp), progress };
   };
   const now = search(0), all = search(OW_EVENTS);
@@ -180,7 +182,7 @@ console.log(list(clean.problems));
     const loaded = runJob(loadedProgressMaps(loads)), same = (a: ArrayLike<number>, b: ArrayLike<number>) => Array.prototype.every.call(a, (v: number, i: number) => v === b[i]);
     const differ = loaded.map((_, p) => p).filter((p) => !same(loaded[p].l1, maps[p].l1) || !same(loaded[p].tls, maps[p].tls));
     check(!differ.length, `the maps from the events are those the game loads at every progress (differing: ${differ.map((p) => hx(p)).join(' ')})`);
-    const t = performance.now(), search = progressSearches(progressInput(r, maps, kinds, shapes, new ExitGraph(r)));
+    const t = performance.now(), search = progressSearches(progressInput(r, maps, kinds, shapes, hard, new ExitGraph(r)));
     const ps = stuckAtEveryProgress(r, search, at);
     console.log(`     the searches at every progress and their dead ends in ${Math.round(performance.now() - t)} ms`);
     return { ps, search };
@@ -221,7 +223,7 @@ console.log(list(clean.problems));
   // budgets, those found at every event progress – the same as found from the searches the overworld view has, places
   // named by the submaps' views; a job of steps, its result as the worker sends it (structured clone)
   const learned = (x: Rom) => {
-    const loads = new OverworldLoads(new OverworldEmulator(x), 4), job = worldCheckJob(x, loads, kinds, shapes);
+    const loads = new OverworldLoads(new OverworldEmulator(x), 4), job = worldCheckJob(x, loads, kinds, shapes, hard);
     let steps = 0, st = job.next();
     while (!st.done) { steps++; st = job.next(); }
     const views = submapViews(loads), place = (i: number) => tileText({ submap: submapOf(views, i), ...l1XY(i) });
@@ -230,7 +232,7 @@ console.log(list(clean.problems));
   const same = (a: WorldProblem[], b: WorldProblem[]) => JSON.stringify(a) === JSON.stringify(b);
   for (const [name, x] of [['the clean game', rom], [`the path tile at ${at(cut)} taken away`, r]] as [string, Rom][]) {
     const { got, steps, place, loads } = learned(x), shownX = checkRom(x), graph = new ExitGraph(x), budgets = owBudgets(x, fullestSubmap(x), kinds);
-    const maps = progressMapsFromEvents(x, runJob(progressFlagsJob(loads))), search = progressSearches(progressInput(x, maps, kinds, shapes, graph));
+    const maps = progressMapsFromEvents(x, runJob(progressFlagsJob(loads))), search = progressSearches(progressInput(x, maps, kinds, shapes, hard, graph));
     const checks = [...worldChecks(x, shownX.all, place, graph, submapViews(loads)), ...budgetProblems(budgets)];
     const everyX = [...stuckAtEveryProgress(x, search, place), ...lookProblems({ rom: x, maps, ownLooks: l1OwnLooks(x, loads), kinds, views: submapViews(loads), search, place })];
     check(steps >= 3 && same(got.checks, checks) && JSON.stringify(got.budgets) === JSON.stringify(budgets) && same(got.every, everyX) && checks.length > 0,
@@ -244,7 +246,7 @@ console.log(list(clean.problems));
   const everyOf = (r: Rom) => {
     const loads = new OverworldLoads(new OverworldEmulator(r), 4), views = submapViews(loads);
     const maps = progressMapsFromEvents(r, runJob(progressFlagsJob(loads)));
-    return stuckAtEveryProgress(r, progressSearches(progressInput(r, maps, kinds, shapes, new ExitGraph(r))), at, (i) => submapOf(views, i));
+    return stuckAtEveryProgress(r, progressSearches(progressInput(r, maps, kinds, shapes, hard, new ExitGraph(r))), at, (i) => submapOf(views, i));
   };
   const cases: [number, number, string, number, string][] = [
     [l1Index(0, 0x19, 0x10), 0x4d, 'down', 0x42, 'the exit tile is vertical, the path into it horizontal'], // (the main map has no other 42: the lowest)
@@ -346,7 +348,7 @@ console.log(list(clean.problems));
   const everyOf = (r: Rom) => {
     const loads = new OverworldLoads(new OverworldEmulator(r), 4), views = submapViews(loads);
     const maps = progressMapsFromEvents(r, runJob(progressFlagsJob(loads)));
-    return stuckAtEveryProgress(r, progressSearches(progressInput(r, maps, kinds, shapes, new ExitGraph(r))), at, (i) => submapOf(views, i));
+    return stuckAtEveryProgress(r, progressSearches(progressInput(r, maps, kinds, shapes, hard, new ExitGraph(r))), at, (i) => submapOf(views, i));
   };
   const stuck = (ps: WorldProblem[]) => ps.filter((p) => p.key.startsWith('arrival-stuck:'));
   check(!stuck(everyOf(rom)).length && !stuck(clean.problems).length, 'the clean game: no star, pipe or teleport puts Mario where he can\'t move, at any event progress');

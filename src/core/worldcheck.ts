@@ -22,6 +22,7 @@ import type { OwMode } from './owlayers.ts';
 import { reach, reachProblems, stuckProblems, exitTileFix, type Reached, type ReachKind, type ReachProblem, type CheckSeverity } from './owreach.ts';
 import { hex3 } from './names.ts';
 import { stopsOn, type PathKind, type PathShapes } from './owpaths.ts';
+import type { HardWalk } from './owhardpaths.ts';
 import type { OwRefusalData } from './owrefusal.ts';
 import { checkContext, eventsNeverRun, stranded, untiledLevelsEntered, eventOrderProblems, starsWithoutTranslevelProblems, misplacedLinkEnds, sharedOrEmptyLevelTiles } from './owchecks.ts';
 import { moveEnd, endTile, type MisplacedEnd } from './owlinkends.ts';
@@ -205,9 +206,9 @@ export interface WorldCheckLearned { checks: WorldProblem[]; budgets: Budget[]; 
 // so that the editor's main thread only searches at the progress shown: the saves (owprogress.ts progressSavesJob, kept
 // by the loads, a step per event); the submaps' views and the tiles' own looks (a step per submap); the map with every
 // event passed as emulated (as the overworld view's search has it); worldChecks and the budgets; then the searches at every progress over the maps built from
-// the events – each a step. kinds, shapes: the path kinds and shapes; open: the open level with its exits as edited (as
+// the events – each a step. kinds, shapes, hard: the path kinds and shapes, the hardcoded paths (owhardpaths.ts); open: the open level with its exits as edited (as
 // the editor's exits, ExitGraph) – all sent with the job
-export function* worldCheckJob(rom: Rom, loads: OverworldLoads, kinds: readonly PathKind[], shapes: PathShapes, open?: { number: number; exits: ScreenExit[] }): Job<WorldCheckLearned> {
+export function* worldCheckJob(rom: Rom, loads: OverworldLoads, kinds: readonly PathKind[], shapes: PathShapes, hard: readonly HardWalk[], open?: { number: number; exits: ScreenExit[] }): Job<WorldCheckLearned> {
   const saves = yield* progressSavesJob(loads);
   yield;
   const views = yield* submapViewsJob(loads), ownLooks = yield* l1OwnLooksJob(rom, loads);
@@ -217,12 +218,12 @@ export function* worldCheckJob(rom: Rom, loads: OverworldLoads, kinds: readonly 
   yield;
   // (a problem's tile named on its submap by submapOf: only the tile known, ambiguous in an overlap of views)
   const graph = new ExitGraph(rom, open), place = (i: number) => tileText({ submap: submapOf(views, i), ...l1XY(i) });
-  const inp = progressInput(rom, emulated, kinds, shapes, graph)(0);
+  const inp = progressInput(rom, emulated, kinds, shapes, hard, graph)(0);
   const all: CheckedAt = { inp, r: reach(inp), progress: OW_EVENTS };
   const budgets = owBudgets(rom, fullestSubmap(rom), kinds), checks = [...worldChecks(rom, all, place, graph, views), ...budgetProblems(budgets)];
   yield;
   const maps = progressMapsFromEvents(rom, saves.map((s) => s.levelFlags));
-  const search = progressSearches(progressInput(rom, maps, kinds, shapes, graph));
+  const search = progressSearches(progressInput(rom, maps, kinds, shapes, hard, graph));
   return { checks, budgets, every: [...stuckAtEveryProgress(rom, search, place, (i) => submapOf(views, i)), ...lookProblems({ rom, maps, ownLooks, kinds, views, search, place })] };
 }
 

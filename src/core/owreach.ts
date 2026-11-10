@@ -16,13 +16,15 @@
 //   (Lunar Magic's) from the level's tiles to its location; put there he stands, walking off as from a stop tile – by
 //   the flags of the tile's translevel, a path tile's 0 (stuckOnArrival);
 // - with no tile next to him, the game's hardcoded paths ($049078: from a translevel, or a place of the main map,
-//   in a direction, the steps and tiles of the way) – the game's own, not tiles of the map (not editable).
+//   in a direction, the steps and tiles of the way) – the game's own, not tiles of the map (not editable), learned by
+//   emulation (owhardpaths.ts: the walk from each level or stop tile in each direction where the game takes one).
 //
 // The flags at an event progress are the save's there (owprogress.ts, learned by playing the events' levels); passing a
 // level that runs no event opens nothing (revealwalk.ts: the game handles the exit enabling no direction, without the
 // reveal walk). Flags only open, so the search runs until nothing more opens.
 
-import { Rom, snesToPc } from './rom.ts';
+import type { Rom } from './rom.ts';
+import { stepDir, type HardWalk } from './owhardpaths.ts';
 import { l1Index, l1XY, DIR_FLAGS, DIR_NAMES, exitDirections, translevelToLevel, MAX_TRANSLEVEL, initialFlags } from './overworld.ts';
 import { readEvents, eventRunners, exitChanges, eventTitle, exitPassedOtherwise, type EventChanges, type EventRunner } from './owevents.ts';
 import { hex2, hex3 } from './names.ts';
@@ -43,21 +45,6 @@ const lowByte = (t: number) => t & 0xff;
 
 const tileOf = (t: OwTile): number => l1Index(t.submap ? 1 : 0, t.x, t.y);
 
-// a way of the game's own ($049078): from a tile of translevel `tl` (or, tl -1, from tile `at` of the main map)
-// in direction `dir`, the tiles stepped onto (l1 index), the last where he stops (-1 for its tile: the map's)
-export interface HardPath { tl: number; at: number; dir: number; steps: { dir: number; tile: number }[] }
-const HP_FROM = 0x049078, HP_DIRS = 0x0490ca, HP_TILES = 0x049086, HP_START = 0x04910e, HP_Y = 0x049082, HP_X = 0x049084;
-const HP_COUNT = 10, HP_STEPS = 0x44, HP_MAP_TILE = 0x58;
-export function hardPaths(rom: Rom): HardPath[] {
-  const d = rom.data, r8 = (a: number) => d[snesToPc(a)], dir = (y: number) => y >> 1; // (the game's 0, 2, 4, 6: up, down, left, right)
-  return Array.from({ length: HP_COUNT }, (_, x) => {
-    const from = r8(HP_FROM + x), a = r8(HP_START + x), b = x + 1 < HP_COUNT ? r8(HP_START + x + 1) : HP_STEPS;
-    const steps = Array.from({ length: b - a }, (_, k) => ({ dir: dir(r8(HP_DIRS + a + k)), tile: r8(HP_TILES + a + k) }));
-    const at = from === 0xff ? l1Index(0, rom.r16(HP_X) >> 4, rom.r16(HP_Y) >> 4) : -1;
-    return { tl: from === 0xff ? -1 : from, at, dir: steps[0]?.dir ?? 0, steps: steps.map((s) => ({ dir: s.dir, tile: s.tile === HP_MAP_TILE ? -1 : s.tile })) };
-  });
-}
-
 // What the search needs: layer 1 and the translevels as the game has them at the event progress (l1Index order),
 // the level flags of the save (per translevel), the path kinds, where Mario starts, the links.
 export interface ReachInput {
@@ -71,7 +58,7 @@ export interface ReachInput {
   // exit path entries: the pixel position Mario leaves at (the region: main map 0, submaps 1), the pixel position and
   // tile he comes to
   exitPaths: { from: { region: number; x: number; y: number }; to: { x: number; y: number }; tile: number }[];
-  hard: HardPath[];
+  hard: readonly HardWalk[]; // the game's hardcoded paths (owhardpaths.ts, learned on the map with every event passed)
   levelWarps?: (tl: number) => number[]; // the tiles a level's exits to the overworld teleport to
   // the tiles star/pipe entries and levels' exits lead to, as the entry stores them (its submap: in an overlap of
   // views the tile alone doesn't tell it), to name them (reachInput fills it; a level's as its teleports are asked –
@@ -179,25 +166,36 @@ export function exitTileFix(inp: ReachInput, k: number, at: number, used: readon
   return [...used.filter((t) => exits.includes(t)), ...exits].find((t) => t !== was && fits(t)) ?? -1;
 }
 
-// the game's hardcoded paths from tile `from` in direction d (none: null)
-function hardWalk(inp: ReachInput, from: number, d: number): Walk | null {
-  const tl = inp.tls[from];
-  const hp = last(inp.hard, (p) => p.dir === d && (p.tl < 0 ? p.at === from : p.tl === tl && tl > 0));
-  if (!hp) return null;
-  const path: number[] = [];
-  let cur = from;
-  for (const s of hp.steps) {
-    const n = neighbor(cur, s.dir);
-    if (n < 0) return { path, to: -1, dir: s.dir, stuck: { at: cur, why: 'end' } };
-    cur = n;
-    const t = s.tile < 0 ? inp.l1[cur] : s.tile;
-    if (t >= PATH_TILES_END) {
-      const k = inp.kinds[t];
-      return k === 'level' || stopsOn(k) ? { path, to: cur, dir: s.dir } : { path, to: -1, dir: s.dir, stuck: { at: cur, why: 'end' } };
+// the game's hardcoded path from tile `from` in direction d (none: null) – as learned (owhardpaths.ts)
+const hardAt = (inp: Pick<ReachInput, 'hard'>, from: number, d: number): HardWalk | undefined => inp.hard.find((h) => h.from === from && h.dir === d);
+function hardWalk(inp: Pick<ReachInput, 'hard'>, from: number, d: number): Walk | null {
+  const h = hardAt(inp, from, d);
+  if (!h) return null;
+  return h.to >= 0 ? { path: h.path, to: h.to, dir: h.arrive } : { path: h.path, to: -1, dir: h.arrive, stuck: { at: h.path.at(-1) ?? from, why: 'end' } };
+}
+
+// A cell one of the game's hardcoded paths leads Mario over (owhardpaths.ts) – its layer 1 tile needn't be a path tile,
+// the game moves him by the path's steps (its own, in its code: not editable on the map). from: the level or stop tile
+// he starts at, dir: the way he leaves it, to: where he stops (-1: stuck); ways: the directions he steps onto the cell
+// in and leaves it in
+export interface HardCell { from: number; dir: number; to: number; ways: [number, number][] }
+// The cells the hardcoded paths lead over on the maps (l1 as the game has them; l1Index order): from each level or
+// stop tile in each direction where the game takes one – no tile next to it Mario walks onto that way (walkFrom),
+// whatever the level flags open. A cell two ways cross has the first.
+export function hardPathCells(inp: Pick<ReachInput, 'l1' | 'kinds' | 'hard'>): Map<number, HardCell> {
+  const out = new Map<number, HardCell>();
+  for (const h of inp.hard) {
+    const kind = inp.kinds[inp.l1[h.from]], n = neighbor(h.from, h.dir);
+    if ((kind !== 'level' && !stopsOn(kind)) || (n >= 0 && inp.kinds[inp.l1[n]] !== 'none')) continue;
+    const steps = [h.from, ...h.path, ...(h.to >= 0 ? [h.to] : [])];
+    for (let k = 1; k < steps.length - (h.to >= 0 ? 1 : 0); k++) {
+      const cell = steps[k], into = stepDir(steps[k - 1], cell), on = k + 1 < steps.length ? stepDir(cell, steps[k + 1]) : into;
+      const c = out.get(cell);
+      if (!c) out.set(cell, { from: h.from, dir: h.dir, to: h.to, ways: [[into, on]] });
+      else if (c.from === h.from && c.dir === h.dir) c.ways.push([into, on]);
     }
-    path.push(cur);
   }
-  return { path, to: -1, dir: hp.steps.at(-1)?.dir ?? d, stuck: { at: cur, why: 'end' } };
+  return out;
 }
 
 export function reach(inp: ReachInput): Reach {
@@ -323,16 +321,17 @@ export function exitPathEntries(rom: Rom): ReachInput['exitPaths'] {
 }
 
 // (gameL1 of the map loaded at it, its translevels), the level flags of the save there (owprogress.ts), the path
-// kinds and Mario's start position; levelWarps: where the levels' exits to the overworld teleport (optional)
+// kinds and shapes, the game's hardcoded paths (owhardpaths.ts) and Mario's start position; levelWarps: where the levels' exits
+// to the overworld teleport (optional)
 export function reachInput(rom: Rom, l1: ArrayLike<number>, tls: ArrayLike<number>, flags: ArrayLike<number>, kinds: readonly PathKind[],
-  shapes: PathShapes, start: OwTile, levelWarps?: (tl: number) => OwTile[]): ReachInput {
+  shapes: PathShapes, hard: readonly HardWalk[], start: OwTile, levelWarps?: (tl: number) => OwTile[]): ReachInput {
   const stars = new Map<number, number[]>(), targets = new Map<number, OwTile>();
   readTeleports(rom).forEach((t, i, all) => {
     if (t.from && t.to && starEntryAt(all, t.from) === i) { stars.set(tileOf(t.from), [tileOf(t.to)]); targets.set(tileOf(t.to), t.to); } // the entry the game finds
   });
   const exitPaths = exitPathEntries(rom);
   return {
-    l1, tls, flags, kinds, shapes, start: tileOf(start), stars, exitPaths, hard: hardPaths(rom), targets,
+    l1, tls, flags, kinds, shapes, start: tileOf(start), stars, exitPaths, hard, targets,
     levelWarps: levelWarps && ((tl) => levelWarps(tl).map((t) => { targets.set(tileOf(t), t); return tileOf(t); })),
   };
 }

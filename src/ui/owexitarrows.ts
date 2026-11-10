@@ -50,10 +50,10 @@ export class ExitArrowLayer {
   edges(): ExitEdge[] | null {
     const v = this.view, app = v.app, rom = app.rom;
     if (this.passable?.gen === rom.gen) return this.passable.edges;
-    const kinds = v.pathKinds(), shapes = app.pathShapes(this.learned);
-    if (!kinds || !shapes || this.asked === rom.gen) return null;
+    const kinds = v.pathKinds(), shapes = app.pathShapes(this.learned), hard = kinds && app.hardWalks(kinds, this.learned);
+    if (!kinds || !shapes || !hard || this.asked === rom.gen) return null;
     // (dropped: the overworld left, asked again when shown)
-    const passable = app.overworldExitEdges(kinds, shapes, this.learned, () => { this.asked = -1; });
+    const passable = app.overworldExitEdges(kinds, shapes, hard, this.learned, () => { this.asked = -1; });
     if (passable) { this.passable = { rom, gen: rom.gen, edges: passable }; return passable; }
     this.asked = rom.gen;
     return null;

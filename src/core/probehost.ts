@@ -44,6 +44,7 @@ import { pathKindsJob, pathShapesJob } from './owpaths.ts';
 import { passableEdgesJob } from './owexitedges.ts';
 import { worldCheckJob } from './worldcheck.ts';
 import { revealWalkJob } from './revealwalk.ts';
+import { hardWalksJob } from './owhardpaths.ts';
 import { KeptSuggestions, prefabSuggestionsJob } from './prefabsuggest.ts';
 import { SizeProbe, sizesJob } from './objresize.ts';
 import { OverworldEmulator, OverworldLoads, overworldMapJob, OW_LOADS_KEPT } from './overworld.ts';
@@ -122,6 +123,7 @@ function learnJob(
     case 'pathKinds': return (emu) => pathKindsJob(emu);
     case 'pathShapes': return (emu) => pathShapesJob(emu);
     case 'revealWalks': return (emu) => revealWalkJob(emu);
+    case 'hardWalks': return (emu) => hardWalksJob(emu, j.l1, j.tls, j.cells);
     case 'suggest': return (emu) => prefabSuggestionsJob(state.rom, emu, state.suggest, j.levels, j.open);
     case 'sizes': return (emu) => {
       const key = `${j.level.number}:${inputHash(j.level.header)}:${j.layer2Pointer}`;
@@ -140,8 +142,8 @@ function learnJob(
     case 'owAnimSteps': return () => owAnimStepsJob(owLoads(state), j.map, j.progress);
     case 'owSave': return (emu) => progressSaveJob(owLoads(state), j.progress, { uses: state.uses, emu, prober: state.prober });
     case 'owL1Without': return () => layer1WithoutJob(state.l1Copy ??= new EventL1Copy(), state.rom, j.event);
-    case 'owExitEdges': return () => passableEdgesJob(state.rom, owLoads(state), j.kinds, j.shapes);
-    case 'owWorldCheck': return () => worldCheckJob(state.rom, owLoads(state), j.kinds, j.shapes, j.open);
+    case 'owExitEdges': return () => passableEdgesJob(state.rom, owLoads(state), j.kinds, j.shapes, j.hard);
+    case 'owWorldCheck': return () => worldCheckJob(state.rom, owLoads(state), j.kinds, j.shapes, j.hard, j.open);
     case 'msgRoutine': return (emu) => messageRoutineJob(state.rom, emu);
     case 'gameBg': return (emu) => gameBgJob(emu, j.level);
     case 'prefabPlaces': return (emu) => prefabPlacesJob(state.rom, emu, j.prefab, j.levels, j.open, j.skip);

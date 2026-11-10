@@ -14,6 +14,7 @@ import { progressSavesJob, progressSearches, progressInput, progressMapsFromEven
 import { inputWithout, reach, waysFrom, neighbor, type Reach, type Reached, type ReachInput } from './owreach.ts';
 import { ExitGraph } from './exitgraph.ts';
 import type { PathKind, PathShapes } from './owpaths.ts';
+import type { HardWalk } from './owhardpaths.ts';
 import type { Job } from './jobrunner.ts';
 
 // a level B an exit opens: its translevel, its level tile Mario reaches, where the exit's arrow ends – that tile, or
@@ -192,10 +193,11 @@ function arrowEnd(ways: Map<number, Way>, from: number, to: number, submapAt: (t
 
 // The exits' edges with the events still passable without each exit's event (exitEdgeSteps passable), as a job of the
 // result learner (probe worker): the saves' level flags (owprogress.ts progressSavesJob, kept by the loads), the maps at
-// every progress from the events, then a step per exit. kinds, shapes: the path kinds and shapes (sent with the job)
-export function* passableEdgesJob(rom: Rom, loads: OverworldLoads, kinds: readonly PathKind[], shapes: PathShapes): Job<ExitEdge[]> {
+// every progress from the events, then a step per exit. kinds, shapes, hard: the path kinds and shapes, the hardcoded paths
+// (owhardpaths.ts; sent with the job)
+export function* passableEdgesJob(rom: Rom, loads: OverworldLoads, kinds: readonly PathKind[], shapes: PathShapes, hard: readonly HardWalk[]): Job<ExitEdge[]> {
   const flags = (yield* progressSavesJob(loads)).map((s) => s.levelFlags);
   yield;
-  const search = progressSearches(progressInput(rom, progressMapsFromEvents(rom, flags), kinds, shapes, new ExitGraph(rom))), views = yield* submapViewsJob(loads);
+  const search = progressSearches(progressInput(rom, progressMapsFromEvents(rom, flags), kinds, shapes, hard, new ExitGraph(rom))), views = yield* submapViewsJob(loads);
   return yield* exitEdgeSteps(rom, search, (i) => submapOf(views, i), true);
 }

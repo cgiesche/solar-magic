@@ -72,6 +72,7 @@ import { slipperyKey } from '../core/slippery.ts';
 import { gameBgKey } from '../core/tilemove.ts';
 import { type PathKind, type PathShapes, type LevelTileTest, levelTileTest } from '../core/owpaths.ts';
 import type { RevealWalkSkips } from '../core/revealwalk.ts';
+import { hardWalksInput, type HardWalk } from '../core/owhardpaths.ts';
 import { OW_EVENTS, type OwRender } from '../core/overworld.ts';
 import type { OwTriggerSwitches } from '../core/owanimview.ts';
 import { animationPref } from './motion.ts';
@@ -1209,6 +1210,21 @@ export class App {
   pathShapes(done: () => void): PathShapes | null {
     return this.probes.learn<PathShapes>('owsh2', { kind: 'pathShapes' }, { lane: 'owsh', label: 'Path shapes', done }) ?? null;
   }
+  // the game's hardcoded paths on the overworld (owhardpaths.ts), from the path kinds: learned in the probe worker on
+  // the map with every event passed and kept in the result cache while it and the game's code are unchanged; null
+  // while that runs, then `done` is called (none when it fails)
+  hardWalks(kinds: readonly PathKind[], done: () => void): HardWalk[] | null {
+    const gen = this.rom.gen;
+    let m = this.hardWalksAsked;
+    if (m?.rom !== this.rom || m.gen !== gen || m.kinds !== kinds) {
+      const spec = hardWalksInput(this.rom, kinds);
+      m = this.hardWalksAsked = { rom: this.rom, gen, kinds, spec, input: inputHash(spec) };
+    }
+    const r = this.probes.learnOrFailed<HardWalk[]>('owhw1', { kind: 'hardWalks', ...m.spec }, { lane: 'owhw', label: 'Hardcoded paths', input: m.input, done, failed: done });
+    return r === FAILED ? [] : r ?? null;
+  }
+  // what the hardcoded paths were last asked with (hardWalksInput, its hash: built once per ROM change)
+  private hardWalksAsked: { rom: Rom; gen: number; kinds: readonly PathKind[]; spec: ReturnType<typeof hardWalksInput>; input: string } | null = null;
   // the overworld with every event passed (path validation, owreach.ts: what Mario can ever reach), learned in the probe
   // worker in a lane of its own (the map shown keeps its) and kept in memory while the ROM bytes it read are unchanged:
   // undefined while it is emulated, then `done` is called
@@ -1219,16 +1235,16 @@ export class App {
   // every event passed, the budgets, those found at every event progress), from the path kinds and shapes and the open
   // level's exits as edited, learned in the probe worker and kept in memory while the ROM bytes it read are unchanged
   // (seconds: the saves at every progress first)
-  overworldWorldCheck(kinds: PathKind[], shapes: PathShapes, done: () => void): WorldCheckLearned | undefined {
+  overworldWorldCheck(kinds: PathKind[], shapes: PathShapes, hard: HardWalk[], done: () => void): WorldCheckLearned | undefined {
     const open = { number: this.level.number, exits: this.level.exits };
-    return this.probes.learn<WorldCheckLearned>('owwc1', { kind: 'owWorldCheck', kinds, shapes, open }, { lane: 'owwc', label: 'World check', input: [kinds, shapes, open], done });
+    return this.probes.learn<WorldCheckLearned>('owwc2', { kind: 'owWorldCheck', kinds, shapes, hard, open }, { lane: 'owwc', label: 'World check', input: [kinds, shapes, hard, open], done });
   }
   // the exits' edges with the events still passable without each exit's event (owexitedges.ts passableEdgesJob, the
   // layer 1 mode's exit arrows), from the path kinds and shapes, learned in the probe worker and kept in memory while the ROM
   // bytes they read are unchanged (seconds: the saves at every progress first); dropped: the request was dropped (the
   // overworld left, overworldLeft)
-  overworldExitEdges(kinds: PathKind[], shapes: PathShapes, done: () => void, dropped?: () => void): ExitEdge[] | undefined {
-    return this.probes.learn<ExitEdge[]>('owxe1', { kind: 'owExitEdges', kinds, shapes }, { lane: 'owxe', label: 'Exit arrows', input: [kinds, shapes], done, dropped });
+  overworldExitEdges(kinds: PathKind[], shapes: PathShapes, hard: HardWalk[], done: () => void, dropped?: () => void): ExitEdge[] | undefined {
+    return this.probes.learn<ExitEdge[]>('owxe2', { kind: 'owExitEdges', kinds, shapes, hard }, { lane: 'owxe', label: 'Exit arrows', input: [kinds, shapes, hard], done, dropped });
   }
   // The overworld workspace was left: the overworld view's jobs of seconds (the save at the progress shown and with
   // every event passed, the World check, the exits' arrows) are not wanted any more, so that the level editor's jobs

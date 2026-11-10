@@ -12,6 +12,7 @@ import { levelRows, type Level } from '../src/core/level.ts';
 import type { LevelRender } from '../src/core/levelemu.ts';
 import { pathKindsJob, pathShapesJob, levelTileTest, type PathKind, type PathShapes, type LevelTileTest } from '../src/core/owpaths.ts';
 import { OW_EVENTS, gameL1, type OverworldLoads } from '../src/core/overworld.ts';
+import { hardWalksJob, hardWalksInput, type HardWalk } from '../src/core/owhardpaths.ts';
 import { progressSaves, type ProgressMap } from '../src/core/owprogress.ts';
 import { RAM } from '../src/core/ram.ts';
 
@@ -45,6 +46,12 @@ export function pathShapes(rom: Rom): PathShapes {
   const runner = new JobRunner({ rom, results: new ResultCache(new RomFingerprint(rom)) });
   const run = runner.run({ key: 'owsh', keep: false, picture: false, start: pathShapesJob });
   for (;;) { const r = runner.step('owsh', run); if (r) return r.result; }
+}
+// the game's hardcoded paths in `rom` (owhardpaths.ts) from its path kinds, as pathKinds (the input as App asks with)
+export function hardWalks(rom: Rom, kinds: readonly PathKind[] = pathKinds(rom)): HardWalk[] {
+  const runner = new JobRunner({ rom, results: new ResultCache(new RomFingerprint(rom)) }), { l1, tls, cells } = hardWalksInput(rom, kinds);
+  const run = runner.run({ key: 'owhw', keep: false, picture: false, start: (emu) => hardWalksJob(emu, l1, tls, cells) });
+  for (;;) { const r = runner.step('owhw', run); if (r) return r.result; }
 }
 // which tiles are level tiles in `rom`, learned as the editor learns them
 export const levelTiles = (rom: Rom): LevelTileTest => levelTileTest(pathKinds(rom));

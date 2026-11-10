@@ -20,7 +20,7 @@ import { levelTileTest } from '../src/core/owpaths.ts';
 import { routeTiles, routeKind, writeRoute } from '../src/core/owroute.ts';
 import { l1OwnLooks, lookProblems, hasOwnLook } from '../src/core/owlook.ts';
 import { diffProblems, diffText, type WorldProblem } from '../src/core/worldcheck.ts';
-import { editorImage, pathKinds, pathShapes, loadedProgressMaps } from './fixture.ts';
+import { editorImage, pathKinds, pathShapes, hardWalks, loadedProgressMaps } from './fixture.ts';
 
 let bad = 0;
 const check = (ok: boolean, what: string) => { console.log((ok ? 'ok   ' : 'FAIL ') + what); if (!ok) bad++; };
@@ -30,7 +30,7 @@ const runJob = <T>(job: Job<T>): T => { let st = job.next(); while (!st.done) st
 const keys = (ps: WorldProblem[], kind: string) => ps.filter((p) => p.key.startsWith(`${kind}:`)).map((p) => +p.key.split(':')[1]).sort((a, b) => a - b).join();
 
 const rom = new Rom(await editorImage()), s = new RomEditSession(rom);
-const kinds = pathKinds(rom), shapes = pathShapes(rom), isLevel = levelTileTest(kinds);
+const kinds = pathKinds(rom), shapes = pathShapes(rom), hard = hardWalks(rom, kinds), isLevel = levelTileTest(kinds);
 // (one set of loads for every edit, as the probe worker keeps them: what an edit leaves alone is not emulated again)
 const loads = new OverworldLoads(new OverworldEmulator(rom), 4);
 interface Checked { maps: ProgressMap[]; views: ReturnType<typeof submapViews>; problems: WorldProblem[] }
@@ -38,7 +38,7 @@ function checkLooks(what: string): Checked {
   let t = performance.now();
   const maps = progressMapsFromEvents(rom, runJob(progressFlagsJob(loads))), views = submapViews(loads), own = l1OwnLooks(rom, loads);
   const learned = performance.now() - t;
-  const search = progressSearches(progressInput(rom, maps, kinds, shapes, new ExitGraph(rom)));
+  const search = progressSearches(progressInput(rom, maps, kinds, shapes, hard, new ExitGraph(rom)));
   t = performance.now();
   const problems = lookProblems({ rom, maps, ownLooks: own, kinds, views, search, place: at });
   console.log(`     ${what}: the saves and maps at every progress and the looks in ${Math.round(learned)} ms, the rules in ${Math.round(performance.now() - t)} ms`);
@@ -78,7 +78,7 @@ const written: Uint8Array[] = [];
   }
 }
 {
-  const search = progressInput(rom, clean.maps, kinds, shapes, new ExitGraph(rom));
+  const search = progressInput(rom, clean.maps, kinds, shapes, hard, new ExitGraph(rom));
   const levels = Array.from({ length: 0x800 }, (_, i) => i).filter((i) => isLevel(clean.maps[OW_EVENTS].l1[i]) && tls[i] && onMaps(i));
   for (const from of levels) {
     const e = baseEvent(rom, tls[from]);

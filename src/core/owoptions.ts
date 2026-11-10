@@ -7,7 +7,8 @@
 // SMW Central's hijack map names most of them. What each does in the game is checked by emulation (tools/testowoptions.ts).
 //
 // - hardcoded paths: the game's 5 paths between levels that cross other paths ($049301: levels 9–15, 23–1B,
-//   11F–120, 10C–10D, and 24 to a pipe by position) – a BRA over the lookup ($049307)
+//   11F–120, 10C–10D, and 24 to a pipe by position) – a BRA over the lookup ($049307), also over a patch's lookup
+//   hooked after it ($049312, Kevin's: hardPathsHooked); what the game walks is learned by emulation (owhardpaths.ts)
 // - path fade: the event path's fade-in (palettes, translucent sprites); off, each step's tiles are written at once
 //   and the next one follows after $40 / speed frames (Lunar Magic's "Path Reveal Speed", 6 by default; the ADC's
 //   operand in its routine at $04EACC). Turned off, it also turns off the sprites' translucency the fade needs
@@ -38,7 +39,15 @@ export interface OwOption {
   needs?: OwOptionId; // has an effect only while that one is on
   // a setting of another option, shown with it while that one has this value (the fade's translucency while it is off)
   sub?: { of: OwOptionId; when: boolean };
+  // what to know about the switch in this ROM, shown with it (null: nothing)
+  note?: (rom: Rom) => string | null;
 }
+
+// the game's code the hardcoded paths' lookup starts with, after Lunar Magic's switch ($049307): LDX #$0009 – a patch
+// with its own tables hooks here (Kevin's "Custom Overworld Hardcoded Paths": a JML)
+const HARD_LOOKUP = 0x049312, HARD_LOOKUP_GAME = [0xa2, 0x09, 0x00];
+// whether a patch changed the game's lookup of the hardcoded paths (its paths behind Lunar Magic's switch too)
+export const hardPathsHooked = (rom: Pick<Rom, 'r8'>): boolean => HARD_LOOKUP_GAME.some((v, k) => rom.r8(HARD_LOOKUP + k) !== v);
 
 // The colors the path fade rewrites while a step fades in, on the main map and the submaps alike (learned by emulation,
 // testowoptions: colors 0–7 of palettes 0–3 change, palettes C–F take colors 0–7 of palettes 4–7, colors 8–F of
@@ -64,9 +73,12 @@ export const OW_OPTIONS: readonly OwOption[] = [
     bytes: [{ at: 0x048380, game: [0x10], changed: [0x00] }],
   },
   {
-    id: 'hardcodedPaths', label: 'The game\'s 5 hardcoded paths', game: true,
-    title: 'The game walks 5 paths by a table instead of path tiles, so that they can cross other paths: levels 9–15 (Donut Plains), 23–1B and 24 to a pipe (Chocolate Island), 11F–120 (Forest of Illusion), 10C–10D (Valley of Bowser). A path tile next to a level tile is walked instead anyway; turn them off when those levels or places are used differently.',
+    id: 'hardcodedPaths', label: 'Allow hardcoded default layer 1 paths', game: true,
+    title: 'The game walks 5 paths by a table in its code instead of path tiles, so that they can cross other paths: levels 9–15 (Donut Plains), 23–1B and 24 to a pipe (Chocolate Island), 11F–120 (Forest of Illusion), 10C–10D (Valley of Bowser). Mario takes one only where no path tile leads off the level tile that way; the map shows them with dashed marks. Turn them off when those levels or places are used differently.',
     bytes: [{ at: 0x049307, game: [0xa6, 0x08], changed: [0x80, 0x71] }],
+    note: (rom) => (hardPathsHooked(rom)
+      ? 'A patch replaces the game\'s hardcoded paths with its own (its code at $049312, e.g. Kevin\'s "Custom Overworld Hardcoded Paths"): turned off, the patch\'s paths are off too.'
+      : null),
   },
   {
     id: 'pathFade', label: 'Event path fade effect', game: true,

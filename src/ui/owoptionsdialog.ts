@@ -71,6 +71,8 @@ function optionsPanel(app: App, redraw: () => void): HTMLElement {
     }
     if (o.sub) c.classList.add('ow-option-sub');
     rows.push(c);
+    const note = o.note?.(rom);
+    if (note) rows.push(h('div', { class: 'hint ow-option-sub' }, note));
     const speed = o.id === 'pathFade' ? revealSpeed(rom) : null;
     if (speed !== null) {
       const inp = hexInput(speed, 2, (n) => app.romEdit('Path reveal speed', () => setRevealSpeed(rom, n)), MAX_REVEAL_SPEED, (n) => n >= 1 || 'at least 1');

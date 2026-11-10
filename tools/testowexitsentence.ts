@@ -18,7 +18,7 @@ import { addReveal, removeReveal } from '../src/core/oweventtiles.ts';
 import { RomEditSession } from '../src/core/romedit.ts';
 import { levelName } from '../src/core/levelnames.ts';
 import { OW_NORMAL, OW_SECRET, OW_END_TURN } from '../src/core/level.ts';
-import { editorImage, pathKinds, pathShapes } from './fixture.ts';
+import { editorImage, pathKinds, pathShapes, hardWalks } from './fixture.ts';
 
 let bad = 0;
 const check = (ok: boolean, what: string) => { console.log((ok ? 'ok   ' : 'FAIL ') + what); if (!ok) bad++; };
@@ -29,7 +29,7 @@ const rom = new Rom(await editorImage()), runners = eventRunners(rom), tls = rea
 // flags as the probe worker learns them)
 const loads = new OverworldLoads(new OverworldEmulator(rom), 4), views = submapViews(loads);
 const maps = progressMapsFromEvents(rom, progressSaves(loads).map((s) => s.levelFlags));
-const edges = exitEdges(rom, progressSearches(progressInput(rom, maps, pathKinds(rom), pathShapes(rom), new ExitGraph(rom))), (i) => submapOf(views, i));
+const edges = exitEdges(rom, progressSearches(progressInput(rom, maps, pathKinds(rom), pathShapes(rom), hardWalks(rom), new ExitGraph(rom))), (i) => submapOf(views, i));
 const words = { level: (tl: number) => levelName(rom, tl), tile: (t: number) => hx(t) };
 const tlOf = (e: number) => runners.get(e)![0].tl;
 const say = (s: ExitSentence[]) => s.map((x) => `${x.exit}: ${x.clauses.map((c) => c.text).join(' · ') || 'opens nothing yet'}`).join(' | ');
@@ -129,7 +129,7 @@ function sentencesOpen(edges: readonly ExitEdge[], rule: string) {
 }
 sentencesOpen(edges, 'the cheap rule (exitEdges)');
 {
-  const job = passableEdgesJob(rom, loads, pathKinds(rom), pathShapes(rom));
+  const job = passableEdgesJob(rom, loads, pathKinds(rom), pathShapes(rom), hardWalks(rom));
   let st = job.next();
   while (!st.done) st = job.next();
   const differ = st.value.filter((e) => edges.find((x) => x.tl === e.tl && x.exit === e.exit)?.opens.map((o) => o.tl).join() !== e.opens.map((o) => o.tl).join());

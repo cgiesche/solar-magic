@@ -23,7 +23,7 @@ import type { Job } from '../src/core/jobrunner.ts';
 import { LevelEmulator } from '../src/core/levelemu.ts';
 import { PlaySession } from '../src/core/playsession.ts';
 import { GM, RAM } from '../src/core/ram.ts';
-import { editorImage, pathKinds, pathShapes } from './fixture.ts';
+import { editorImage, pathKinds, pathShapes, hardWalks } from './fixture.ts';
 
 let bad = 0;
 const check = (ok: boolean, what: string) => { console.log((ok ? 'ok   ' : 'FAIL ') + what); if (!ok) bad++; };
@@ -106,14 +106,14 @@ const save = run(progressSaveJob(loads, S)) as ProgressSave;
 
 // ---- reach at the set: over the map built from the events, as over the emulated one ----
 {
-  const kinds = pathKinds(rom), shapes = pathShapes(rom), start = readStart(rom, 0);
+  const kinds = pathKinds(rom), shapes = pathShapes(rom), hard = hardWalks(rom, kinds), start = readStart(rom, 0);
   const built = progressMapFromEvents(rom, S, save.levelFlags);
   const r = new OverworldEmulator(rom).load(0, S);
-  const a = reach(reachInput(rom, built.l1, built.tls, built.flags, kinds, shapes, start));
-  const b = reach(reachInput(rom, gameL1(r), r.wram.subarray(RAM.owTranslevels, RAM.owTranslevelsEnd), save.levelFlags, kinds, shapes, start));
+  const a = reach(reachInput(rom, built.l1, built.tls, built.flags, kinds, shapes, hard, start));
+  const b = reach(reachInput(rom, gameL1(r), r.wram.subarray(RAM.owTranslevels, RAM.owTranslevelsEnd), save.levelFlags, kinds, shapes, hard, start));
   const n = a.tiles.reduce((x: number, v) => x + (v ? 1 : 0), 0);
   check(same(a.tiles, b.tiles) && n > 0, `the same ${n} tiles reached over the map built from the events and the emulated one`);
-  const at3r = reach(reachInput(rom, progressMapsFromEvents(rom, saves.map((s) => s.levelFlags))[3].l1, built.tls, saves[3].levelFlags, kinds, shapes, start));
+  const at3r = reach(reachInput(rom, progressMapsFromEvents(rom, saves.map((s) => s.levelFlags))[3].l1, built.tls, saves[3].levelFlags, kinds, shapes, hard, start));
   check(!same(a.tiles, at3r.tiles), 'other tiles reached than at the prefix up to event 02');
   const p4 = progressMapFromEvents(rom, 4, saves[4].levelFlags), m4 = progressMapsFromEvents(rom, saves.map((s) => s.levelFlags))[4];
   check(same(p4.l1, m4.l1) && same(p4.flags, m4.flags), 'a prefix: the map of progressMapsFromEvents');

@@ -30,7 +30,7 @@ import { refusalOf, refusalDetails } from '../src/core/owrefusal.ts';
 import { refusalWords } from '../src/ui/owrefusal.ts';
 import { setLevelNameTiles } from '../src/core/levelnames.ts';
 import { readMessage, writeMessages, isBlank } from '../src/core/messages.ts';
-import { editorImage, pathKinds, pathShapes } from './fixture.ts';
+import { editorImage, pathKinds, pathShapes, hardWalks } from './fixture.ts';
 
 let bad = 0;
 const check = (ok: boolean, what: string) => { console.log((ok ? 'ok   ' : 'FAIL ') + what); if (!ok) bad++; };
@@ -39,13 +39,13 @@ const at = (i: number) => { const { x, y } = l1XY(i); return `${i >> 10 ? 'subma
 const same = (a: ArrayLike<number>, b: ArrayLike<number>) => a.length === b.length && Array.from(a).every((v, i) => v === b[i]);
 
 const image = await editorImage();
-const kinds = pathKinds(new Rom(image.slice())), shapes = pathShapes(new Rom(image.slice())), isLevel = levelTileTest(kinds);
+const kinds = pathKinds(new Rom(image.slice())), shapes = pathShapes(new Rom(image.slice())), hard = hardWalks(new Rom(image.slice()), kinds), isLevel = levelTileTest(kinds);
 // the tiles Mario reaches in `rom` at event progresses (the saves there emulated once)
 const reacher = (rom: Rom) => {
   const loads = new OverworldLoads(new OverworldEmulator(rom), 4), saves = progressSaves(loads), views = submapViews(loads);
   return (progress: number) => {
     const r = loads.get(0, progress);
-    const inp: ReachInput = reachInput(rom, gameL1(r).slice(), r.wram.slice(RAM.owTranslevels, RAM.owTranslevelsEnd), saves[progress].levelFlags, kinds, shapes, readStart(rom, 0));
+    const inp: ReachInput = reachInput(rom, gameL1(r).slice(), r.wram.slice(RAM.owTranslevels, RAM.owTranslevelsEnd), saves[progress].levelFlags, kinds, shapes, hard, readStart(rom, 0));
     return { inp, r: reach(inp), views };
   };
 };

@@ -24,6 +24,7 @@ import { levelTeleports } from './owlinks.ts';
 import { readStart } from './owsprites.ts';
 import { reach, reachInput, type ReachInput } from './owreach.ts';
 import type { PathKind, PathShapes } from './owpaths.ts';
+import type { HardWalk } from './owhardpaths.ts';
 import type { OwTile } from './owteleport.ts';
 import type { CheckedAt } from './worldcheck.ts';
 import type { LevelUses } from './levelusage.ts';
@@ -93,10 +94,10 @@ export function progressMapsFromEvents(rom: Rom, flags: readonly number[][]): Pr
 
 // the search's input at event progress p from the maps at every progress, as the overworld view searches: with the
 // levels' exits to the overworld teleporting (each level's asked once)
-export function progressInput(rom: Rom, maps: readonly ProgressMap[], kinds: readonly PathKind[], shapes: PathShapes, graph: ExitGraph): (p: number) => ReachInput {
+export function progressInput(rom: Rom, maps: readonly ProgressMap[], kinds: readonly PathKind[], shapes: PathShapes, hard: readonly HardWalk[], graph: ExitGraph): (p: number) => ReachInput {
   const warps = new Map<number, OwTile[]>(), start = readStart(rom, 0);
   const levelWarps = (tl: number) => warps.get(tl) ?? warps.set(tl, levelTeleports(rom, graph, tl).map((t) => t.to)).get(tl)!;
-  return (p) => reachInput(rom, maps[p].l1, maps[p].tls, maps[p].flags, kinds, shapes, start, levelWarps);
+  return (p) => reachInput(rom, maps[p].l1, maps[p].tls, maps[p].flags, kinds, shapes, hard, start, levelWarps);
 }
 
 // the searches at every event progress 0 … OW_EVENTS from their inputs, each searched once when first asked for: how

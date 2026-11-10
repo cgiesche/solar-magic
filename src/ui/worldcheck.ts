@@ -70,12 +70,13 @@ export class WorldCheck {
     return problems;
   }
 
-  // what the probe worker learns of the ROM as it is (core/worldcheck.ts worldCheckJob), from the path kinds and shapes
+  // what the probe worker learns of the ROM as it is (core/worldcheck.ts worldCheckJob), from the path kinds and shapes, the hardcoded paths
   // and the open level's exits as edited; null while it or they are learned
   private workerPart(): WorldCheckLearned | null {
     const v = this.view, gen = v.app.rom.gen, graph = v.app.entrances.graph();
     if (this.learnedAt?.gen === gen && this.learnedAt.graph === graph) return this.learnedAt.learned;
-    const kinds = v.pathKinds(), shapes = v.app.pathShapes(this.learned), learned = kinds && shapes && v.app.overworldWorldCheck(kinds, shapes, this.learned);
+    const kinds = v.pathKinds(), shapes = v.app.pathShapes(this.learned), hard = kinds && v.app.hardWalks(kinds, this.learned);
+    const learned = kinds && shapes && hard && v.app.overworldWorldCheck(kinds, shapes, hard, this.learned);
     if (!learned) return null;
     this.learnedAt = { gen, graph, learned };
     return learned;

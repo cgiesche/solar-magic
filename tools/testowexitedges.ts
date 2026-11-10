@@ -18,7 +18,7 @@ import { exitEdges, passableEdgesJob, shownExitEdges, type ExitEdge } from '../s
 import { RAM } from '../src/core/ram.ts';
 import { ExitGraph } from '../src/core/exitgraph.ts';
 import { levelTeleports } from '../src/core/owlinks.ts';
-import { editorImage, pathKinds, pathShapes, loadedProgressMaps } from './fixture.ts';
+import { editorImage, pathKinds, pathShapes, hardWalks, loadedProgressMaps } from './fixture.ts';
 
 let bad = 0;
 const check = (ok: boolean, what: string) => { console.log((ok ? 'ok   ' : 'FAIL ') + what); if (!ok) bad++; };
@@ -36,7 +36,7 @@ const lv = (tl: number) => hx(translevelToLevel(tl), 3);
 }
 
 const rom = new Rom(await editorImage());
-const kinds = pathKinds(rom), shapes = pathShapes(rom);
+const kinds = pathKinds(rom), shapes = pathShapes(rom), hard = hardWalks(rom, kinds);
 const loads = new OverworldLoads(new OverworldEmulator(rom), 4);
 
 // the maps the game loads at every progress
@@ -61,7 +61,7 @@ const start = readStart(rom, 0);
 // (as the overworld view searches: with the levels' exits to the overworld teleporting)
 const graph = new ExitGraph(rom), warps = new Map<number, ReturnType<typeof levelTeleports>>();
 const levelWarps = (tl: number) => (warps.get(tl) ?? warps.set(tl, levelTeleports(rom, graph, tl)).get(tl)!).map((t) => t.to);
-const input = (p: number) => reachInput(rom, maps[p].l1, maps[p].tls, maps[p].flags, kinds, shapes, start, levelWarps);
+const input = (p: number) => reachInput(rom, maps[p].l1, maps[p].tls, maps[p].flags, kinds, shapes, hard, start, levelWarps);
 const t0 = performance.now(), edges = exitEdges(rom, progressSearches(input), sub);
 console.log(`     ${edges.length} exits in ${Math.round(performance.now() - t0)} ms: ${edges.filter((e) => e.opens.length).length} with arrows (${edges.reduce((n, e) => n + e.opens.length, 0)})`);
 const text = (e: (typeof edges)[number]) => `${lv(e.tl)} ${EXIT_NAMES[e.exit].toLowerCase()} → ${e.opens.map((o) => lv(o.tl)).join(' ') || 'nothing'}`;
@@ -135,7 +135,7 @@ check(yi.filter((e) => e.opens.length).length === want.length, `no other exit on
 
 // ---- the events still passable without the exit's event (the probe worker's job, after the saves: they are kept) ----
 {
-  const job = passableEdgesJob(rom, loads, kinds, shapes), t1 = performance.now();
+  const job = passableEdgesJob(rom, loads, kinds, shapes, hard), t1 = performance.now();
   let s = job.next(), n = 0;
   for (; !s.done; s = job.next()) n++;
   const passable: ExitEdge[] = s.value, ms = Math.round(performance.now() - t1);

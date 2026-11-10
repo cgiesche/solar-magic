@@ -22,7 +22,7 @@ import { submapsShowing, pathSubmap, endChoice, endChoiceText, linksEndingAt, cl
 import { submapViews, submapOf, submapShown, inView } from '../src/core/owevents.ts';
 import { readSecondaryEntrance, writeSecondaryEntrance, newOverworldExit } from '../src/core/level.ts';
 import { GM, RAM, PAD, MARIO_DYING, get16, set16 } from '../src/core/ram.ts';
-import { editorImage, cleanImage, romDiff, pathShapes, pathKinds } from './fixture.ts';
+import { editorImage, cleanImage, romDiff, pathShapes, hardWalks, pathKinds } from './fixture.ts';
 
 let bad = 0;
 const check = (ok: boolean, what: string) => { console.log((ok ? 'ok   ' : 'FAIL ') + what); if (!ok) bad++; };
@@ -310,14 +310,14 @@ function warp(r: Rom, from: OwTile) {
     e.snes.wram[RAM.levelFlags] |= open;
     return press(e, pad);
   });
-  const loads = new OverworldLoads(new OverworldEmulator(new Rom(rom.data.slice())), 2), kinds = pathKinds(rom), shapes = pathShapes(rom);
+  const loads = new OverworldLoads(new OverworldEmulator(new Rom(rom.data.slice())), 2), kinds = pathKinds(rom), shapes = pathShapes(rom), hard = hardWalks(rom, kinds);
   const model = (r: Rom, open = 0) => {
     const flags = new Uint8Array(MAX_TRANSLEVEL + 1); // (a new game's: the initial flags)
     for (let tl = 0; tl <= MAX_TRANSLEVEL; tl++) flags[tl] = initialFlags(r, tl);
     flags[0] |= open;
     const l1 = readL1(r), every = gameL1(loads.get(0, OW_EVENTS)), game = readL1(rom);
     for (let i = 0; i < l1.length; i++) if (l1[i] === game[i]) l1[i] = every[i]; // (cells painted kept)
-    return reachInput(r, l1, readTranslevels(r), flags, kinds, shapes, readStart(r, 0));
+    return reachInput(r, l1, readTranslevels(r), flags, kinds, shapes, hard, readStart(r, 0));
   };
   const from: OwTile = { submap: 1, x: 0x0c, y: 0x08 }, vd: OwTile = { submap: 2, x: 5, y: 0x14 }, vdi = l1Index(1, 5, 0x14);
   const r = new Rom(rom.data.slice());
