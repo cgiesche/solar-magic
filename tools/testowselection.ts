@@ -1,9 +1,10 @@
 // The overworld's Paint panel hidden for a selection (#421, ui/owselection.ts selectionHidesPaint): a level tile, star
 // or pipe 5B selected by a click in the layer 1 mode shows only its properties; Paint stays for a tile's info
 // (Alt/Ctrl+click), in the other modes, for other tiles (the pipe 82, a path), while the path kinds are learned (a star
-// not known yet) and while a reveal's new tile is picked in the sheet; nothing selected: Paint.
+// not known yet) and while a reveal's new tile is picked in the sheet; nothing selected: Paint. And what a plain click
+// selects rather than picking into the brush (#434, clickSelects): a link end, a star or pipe with or without a link.
 // node tools/testowselection.ts
-import { selectionHidesPaint, type OwSelection } from '../src/ui/owselection.ts';
+import { selectionHidesPaint, clickSelects, type OwSelection } from '../src/ui/owselection.ts';
 import { STAR_TILE, PIPE_TILE } from '../src/core/owstars.ts';
 import { ANY_WAY_TILE } from '../src/core/owreach.ts';
 import type { PathKind } from '../src/core/owpaths.ts';
@@ -26,6 +27,13 @@ check(!selectionHidesPaint({ ...level, mode: 'l2' }) && !selectionHidesPaint({ .
 check(!selectionHidesPaint({ ...level, selected: -1 }), 'nothing selected: Paint');
 check(!selectionHidesPaint({ ...star, kinds: null }), 'the path kinds still learned (a star not known): Paint stays');
 check(!selectionHidesPaint({ ...level, revealPick: true }), 'a reveal\'s new tile picked in the sheet: Paint shown');
+
+// what a plain click (and a right click: its menu) on layer 1 takes as an object rather than a brush tile (#434)
+check(clickSelects(STAR_TILE, false, kinds) && clickSelects(PIPE_TILE, false, kinds), 'a star or pipe 5B without a link: selected (Link to… reachable)');
+check(clickSelects(0x100 | STAR_TILE, false, kinds), 'a star 15F without a link: selected');
+check(clickSelects(ANY_WAY_TILE, false, kinds), 'the pipe 82 without a link: selected (it can be linked too)');
+check(!clickSelects(0x04, false, kinds), 'a path tile: picked into the brush');
+check(clickSelects(0x04, true, kinds), 'any link end (an exit path tile, a location): selected');
 
 console.log(bad ? `\n${bad} FAILED` : '\nall ok');
 process.exit(bad ? 1 : 0);

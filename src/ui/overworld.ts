@@ -34,7 +34,7 @@ import type { OwSpriteView } from '../core/owsprites.ts';
 import { LinkLayer, type OffMapEnd } from './owlinkview.ts';
 import { LevelTileLayer, tilePlace } from './owlevelview.ts';
 import { TileLabels } from './owlevelname.ts';
-import { selectionHidesPaint } from './owselection.ts';
+import { selectionHidesPaint, clickSelects } from './owselection.ts';
 import { ownsTranslevel, starOrPipe, starDirs, giveStarTranslevel, type StarPaths } from '../core/owstars.ts';
 import { levelsWithoutTile, type LevelTileEvent } from '../core/owleveltiles.ts';
 import {
@@ -834,10 +834,12 @@ export class OverworldView {
         this.levelTiles.menu(menu.cx, menu.cy, menu.x, menu.y);
         return;
       }
-      // a link end (not a level tile): an object too – a right click its menu, a click selects it (#413)
+      // a link end (not a level tile): an object too – a right click its menu, a click selects it (#413); a star or
+      // pipe without a link is selected by a click too (#434: Link to… in its properties), a right click paints over it
       const cell = c.x >= 0 && c.y >= 0 && c.x < 32 && c.y < 32 ? l1Index(this.region, c.x, c.y) : -1;
-      if (!level && cell >= 0 && this.links.cells().has(cell)) {
-        if (paintButton(e)) {
+      const linkEnd = cell >= 0 && this.links.cells().has(cell);
+      if (!level && cell >= 0 && clickSelects(this.shown.l1[cell], linkEnd, this.pathKinds())) {
+        if (paintButton(e) && linkEnd) {
           // (the route brush: once released without a drag – a route may start there)
           if (this.routeBrush) { this.pathTool.down(c.x, c.y); if (this.pathTool.drawing) { this.menuAt = { cx: e.clientX, cy: e.clientY, x: c.x, y: c.y }; return; } }
           this.linkMenu(cell, e.clientX, e.clientY);
@@ -853,8 +855,8 @@ export class OverworldView {
       // a click on a level tile selects it, a drag moves it (a pick starts beside one)
       if (e.button === 0 && level && !e.shiftKey && !e.altKey && !e.ctrlKey) { this.levelTiles.down(c.x, c.y); this.updateStatus(); this.paint(); return; }
       // (a pick beside one: the level tile, star or pipe selected no longer – Delete would remove it unseen –, Paint shown
-      // again with the brush picked)
-      if (e.button === 0 && !e.shiftKey && !e.altKey && !e.ctrlKey && this.selected >= 0 && (this.isLevelTile(this.levelL1()[this.selected]) || this.paintHidden())) this.selectTile(-1, false);
+      // again with the brush picked; the pipe 82 too, whose selection keeps Paint, #434)
+      if (e.button === 0 && !e.shiftKey && !e.altKey && !e.ctrlKey && this.selected >= 0 && (this.isLevelTile(this.levelL1()[this.selected]) || this.paintHidden() || clickSelects(this.shown.l1[this.selected], false, this.pathKinds()))) this.selectTile(-1, false);
     }
     if (paintButton(e)) {
       // (the route brush: the route drawn)
@@ -1611,7 +1613,7 @@ export class OverworldView {
       h('label', { class: 'row' }, 'Map ', select(MAP_NAMES.map((n, i) => [i, n] as [number, string]), this.map, (v) => this.setMap(v))),
       h('span', { class: 'sep' }),
       h('div', { class: 'btn-group' },
-        h('button', { class: `ow-l1${this.mode === 'l1' ? ' active' : ''}`, title: 'Layer 1 (1): paths painted as tiles, the level tiles objects on top (hatched) – click selects one, drag moves it, right click: its menu, Delete removes it; placed with a look from "Levels" in the Paint panel; the overworld links\' tiles objects too (marked, right click: Link to…, Remove link) · the path tiles marked; layer 2 dimmed (View → Layers), hold Q to hide it', onclick: () => this.setMode('l1') }, 'Layer 1 (paths, levels & links)'),
+        h('button', { class: `ow-l1${this.mode === 'l1' ? ' active' : ''}`, title: 'Layer 1 (1): paths painted as tiles, the level tiles objects on top (hatched) – click selects one, drag moves it, right click: its menu, Delete removes it; placed with a look from "Levels" in the Paint panel; the overworld links\' tiles objects too (marked, right click: Link to…, Remove link), a star or pipe without a link selected by a click (Link to… in its properties) · the path tiles marked; layer 2 dimmed (View → Layers), hold Q to hide it', onclick: () => this.setMode('l1') }, 'Layer 1 (paths, levels & links)'),
         h('button', { class: `ow-l2${this.mode === 'l2' ? ' active' : ''}`, title: 'Layer 2 (2) · layer 1 with its path marks dimmed or hidden (View → Layers), hold Q for the other', onclick: () => this.setMode('l2') }, 'Layer 2 (terrain)'),
         h('button', { class: this.mode === 'sprites' ? 'active' : '', title: 'Sprites (3): the overworld\'s sprites as the game shows them at the event progress, the start positions and the Koopa Kids\' places; drag to move', onclick: () => this.setMode('sprites') }, 'Sprites')),
       h('span', { class: 'sep' }),
