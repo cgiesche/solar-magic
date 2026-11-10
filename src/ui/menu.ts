@@ -14,8 +14,13 @@ export type Menu = { label: string; items: MenuItem[] | (() => MenuItem[]); disa
 
 let current: { close: () => void; owner: HTMLElement } | null = null;
 
+// what else closes when a menu opens or menus are closed (an open popover, popover.ts)
+const alsoClose = new Set<() => void>();
+export function onCloseMenus(fn: () => void): void { alsoClose.add(fn); }
+
 export function closeMenus(): void {
   current?.close();
+  for (const fn of alsoClose) fn();
 }
 
 // one dropdown button; `bar` groups buttons so hovering switches between open menus

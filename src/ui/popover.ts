@@ -1,47 +1,50 @@
-// A popover from a button (ADR 0015): settings or reference shown beside where they are chosen, out of the side
-// panel. Closes on a click outside it or Esc; one open at a time, and an open menu closes it (and it the menu).
-// The button stays the same element while its bar is drawn again, so an open popover survives that; refresh() draws its
-// content again (the thing it shows changed).
+// a popover from a button (ADR 0015): settings or reference shown beside where they are chosen, out of the side
+// panel. Closes on a click outside it or Esc; one open at a time, closed with the menus (menu.ts closeMenus: a menu
+// opening, by mouse or key) and closing them. The button stays the same element while its bar is drawn again, so an
+// open popover survives that; refresh() draws its content again (what it shows changed)
 
 import { h } from './dom.ts';
-import { closeMenus } from './menu.ts';
+import { closeMenus, onCloseMenus } from './menu.ts';
 
 export type Popover = {
-  root: HTMLElement; // the button in its wrapper: put it where the button goes
-  refresh: () => void; // the content drawn again when open (closed when the button left the page)
+  root: HTMLElement; // the button in its wrapper: put where the button goes
+  refresh: () => void; // the content drawn again while open (closed once the button is no longer shown)
   close: () => void;
-  isOpen: () => boolean;
 };
 
 let current: Popover | null = null;
-
-export function closePopovers(): void {
-  current?.close();
-}
+onCloseMenus(() => current?.close());
 
 // label: the button's text; title: its tooltip; content: made anew whenever it opens or is refreshed
-export function popover(label: string, title: string, content: () => HTMLElement, cls = ''): Popover {
-  const btn = h('button', { class: `pop-btn${cls ? ` ${cls}` : ''}`, title, 'aria-haspopup': 'dialog', 'aria-expanded': 'false' }, label);
-  const wrap = h('div', { class: 'menu-wrap' }, btn);
-  const box = h('div', { class: 'popover', role: 'dialog' });
+export function popover(label: string, title: string, content: () => HTMLElement): Popover {
+  const btn = h('button', { class: 'pop-btn', title, 'aria-haspopup': 'dialog', 'aria-expanded': 'false' }, label);
+  const wrap = h('div', { class: 'pop-wrap' }, btn);
+  const box = h('div', { class: 'popover', role: 'dialog', 'aria-label': title });
+  // (its workspace left by a key or the address: closed, not in the way there)
+  const shown = () => wrap.isConnected && wrap.checkVisibility();
   const outside = (ev: MouseEvent) => { if (!wrap.contains(ev.target as Node)) self.close(); };
   // (capture: before the editor's own Esc – the selection stays)
   const keys = (ev: KeyboardEvent) => {
     if (ev.key !== 'Escape') return;
+    if (!shown()) { self.close(); return; }
     ev.preventDefault();
     ev.stopPropagation();
     self.close();
     btn.focus();
   };
-  const place = () => {
+  const fill = () => {
+    // (the control with the focus keeps it: a song just chosen)
+    const fields = () => [...box.querySelectorAll<HTMLElement>('button, select, input')];
+    const at = fields().indexOf(document.activeElement as HTMLElement);
+    box.replaceChildren(content());
+    if (at >= 0) fields()[at]?.focus();
+    // kept on screen near the right edge
     box.style.left = '0';
     box.style.right = 'auto';
-    // kept on screen near the right edge
     if (box.getBoundingClientRect().right > window.innerWidth - 4) { box.style.left = 'auto'; box.style.right = '0'; }
   };
   const self: Popover = {
     root: wrap,
-    isOpen: () => current === self,
     close: () => {
       if (current !== self) return;
       current = null;
@@ -53,18 +56,14 @@ export function popover(label: string, title: string, content: () => HTMLElement
     },
     refresh: () => {
       if (current !== self) return;
-      if (!wrap.isConnected) { self.close(); return; }
-      box.replaceChildren(content());
-      place();
+      if (shown()) fill(); else self.close();
     },
   };
   const open = () => {
-    closeMenus();
-    closePopovers();
+    closeMenus(); // (this one's predecessor too)
     current = self;
-    box.replaceChildren(content());
     wrap.append(box);
-    place();
+    fill();
     btn.classList.add('open');
     btn.setAttribute('aria-expanded', 'true');
     window.addEventListener('mousedown', outside, true);

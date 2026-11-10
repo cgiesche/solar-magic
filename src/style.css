@@ -161,6 +161,7 @@ input.invalid, input.invalid:focus { outline: 1px solid var(--danger); border-co
 .menu-label { flex: 1; }
 .menu-item kbd { margin-left: 18px; font-size: 11px; color: var(--muted); background: none; }
 .menu-item:hover:not(:disabled) kbd, .menu-item:focus kbd { color: #dfefff; border-color: rgba(255,255,255,.35); }
+.pop-wrap { position: relative; }
 .pop-btn.open { border-color: var(--accent); }
 /* a popover from a button (popover.ts, ADR 0015): settings or reference beside where they are chosen */
 .popover { position: absolute; top: calc(100% + 3px); left: 0; z-index: 400; min-width: 260px; max-width: min(380px, calc(100vw - 32px)); padding: 6px;

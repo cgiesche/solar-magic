@@ -1553,6 +1553,7 @@ export class OverworldView {
     this.replacing = null;
     this.redrawMap();
     this.buildBar();
+    this.mapPop.refresh(); // (the new map's settings)
     this.buildSide();
     this.buildLeft();
     this.onNav();
@@ -1758,7 +1759,6 @@ export class OverworldView {
     this.watch.add(() => this.buildSideNow());
   }
   private buildSideNow(): void {
-    this.mapPop.refresh(); // (the map shown or its settings changed)
     if (this.palPanel.hidden) { this.buildProps(); return; } // (Paint hidden by the selection: drawn when shown again)
     const scroll = this.palScroll ?? this.palPanel.scrollTop;
     this.palScroll = null;
@@ -1845,8 +1845,8 @@ export class OverworldView {
   }
 
   // the settings of the map shown, in the popover from "⚙" beside the map select (ADR 0015): its song (one ROM edit),
-  // from the ROM's songs as for levels, its graphics and border
-  private readonly mapPop = popover('⚙', 'Settings of the map shown: its music, graphics and border', () => this.mapSettings());
+  // from the ROM's songs as for levels, its graphics and border (what it reads watched: drawn again after undo/redo)
+  private readonly mapPop = popover('⚙', 'Settings of the map shown: its music, graphics and border', () => this.watch.add(() => this.mapSettings()));
   private mapSettings(): HTMLElement {
     const rom = this.app.rom, map = this.map, cur = submapMusic(rom, map);
     let songs: SongInfo[];
@@ -1864,7 +1864,7 @@ export class OverworldView {
     });
     sel.title = `The song ${MAP_NAMES[map]} plays – when the overworld loads there and when Mario comes from another map (songs come with packages; with AddmusicK all of its songs)`;
     const play = playButton(label, listen, `Listen: the overworld on ${MAP_NAMES[map]}, as the game plays its song`);
-    return h('div', { class: 'ow-info ow-map-settings' }, h('div', { class: 'hint' }, MAP_NAMES[map]),
+    return h('div', { class: 'ow-info' }, h('div', { class: 'hint' }, MAP_NAMES[map]),
       h('div', { class: 'prop' }, h('label', null, 'Map music'), sel, play),
       h('button', { onclick: () => { this.mapPop.close(); this.onEditGraphics(map, this.progress); }, title: `${MAP_NAMES[map]}'s own palettes, graphics files, layer 3 graphics and animations in the graphics workspace` }, 'Edit graphics of this submap'),
       h('button', { onclick: () => { this.mapPop.close(); this.onEditBorder(map); }, title: `${MAP_NAMES[map]}'s border (layer 3, fixed on the screen) in the Game workspace` }, 'Edit border of this submap'));
@@ -2489,6 +2489,7 @@ export class OverworldView {
     this.stopPlay();
     this.syncEvent();
     this.buildBar(); // (the badge naming the edited event)
+    this.mapPop.refresh(); // (the map's settings as in the ROM: undo/redo)
     this.buildSide();
     this.buildLeft();
     this.redrawMap();
