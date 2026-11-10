@@ -88,12 +88,12 @@ export class EditSession {
 
   // opens level n (the dirty one saved first, or its changes dropped with discard) with a new level history
   open(n: number, discard = false): void {
-    const was = this.editing;
+    const wasEditing = this.editing;
     if (this.level && this.dirty && !discard) this.save(true);
     this.current = loadLevel(this.rom, n);
     this.levelHistory.clear();
     this.markSaved();
-    if (was) this.hooks.editEnded?.();
+    if (wasEditing) this.hooks.editEnded?.();
   }
 
   // saves the open level and loads it again (addresses and sizes); objects and sprites keep their ids
@@ -191,8 +191,8 @@ export class EditSession {
   // ------------- undo / redo -------------
   // undoes the latest level or ROM edit
   undo(): StepResult | null {
-    const was = this.editing;
-    try { return this.undoStep(); } finally { if (was) this.hooks.editEnded?.(); }
+    const wasEditing = this.editing;
+    try { return this.undoStep(); } finally { if (wasEditing) this.hooks.editEnded?.(); }
   }
   private undoStep(): StepResult | null {
     this.commitLevelEdit(); // (an edit still open, e.g. while dragging)
@@ -213,8 +213,8 @@ export class EditSession {
   }
 
   redo(): StepResult | null {
-    const was = this.editing;
-    try { return this.redoStep(); } finally { if (was) this.hooks.editEnded?.(); }
+    const wasEditing = this.editing;
+    try { return this.redoStep(); } finally { if (wasEditing) this.hooks.editEnded?.(); }
   }
   private redoStep(): StepResult | null {
     this.commitLevelEdit();

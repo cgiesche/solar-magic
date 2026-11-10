@@ -168,9 +168,9 @@ export class LevelView {
     this.paint();
   }
 
-  // painted with the next display frame (once, however often asked before)
+  // painted with the next display frame (once, however often asked before; a drag step's refresh due then paints)
   requestPaint(): void {
-    if (this.pendingFrame) return;
+    if (this.pendingFrame || this.refreshTimer) return;
     this.pendingFrame = requestAnimationFrame(() => { this.pendingFrame = 0; this.paint(); });
   }
 
@@ -632,12 +632,15 @@ export class LevelView {
     }
   }
 
+  // a drag step's refresh, with the next display frame: the view painted then, once, as changed (a paint requested
+  // before waits for it: it would show the level before the step, #452)
   refreshTimer = 0;
   scheduleRefresh(): void {
     if (this.refreshTimer) return;
+    if (this.pendingFrame) { cancelAnimationFrame(this.pendingFrame); this.pendingFrame = 0; }
     this.refreshTimer = requestAnimationFrame(() => {
       this.refreshTimer = 0;
-      this.app.changed();
+      try { this.app.changed(); } finally { this.paint(); }
     });
   }
 
