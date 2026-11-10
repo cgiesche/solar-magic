@@ -9,6 +9,7 @@ import { Rom } from '../src/core/rom.ts';
 import { loadLevel, type Level } from '../src/core/level.ts';
 import { levelOverride } from '../src/core/levelusage.ts';
 import type { SnesState } from '../src/core/snes.ts';
+import { FG_PALS, PAL_SIZE } from '../src/core/sharedpal.ts';
 import { editorImage } from './fixture.ts';
 
 let bad = 0;
@@ -69,6 +70,64 @@ function load(lv: Level): { diff: string; emulated: number; frames: number } {
   const sorted = counts.slice().sort((a, b) => a - b), median = sorted[sorted.length >> 1];
   check(!wrong, `105: each of its ${lv.objects.length} objects moved a tile, every load the same as a whole load ${wrong}`);
   check(median <= 8, `105: a move emulates few frames (median ${median}, most ${sorted.at(-1)} of ${load(lv).frames})`);
+}
+
+// ---- other kinds of levels and edits: every load the same as a whole load ----
+// 106: layer 2 BG, 0C2: vertical, 0E7: vertical with layer 2 objects, 01F: layer 3 image, 127: tides
+{
+  let wrong = '', loads = 0;
+  const see = (what: string, r: { diff: string }) => { loads++; if (r.diff && !wrong) wrong = `${what}: ${r.diff}`; };
+  for (const n of [0x106, 0x0c2, 0x0e7, 0x01f, 0x127]) {
+    const lv = loadLevel(rom, n), name = n.toString(16);
+    see(name, load(lv));
+    for (let i = 0; i < lv.objects.length; i += 3) {
+      const o = lv.objects[i];
+      o.y++; see(`${name} object ${i} moved down`, load(lv)); o.y--;
+    }
+    for (let i = 0; i < (lv.layer2Objects?.length ?? 0); i += 3) {
+      const o = lv.layer2Objects![i];
+      o.x++; see(`${name} layer 2 object ${i} moved`, load(lv)); o.x--;
+    }
+    // deleted, and put back
+    const gone = lv.objects.splice(lv.objects.length >> 1, 1);
+    see(`${name} an object deleted`, load(lv));
+    lv.objects.splice(lv.objects.length >> 1, 0, ...gone);
+    see(`${name} put back`, load(lv));
+    // sprites moved
+    for (const s of lv.sprites.slice(0, 4)) { s.x++; see(`${name} a sprite moved`, load(lv)); s.x--; }
+    // the header: another FG palette, another tileset
+    const h = lv.header, fg = h.fgPalette, ts = h.tileset;
+    h.fgPalette = (fg + 1) & 7; see(`${name} another FG palette`, load(lv)); h.fgPalette = fg;
+    h.tileset = ts === 0 ? 1 : 0; see(`${name} another tileset`, load(lv)); h.tileset = ts;
+    see(`${name} as it was`, load(lv));
+  }
+  check(!wrong, `levels 106, 0C2, 0E7, 01F, 127: objects of both layers moved, deleted, sprites moved, the header changed – ${loads} loads the same as whole loads ${wrong}`);
+}
+
+// ---- another level loaded in between, and the ROM changed: the same as a whole load ----
+{
+  const a = loadLevel(rom, 0x105), b = loadLevel(rom, 0x106);
+  load(a);
+  const other = load(b), back = load(a);
+  check(!other.diff && !back.diff, `105, then 106, then 105 again: the same as whole loads ${other.diff} ${back.diff}`);
+  const at = FG_PALS + a.header.fgPalette * PAL_SIZE + 4, was = rom.r8(at);
+  const before = emu.load(0x105, levelOverride(rom, a)).cgram.slice();
+  rom.w8(at, was ^ 0x1f);
+  const changed = load(a), cg = emu.load(0x105, levelOverride(rom, a)).cgram;
+  check(!changed.diff && changed.emulated > 0 && !bytes(before, cg),
+    `a color of 105's FG palette changed in the ROM: emulated again (${changed.emulated} frames), the same as a whole load ${changed.diff}`);
+  rom.w8(at, was);
+  const undone = load(a);
+  check(!undone.diff, `the color back: the same as a whole load ${undone.diff}`);
+}
+
+// ---- reuse off: every frame emulated ----
+{
+  const plain = new LevelEmulator(rom);
+  plain.adoptBoot(emu);
+  const lv = loadLevel(rom, 0x105), ov = levelOverride(rom, lv);
+  const r1 = plain.load(0x105, ov), n1 = plain.emulatedFrames, r2 = plain.load(0x105, ov);
+  check(n1 === r1.frames && plain.emulatedFrames === r2.frames, `reuse off: every frame emulated (${n1}/${r1.frames}, ${plain.emulatedFrames}/${r2.frames})`);
 }
 
 console.log(bad ? `${bad} FAILED` : 'all ok');
