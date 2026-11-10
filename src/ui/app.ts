@@ -244,6 +244,8 @@ export class App {
     this.view.show.anim = animationPref.get();
     this.emu = new LevelEmulator(rom);
     this.emu.skipMask = this.gfxSkipMask;
+    // the level is loaded anew for every edit and drag step: frames that read the same are taken over (#448)
+    this.emu.reuseLoads = true;
     this.emu.boot();
     onModalsChange(() => { this.scheduler.resume(); this.emit('busy'); });
     // sprite images: learned again when what they depend on changed (the learner decides)
