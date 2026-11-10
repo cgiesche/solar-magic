@@ -51,5 +51,25 @@ function load(lv: Level): { diff: string; emulated: number; frames: number } {
   check(!again.diff && again.emulated === 0, `105 again: the same, no frame emulated (${again.emulated}/${again.frames}) ${again.diff}`);
 }
 
+// ---- every object moved a tile, as a drag's steps: each load after the last one ----
+// (the frames before the objects' and those after them take over: only the objects' frames are emulated, unless
+// the move changes what the start screens show)
+{
+  const lv = loadLevel(rom, 0x105);
+  load(lv);
+  const counts: number[] = [];
+  let wrong = '';
+  for (const o of lv.objects) {
+    o.x++;
+    const r = load(lv);
+    o.x--;
+    if (r.diff && !wrong) wrong = `${o.num.toString(16)}/${o.ext.toString(16)} at ${o.x},${o.y}: ${r.diff}`;
+    counts.push(r.emulated);
+  }
+  const sorted = counts.slice().sort((a, b) => a - b), median = sorted[sorted.length >> 1];
+  check(!wrong, `105: each of its ${lv.objects.length} objects moved a tile, every load the same as a whole load ${wrong}`);
+  check(median <= 8, `105: a move emulates few frames (median ${median}, most ${sorted.at(-1)} of ${load(lv).frames})`);
+}
+
 console.log(bad ? `${bad} FAILED` : 'all ok');
 if (bad) process.exit(1);
