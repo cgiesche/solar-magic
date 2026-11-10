@@ -12,7 +12,7 @@ import { translevelToLevel } from '../core/overworld.ts';
 import { TileCache, blit8 } from '../core/render.ts';
 import { levelNameTiles, setLevelNameTiles, decodeName, encodeName, tileChar, tileEscape, NAME_LEN, NAME_VRAM, NAME_ATTR, NAME_SPACE, type EncodedName } from '../core/levelnames.ts';
 import { boolPref } from './prefs.ts';
-import { closeMenus } from './menu.ts';
+import { closeMenus, onCloseMenus } from './menu.ts';
 import { placeLabel } from './owlevelname.ts';
 
 const COLS = 32, ROWS = 3, FIRST_ROW = 3; // the border's rows shown: the name's (4) with the one above and below
@@ -103,9 +103,11 @@ export function levelNameField(app: App, tl: number, r: OwRender | null, edit = 
   });
   input.addEventListener('keydown', (e) => {
     if (e.key === 'Enter') { e.preventDefault(); commit(); }
+    if (e.key !== 'Escape') return;
+    e.preventDefault();
     // (Esc layered: the character table closed first, the field keeps the focus; then the typing undone)
-    if (e.key === 'Escape' && chars.close()) { e.preventDefault(); e.stopPropagation(); return; }
-    if (e.key === 'Escape') { e.preventDefault(); input.value = text(); update(); input.blur(); }
+    if (chars.close()) e.stopPropagation();
+    else { input.value = text(); update(); input.blur(); }
   });
   update();
   return [
@@ -121,11 +123,18 @@ export function levelNameField(app: App, tl: number, r: OwRender | null, edit = 
   ];
 }
 
+// the character table shown (one at a time), closed with the menus and popovers (menu.ts closeMenus)
+let shownTable: (() => boolean) | null = null;
+onCloseMenus(() => shownTable?.());
+
+const rectOf = (b: DOMRect) => ({ x: b.left, y: b.top, w: b.width, h: b.height });
+
 // the map's font as a popover at the name field (fixed: out of the side panel's scrolling), shown while the field has
-// the focus – under it and its preview down to `last` (the preview stays seen while typing), above the field where
-// there is no room below; none while the field is scrolled out of its panel. A click types a character and the focus
-// stays in the field. close(): false when it was not shown
-function charTable(input: HTMLInputElement, last: HTMLElement, r: OwRender | null, pick: (t: number) => void): { box: HTMLElement; close: () => boolean } {
+// the focus – under it and its preview down to keepSeen (the preview and its note stay seen while typing), above the
+// field where there is no room below; none while the field is scrolled out of its panel. A click types a character
+// and the focus stays in the field; closed by Esc, a click in the field or typing shows it again. close(): false when
+// it was not shown
+function charTable(input: HTMLInputElement, keepSeen: HTMLElement, r: OwRender | null, pick: (t: number) => void): { box: HTMLElement; close: () => boolean } {
   const box = h('div', { class: 'popover ln-chars', role: 'dialog', 'aria-label': 'The map\'s font: a click types a character', hidden: true },
     r ? fontPicker(r, pick) : h('div', { class: 'hint' }, 'The font is shown once the map is loaded.'));
   // (a click in it beside the font: the focus stays in the field too)
@@ -134,13 +143,15 @@ function charTable(input: HTMLInputElement, last: HTMLElement, r: OwRender | nul
     if (!input.isConnected || document.activeElement !== input) { close(); return; }
     const f = input.getBoundingClientRect(), clip = (input.closest('.props') ?? document.documentElement).getBoundingClientRect();
     const seen = f.bottom > clip.top && f.top < clip.bottom;
-    const at = seen ? placeLabel({ x: f.left, y: f.top, w: f.width, h: Math.max(f.height, last.getBoundingClientRect().bottom - f.top) }, box.offsetWidth, box.offsetHeight, { x: 0, y: 0, w: window.innerWidth, h: window.innerHeight }, 3) : null;
+    const anchor = { ...rectOf(f), h: Math.max(f.height, keepSeen.getBoundingClientRect().bottom - f.top) };
+    const at = seen ? placeLabel(anchor, box.offsetWidth, box.offsetHeight, { x: 0, y: 0, w: window.innerWidth, h: window.innerHeight }, 3) : null;
     box.style.visibility = at ? '' : 'hidden';
     if (at) { box.style.left = `${at.x}px`; box.style.top = `${at.y}px`; }
   };
   const open = () => {
     if (!box.hidden) return;
-    closeMenus(); // (one popover at a time)
+    closeMenus(); // (one popover at a time: another field's table too)
+    shownTable = close;
     box.hidden = false;
     place();
     window.addEventListener('scroll', place, true);
@@ -148,6 +159,7 @@ function charTable(input: HTMLInputElement, last: HTMLElement, r: OwRender | nul
   };
   const close = (): boolean => {
     if (box.hidden) return false;
+    if (shownTable === close) shownTable = null;
     box.hidden = true;
     window.removeEventListener('scroll', place, true);
     window.removeEventListener('resize', place);
@@ -155,8 +167,9 @@ function charTable(input: HTMLInputElement, last: HTMLElement, r: OwRender | nul
   };
   input.addEventListener('focus', open);
   input.addEventListener('blur', () => close());
-  // (closed by Esc: a click in the field shows it again)
-  input.addEventListener('mousedown', () => { if (document.activeElement === input) open(); });
+  const again = () => { if (document.activeElement === input) open(); };
+  input.addEventListener('mousedown', again);
+  input.addEventListener('input', again);
   return { box, close };
 }
 
