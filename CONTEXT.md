@@ -80,6 +80,10 @@ _Avoid_: structure (the old name), custom object (one of object 2D's numbers, Ob
 The panel beside the level or the overworld that something to place or paint is chosen from: in a level objects, prefabs, Map16 tiles and sprites (layer 1/2 and sprites), BG and layer 3 tiles; in the overworld its tiles and sprites. What it draws keeps its pixels of one size: fixed grids fill its width (a Map16 page keeps its 16 columns), drawn at the next whole number of screen pixels per pixel above it and shrunk smoothly; single images at whole numbers of screen pixels; below 3× the hovered entry is shown enlarged beside it.
 _Avoid_: palette (that is colors), Insert panel, tile selector
 
+**Side panel**:
+The panel at the right of an editor: what the user works with now – the tool (the picker, "Paint") and the selection ("Properties") – nothing else (ADR 0015). Settings of the whole map or game are in popovers or dialogs where they are chosen, reference (a legend, a font's characters) in popovers shown when asked or in the status bar on hover. The overworld follows it first.
+_Avoid_: sidebar, inspector
+
 **Picked item**:
 What the picker has chosen for a right click (or Shift+click) in layer 1/2 and sprites to place: an object, a block of Map16 tiles, a prefab or a sprite – or none. Choosing one in the picker clears the level's selection; a single item selected in the level becomes it (shown in its tab). A click into nothing (no item of a shown layer there, not dragged, without Ctrl) clears it with the selection, so does Esc once the selection is clear. Without one – and on the selection – the right click opens the level's context menu.
 _Avoid_: palette item (the old name), brush (BG and layer 3 paint with one, never empty), current object, ghost (the view's ghosted other layer)
