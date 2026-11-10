@@ -5,10 +5,11 @@
 // to) only of the selected tile – all with View → "Link arrows". A tile is linked by "Link to…" (its menu or
 // properties) and a click on the target (the pick pending: refused tiles hatched, the map's cursor a crosshair; Esc
 // cancels): an exit path tile by an exit path (the side its path goes on found from the path tiles around it, the
-// target's the opposite one), a star or pipe (a tile where A warps) by a star/pipe link, a Koopa Kid's tile by its place. Dragging the
-// selected link's other end, a location or a Koopa Kid's place moves it; "Remove link" (menu, Delete) removes it, the
-// tile staying. A link end dropped on a tile several submaps' views show asks which submap at the cursor, the one whose
-// paths the tile is on first (core/owlinkends.ts endChoice). Each change is one ROM edit (owlinks.ts).
+// target's the opposite one), a star or pipe (a tile where A warps) by a star/pipe link – both ways only to another –,
+// a Koopa Kid's tile by its place. Dragging the selected link's other end, a location or a Koopa Kid's place moves it;
+// "Remove link" (menu, Delete) removes it, the tile staying. A link end dropped on a tile several submaps' views show
+// asks which submap at the cursor, the one whose paths the tile is on first (core/owlinkends.ts endChoice). Each change
+// is one ROM edit (owlinks.ts).
 
 import type { OverworldView, PickCheck } from './overworld.ts';
 import { l1Hex } from '../core/owl1sheet.ts';
@@ -25,7 +26,7 @@ import { l1Index, l1XY, DIR_NAMES, DIR_ARROWS, MAP_NAMES } from '../core/overwor
 import { inView } from '../core/owevents.ts';
 import { endChoice, endChoiceText, clickedLinks, submapsShowing, endTile } from '../core/owlinkends.ts';
 import { contextMenu, type MenuItem } from './menu.ts';
-import { isPathKind, PATH_KIND_NAMES } from '../core/owpaths.ts';
+import { isPathKind, PATH_KIND_NAMES, type PathKind } from '../core/owpaths.ts';
 import { ExitGraph } from '../core/exitgraph.ts';
 import { readSecondaryEntrance, levelTranslevel } from '../core/level.ts';
 import { hex } from '../core/names.ts';
@@ -143,7 +144,7 @@ export class LinkLayer {
     // (what is dropped: a link's target – its source is where Mario takes it –, a location, a new link's target)
     const s = move?.sel;
     let kind: string | null, back: boolean;
-    if (!s) { kind = this.source(from).kind; back = this.both; }
+    if (!s) { kind = this.source(from).kind; back = kind === 'star' || kind === 'exit' ? this.backTo(kind, i) : false; }
     else if (s.kind === 'link') { kind = move!.target ? s.link.kind : null; back = s.link.both; }
     else { kind = s.kind; back = false; }
     return (kind === 'star' || kind === 'location') && this.stuck(i, back) ? ' · Mario can\'t move there' : '';
@@ -168,10 +169,22 @@ export class LinkLayer {
     if (!kinds) return { kind: null, why: 'the path tiles are still being learned – try again in a moment' };
     const k = kinds[this.view.shown.l1[i]];
     if (k === 'exit') return { kind: 'exit' };
-    const info = this.info();
-    if (k === 'warp' || (info.warps ??= warpCells(this.rom, kinds)).has(i)) return { kind: 'star' };
+    if (this.warps(kinds).has(i)) return { kind: 'star' };
     const refusal: OwRefusalData = { kind: 'linkNoStart', tile: this.view.shown.l1[i], path: PATH_KIND_NAMES[k].toLowerCase() };
     return { kind: null, why: refusalWords(this.rom, refusal).reason, refusal };
+  }
+  // the cells where A warps at some event progress (owlinks.ts warpCells; read again after a ROM change)
+  private warps(kinds: readonly PathKind[]): Set<number> {
+    const info = this.info();
+    return (info.warps ??= warpCells(this.rom, kinds));
+  }
+  // whether a new link of `kind` to cell b leads back when "New links both ways" is on: an exit path always, a star/pipe
+  // link only to a star or pipe (#455: A warps only there – a level tile or plain stop tile as its target gets a one-way
+  // link, not a way back the World check would warn of at once)
+  private backTo(kind: LinkKind, b: number): boolean {
+    if (!this.both) return false;
+    const kinds = this.view.pathKinds();
+    return kind !== 'star' || !kinds || this.warps(kinds).has(b);
   }
   // an exit path tile's end: the side its path goes on (toward a path tile around it)
   private exitEnd(t: OwTile): LinkEnd {
@@ -232,7 +245,8 @@ export class LinkLayer {
     const p = this.pending, hover = this.view.hover;
     if (p && 'from' in p && this.shown(p.from) && hover && hover.x >= 0 && hover.y >= 0 && hover.x < 32 && hover.y < 32) {
       const k = this.source(this.index(p.from), p.from).kind;
-      if (k) arrow(ctx, lw, center(p.from), { x: hover.x * 16 + 8, y: hover.y * 16 + 8 }, COLORS[k], this.both && k !== 'koopa', true, k === 'koopa');
+      const back = k === 'star' || k === 'exit' ? this.backTo(k, l1Index(this.view.region, hover.x, hover.y)) : false;
+      if (k) arrow(ctx, lw, center(p.from), { x: hover.x * 16 + 8, y: hover.y * 16 + 8 }, COLORS[k], back, true, k === 'koopa');
     }
   }
   // a small dot of its kind's colour in the top right corner of each cell a link ends at (the region shown)
@@ -304,7 +318,10 @@ export class LinkLayer {
     const kind = src.kind;
     if (!kind) return null;
     const end = this.endOf(kind);
-    return { key: key({ from, kind }), dep, make: () => { const c = linkCheck(rom, kind, this.both); return (i) => c(end(a), end(this.tile(i))); } };
+    return { key: key({ from, kind }), dep, make: () => {
+      const both = linkCheck(rom, kind, true), one = linkCheck(rom, kind, false);
+      return (i) => (this.backTo(kind, i) ? both : one)(end(a), end(this.tile(i)));
+    } };
   }
   // a tile's end of a link of `kind` (an exit path tile's: with the side its path goes on)
   private endOf(kind: LinkKind): (t: OwTile) => LinkEnd {
@@ -451,7 +468,8 @@ export class LinkLayer {
     if (src.kind === 'koopa') { this.setKoopa(this.koopaAt(this.index(a)), a, b); return; }
     const kind = src.kind, end = this.endOf(kind), ea = end(a), eb = end(b);
     let made: OwLink | null = null;
-    this.edit(`Overworld link ${tileText(a)} ${this.both ? '↔' : '→'} ${tileText(b)}`, () => { made = makeLink(this.rom, kind, ea, eb, this.both); });
+    const back = this.backTo(kind, this.index(b));
+    this.edit(`Overworld link ${tileText(a)} ${back ? '↔' : '→'} ${tileText(b)}`, () => { made = makeLink(this.rom, kind, ea, eb, back); });
     if (made) this.sel = { kind: 'link', link: made };
   }
   // Koopa Kid k (of tile `from`) puts Mario at `to`: a place of the submap of its tile
@@ -564,7 +582,8 @@ export class LinkLayer {
       h('div', { class: 'row' }, h('button', { class: 'link-btn', title: 'Shows the other end, on its map, selected', onclick: () => this.goTo(at >= 0 && this.endsAt(l.a, at) ? l.b : l.a) },
         `Leads to ${tileText(at >= 0 && this.endsAt(l.a, at) ? l.b : l.a)}`)),
       h('div', { class: 'hint' }, `Entr${l.entries.length > 1 ? 'ies' : 'y'} ${l.entries.map((i) => hex(i, 2)).join(', ')} of the ${l.kind === 'exit' ? 'exit path' : 'star/pipe'} table`),
-      checkbox('Both ways', 'The target leads back to this tile', l.both, (on) => this.apply(() => this.edit(`${name}: ${on ? 'both ways' : 'one-way'}`, () => { this.sel = { kind: 'link', link: setBothWays(rom, l, on) }; }))),
+      l.both || l.kind !== 'star' || !this.view.pathKinds() || this.warps(this.view.pathKinds()!).has(this.index(l.b)) ? checkbox('Both ways', 'The target leads back to this tile', l.both, (on) => this.apply(() => this.edit(`${name}: ${on ? 'both ways' : 'one-way'}`, () => { this.sel = { kind: 'link', link: setBothWays(rom, l, on) }; })))
+        : h('div', { class: 'hint' }, 'One-way: its target is no star or pipe, A doesn\'t warp there'),
       ...exitInfo,
       ...offView,
       ...l.kind === 'star' ? [this.stuckBox(l.b, 'star'), l.both ? this.stuckBox(l.a, 'star') : null] : [],

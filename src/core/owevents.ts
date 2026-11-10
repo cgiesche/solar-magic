@@ -387,6 +387,10 @@ function isReversed(steps: Piece[], d: EventData, place: EventPlace): boolean {
 export const exitEvent = (base: number, exit: number): number =>
   base === NO_EVENT ? (exit === 1 ? 0 : -1) : base + exit < OW_EVENTS ? base + exit : -1;
 
+// the star and pipe tiles by number, for eventRunners – the rest of the editor learns them (path kind 'warp',
+// owpaths.ts, #455); there the ROM alone is at hand, as for the learners that play the events (#457)
+const STAR_PIPE_TILES = [0x5b, 0x5f, 0x82];
+
 // a level exit that runs an event: the translevel, the exit (0 normal, 1–3 the secret exits: exitEvent), the
 // layer 1 tile entering the level (l1Index: the first the translevel table gives it, levelTileLevels); overworld: an
 // exit to the overworld with a base event of its own (secretexits.ts OwnEventExit) in a level played from the
@@ -400,17 +404,14 @@ export interface EventRunner { tl: number; exit: number; tile: number; overworld
 // its event is no level's base event and changes something (layer 1 or 2, a reveal or destroy): what else would run
 // it – the clean game's Donut Secret House and Chocolate Island 2 have secret exits nothing in their data shows. So a
 // level without secret exits doesn't name the next level's base event (Yoshi's Island 4's + 1, Iggy's castle's) nor
-// an event that does nothing; an event no exit runs is named by none. A star or pipe (STAR_PIPE_TILES) enters no level,
-// so its translevel runs nothing: not on the map before events, nor where the reveal list or an event's layer 1
+// an event that does nothing; an event no exit runs is named by none. A star or pipe (by tile number: STAR_PIPE_TILES)
+// enters no level, so its translevel runs nothing: not on the map before events, nor where the reveal list or an event's layer 1
 // changes turn the cell into one – the clean game's six stars (translevels 4D 52 53 57 5B 5C) and the four revealed
 // ones with a base event (1E 30 48 55) run none of their base events (64 56 53 59 50 5C, 36 44 6D 5F, which change
 // nothing): A on a star takes Mario to another place (docs/research/star-tile-translevels.md).
 // An exit to the overworld with a base event of its own (#429, level.ts OverworldExit) runs that event + the exit its
 // action passes the level by – the exit's code sets $1DEA and $0DD5, the overworld's runs the event (levelheight.ts
 // OverworldExit) – from the translevel its level is played from: a runner after the level tiles' own exits.
-// (the star and pipe tiles by number – the rest of the editor learns them, path kind 'warp' (owpaths.ts, #455); here
-// the ROM alone is at hand, as for the learners that play the events: #457)
-const STAR_PIPE_TILES = [0x5b, 0x5f, 0x82];
 export function eventRunners(rom: Rom): Map<number, EventRunner[]> {
   const tls = readTranslevels(rom), out = new Map<number, EventRunner[]>(), shown = shownSecretExits(rom), starPipe = cellsBecoming(rom, (t) => STAR_PIPE_TILES.includes(t & 0xff));
   const tileOf = new Map<number, number>();

@@ -26,7 +26,7 @@ export type OwRefusalData =
   // ---- links (owlinks.ts) ----
   | { kind: 'linkToItself' }
   | { kind: 'l1TilePast'; tile: number; tiles: number } // a layer 1 tile past the overworld's (000…tiles-1)
-  | { kind: 'linkNoStart'; tile: number; path: string } // a link from a tile Mario doesn't stop on (path: its kind's name)
+  | { kind: 'linkNoStart'; tile: number; path: string } // a link from a tile where A doesn't warp nor an exit path starts (path: its kind's name)
   | { kind: 'teleportsFull'; max: number } // every star/pipe entry used
   | { kind: 'exitPathsFull'; max: number } // every exit path entry used
   | { kind: 'koopaPlaceSubmap'; from: { submap: number; x: number; y: number } } // a Koopa Kid's place off the submap of its tile

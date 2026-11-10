@@ -664,8 +664,8 @@ export class OverworldView {
   }
 
   // the path tiles of the map shown, a mark per kind (as Lunar Magic's "Layer 1 Mario Paths"): walk green, climb
-  // green with rungs, swim blue, exit red, stop a cross, warp (a star or pipe) a violet ring; the tile's shape as lines (once the shapes are learned): where
-  // Mario walks over the cell (owpathshape.ts mapWays: a straight tile at the height the tile before leaves him), else
+  // green with rungs, swim blue, exit red, stop a cross, warp (a star or pipe) a violet ring; the tile's shape as lines
+  // (once the shapes are learned): where Mario walks over the cell (owpathshape.ts mapWays: a straight tile at the height the tile before leaves him), else
   // the tile's usual lines (usualWays)
   paintPaths(lw: number): void {
     const kinds = this.pathKinds();
@@ -2027,8 +2027,8 @@ export class OverworldView {
   // the selected tile: a level tile's settings, and for every tile the events that reveal it
   tileInfo(i: number): HTMLElement {
     const { x, y } = l1XY(i), t = this.levelL1()[i];
-    const known = !!this.pathKinds(); // (whether it is a level tile: not known while the path tiles are learned)
-    const info = this.isLevelTile(t) ? this.levelInfo(i) : known && ownsTranslevel(this.pathKinds()!, t) ? this.starInfo(i)
+    const kinds = this.pathKinds(), known = !!kinds; // (whether it is a level tile: not known while the path tiles are learned)
+    const info = this.isLevelTile(t) ? this.levelInfo(i) : kinds && ownsTranslevel(kinds, t) ? this.starInfo(i)
       : h('div', { class: 'ow-info' }, h('div', { class: 'hint' }, `Tile ${hex(x, 2)},${hex(y, 2)} · ${l1Hex(t)}${known ? ' (not a level tile)' : ''}`),
         known ? null : h('div', { class: 'hint' }, LEVEL_TILES_LEARNED));
     info.append(h('div', { class: 'row' }, h('button', { title: 'Edit which 8x8 tiles make this layer 1 tile, in the Map16 tab (M) – for every place of the tile on all maps', onclick: () => this.editTile(i) }, `Edit tile ${l1Hex(t)} in Map16 …`)),

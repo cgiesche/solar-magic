@@ -70,7 +70,7 @@ export function refusalWords(rom: Rom, r: OwRefusalData): RefusalWords {
         : `Move it to an event ${r.to > r.from ? 'before' : 'after'} that one, or with Alt held only a tile that event leaves alone.`);
     case 'moveNoLayer1': return w('This change can\'t be moved', 'it is a change of layer 2, whose steps stay with their event',
       'Paint the layer 2 look into the other event instead.');
-    case 'linkNoStart': return w('No link starts here', 'Mario doesn\'t stop on this tile: a star or pipe is a tile he stops on, a path to another submap an exit path tile',
+    case 'linkNoStart': return w('No link starts here', 'a star or pipe link starts only from a tile where A warps (a star or pipe tile), a path to another submap from an exit path tile',
       'Start the link on a star, pipe or exit path tile.');
     case 'l1TilePast': return w('This tile can\'t be edited', 'it is past the tiles the overworld has');
     case 'crumbleNoEvent': return w('The level tile can\'t crumble when beaten', `the normal exit of ${levelTitle(rom, r.tl)} changes nothing on the map`,
