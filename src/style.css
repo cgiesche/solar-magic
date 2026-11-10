@@ -161,6 +161,11 @@ input.invalid, input.invalid:focus { outline: 1px solid var(--danger); border-co
 .menu-label { flex: 1; }
 .menu-item kbd { margin-left: 18px; font-size: 11px; color: var(--muted); background: none; }
 .menu-item:hover:not(:disabled) kbd, .menu-item:focus kbd { color: #dfefff; border-color: rgba(255,255,255,.35); }
+.pop-btn.open { border-color: var(--accent); }
+/* a popover from a button (popover.ts, ADR 0015): settings or reference beside where they are chosen */
+.popover { position: absolute; top: calc(100% + 3px); left: 0; z-index: 400; min-width: 260px; max-width: min(380px, calc(100vw - 32px)); padding: 6px;
+  background: var(--panel); border: 1px solid var(--border); border-radius: 6px; box-shadow: 0 8px 28px rgba(0,0,0,.45); }
+.popover > .ow-info { border: none; padding: 0; }
 .menu-sep { height: 1px; background: var(--border); margin: 4px 2px; }
 .menu-heading { font-size: 10px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); padding: 6px 8px 2px 26px; }
 .btn-group { display: flex; }
@@ -410,7 +415,7 @@ canvas.sheet-fill { width: 100%; height: auto; image-rendering: auto; }
 .budget-fill { display: block; height: 100%; background: var(--gauge); }
 .ow-pick-body { display: flex; flex-direction: column; gap: 6px; }
 .ow-pick { width: 512px; max-width: 100%; aspect-ratio: 1; image-rendering: pixelated; cursor: crosshair; border: 1px solid var(--border); }
-/* the overworld's global settings under the mode's properties (overworld.ts buildProps): "Map", "Overworld" */
+/* the overworld's global settings under the mode's properties (overworld.ts buildProps): "Overworld" */
 .ow-section { margin-top: 10px; border-top: 1px solid var(--border); padding-top: 6px; }
 .ow-section > summary { cursor: pointer; font-weight: 600; text-transform: uppercase; font-size: 11px; letter-spacing: .06em; color: var(--muted); margin-bottom: 6px; }
 .ow-section > summary .hint { text-transform: none; letter-spacing: 0; font-weight: 400; }

@@ -857,8 +857,8 @@ fade takes 14. Bytes a patch changed show the option as changed by a patch, and 
 ### Submap graphics
 
 The graphics workspace edits a submap's graphics as a level's: its target (the bar's first choice) is the open level
-or one of the 7 submaps, the overworld's properties lead there (*Edit graphics of this submap*). In Lunar Magic's
-layout ([research](research/lunar-magic-submap-graphics.md)):
+or one of the 7 submaps, the overworld's map settings lead there (*Edit graphics of this submap* in the "⚙" popover
+beside the map select). In Lunar Magic's layout ([research](research/lunar-magic-submap-graphics.md)):
 - **palettes** (Lunar Magic's custom overworld palettes): all 256 colors per submap, a second set after the special
   world (`$1EEB` bit 7, the game's test). A JSL at `$00AD32` (then RTS) to Lunar Magic's routine, byte for byte,
   which copies 0x200 bytes to the palette buffer `$0703` from a table of 14 palettes (its low 16 bits the operand of

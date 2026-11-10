@@ -59,6 +59,7 @@ import { menuButton, contextMenu } from './menu.ts';
 import { fillPixels, fitScale, sized, previewSheet, hidePickerPreview, showPickerPreview, crop } from './pickerview.ts';
 import { loadMusicProject, submapSongs, submapMusic, setSubmapMusic, songHex, type SongInfo } from '../core/music.ts';
 import { songLabel, playButton } from './musicdialog.ts';
+import { popover } from './popover.ts';
 import { musicPlayer, submapMusicLabel } from './musicplayer.ts';
 import type { Rom } from '../core/rom.ts';
 import { ReachLayer } from './owreachview.ts';
@@ -1616,6 +1617,7 @@ export class OverworldView {
     this.showEventBadge();
     this.bar.replaceChildren(
       h('label', { class: 'row' }, 'Map ', select(MAP_NAMES.map((n, i) => [i, n] as [number, string]), this.map, (v) => this.setMap(v))),
+      this.mapPop.root,
       h('span', { class: 'sep' }),
       h('div', { class: 'btn-group' },
         h('button', { class: `ow-l1${this.mode === 'l1' ? ' active' : ''}`, title: 'Layer 1 (1): paths painted as tiles, the level tiles objects on top (hatched) – click selects one, drag moves it, right click: its menu, Delete removes it; placed with a look from "Levels" in the Paint panel; the overworld links\' tiles objects too (marked, right click: Link to…, Remove link), a star or pipe without a link selected by a click (Link to… in its properties) · the path tiles marked; layer 2 dimmed (View → Layers), hold Q to hide it', onclick: () => this.setMode('l1') }, 'Layer 1 (paths, levels & links)'),
@@ -1756,6 +1758,7 @@ export class OverworldView {
     this.watch.add(() => this.buildSideNow());
   }
   private buildSideNow(): void {
+    this.mapPop.refresh(); // (the map shown or its settings changed)
     if (this.palPanel.hidden) { this.buildProps(); return; } // (Paint hidden by the selection: drawn when shown again)
     const scroll = this.palScroll ?? this.palPanel.scrollTop;
     this.palScroll = null;
@@ -1775,10 +1778,9 @@ export class OverworldView {
       kinds: this.pathKinds(), revealPick: (this.eventPick?.at ?? -1) >= 0 });
   }
 
-  // the mode's properties (of what is selected), under them the global settings in two sections shown in every mode:
-  // "Map" (the map shown: music, graphics, border; open by default) and "Overworld" (the game's options, the reveal
-  // list; collapsed by default) – each open or closed for the session
-  private mapOpen = true;
+  // the mode's properties (of what is selected), under them the global settings in a section shown in every mode:
+  // "Overworld" (the game's options, the reveal list; collapsed by default, open or closed for the session). The map
+  // shown's settings are in a popover beside the map select (mapPop, ADR 0015)
   private overworldOpen = false;
   private revealListOpen = false;
   buildProps(): void {
@@ -1795,13 +1797,10 @@ export class OverworldView {
         this.selected >= 0 ? this.tileInfo(this.selected) : emptyState(this.mode === 'l1' ? 'Click a level tile on the map, or any tile with Alt/Ctrl+click.'
           : 'Select a tile – a level tile too – with Alt/Ctrl+click on the map.'),
         ...links ? [links] : [], ...this.mode === 'l1' ? [this.linkLegend()] : []];
-    const map = h('details', { class: 'ow-section', open: this.mapOpen, ontoggle: () => (this.mapOpen = map.open) },
-      h('summary', { title: `The settings of the map shown (${MAP_NAMES[this.map]})` }, 'Map', h('span', { class: 'hint' }, ` · ${MAP_NAMES[this.map]}`)),
-      this.mapSettings());
     const ow = h('details', { class: 'ow-section', open: this.overworldOpen, ontoggle: () => (this.overworldOpen = ow.open) },
       h('summary', { title: 'The settings of the whole overworld' }, 'Overworld'),
       this.optionsPanel(), this.revealList());
-    this.props.replaceChildren(...own, map, ow);
+    this.props.replaceChildren(...own, ow);
   }
 
   // the game's overworld options (Lunar Magic's "Extra Options", core/owoptions.ts): each switch one ROM edit
@@ -1845,7 +1844,9 @@ export class OverworldView {
     return h('div', { class: 'ow-info' }, h('div', { class: 'hint' }, 'Options · the game\'s switches'), ...rows);
   }
 
-  // the settings of the map shown: its song (one ROM edit), from the ROM's songs as for levels
+  // the settings of the map shown, in the popover from "⚙" beside the map select (ADR 0015): its song (one ROM edit),
+  // from the ROM's songs as for levels, its graphics and border
+  private readonly mapPop = popover('⚙', 'Settings of the map shown: its music, graphics and border', () => this.mapSettings());
   private mapSettings(): HTMLElement {
     const rom = this.app.rom, map = this.map, cur = submapMusic(rom, map);
     let songs: SongInfo[];
@@ -1863,9 +1864,10 @@ export class OverworldView {
     });
     sel.title = `The song ${MAP_NAMES[map]} plays – when the overworld loads there and when Mario comes from another map (songs come with packages; with AddmusicK all of its songs)`;
     const play = playButton(label, listen, `Listen: the overworld on ${MAP_NAMES[map]}, as the game plays its song`);
-    return h('div', { class: 'ow-info' }, h('div', { class: 'prop' }, h('label', null, 'Map music'), sel, play),
-      h('button', { onclick: () => this.onEditGraphics(map, this.progress), title: `${MAP_NAMES[map]}'s own palettes, graphics files, layer 3 graphics and animations in the graphics workspace` }, 'Edit graphics of this submap'),
-      h('button', { onclick: () => this.onEditBorder(map), title: `${MAP_NAMES[map]}'s border (layer 3, fixed on the screen) in the Game workspace` }, 'Edit border of this submap'));
+    return h('div', { class: 'ow-info ow-map-settings' }, h('div', { class: 'hint' }, MAP_NAMES[map]),
+      h('div', { class: 'prop' }, h('label', null, 'Map music'), sel, play),
+      h('button', { onclick: () => { this.mapPop.close(); this.onEditGraphics(map, this.progress); }, title: `${MAP_NAMES[map]}'s own palettes, graphics files, layer 3 graphics and animations in the graphics workspace` }, 'Edit graphics of this submap'),
+      h('button', { onclick: () => { this.mapPop.close(); this.onEditBorder(map); }, title: `${MAP_NAMES[map]}'s border (layer 3, fixed on the screen) in the Game workspace` }, 'Edit border of this submap'));
   }
 
   // the layer 1 picker's "Levels" (ADR 0012): the level tiles' looks – one chosen as the brush, a right click on a cell
