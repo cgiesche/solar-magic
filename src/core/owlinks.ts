@@ -23,7 +23,8 @@ import {
 } from './owteleport.ts';
 import { readSecondaryEntrance, levelTranslevel } from './level.ts';
 import type { ExitGraph } from './exitgraph.ts';
-import { NO_SHAPE, dirOf, type PathShapes } from './owpaths.ts';
+import { NO_SHAPE, dirOf, type PathKind, type PathShapes } from './owpaths.ts';
+import { cellsBecoming } from './owevents.ts';
 import { DIR_NAMES, readL1, l1Index, l1XY } from './overworld.ts';
 import { OwRefusal, type OwRefusalData } from './owrefusal.ts';
 
@@ -137,6 +138,13 @@ export function makeLink(rom: Rom, kind: LinkKind, a: LinkEnd, to: LinkEnd, both
   if (why) throw new OwRefusal(why);
   const entries = kind === 'star' ? linkStars(rom, a, b, both) : linkExits(rom, a, b, both);
   return { kind, a: { ...a }, b: { ...b }, both, entries };
+}
+
+// The cells a star/pipe link may start from (#455): those where A warps (path kind 'warp', as learned: kinds) at some
+// event progress – on the map before events, revealed or put by an event – the game's table being keyed by the cell. Not
+// a level tile (A enters its level) nor a plain stop tile (A does nothing) that is never a star or pipe.
+export function warpCells(rom: Rom, kinds: readonly PathKind[]): Set<number> {
+  return cellsBecoming(rom, (t) => kinds[t] === 'warp');
 }
 
 const NOT_ITSELF: OwRefusalData = { kind: 'linkToItself' };

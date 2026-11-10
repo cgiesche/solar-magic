@@ -24,7 +24,7 @@ const REST_MS = 700; // the mouse resting on a cell this long shows its history
 const LEAVE_MS = 300; // the time to move from the cell into the popup
 const DRAG_PX = 4; // the mouse moved this far with the button held on an entry: a drag (else a click)
 // a tile's path kind in a word (none for a tile that is no path)
-const KIND_WORDS: Record<PathKind, string> = { walk: 'path', climb: 'climbing path', swim: 'water path', exit: 'exit path', stop: 'stop', level: 'level tile', none: '' };
+const KIND_WORDS: Record<PathKind, string> = { walk: 'path', climb: 'climbing path', swim: 'water path', exit: 'exit path', stop: 'stop', warp: 'star or pipe', level: 'level tile', none: '' };
 // a layer 1 tile in words: its number and path kind ("66 path"; the editor has no names of tiles)
 export function tileWords(kinds: readonly PathKind[] | null, t: number): string {
   const k = kinds?.[t];

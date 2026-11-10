@@ -42,7 +42,8 @@ export class TileLabels {
     if (v.mode !== 'l1' || i < 0 || (i >= 0x400) !== (v.region === 1) || !levelNamePatch(v.app.rom)) return null;
     const tl = v.tls[i], t = v.levelL1()[i];
     if (!tl) return null;
-    return v.isLevelTile(t) || (v.pathKinds() && ownsTranslevel(t)) ? { i, tl } : null;
+    const kinds = v.pathKinds();
+    return v.isLevelTile(t) || (kinds && ownsTranslevel(kinds, t)) ? { i, tl } : null;
   }
 
   // the labels of each tile: the selected level's name, then where its links lead

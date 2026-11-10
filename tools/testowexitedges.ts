@@ -107,7 +107,7 @@ check(yi.filter((e) => e.opens.length).length === want.length, `no other exit on
   // (#403) 11C (Vanilla Dome 0C,12): Mario walks 0C,14 – 0A,14 to the star leaving Vanilla Dome; the row lies
   // in Forest of Illusion's view too, nearer its center, but walking never changes the submap – only a link does
   const vd = edges.find((x) => x.from === l1Index(1, 0x0c, 0x12) && x.exit === 0), v = vd?.opens[0];
-  check(!!v && sub(v.tile) === 0 && v.end === l1Index(1, 0x0a, 0x14) && kinds[maps[vd!.event + 1].l1[v.end]] === 'stop',
+  check(!!v && sub(v.tile) === 0 && v.end === l1Index(1, 0x0a, 0x14) && kinds[maps[vd!.event + 1].l1[v.end]] === 'warp',
     `${vd && lv(vd.tl)}'s arrow to ${v && at(v.tile)} (main map) ends at ${v && at(v.end)}, the star of Vanilla Dome (not at ${at(l1Index(1, 0x0c, 0x14))})`);
 }
 

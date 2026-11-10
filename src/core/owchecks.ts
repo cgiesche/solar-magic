@@ -4,7 +4,7 @@
 // level or entering none. Each a plain function of the ROM and the searches of owreach.ts with every event passed.
 
 import type { Rom } from './rom.ts';
-import { OW_EVENTS, MAX_TRANSLEVEL, translevelToLevel, sharedTranslevels, readL1, readTranslevels, l1Index, isStarPipeTile, MAP_NAMES } from './overworld.ts';
+import { OW_EVENTS, MAX_TRANSLEVEL, translevelToLevel, sharedTranslevels, readL1, readTranslevels, l1Index, MAP_NAMES } from './overworld.ts';
 import { readEvents, cellsBecoming, eventChanges, eventRunners, eventPieces, drawPiece, l2XY, type EventData, type EventChanges, type EventRunner } from './owevents.ts';
 import { reach, inputWithout, type Reach } from './owreach.ts';
 import { starsWithoutTranslevel, ownsTranslevel, isStar } from './owstars.ts';
@@ -62,13 +62,13 @@ export function eventsNeverRun(c: CheckContext): WorldProblem[] {
 // bar shows its blank name. Found at progress 0 when the star or pipe is on the map before events; one an event puts
 // there named by what it becomes.
 export function starsWithoutTranslevelProblems(c: CheckContext): WorldProblem[] {
-  const l1 = readL1(c.rom);
+  const l1 = readL1(c.rom), kinds = c.all.inp.kinds, owns = (t: number) => ownsTranslevel(kinds, t);
   let stars: Set<number> | null = null;
-  const star = (i: number) => (ownsTranslevel(l1[i]) ? isStar(l1[i]) : (stars ??= cellsBecoming(c.rom, isStar)).has(i));
-  return starsWithoutTranslevel(c.rom).map((i) => {
+  const star = (i: number) => (owns(l1[i]) ? isStar(l1[i]) : (stars ??= cellsBecoming(c.rom, isStar)).has(i));
+  return starsWithoutTranslevel(c.rom, kinds).map((i) => {
     const what = star(i) ? 'star' : 'pipe';
     return {
-      key: `star-no-translevel:${i}`, group: 'paths', severity: 'warn', tile: i, progress: ownsTranslevel(l1[i]) ? 0 : OW_EVENTS,
+      key: `star-no-translevel:${i}`, group: 'paths', severity: 'warn', tile: i, progress: owns(l1[i]) ? 0 : OW_EVENTS,
       text: `${what === 'star' ? 'Star' : 'Pipe'} at ${c.place(i)} has no translevel of its own`, brief: `${what} without translevel at ${c.place(i)}`,
       title: 'Mario walks off it only in the ways translevel 00\'s flags open – shared with every tile without one – and the status bar shows a blank name. Select it in the layer 1 mode (Alt+click) and give it a translevel.',
     };
@@ -89,7 +89,7 @@ export function stranded(c: CheckContext): WorldProblem[] {
     if (at !== undefined) links.push({ at, from: k >> 2, to: w.to, what: 'exit path tile' });
   }
   for (const s of r.stops) {
-    if (!isStarPipeTile(inp.l1[s])) continue;
+    if (inp.kinds[inp.l1[s]] !== 'warp') continue;
     for (const to of inp.stars.get(s) ?? []) links.push({ at: s, from: s, to, what: 'star or pipe' });
   }
   const out: WorldProblem[] = [], keys = new Set<string>();

@@ -1,7 +1,7 @@
 // A path tile's shape shown (CONTEXT.md "Path shape"): the ways Mario takes over a tile – the lines the overworld
 // editor draws through its mark (the path marks on the map, the layer 1 sheet) and the words its popup and status bar
 // say – derived from the path shapes learned by emulation (owpaths.ts). Pure: nothing drawn.
-import { DX, DY, NO_SHAPE, PATH_KIND_NAMES, reverse, turnedAt, type PathKind, type PathShapes } from './owpaths.ts';
+import { DX, DY, NO_SHAPE, PATH_KIND_NAMES, reverse, turnedAt, stopsOn, type PathKind, type PathShapes } from './owpaths.ts';
 import { walkFrom, neighbor, type ReachInput } from './owreach.ts';
 
 // the kinds whose tiles Mario walks over by their shape, on the map they are on (the route solver's, owroute.ts; a
@@ -60,7 +60,7 @@ export function mapWays(l1: ArrayLike<number>, kinds: readonly PathKind[], shape
   };
   for (let i = 0; i < l1.length; i++) {
     const k = kinds[l1[i]];
-    if (k !== 'stop' && k !== 'level') continue;
+    if (!stopsOn(k) && k !== 'level') continue;
     for (let d = 0; d < 4; d++) {
       const n = neighbor(i, d);
       if (n >= 0 && kinds[l1[n]] !== 'none') walkFrom(inp, i, d, add);

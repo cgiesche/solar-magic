@@ -23,12 +23,12 @@
 // reveal walk). Flags only open, so the search runs until nothing more opens.
 
 import { Rom, snesToPc } from './rom.ts';
-import { isStarPipeTile, l1Index, l1XY, DIR_FLAGS, DIR_NAMES, exitDirections, translevelToLevel, MAX_TRANSLEVEL, initialFlags } from './overworld.ts';
+import { l1Index, l1XY, DIR_FLAGS, DIR_NAMES, exitDirections, translevelToLevel, MAX_TRANSLEVEL, initialFlags } from './overworld.ts';
 import { readEvents, eventRunners, exitChanges, eventTitle, exitPassedOtherwise, type EventChanges, type EventRunner } from './owevents.ts';
 import { hex2, hex3 } from './names.ts';
 import type { Severity } from './problems.ts';
 import { readTeleports, readExitPaths, starEntryAt, tileText, type OwTile } from './owteleport.ts';
-import { DX, DY, PATH_TILES_END, dirOf, reverse, shapeVector, turnedAt, type PathKind, type PathShapes } from './owpaths.ts';
+import { DX, DY, PATH_TILES_END, dirOf, reverse, shapeVector, turnedAt, stopsOn, type PathKind, type PathShapes } from './owpaths.ts';
 
 // the tile next to layer 1 tile i in direction dir on its map, -1 off the map
 export function neighbor(i: number, dir: number): number {
@@ -122,7 +122,7 @@ export function walkFrom(inp: ReachInput, from: number, d: number, onStep?: Walk
   let cur = from, dir = d, n = first, offPath: OffPath | undefined;
   for (let k = 0; k < MAX_STEPS; k++) {
     const kind = kinds[l1[n]];
-    if (kind === 'level' || kind === 'stop') return { path, to: n, dir, offPath };
+    if (kind === 'level' || stopsOn(kind)) return { path, to: n, dir, offPath };
     path.push(n);
     if (kind === 'exit') {
       // the exit path entry of where his step onto it ended ($049A24: his pixel position, not the tile's – 4D's first
@@ -135,7 +135,7 @@ export function walkFrom(inp: ReachInput, from: number, d: number, onStep?: Walk
       px = (e.to.x + vx) & ~3; py = (e.to.y + vy) & ~3;
       dir = turnedAt(px, py, vx, vy, dir);
       const k2 = kinds[l1[cur]];
-      if (k2 === 'level' || k2 === 'stop') return { path, to: cur, dir, offPath };
+      if (k2 === 'level' || stopsOn(k2)) return { path, to: cur, dir, offPath };
       // on the path where he ends at the edge of the tile led to that he goes on over, as a path tile leaves him
       const { x: tx, y: ty } = l1XY(cur);
       if (!offPath && (px !== tx * 16 + 8 + DX[dir] * 8 || py !== ty * 16 + 8 + DY[dir] * 8)) {
@@ -193,7 +193,7 @@ function hardWalk(inp: ReachInput, from: number, d: number): Walk | null {
     const t = s.tile < 0 ? inp.l1[cur] : s.tile;
     if (t >= PATH_TILES_END) {
       const k = inp.kinds[t];
-      return k === 'level' || k === 'stop' ? { path, to: cur, dir: s.dir } : { path, to: -1, dir: s.dir, stuck: { at: cur, why: 'end' } };
+      return k === 'level' || stopsOn(k) ? { path, to: cur, dir: s.dir } : { path, to: -1, dir: s.dir, stuck: { at: cur, why: 'end' } };
     }
     path.push(cur);
   }
@@ -219,7 +219,7 @@ export function reach(inp: ReachInput): Reach {
   while (queue.length) {
     const s = queue.pop()!, tl = inp.tls[s];
     if (inp.ends?.(s)) continue;
-    if (isStarPipeTile(inp.l1[s])) for (const to of inp.stars.get(s) ?? []) stand(to);
+    if (inp.kinds[inp.l1[s]] === 'warp') for (const to of inp.stars.get(s) ?? []) stand(to);
     if (tl) for (const to of inp.levelWarps?.(tl) ?? []) stand(to);
     for (let d = 0; d < 4; d++) {
       if (walks.has(s * 4 + d) || (lowByte(inp.l1[s]) !== ANY_WAY_TILE && !(flags[tl] & DIR_FLAGS[d]))) continue;
@@ -244,7 +244,7 @@ export function waysFrom(inp: ReachInput, r: Reach, s: number): { path: number[]
     const w = r.walks.get(s * 4 + d);
     if (w && w.to >= 0) out.push({ path: w.path, to: w.to });
   }
-  if (isStarPipeTile(inp.l1[s])) for (const to of inp.stars.get(s) ?? []) out.push({ path: [], to });
+  if (inp.kinds[inp.l1[s]] === 'warp') for (const to of inp.stars.get(s) ?? []) out.push({ path: [], to });
   const tl = inp.tls[s];
   if (tl) for (const to of inp.levelWarps?.(tl) ?? []) out.push({ path: [], to });
   return out;
@@ -260,7 +260,7 @@ export function waysFrom(inp: ReachInput, r: Reach, s: number): { path: number[]
 // link being made both ways gives it one). flags: the level flags (Reach.flags: once every tile he gets to is reached)
 export function stuckOnArrival(inp: ReachInput, flags: ArrayLike<number>, i: number, back = false): boolean {
   const t = inp.l1[i];
-  if (inp.kinds[t] === 'level' || (isStarPipeTile(t) && (back || inp.stars.has(i)))) return false;
+  if (inp.kinds[t] === 'level' || (inp.kinds[t] === 'warp' && (back || inp.stars.has(i)))) return false;
   const open = lowByte(t) === ANY_WAY_TILE ? 0x0f : flags[inp.tls[i]] ?? 0;
   return ![0, 1, 2, 3].some((d) => open & DIR_FLAGS[d] && walkFrom(inp, i, d));
 }
@@ -270,10 +270,10 @@ export function stuckOnArrival(inp: ReachInput, flags: ArrayLike<number>, i: num
 // on a stop, star or pipe whose translevel's flags open no way off it
 export function stuckOnArrivalText(inp: ReachInput, i: number, name: string, how: ArrivalHow): string {
   const t = inp.l1[i], k = inp.kinds[t], tl = inp.tls[i];
-  if (k !== 'stop') {
+  if (!stopsOn(k)) {
     return `Mario arrives standing on ${k === 'none' ? 'a tile he doesn\'t walk on' : 'a path tile'} at ${name} and can't move – ${how === 'star' ? 'a star/pipe link' : 'an exit to the overworld\'s location'} must lead to a tile he stops on (a level, stop, star or pipe tile)`;
   }
-  const what = lowByte(t) === STAR_TILE ? 'star' : isStarPipeTile(t) ? 'pipe' : 'stop tile';
+  const what = k === 'warp' ? (lowByte(t) === STAR_TILE ? 'star' : 'pipe') : 'stop tile';
   return `Mario arrives standing on the ${what} at ${name} and can't move: no way off it is open ${tl ? `(its translevel ${hex2(tl)}'s flags)` : '– it has no translevel of its own (translevel 00\'s flags, shared by every tile without one)'}`;
 }
 
@@ -288,7 +288,7 @@ export function arrivals(s: Reached): Arrival[] {
   const { inp, r } = s, out: Arrival[] = [];
   for (const at of r.stops) {
     const t = inp.l1[at], tl = inp.tls[at];
-    if (isStarPipeTile(t)) for (const to of inp.stars.get(at) ?? []) out.push({ at, to, how: 'star' });
+    if (inp.kinds[t] === 'warp') for (const to of inp.stars.get(at) ?? []) out.push({ at, to, how: 'star' });
     if (tl && inp.kinds[t] === 'level') for (const to of inp.levelWarps?.(tl) ?? []) out.push({ at, to, how: 'teleport' });
   }
   return out;

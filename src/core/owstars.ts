@@ -9,23 +9,23 @@
 // another event progress), which the translevel table (per cell) holds it for. Pure on the ROM given: nothing drawn.
 
 import type { Rom } from './rom.ts';
-import { readTranslevels, writeTranslevels, resetTranslevel, MAX_TRANSLEVEL, isStarPipeTile } from './overworld.ts';
+import { readTranslevels, writeTranslevels, resetTranslevel, MAX_TRANSLEVEL } from './overworld.ts';
 import { cellsBecoming } from './owevents.ts';
 import { heldElsewhere } from './owleveltiles.ts';
 import { neighbor, ANY_WAY_TILE } from './owreach.ts';
 import { tileWays, WALKED_KINDS } from './owpathshape.ts';
 import { stopTranslevels, takeStopTranslevel, dirFlags } from './owroute.ts';
 import { OwRefusal } from './owrefusal.ts';
-import type { PathKind, PathShapes } from './owpaths.ts';
+import { stopsOn, type PathKind, type PathShapes } from './owpaths.ts';
 
 export const STAR_TILE = 0x5f;
 // whether layer 1 tile t is a star (the game compares the tile's low byte, $04915E: a tile 15F is one too)
 export const isStar = (t: number): boolean => (t & 0xff) === STAR_TILE;
 export const PIPE_TILE = 0x5b;
-// Whether layer 1 tile t keeps a translevel of its own as a star does (#407): a star or pipe tile (isStarPipeTile) Mario
-// walks off by its translevel's flags – 5F and 5B (15F, 15B), not the pipe 82, which he walks off any way ($049268,
-// ANY_WAY_TILE), as the clean game's pipes on translevel 0 do
-export const ownsTranslevel = (t: number): boolean => isStarPipeTile(t) && (t & 0xff) !== ANY_WAY_TILE;
+// Whether layer 1 tile t keeps a translevel of its own as a star does (#407): a star or pipe tile (path kind 'warp', A
+// warps, as learned: kinds) Mario walks off by its translevel's flags – 5F and 5B (15F, 15B), not the pipe 82, which he
+// walks off any way ($049268, ANY_WAY_TILE), as the clean game's pipes on translevel 0 do
+export const ownsTranslevel = (kinds: readonly PathKind[], t: number): boolean => kinds[t] === 'warp' && (t & 0xff) !== ANY_WAY_TILE;
 // what such a tile is called
 export const starOrPipe = (t: number): 'star' | 'pipe' => (isStar(t) ? 'star' : 'pipe');
 
@@ -40,7 +40,7 @@ export function starDirs(l1: ArrayLike<number>, i: number, p: StarPaths): number
     const n = neighbor(i, d);
     if (n < 0) continue;
     const t = l1[n], k = p.kinds[t];
-    const leads = k === 'level' || k === 'stop' || k === 'exit'
+    const leads = k === 'level' || stopsOn(k) || k === 'exit'
       || (WALKED_KINDS.includes(k) && (!p.shapes || tileWays(t, k, p.shapes).some((w) => w.dir === d)));
     if (leads) out.push(d);
   }
@@ -59,14 +59,14 @@ export function starDirs(l1: ArrayLike<number>, i: number, p: StarPaths): number
 export function paintStars(rom: Rom, cells: Iterable<number>, before: ArrayLike<number>, after: ArrayLike<number>, p: StarPaths,
   event = -1, without: ArrayLike<number> | null = null): { taken: number[]; freed: number[] } {
   const tls = readTranslevels(rom), st = stopTranslevels(rom, tls);
-  const isLevel = (t: number) => p.kinds[t] === 'level', isStop = (t: number) => p.kinds[t] === 'stop' || isLevel(t);
+  const isLevel = (t: number) => p.kinds[t] === 'level', isStop = (t: number) => stopsOn(p.kinds[t]) || isLevel(t);
   const stopHeld = heldElsewhere(rom, isStop, event, without), levelHeld = heldElsewhere(rom, isLevel, event, without);
   // (the translevels a level tile enters, at any progress)
   let levels: Set<number> | null = null;
   const aLevels = (tl: number) => (levels ??= new Set([...cellsBecoming(rom, isLevel)].map((k) => tls[k]))).has(tl);
   const need: number[] = [], free: number[] = [];
   for (const i of cells) {
-    if (ownsTranslevel(after[i])) {
+    if (ownsTranslevel(p.kinds, after[i])) {
       if (tls[i] && levelHeld(i)) throw new OwRefusal({ kind: 'starOnLevel', cell: i, tl: tls[i], pipe: !isStar(after[i]) });
       if (!tls[i] || aLevels(tls[i])) need.push(i);
     } else if (tls[i] && isStop(before[i]) && !isStop(after[i]) && !stopHeld(i)) free.push(i);
@@ -89,8 +89,8 @@ export function giveStarTranslevel(rom: Rom, i: number, l1: ArrayLike<number>, p
 
 // the stars (cells) at any event progress – on the map before events, turned into one by the reveal list or an
 // event's layer 1 change – that hold no translevel: Mario walks off them in the ways translevel 0's flags open, shared
-// with every tile without one, and the status bar shows translevel 0's blank name
-export function starsWithoutTranslevel(rom: Rom): number[] {
+// with every tile without one, and the status bar shows translevel 0's blank name (kinds: the path kinds)
+export function starsWithoutTranslevel(rom: Rom, kinds: readonly PathKind[]): number[] {
   const tls = readTranslevels(rom);
-  return [...cellsBecoming(rom, ownsTranslevel)].filter((i) => !tls[i]).sort((a, b) => a - b);
+  return [...cellsBecoming(rom, (t) => ownsTranslevel(kinds, t))].filter((i) => !tls[i]).sort((a, b) => a - b);
 }

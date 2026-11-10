@@ -1,4 +1,4 @@
-// Path tiles (owpaths.ts): the kind of every layer 1 tile – walk, climb, swim, exit, stop, level or none –
+// Path tiles (owpaths.ts): the kind of every layer 1 tile – walk, climb, swim, exit, stop, warp, level or none –
 // learned by moving Mario onto it in the emulator. Checked against the clean game's own tables (read here
 // as the test's independent knowledge, the editor reads none of them): its path tiles 01–51 by the pose
 // each gives Mario ($049FEB: bit 3 swimming, bit 4 climbing; 52–55 read past it) and its list of exit tiles ($049426); a
@@ -11,6 +11,7 @@ import {
   readL1, writeL1, readL2, writeL2, readTranslevels, writeTranslevels, placeTile, setInitialFlags, setExitDirection, FLAG, MAX_TRANSLEVEL,
 } from '../src/core/overworld.ts';
 import { setLevelNameTiles, encodeName } from '../src/core/levelnames.ts';
+import { writeTeleport } from '../src/core/owteleport.ts';
 import { editorImage, cleanImage } from './fixture.ts';
 
 let bad = 0;
@@ -51,7 +52,11 @@ check(kinds.length === 0x200, '512 tiles (pages 0 and 1)');
   check(kinds[0x05] === 'walk' && kinds[0x28] === 'swim' && kinds[0x3f] === 'climb' && kinds[0x44] === 'exit', 'walk 05, swim 28, climb 3F, exit 44');
   check(kinds[0] === 'none' && Array.from({ length: 0x100 - 0x87 }, (_, k) => kinds[k + 0x87]).every((k) => k === 'none'), 'tile 00 and 87–FF: no path');
   check(kinds[0x56] === 'level' && kinds[0x80] === 'level', 'level tiles 56, 80: enter a level');
-  check([0x81, 0x82, 0x86].every((t) => kinds[t] === 'stop'), 'tiles 81, 82, 86: Mario stops, enters no level');
+  check([0x81, 0x86].every((t) => kinds[t] === 'stop'), 'tiles 81, 86: Mario stops, enters no level, A does nothing');
+  // (A on 5F, 82 or 5B looks Mario's place up in the star/pipe table, $04915E, $04917D: a warp where it has an entry)
+  check([0x5b, 0x5f, 0x82].every((t) => kinds[t] === 'warp'), `tiles 5B, 5F, 82: A warps (${[0x5b, 0x5f, 0x82].map((t) => kinds[t]).join(', ')})`);
+  const warps = kinds.flatMap((k, t) => (k === 'warp' ? [t] : []));
+  check(warps.join() === [0x5b, 0x5f, 0x82, 0x15b, 0x15f, 0x182].join(), `the warp tiles: 5B, 5F, 82 on both pages (${warps.map(hx).join(' ')})`);
   const level = levelTileTest(kinds), levels = Array.from({ length: 0x100 }, (_, t) => t).filter(level);
   // (the game's scan gives 56–80 a translevel, $04D838; A on 5F or 5B looks Mario's place up in the star and pipe
   // places, $049161, $049184, and enters no level)
@@ -67,7 +72,8 @@ check(kinds.length === 0x200, '512 tiles (pages 0 and 1)');
   l1.fill(0x04, 0, 0x40); l2.fill(0x0123, 0, 0x100); tls[0x10] = 0x30;
   writeL1(r, l1); writeL2(r, l2); writeTranslevels(r, tls);
   setInitialFlags(r, 0x29, 0x8f); setExitDirection(r, 0x29, 0, 3); setLevelNameTiles(r, 0x29, encodeName('A NAME').tiles);
-  check(!reads.differ(before, r.data), 'layer 1, layer 2, translevels, initial flags, exit directions, a name changed: the kinds hold');
+  writeTeleport(r, 0x40, { from: { submap: 1, x: 3, y: 4 }, to: { submap: 2, x: 5, y: 6 } });
+  check(!reads.differ(before, r.data), 'layer 1, layer 2, translevels, initial flags, exit directions, a name, a star/pipe link changed: the kinds hold');
 }
 
 // ---- the probe's own translevel isn't taken from the map ----
@@ -93,7 +99,7 @@ check(kinds.length === 0x200, '512 tiles (pages 0 and 1)');
   const at = Array.from({ length: 0x96 }, (_, k) => 0x03ba50 + k).find((a) => r.r8(a) === 0xc9 && r.r8(a + 1) === 0x81 && r.r8(a + 2) === 0x6b)!;
   r.w8(at + 1, 0x82);
   const k = learn(r).kinds, level = levelTileTest(k), before = levelTileTest(kinds);
-  check(k[0x81] === 'level' && k[0x82] === 'stop' && level(0x81) && !before(0x81), `the game entering a level from tile 81 (CMP #$82 at ${at.toString(16)}): tile 81 ${k[0x81]}, a level tile (82 ${k[0x82]})`);
+  check(k[0x81] === 'level' && k[0x82] === 'warp' && level(0x81) && !before(0x81), `the game entering a level from tile 81 (CMP #$82 at ${at.toString(16)}): tile 81 ${k[0x81]}, a level tile (82 ${k[0x82]})`);
   const l1 = readL1(r), t = readTranslevels(r), i = l1.findIndex((v, j) => !t[j] && !level(v));
   placeTile(l1, t, i, 0x81, level);
   const l1b = readL1(rom), tb = readTranslevels(rom);

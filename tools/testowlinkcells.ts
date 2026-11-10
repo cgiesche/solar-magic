@@ -2,7 +2,7 @@
 // Kids' places and locations end at; a paint stroke and the route brush leave them alone; a level tile moved takes
 // them along – star/pipe and exit path links (both ends, swapped with the tile there), a Koopa Kid's place.
 import { Rom } from '../src/core/rom.ts';
-import { readLinks, linkEndCells, moveLinkEnds, koopaTeleport, type OwLink, type LinkEnd } from '../src/core/owlinks.ts';
+import { readLinks, linkEndCells, moveLinkEnds, koopaTeleport, warpCells, type OwLink, type LinkEnd } from '../src/core/owlinks.ts';
 import { endTile } from '../src/core/owlinkends.ts';
 import { l1Index, readL1, readL2, gameL1, OverworldLoads, OverworldEmulator, OW_EVENTS } from '../src/core/overworld.ts';
 import { OverworldStroke } from '../src/core/owstroke.ts';
@@ -89,6 +89,17 @@ const find = (ls: OwLink[], s: number, x: number, y: number) => ls.find((l) => a
   check(koopaTeleport(r2, 0)!.x === p.x, 'not by a move on the other region');
 }
 
+// ---- where a star/pipe link may start (#455): a cell where A warps at some event progress ----
+{
+  const warps = warpCells(rom, kinds), yi = l1Index(1, 6, 7);
+  const sw = links.filter((l) => l.kind === 'star').flatMap((l) => (l.both ? [l.a, l.b] : [l.a])).filter((e) => l1[endTile(e)] === 0x5a);
+  check(warps.has(l1Index(0, 17, 7)), 'a pipe on the map before events: a source');
+  check(sw.length === 7 && sw.every((e) => warps.has(endTile(e))), `the seven 05A ends (Star World, Star Road; an event turns them into 05F): sources (${sw.length})`);
+  check(!warps.has(yi) && kinds[l1[yi]] === 'level', 'the level tile at Yoshi\'s Island 06,07: not a source');
+  const stop = l1.findIndex((t) => kinds[t] === 'stop');
+  check(stop >= 0 && !warps.has(stop), `a plain stop tile ${hx(l1[stop])} (${hx(stop)}): not a source`);
+}
+
 // ---- the World check: a link from or to a tile Mario can't use it on ----
 {
   // (the maps at each progress: `before` up to progress `p`, `after` from it)
@@ -96,8 +107,17 @@ const find = (ls: OwLink[], s: number, x: number, y: number) => ls.find((l) => a
     linkTileProblems(links, (q) => ({ inp: { l1: q < p ? before : after, kinds } }), place);
   const every = gameL1Every;
   const deadStar = find(links, 0, 20, 2)!;
-  check(on(every).length === 0 && every[endTile(deadStar.a)] === 0, 'the clean game: none – its star entry from Main map 14,02 (empty at every progress) not either');
-  const known = (ps: ReturnType<typeof on>) => ps;
+  // (#455: A warps only on a star or pipe – path kind 'warp' –, the clean game's entry from Yoshi's Island 06,07 is on
+  // the level tile 056 at every progress: A enters the level there)
+  const yi = l1Index(1, 6, 7), clean = on(every);
+  check(clean.length === 1 && clean[0].tile === yi && clean[0].severity === 'warn' && kinds[every[yi]] === 'level' && !!clean[0].fix && 'link' in clean[0].fix,
+    `the clean game: one warning, its star/pipe entry from the level tile at Yoshi's Island 06,07 (${clean.map((p) => `${hx(p.tile)} ${p.text}`).join('; ')})`);
+  check(every[endTile(deadStar.a)] === 0 && !clean.some((p) => p.tile === endTile(deadStar.a)), 'its star entry from Main map 14,02 (empty at every progress): none');
+  const stop = every.slice();
+  stop[endTile(deadStar.a)] = 0x81;
+  const s81 = on(stop).filter((p) => p.tile === endTile(deadStar.a));
+  check(kinds[0x81] === 'stop' && s81.length === 1 && s81[0].severity === 'warn', `a star/pipe link from a plain stop tile 81: a warning (${s81[0]?.text})`);
+  const known = (ps: ReturnType<typeof on>) => ps.filter((p) => p.tile !== yi);
   check(known(on(l1, every, 5)).length === 0, 'a star an event reveals later (none before): none');
   const star = find(links, 0, 17, 7)!, painted = every.slice();
   painted[endTile(star.a)] = 0;
@@ -110,7 +130,7 @@ const find = (ls: OwLink[], s: number, x: number, y: number) => ls.find((l) => a
   const q = known(on(gone)), path = every.slice();
   check(q.length === 0, 'an exit path\'s target empty at every progress: none (Mario never there)');
   path[endTile(exit.b)] = every[l1Index(0, 5, 20)];
-  const w = on(path);
+  const w = known(on(path));
   check(kinds[path[endTile(exit.b)]] !== 'exit' && kinds[path[endTile(exit.b)]] !== 'none' && w.length === 1 && w[0].tile === endTile(exit.b) && w[0].severity === 'warn' && / to /.test(w[0].text),
     `an exit path's target another tile at every progress: a warning at its target (${w[0]?.text})`);
   const r = fresh();

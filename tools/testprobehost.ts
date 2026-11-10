@@ -746,7 +746,7 @@ for (const changeRead of [false, true]) {
   check(l2.done?.type === 'learned' && !l2.done.failed && l2Now.paired.length === 16 && JSON.stringify(l2.done.result) === JSON.stringify(l2Now), 'layer 2 motions: as on the main thread');
   check(same(l2.put.get(storeKey('l2m-test', l2Input)), results.entry('l2m-test', l2Input) && { ...results.entry('l2m-test', l2Input)!, input: l2Input }),
     'layer 2 motions: their entry as on the main thread (key, input, bytes read: no picture)');
-  const pk = run({ type: 'learn', lane: 'owpk1', key: 'owpk-test', job: { kind: 'pathKinds' }, replace: true });
+  const pk = run({ type: 'learn', lane: 'owpk2', key: 'owpk-test', job: { kind: 'pathKinds' }, replace: true });
   const pkNow = atOnce<PathKind[]>({ key: 'owpk-test', keep: true, picture: false, start: pathKindsJob });
   check(pk.done?.type === 'learned' && pkNow.length === 0x200 && JSON.stringify(pk.done.result) === JSON.stringify(pkNow), 'path kinds: as on the main thread');
   check(same(pk.put.get('owpk-test'), results.entry('owpk-test', undefined)), 'path kinds: their entry as on the main thread (bytes read: no picture)');

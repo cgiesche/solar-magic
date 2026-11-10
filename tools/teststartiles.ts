@@ -42,6 +42,7 @@ import { readStart } from '../src/core/owsprites.ts';
 import { PlaySession } from '../src/core/playsession.ts';
 import { GM, RAM, PAD, get16 } from '../src/core/ram.ts';
 import { cleanImage, editorImage, pathKinds, pathShapes } from './fixture.ts';
+import { stopsOn } from '../src/core/owpaths.ts';
 
 let bad = 0;
 const check = (ok: boolean, what: string) => { console.log((ok ? 'ok   ' : 'FAIL ') + what); if (!ok) bad++; };
@@ -137,7 +138,7 @@ const UNUSED = Array.from({ length: MAX_TRANSLEVEL }, (_, k) => k + 1).find((t) 
     const tl = tls[i];
     let way: [number, number, number] | null = null; // from, direction, the direction he arrives in
     for (let from = 0; from < 0x800 && !way; from++) for (let d = 0; d < 4 && !way; d++) {
-      if (from === i || !['level', 'stop'].includes(kinds[open.l1[from]]) || (l1[from] & 0xff) === 0x5f) continue;
+      if (from === i || !['level', 'stop', 'warp'].includes(kinds[open.l1[from]]) || (l1[from] & 0xff) === 0x5f) continue;
       const w = walkFrom(open, from, d);
       if (w && w.to === i) way = [from, d, w.dir];
     }
@@ -231,7 +232,7 @@ for (const TILE of [STAR_TILE, PIPE_TILE]) {
   const paths = { kinds, shapes }, isLevel = (t: number) => kinds[t] === 'level';
   // (a stop tile of the map before events without translevel with a path off it – in the clean game a pipe 82; a stop
   // tile painted over it: stopTile, 81)
-  const cell = [...l1.keys()].find((i) => kinds[l1[i]] === 'stop' && !tls[i] && !ownsTranslevel(l1[i]) && starDirs(l1, i, paths).length)!, stop = stopTile(kinds);
+  const cell = [...l1.keys()].find((i) => stopsOn(kinds[l1[i]]) && !tls[i] && !ownsTranslevel(kinds, l1[i]) && starDirs(l1, i, paths).length)!, stop = stopTile(kinds);
   const paint = (r: Rom, i: number, t: number) => {
     const maps = { l1: readL1(r), l2: readL2(r) }, s = new OverworldStroke(r, 'l1', maps, isLevel, null, paths), { x, y } = l1XY(i);
     s.paint(i >> 10, x, y, t);
@@ -295,8 +296,8 @@ for (const TILE of [STAR_TILE, PIPE_TILE]) {
   };
   paint(cell, stopTile(kinds));
   paint(cell, 0x82);
-  check(!ownsTranslevel(0x82) && ownsTranslevel(PIPE_TILE) && ownsTranslevel(STAR_TILE) && ownsTranslevel(0x100 | PIPE_TILE) && readTranslevels(r)[cell] === 0,
-    `an 82 painted at ${at(cell)}: no translevel (${hx(readTranslevels(r)[cell])}) – the tiles taking one: 5F, 5B (and 15F, 15B), not 82`);
+  check(!ownsTranslevel(kinds, 0x82) && ownsTranslevel(kinds, PIPE_TILE) && ownsTranslevel(kinds, STAR_TILE) && ownsTranslevel(kinds, 0x100 | PIPE_TILE) && !ownsTranslevel(kinds, 0x56) && readTranslevels(r)[cell] === 0,
+    `an 82 painted at ${at(cell)}: no translevel (${hx(readTranslevels(r)[cell])}) – the tiles taking one: 5F, 5B (and 15F, 15B), not 82 (nor a level tile)`);
   const walks = PADS.map((pad) => press(onTile(r, cell), pad) !== cell);
   check(walks.every((w, d) => w === starDirs(readL1(r), cell, paths).includes(d)) && walks.some(Boolean),
     `Mario walks off it on translevel 0 (${walks.map((w, d) => (w ? DIR_NAMES[d] : '')).filter(Boolean).join(' ')}): every way a path leads`);
@@ -305,20 +306,20 @@ for (const TILE of [STAR_TILE, PIPE_TILE]) {
 // ---- a star or pipe without translevel: the World check's warning, one given ----
 {
   const paths = { kinds, shapes };
-  check(!starsWithoutTranslevel(rom).length, 'the clean game: every star (before events or revealed) has a translevel; its pipes are 82s (none takes one)');
+  check(!starsWithoutTranslevel(rom, kinds).length, 'the clean game: every star (before events or revealed) has a translevel; its pipes are 82s (none takes one)');
   const r = withTl(STARS[0], 0), place = (i: number) => at(i);
-  const ps = starsWithoutTranslevelProblems({ rom: r, place } as CheckContext);
+  const ps = starsWithoutTranslevelProblems({ rom: r, place, all: { inp: { kinds } } } as unknown as CheckContext);
   check(ps.length === 1 && ps[0].tile === STARS[0] && ps[0].severity === 'warn' && ps[0].progress === 0, `its translevel zeroed: "${ps[0]?.text}"`);
   const tl = giveStarTranslevel(r, STARS[0], readL1(r), paths);
-  check(!!tl && readTranslevels(r)[STARS[0]] === tl && initialFlags(r, tl) === dirFlags(starDirs(readL1(r), STARS[0], paths)) && !starsWithoutTranslevel(r).length,
+  check(!!tl && readTranslevels(r)[STARS[0]] === tl && initialFlags(r, tl) === dirFlags(starDirs(readL1(r), STARS[0], paths)) && !starsWithoutTranslevel(r, kinds).length,
     `given one: ${hx(tl)}, its flags ${hx(initialFlags(r, tl))}`);
   // a pipe 5B on translevel 0 (painted before #407): the same warning, named a pipe, and one given
   const pipe = [...l1.keys()].find((i) => (l1[i] & 0xff) === 0x82 && !tls[i])!, rp = new Rom(rom.data.slice()), lp = readL1(rp);
   lp[pipe] = PIPE_TILE; writeL1(rp, lp);
-  const pp = starsWithoutTranslevelProblems({ rom: rp, place } as CheckContext);
+  const pp = starsWithoutTranslevelProblems({ rom: rp, place, all: { inp: { kinds } } } as unknown as CheckContext);
   check(pp.length === 1 && pp[0].tile === pipe && pp[0].text === `Pipe at ${at(pipe)} has no translevel of its own`, `a pipe 5B on translevel 0 at ${at(pipe)}: "${pp[0]?.text}"`);
   const tp = giveStarTranslevel(rp, pipe, readL1(rp), paths);
-  check(!!tp && readTranslevels(rp)[pipe] === tp && !starsWithoutTranslevel(rp).length, `given one: ${hx(tp)}, its flags ${hx(initialFlags(rp, tp))}`);
+  check(!!tp && readTranslevels(rp)[pipe] === tp && !starsWithoutTranslevel(rp, kinds).length, `given one: ${hx(tp)}, its flags ${hx(initialFlags(rp, tp))}`);
 }
 
 if (bad) { console.log(`${bad} failed`); process.exit(1); }

@@ -186,7 +186,9 @@ console.log(list(clean.problems));
     return { ps, search };
   };
   const cleanEvery = atEvery(rom).ps;
-  check(!cleanEvery.length, `the clean game: no dead end, no exit path tile leading nowhere at any event progress (${cleanEvery.map((p) => p.brief).join('; ')})`);
+  // (#455: but its star/pipe entry from the level tile at Yoshi's Island 06,07, where A enters the level: a warning)
+  const yiLink = cleanEvery.filter((p) => p.key.startsWith('link-tile:') && p.tile === l1Index(1, 6, 7) && p.severity === 'warn');
+  check(cleanEvery.length === 1 && yiLink.length === 1, `the clean game: no dead end, no exit path tile leading nowhere at any event progress – only the star/pipe link from the level tile at Yoshi's Island 06,07 (${cleanEvery.map((p) => p.brief).join('; ')})`);
   // the last event's layer 1 changes taking away a path tile Mario walks over (one the map before events has) – one
   // whose taking away leaves him stuck at one place (found by a search with every event passed without the tile)
   const full = clean.all, e = OW_EVENTS - 1, empty = kinds.findIndex((k) => k === 'none'), before = readL1(rom);

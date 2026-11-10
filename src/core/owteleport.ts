@@ -240,6 +240,13 @@ export function teleportDataRanges(rom: Rom): [number, number][] {
   return out;
 }
 
+// the bytes the game looks a star's or pipe's tile up in (PC offsets, [start, end); none without the patch): the path
+// probe (owpaths.ts) tells a tile where A warps by A reading them
+export function starTableRanges(rom: Rom): [number, number][] {
+  const t = tableOf(rom);
+  return t === null ? [] : [[snesToPc(t), snesToPc(t) + PART * 4]];
+}
+
 export const sameTile = (a: OwTile, b: OwTile) => a.submap === b.submap && a.x === b.x && a.y === b.y;
 // The entry the game takes for a star/pipe tile (by the tile it is taken from) or an exit path position (by where Mario
 // is when he leaves): the last one with it – the game searches both tables from the last entry down, an earlier entry

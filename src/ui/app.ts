@@ -1195,7 +1195,7 @@ export class App {
   // what Mario does on each overworld layer 1 tile 00–FF (owpaths.ts): learned in the probe worker once and kept in
   // the result cache while the game's code is unchanged; null while that runs, then `done` is called
   pathKinds(done: () => void): PathKind[] | null {
-    return this.probes.learn<PathKind[]>('owpk1', { kind: 'pathKinds' }, { lane: 'owpk1', label: 'Path tiles', done }) ?? null;
+    return this.probes.learn<PathKind[]>('owpk2', { kind: 'pathKinds' }, { lane: 'owpk2', label: 'Path tiles', done }) ?? null;
   }
   // the exits whose first pass skips the reveal walk, per translevel and with the base event "No event" (revealwalk.ts):
   // learned in the probe worker once and kept in the result cache while the game's code is unchanged; null while that

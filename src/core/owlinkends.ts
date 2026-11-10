@@ -12,7 +12,7 @@ import { inView, submapOf, submapShown, type Rect } from './owevents.ts';
 import { neighbor } from './owreach.ts';
 import { readLinks, removeLink, makeLink, type OwLink, type LinkEnd } from './owlinks.ts';
 import { tileText, type OwTile } from './owteleport.ts';
-import type { PathKind } from './owpaths.ts';
+import { stopsOn, type PathKind } from './owpaths.ts';
 
 const SUBMAPS = MAP_NAMES.length;
 // the layer 1 tile (l1Index) of a link end
@@ -36,7 +36,7 @@ export function pathSubmap(l1: ArrayLike<number>, kinds: readonly PathKind[], vi
   const seen = new Set([i]), queue = [i], score = new Map<number, number>();
   while (queue.length) {
     const t = queue.pop()!, k = kinds[l1[t]];
-    if (k === 'stop' || k === 'level') {
+    if (stopsOn(k) || k === 'level') {
       const own = among.filter((s) => inView(views[s], t));
       if (own.length === 1) score.set(own[0], (score.get(own[0]) ?? 0) + 1);
     }

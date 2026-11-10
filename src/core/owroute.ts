@@ -20,7 +20,7 @@
 // translevel 0 shares the flags of every such tile, so at a junction he could not walk on. Its initial flags (Lunar
 // Magic's table, every new game) open the ways the stop has: the route's and those of the path it runs into.
 
-import { DX, DY, PATH_TILES_END, reverse, shapeVector, type PathKind, type PathShapes } from './owpaths.ts';
+import { DX, DY, PATH_TILES_END, reverse, shapeVector, stopsOn, type PathKind, type PathShapes } from './owpaths.ts';
 import { neighbor } from './owreach.ts';
 import { tileWays, WALKED_KINDS, type PathWay } from './owpathshape.ts';
 import { stopTile, levelsWithoutTile, heldElsewhere, type LevelTileEvent } from './owleveltiles.ts';
@@ -28,7 +28,7 @@ import type { Rom } from './rom.ts';
 import { OwRefusal, type OwRefusalData } from './owrefusal.ts';
 import {
   readL1, writeL1, readTranslevels, writeTranslevels, setExitDirection, setInitialFlags, translevelUse, hasNameEventOrMessages, freeTranslevel, resetTranslevel,
-  DIR_FLAGS, MAX_TRANSLEVEL, isStarPipeTile, l1XY,
+  DIR_FLAGS, MAX_TRANSLEVEL, l1XY,
 } from './overworld.ts';
 import { readEvents, writeEvents, paintEventL1, eventRunners } from './owevents.ts';
 
@@ -99,7 +99,7 @@ export interface PathGraph {
 }
 export function pathGraph(l1: ArrayLike<number>, kinds: readonly PathKind[], shapes: PathShapes): PathGraph {
   const kind = (c: number) => kinds[l1[c]], walked = (c: number) => WALKED_KINDS.includes(kind(c));
-  const isStop = (c: number) => kind(c) === 'level' || kind(c) === 'stop' || kind(c) === 'exit';
+  const isStop = (c: number) => kind(c) === 'level' || stopsOn(kind(c)) || kind(c) === 'exit';
   const sideMemo = new Map<number, number[]>();
   const sides = (c: number): number[] => {
     let out = sideMemo.get(c);
@@ -144,7 +144,7 @@ export function routeEnds(route: readonly number[], l1: ArrayLike<number>, kinds
   if (route.length < 2) return { cells: route.slice(), through: [] };
   const g = pathGraph(l1, kinds, shapes), { kind, walked, sides } = g;
   // (a stop tile a path may be drawn on through: a plain stop, its translevel not kept)
-  const passable = (c: number) => kind(c) === 'stop' && !isStarPipeTile(l1[c]) && !kept(c);
+  const passable = (c: number) => kind(c) === 'stop' && !kept(c);
   // (from the last tile of a path, a path tile or a plain stop tile: back along it)
   const backAlong = (c: number, from: number, taken: ReadonlySet<number>): number[] | null => (walked(c) || passable(c) ? g.backAlong(c, from, taken) : null);
   // the cells an end goes on to, outwards (end: the route's end cell, inner: the one before it), and the stop tile at a
@@ -161,7 +161,7 @@ export function routeEnds(route: readonly number[], l1: ArrayLike<number>, kinds
       const n = neighbor(end, d);
       if (n < 0 || taken.has(n)) return [];
       // (a level or stop tile – a plain stop at a path's end with the way back –; the last tile of a path leading this way)
-      if (kind(n) === 'level' || kind(n) === 'stop') {
+      if (kind(n) === 'level' || stopsOn(kind(n))) {
         const back = backAlong(n, end, taken);
         return [{ d, cells: [n, ...(back ?? [])], via: through1(n, back) }];
       }
@@ -208,7 +208,7 @@ function solve(route: readonly number[], inp: RouteInput, askAlternatives: boole
   const roles: Role[] = route.map((c, k) => {
     const kind = kinds[l1[c]], end = k === 0 || k === route.length - 1;
     if (inp.through?.has(k) && !end) return 'path';
-    if (kind === 'level' || kind === 'stop' || (kind === 'exit' && end)) return 'keep';
+    if (kind === 'level' || stopsOn(kind) || (kind === 'exit' && end)) return 'keep';
     if (end || inp.stops?.has(k)) return 'stop';
     if (kind === 'exit') return 'path'; // (refused below)
     return WALKED_KINDS.includes(kind) && joins(c, route[k - 1], route[k + 1], inp) ? 'stop' : 'path';
@@ -415,7 +415,7 @@ export function writeRoute(rom: Rom, route: readonly number[], solved: Pick<Rout
   }
   // (a stop tile run through, a path tile now: its translevel freed – unless the cell is a stop or level tile at another
   // progress, the table being per cell –, reset once no cell holds it)
-  const isStop = (t: number) => kinds[t] === 'stop' || kinds[t] === 'level';
+  const isStop = (t: number) => stopsOn(kinds[t]) || kinds[t] === 'level';
   const held = solved.through?.length ? heldElsewhere(rom, isStop, ev ? ev.event : -1, ev?.without ?? null) : () => true;
   const freed = (solved.through ?? []).filter((c) => tls[c] && !held(c)).map((c) => { const tl = tls[c]; tls[c] = 0; return tl; });
   const taken = need.map((s) => takeStopTranslevel(rom, tls, st, s.cell, stopFlags(s)));

@@ -664,7 +664,7 @@ export class OverworldView {
   }
 
   // the path tiles of the map shown, a mark per kind (as Lunar Magic's "Layer 1 Mario Paths"): walk green, climb
-  // green with rungs, swim blue, exit red, stop a cross; the tile's shape as lines (once the shapes are learned): where
+  // green with rungs, swim blue, exit red, stop a cross, warp (a star or pipe) a violet ring; the tile's shape as lines (once the shapes are learned): where
   // Mario walks over the cell (owpathshape.ts mapWays: a straight tile at the height the tile before leaves him), else
   // the tile's usual lines (usualWays)
   paintPaths(lw: number): void {
@@ -1765,7 +1765,7 @@ export class OverworldView {
   paintHidden(): boolean {
     const i = this.selected, t = i >= 0 ? this.levelL1()[i] : 0;
     return selectionHidesPaint({ mode: this.mode, selected: i, tile: t, byInfo: i === this.infoTile, levelTile: i >= 0 && this.isLevelTile(t),
-      kindsKnown: !!this.pathKinds(), revealPick: (this.eventPick?.at ?? -1) >= 0 });
+      kinds: this.pathKinds(), revealPick: (this.eventPick?.at ?? -1) >= 0 });
   }
 
   // the mode's properties (of what is selected), under them the global settings in two sections shown in every mode:
@@ -2028,7 +2028,7 @@ export class OverworldView {
   tileInfo(i: number): HTMLElement {
     const { x, y } = l1XY(i), t = this.levelL1()[i];
     const known = !!this.pathKinds(); // (whether it is a level tile: not known while the path tiles are learned)
-    const info = this.isLevelTile(t) ? this.levelInfo(i) : known && ownsTranslevel(t) ? this.starInfo(i)
+    const info = this.isLevelTile(t) ? this.levelInfo(i) : known && ownsTranslevel(this.pathKinds()!, t) ? this.starInfo(i)
       : h('div', { class: 'ow-info' }, h('div', { class: 'hint' }, `Tile ${hex(x, 2)},${hex(y, 2)} · ${l1Hex(t)}${known ? ' (not a level tile)' : ''}`),
         known ? null : h('div', { class: 'hint' }, LEVEL_TILES_LEARNED));
     info.append(h('div', { class: 'row' }, h('button', { title: 'Edit which 8x8 tiles make this layer 1 tile, in the Map16 tab (M) – for every place of the tile on all maps', onclick: () => this.editTile(i) }, `Edit tile ${l1Hex(t)} in Map16 …`)),
@@ -2318,7 +2318,7 @@ export class OverworldView {
         budgetGauge(this.budget('l1Tiles'))),
       // (a star or pipe 5B painted takes a translevel of its own: owstars.ts; a stop a route puts too)
       route ? budgetRow('A stop tile a route puts takes a level of its own', this.budget('translevels'))
-        : b.kind === 'l1' && b.entries.some(ownsTranslevel) ? budgetRow('A star or pipe takes a level of its own', this.budget('translevels')) : null,
+        : b.kind === 'l1' && kinds && b.entries.some((t) => ownsTranslevel(kinds, t)) ? budgetRow('A star or pipe takes a level of its own', this.budget('translevels')) : null,
       // (no free tile on either page: the button says why, with the way out)
       kinds && p0.firstFree < 0 && p1.firstFree < 0 ? h('div', { class: 'row' }, h('button', { title: 'No layer 1 tile is free for a new look: says why, with a way out where there is one', onclick: () => this.newTile() }, 'New tile…')) : null,
       // the route brush (owpathtool.ts): a row of its own above the sheet, framed while it is the brush
@@ -2509,10 +2509,11 @@ export class OverworldView {
 }
 
 // the mark of a path tile of kind k (isPathKind) on the 16x16 tile at (px, py), as the map's path marks
-// draws it: walk green, climb green with rungs, swim blue, exit red, stop a cross; its ways (owpathshape.ts mapWays or
+// draws it: walk green, climb green with rungs, swim blue, exit red, stop a cross, warp (a star or pipe: A warps) a violet
+// ring – the colour of the star/pipe links' arrows; its ways (owpathshape.ts mapWays or
 // usualWays, none while the shapes are learned) as white lines through the tile (lw: the width of a pixel)
 // (each kind's colour, r,g,b: the mark's fill with its alpha, the sheet's border opaque; a level tile has no mark)
-const KIND_RGB: Partial<Record<PathKind, [string, number]>> = { walk: ['90,230,100', 0.7], climb: ['90,230,100', 0.7], swim: ['60,140,255', 0.75], exit: ['235,60,60', 0.8], stop: ['255,255,255', 1], level: ['255,210,60', 1] };
+const KIND_RGB: Partial<Record<PathKind, [string, number]>> = { walk: ['90,230,100', 0.7], climb: ['90,230,100', 0.7], swim: ['60,140,255', 0.75], exit: ['235,60,60', 0.8], stop: ['255,255,255', 1], warp: ['197,140,255', 1], level: ['255,210,60', 1] };
 const PATH_FILL = Object.fromEntries(Object.entries(KIND_RGB).map(([k, [c, a]]) => [k, `rgba(${c},${a})`])) as Partial<Record<PathKind, string>>;
 export function drawPathMark(ctx: CanvasRenderingContext2D, k: PathKind, px: number, py: number, lw: number, ways: readonly PathWay[]): void {
   if (k === 'stop') {
@@ -2521,6 +2522,16 @@ export function drawPathMark(ctx: CanvasRenderingContext2D, k: PathKind, px: num
       ctx.lineWidth = w * lw;
       ctx.beginPath();
       ctx.moveTo(px + 4, py + 4); ctx.lineTo(px + 12, py + 12); ctx.moveTo(px + 12, py + 4); ctx.lineTo(px + 4, py + 12);
+      ctx.stroke();
+    }
+    return;
+  }
+  if (k === 'warp') {
+    for (const [c, w] of [['rgba(0,0,0,0.8)', 4], [PATH_FILL.warp!, 2]] as [string, number][]) {
+      ctx.strokeStyle = c;
+      ctx.lineWidth = w * lw;
+      ctx.beginPath();
+      ctx.arc(px + 8, py + 8, 4.5, 0, Math.PI * 2);
       ctx.stroke();
     }
     return;

@@ -5,7 +5,7 @@
 // to) only of the selected tile – all with View → "Link arrows". A tile is linked by "Link to…" (its menu or
 // properties) and a click on the target (the pick pending: refused tiles hatched, the map's cursor a crosshair; Esc
 // cancels): an exit path tile by an exit path (the side its path goes on found from the path tiles around it, the
-// target's the opposite one), a tile Mario stops on by a star/pipe link, a Koopa Kid's tile by its place. Dragging the
+// target's the opposite one), a star or pipe (a tile where A warps) by a star/pipe link, a Koopa Kid's tile by its place. Dragging the
 // selected link's other end, a location or a Koopa Kid's place moves it; "Remove link" (menu, Delete) removes it, the
 // tile staying. A link end dropped on a tile several submaps' views show asks which submap at the cursor, the one whose
 // paths the tile is on first (core/owlinkends.ts endChoice). Each change is one ROM edit (owlinks.ts).
@@ -17,7 +17,7 @@ import { refusedToast, refusalWords } from './owrefusal.ts';
 import { OwRefusal, type OwRefusalData } from '../core/owrefusal.ts';
 import { linkTableFix } from './owfixes.ts';
 import {
-  readLinks, linkEndCells, makeLink, removeLink, setBothWays, moveLocation, locationUses, pathSide, koopaTeleport, setKoopaTeleport, sidesMatch, exitOut, exitOutText,
+  readLinks, linkEndCells, warpCells, makeLink, removeLink, setBothWays, moveLocation, locationUses, pathSide, koopaTeleport, setKoopaTeleport, sidesMatch, exitOut, exitOutText,
   KOOPAS, KOOPA_TILE, koopaOfTile, koopaPlaceRefusal, linkCheck, locationMoveRefusal, type OwLink, type LinkEnd, type LinkKind,
 } from '../core/owlinks.ts';
 import { readTeleports, tileText, sameTile, type OwTile } from '../core/owteleport.ts';
@@ -57,7 +57,7 @@ export class LinkLayer {
   // the ends of the links painted whose other end is on another map: labelled under their tile (owlevelname.ts
   // TileLabels), with a jump there; gathered by paint, cleared by the view before it paints the map
   offMap: OffMapEnd[] = [];
-  private data: { gen: number; links: OwLink[]; uses: Map<number, number[]>; levels: Map<number, number[]> | null } | null = null;
+  private data: { gen: number; links: OwLink[]; uses: Map<number, number[]>; levels: Map<number, number[]> | null; warps: Set<number> | null } | null = null;
   constructor(private view: OverworldView) {}
 
   private get rom() { return this.view.app.rom; }
@@ -67,7 +67,7 @@ export class LinkLayer {
     if (this.data?.gen !== gen) {
       const kinds = this.view.pathKinds();
       const isExit = (t: OwTile) => kinds?.[this.view.shown.l1[this.index(t)]] === 'exit';
-      this.data = { gen, links: readLinks(this.rom, isExit), uses: locationUses(this.rom), levels: null };
+      this.data = { gen, links: readLinks(this.rom, isExit), uses: locationUses(this.rom), levels: null, warps: null };
       // the selection follows the ROM (undo, another change): the link of the same tile and kind, else none
       const s = this.sel;
       if (s?.kind === 'link') {
@@ -159,7 +159,8 @@ export class LinkLayer {
     }))], true);
   }
   // what tile i links by: an exit path from an exit path tile (or one an exit path already starts at, as the game's
-  // cave), a star/pipe link from a tile Mario stops on, a Koopa Kid's place from its tile
+  // cave), a star/pipe link from a tile where A warps – a star or pipe – at some event progress (owlinks.ts warpCells,
+  // #455: not a level tile nor a plain stop tile), a Koopa Kid's place from its tile
   private source(i: number, t = this.tile(i)): Source {
     if (this.koopaAt(i) >= 0) return { kind: 'koopa' };
     if (this.info().links.some((l) => l.kind === 'exit' && (sameTile(l.a, t) || (l.both && sameTile(l.b, t))))) return { kind: 'exit' };
@@ -167,7 +168,8 @@ export class LinkLayer {
     if (!kinds) return { kind: null, why: 'the path tiles are still being learned – try again in a moment' };
     const k = kinds[this.view.shown.l1[i]];
     if (k === 'exit') return { kind: 'exit' };
-    if (k === 'stop' || k === 'level') return { kind: 'star' };
+    const info = this.info();
+    if (k === 'warp' || (info.warps ??= warpCells(this.rom, kinds)).has(i)) return { kind: 'star' };
     const refusal: OwRefusalData = { kind: 'linkNoStart', tile: this.view.shown.l1[i], path: PATH_KIND_NAMES[k].toLowerCase() };
     return { kind: null, why: refusalWords(this.rom, refusal).reason, refusal };
   }

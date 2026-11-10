@@ -3,26 +3,32 @@
 // game, so the editor draws them as an overlay. Learned by emulation, not from a list: in a new game, Mario on
 // his start tile is given a way with the tile next to him and a stop tile after it, and walks there. The
 // overworld looks one tile ahead as he goes: onto a path tile it gives him its pose (swimming, climbing) or
-// switches to another submap (an exit); on a tile he stops at, A tells whether it enters a level. So a patched
+// switches to another submap (an exit); on a tile he stops at, A tells whether it enters a level or looks his place up
+// in the star/pipe table (a warp: a star or pipe, owteleport.ts – it warps where the table has an entry). So a patched
 // game's tiles show what they do there. The result depends on the game's code only: the overworld's data
 // (overworldDataRanges, what is painted) is not read as far as the result is concerned.
 
 import type { LevelEmulator } from './levelemu.ts';
 import type { Job } from './jobrunner.ts';
 import { l1Index, overworldDataRanges, DIR_FLAGS, OW_L1_TILES } from './overworld.ts';
+import { starTableRanges } from './owteleport.ts';
+import { joinHooks } from './snes.ts';
 import { RAM, GM, PAD, get16, getS16 } from './ram.ts';
 
-export const PATH_KINDS = ['walk', 'climb', 'swim', 'exit', 'stop', 'level', 'none'] as const;
+export const PATH_KINDS = ['walk', 'climb', 'swim', 'exit', 'stop', 'warp', 'level', 'none'] as const;
 export type PathKind = (typeof PATH_KINDS)[number];
 // the kinds drawn as path tiles (a level tile shows itself)
 export const isPathKind = (k: PathKind): boolean => k !== 'level' && k !== 'none';
+// whether Mario stops on a tile of kind k without entering a level: a stop tile, or a star or pipe (a warp: he stops on
+// it, A warps him)
+export const stopsOn = (k: PathKind | undefined): boolean => k === 'stop' || k === 'warp';
 // whether a layer 1 tile is a level tile: one the game enters a level from (kind 'level'), as learned here – so a
 // patch changing which tiles enter levels is followed, no range of tile numbers is assumed
 export type LevelTileTest = (tile: number) => boolean;
 export const levelTileTest = (kinds: readonly PathKind[]): LevelTileTest => (t) => kinds[t] === 'level';
 export const PATH_KIND_NAMES: Record<PathKind, string> = {
   walk: 'Path: walk', climb: 'Path: climb', swim: 'Path: swim', exit: 'Path: exit to another submap',
-  stop: 'Path: Mario stops, enters no level', level: 'Level tile', none: 'No path',
+  stop: 'Path: Mario stops, enters no level', warp: 'Path: star or pipe, A warps', level: 'Level tile', none: 'No path',
 };
 
 const WALK_FRAMES = 90; // until Mario reached the tile after the probed one or stopped (a climb is slow)
@@ -62,12 +68,12 @@ function* probeAll(emu: LevelEmulator, end: () => void): Generator<string | void
     w[RAM.owTranslevels + home] = w[RAM.owTranslevels + at(1)] = tl; // (the probed tile enters a level if it can)
     w[RAM.levelFlags + tl] = DIR_FLAGS.reduce<number>((a, b) => a | b, 0); // (not passed: no "no entry")
     const standing = w[RAM.owProcess], start = s.saveState();
-    const kinds: PathKind[] = [];
+    const kinds: PathKind[] = [], table = starTableRanges(emu.rom);
     for (let t = 0; t < OW_L1_TILES; t++) {
       s.loadState(start);
       w[L + at(1)] = t & 0xff;
       w[H + at(1)] = t >> 8;
-      kinds.push(probe(emu, t, tx, dx, pad, standing));
+      kinds.push(probe(emu, t, tx, dx, pad, standing, table));
       yield `Path tiles (${OW_L1_TILES - 1 - t})`;
     }
     return kinds;
@@ -75,7 +81,8 @@ function* probeAll(emu: LevelEmulator, end: () => void): Generator<string | void
 }
 
 // Mario sent from (tx) onto tile t next to him (dx): what the overworld does when it looks ahead onto it
-function probe(emu: LevelEmulator, t: number, tx: number, dx: number, pad: number, standing: number): PathKind {
+// (table: the star/pipe table's bytes)
+function probe(emu: LevelEmulator, t: number, tx: number, dx: number, pad: number, standing: number, table: [number, number][]): PathKind {
   const s = emu.snes, w = s.wram;
   const tileX = () => (get16(w, RAM.owPlayerTileX) - tx) * dx;
   let walking = -1, pose = -1;
@@ -93,11 +100,19 @@ function probe(emu: LevelEmulator, t: number, tx: number, dx: number, pad: numbe
     if (walking < 0 && f > 8) return 'none'; // (he starts at once when he can)
   }
   if (pose < 0 || tileX() !== 1) return 'none';
-  for (let f = 0; f < ENTER_FRAMES; f++) {
-    s.joy1 = f % 8 < 2 ? PAD.a : 0; // (pressed again and again)
-    s.runFrame();
-    if (w[RAM.gameMode] === GM.levelLoad) return 'level';
-  }
+  // A pressed: a level loads, or the star/pipe table is read (no entry for the probed place: nothing happens then, the
+  // game warps where it has one), or nothing
+  let read = false;
+  const base = s.hook, look = { onRomRead: (o: number) => { if (!read && table.some(([a, b]) => o >= a && o < b)) read = true; } };
+  s.hook = base ? joinHooks(base, look) : look;
+  try {
+    for (let f = 0; f < ENTER_FRAMES; f++) {
+      s.joy1 = f % 8 < 2 ? PAD.a : 0; // (pressed again and again)
+      s.runFrame();
+      if (w[RAM.gameMode] === GM.levelLoad) return 'level';
+      if (read) return 'warp';
+    }
+  } finally { s.hook = base; }
   return 'stop';
 }
 

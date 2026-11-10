@@ -186,10 +186,10 @@ const [late, early] = clean.needed.flatMap((as, b) => as.filter((a) => a < b).ma
 // ---- a star or pipe without translevel (#288, #407) ----
 {
   // the clean game's pipes are 82s on translevel 0 (walked off any way): none warned; a 5B there (a hack's) is, as a star
-  check(!starsWithoutTranslevelProblems({ rom, place: at } as CheckContext).length, 'the clean game: no star or pipe without translevel warned (its pipes are 82s)');
+  check(!starsWithoutTranslevelProblems({ rom, place: at, all: { inp: { kinds } } } as unknown as CheckContext).length, 'the clean game: no star or pipe without translevel warned (its pipes are 82s)');
   const r = copy(), l1 = readL1(r), pipe = l1Index(0, 0x0a, 0x03);
   l1[pipe] = 0x5b; writeL1(r, l1);
-  const ps = starsWithoutTranslevelProblems({ rom: r, place: at } as CheckContext);
+  const ps = starsWithoutTranslevelProblems({ rom: r, place: at, all: { inp: { kinds } } } as unknown as CheckContext);
   check(ps.length === 1 && ps[0].tile === pipe && ps[0].severity === 'warn' && ps[0].progress === 0 && ps[0].text === `Pipe at ${at(pipe)} has no translevel of its own`,
     `the pipe 82 at ${at(pipe)} made a 5B on translevel 0: "${ps[0]?.text}"`);
 }

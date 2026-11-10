@@ -6,7 +6,7 @@
 
 import type { Rom } from './rom.ts';
 import { sameProgress, prefixLength, type EventProgress } from './eventset.ts';
-import { readL1, writeL1, readDestroyList, revealEventCount, gameL1, l1XY, NO_EVENT, OW_EVENTS, STAR_PIPE_TILES, type OverworldLoads } from './overworld.ts';
+import { readL1, writeL1, readDestroyList, revealEventCount, gameL1, l1XY, NO_EVENT, OW_EVENTS, type OverworldLoads } from './overworld.ts';
 import { eventReveal } from './oweventtiles.ts';
 import { readEvents, submapViewsJob, submapOf } from './owevents.ts';
 import { budgetLevel, budgetText, owBudgets, fullestSubmap, type Budget } from './owbudget.ts';
@@ -19,9 +19,9 @@ import type { ScreenExit } from './level.ts';
 import type { Job } from './jobrunner.ts';
 import { RAM } from './ram.ts';
 import type { OwMode } from './owlayers.ts';
-import { reach, reachProblems, stuckProblems, exitTileFix, ANY_WAY_TILE, type Reached, type ReachKind, type ReachProblem, type CheckSeverity } from './owreach.ts';
+import { reach, reachProblems, stuckProblems, exitTileFix, type Reached, type ReachKind, type ReachProblem, type CheckSeverity } from './owreach.ts';
 import { hex3 } from './names.ts';
-import type { PathKind, PathShapes } from './owpaths.ts';
+import { stopsOn, type PathKind, type PathShapes } from './owpaths.ts';
 import type { OwRefusalData } from './owrefusal.ts';
 import { checkContext, eventsNeverRun, stranded, untiledLevelsEntered, eventOrderProblems, starsWithoutTranslevelProblems, misplacedLinkEnds, sharedOrEmptyLevelTiles } from './owchecks.ts';
 import { moveEnd, endTile, type MisplacedEnd } from './owlinkends.ts';
@@ -118,7 +118,7 @@ function reachProblem(p: ReachProblem, at: CheckedAt, fx: FixContext): WorldProb
     }
     return q;
   }
-  if (p.kind !== 'dead-end' || kinds[t] === 'stop' || kinds[t] === 'level') return q;
+  if (p.kind !== 'dead-end' || stopsOn(kinds[t]) || kinds[t] === 'level') return q;
   if (fx.stop < 0) q.noFix = { kind: 'deadEndNoStopTile' };
   else if (fx.l1[p.tile] !== t) q.noFix = { kind: 'deadEndEventTile', cell: p.tile };
   else {
@@ -142,19 +142,21 @@ export function stuckAtEveryProgress(rom: Rom, at: (progress: number) => Checked
   return [...out.values()];
 }
 
-// The links from or to a tile Mario can't use them on (#413): a star/pipe link from a tile he doesn't stop on (A warps
-// him only from a stop or level tile), an exit path from or to a tile that is neither an exit path tile nor a stop tile
+// The links from or to a tile Mario can't use them on (#413): a star/pipe link from a tile where A doesn't warp (#455:
+// only a star or pipe, path kind 'warp' – A on a level tile enters the level, on a plain stop tile does nothing; the
+// back end of a link both ways too), an exit path from or to a tile that is neither an exit path tile nor a stop tile
 // (the game's cave starts one from a stop) – found at the first event progress from which it stays so up to every event
 // passed (`at`: the maps at each progress 0 … OW_EVENTS): a tile an event reveals later is fine before, one painted,
 // destroyed or changed by an event is not – an error; one on a tile Mario can use it on at no progress a warning (maybe
 // painted over before events), none where the cell is empty at every progress: an entry nothing uses, Mario never
-// there (the clean game has one, from Main map 14,02). Fix: the link removed.
+// there (the clean game has one, from Main map 14,02). The clean game's entry from Yoshi's Island 06,07 is on the level
+// tile 056 at every progress: a warning. Fix: the link removed.
 export function linkTileProblems(links: readonly OwLink[], at: (progress: number) => { inp: { l1: ArrayLike<number>; kinds: readonly PathKind[] } }, place: (tile: number) => string): WorldProblem[] {
   const out: WorldProblem[] = [], maps = Array.from({ length: OW_EVENTS + 1 }, (_, p) => at(p).inp);
   for (const l of links) {
     const fits = (inp: typeof maps[number], t: OwTile, start: boolean) => {
       const k = inp.kinds[inp.l1[endTile(t)]];
-      return l.kind === 'exit' ? k === 'exit' || k === 'stop' : !start || k === 'stop' || k === 'level';
+      return l.kind === 'exit' ? k === 'exit' || stopsOn(k) : !start || k === 'warp';
     };
     for (const e of [{ t: l.a, start: true }, { t: l.b, start: l.kind === 'exit' || l.both }]) {
       if (fits(maps[OW_EVENTS], e.t, e.start)) continue;
@@ -165,7 +167,7 @@ export function linkTileProblems(links: readonly OwLink[], at: (progress: number
       const tile = endTile(e.t), name = l.kind === 'exit' ? 'exit path' : 'star/pipe link', what = place(tile);
       const text = l.kind === 'exit'
         ? `The exit path ${e.t === l.a ? 'from' : 'to'} ${what} is not on an exit path tile: Mario never takes it there`
-        : `The star/pipe link ${e.t === l.a ? 'from' : 'back from'} ${what} is not on a tile Mario stops on: pressing A there does nothing`;
+        : `The star/pipe link ${e.t === l.a ? 'from' : 'back from'} ${what} is not on a star or pipe tile: pressing A there doesn't warp`;
       out.push({
         key: `link-tile:${l.kind}:${l.entries.join(',')}:${tile}`, group: 'links', severity: never ? 'warn' : 'error',
         text: never ? `${text} at any event progress (an entry nothing uses)` : text, brief: `${name} on the wrong tile at ${what}`,
@@ -290,12 +292,10 @@ export function budgetPlace(rom: Rom, b: Budget, chosen = -1): BudgetPlace {
   }
 }
 
-// (the star and pipe tiles stop Mario too, but look like a way on; tile 82 is a stop tile he walks off any way)
-const STAR_PIPE = STAR_PIPE_TILES.filter((t) => t !== ANY_WAY_TILE);
 // the stop tile a fix puts on the map: the one used most on the map before events (its look the map's), not a star or
-// pipe; none used: the first there is; -1: none
+// pipe (path kind 'warp': they stop Mario too, but look like a way on); none used: the first there is; -1: none
 export function stopTile(l1: ArrayLike<number>, kinds: readonly PathKind[]): number {
-  const isStop = (t: number) => kinds[t] === 'stop' && !STAR_PIPE.includes(t & 0xff);
+  const isStop = (t: number) => kinds[t] === 'stop';
   const used = new Map<number, number>();
   for (let i = 0; i < l1.length; i++) if (isStop(l1[i])) used.set(l1[i], (used.get(l1[i]) ?? 0) + 1);
   const most = [...used].sort((a, b) => b[1] - a[1] || a[0] - b[0])[0];
