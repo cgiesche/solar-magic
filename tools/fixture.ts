@@ -1,6 +1,8 @@
 // The test ROM: the clean game (test/fixtures/smw.smc, provided by hand), and the same as the editor
 // opens it – with its own patches installed (editorpatches.ts)
 import { readFileSync } from 'node:fs';
+import { unzipSync, strFromU8 } from 'fflate';
+import { applyPatch } from '../src/core/patchapply.ts';
 import { Rom } from '../src/core/rom.ts';
 import { installEditorPatches } from '../src/core/editorpatches.ts';
 import type { Package } from '../src/core/pkgreg.ts';
@@ -91,4 +93,15 @@ export function recordShape(pkg: Package | undefined): string {
   if (!pkg) return '';
   const { id: _i, added: _a, srcId: _s, patches, ...rest } = pkg;
   return JSON.stringify({ ...rest, patches: patches.length });
+}
+
+// Kevin's "Custom Overworld Hardcoded Paths" (SMW Central; test/fixtures/more_hardcoded_paths.zip) applied to `rom`
+// (asar loaded: loadAsar), its tables file changed by `edit`. A patch that hooks the overworld's walking and settling
+// ($049312, $04952D, $0495B6, $0495C3, $049798) – Mario's tile recomputed from his pixel position where he stops
+export function applyHardPathsPatch(rom: Rom, edit = (s: string) => s): Rom {
+  const zip = unzipSync(new Uint8Array(readFileSync('test/fixtures/more_hardcoded_paths.zip')));
+  const main = 'more_hardcoded_paths.asm', tables = 'more_hardcoded_paths_tables.asm';
+  const res = applyPatch(rom, { name: 'More Hardcoded Paths', main, files: new Map<string, string>([[main, strFromU8(zip[main])], [tables, edit(strFromU8(zip[tables]))]]) });
+  if (res.errors.length) throw new Error(res.errors.join(' '));
+  return rom;
 }

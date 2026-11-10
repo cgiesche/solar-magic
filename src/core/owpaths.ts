@@ -81,25 +81,39 @@ function* probeAll(emu: LevelEmulator, end: () => void): Generator<string | void
 }
 
 // Mario sent from (tx) onto tile t next to him (dx): what the overworld does when it looks ahead onto it
-// (table: the star/pipe table's bytes)
+// (table: the star/pipe table's bytes). Told by the look-ahead's writes of his tile ($1F1F: onto t, then onto the
+// tile after it – he walked on over t), not by where he stands at a frame's end: code where he stops may set it
+// again (Kevin's "Custom Overworld Hardcoded Paths" from his pixel position, $04952D, which the vectors of the
+// swimming tiles 29 and 37 leave in t's cell)
 function probe(emu: LevelEmulator, t: number, tx: number, dx: number, pad: number, standing: number, table: [number, number][]): PathKind {
   const s = emu.snes, w = s.wram;
-  const tileX = () => (get16(w, RAM.owPlayerTileX) - tx) * dx;
-  let walking = -1, pose = -1;
-  for (let f = 0; f < WALK_FRAMES; f++) {
-    s.joy1 = f < 4 ? pad : 0;
-    s.runFrame();
-    if (walking < 0 && w[RAM.owProcess] !== standing) walking = w[RAM.owProcess];
-    if (pose < 0 && tileX() === 1) {
-      // looking ahead onto t: an exit switches to another process, a path tile gives its pose
-      if (w[RAM.owProcess] !== walking) return 'exit';
-      pose = w[RAM.owPose];
+  // the furthest tile (0 his own, 1 t, 2 the one after) the look-ahead put him on, the pose it gave him on t (the last
+  // written while on t: the look-ahead onto the tile after may come in the same frame)
+  let reached = 0, pose = -1;
+  const outer = s.hook, ahead = {
+    onWramWrite: (a: number, v: number) => {
+      if (a === RAM.owPlayerTileX) reached = Math.max(reached, (v - tx) * dx);
+      else if (a === RAM.owPose && reached === 1) pose = v;
+    },
+  };
+  s.hook = outer ? joinHooks(outer, ahead) : ahead;
+  let walking = -1, onT = false;
+  try {
+    for (let f = 0; f < WALK_FRAMES; f++) {
+      s.joy1 = f < 4 ? pad : 0;
+      s.runFrame();
+      if (walking < 0 && w[RAM.owProcess] !== standing) walking = w[RAM.owProcess];
+      if (!onT && reached >= 1) {
+        // looked ahead onto t: an exit switches to another process, a path tile gives its pose
+        if (w[RAM.owProcess] !== walking) return 'exit';
+        onT = true;
+      }
+      if (reached >= 2) return pose & 0x10 ? 'climb' : pose & 0x08 ? 'swim' : 'walk';
+      if (onT && w[RAM.owProcess] === standing) break; // stopped on t
+      if (walking < 0 && f > 8) return 'none'; // (he starts at once when he can)
     }
-    if (tileX() === 2) return pose & 0x10 ? 'climb' : pose & 0x08 ? 'swim' : 'walk';
-    if (pose >= 0 && w[RAM.owProcess] === standing) break; // stopped on t
-    if (walking < 0 && f > 8) return 'none'; // (he starts at once when he can)
-  }
-  if (pose < 0 || tileX() !== 1) return 'none';
+  } finally { s.hook = outer; }
+  if (!onT || reached !== 1) return 'none';
   // A pressed: a level loads, or the star/pipe table is read (no entry for the probed place: nothing happens then, the
   // game warps where it has one), or nothing
   let read = false;

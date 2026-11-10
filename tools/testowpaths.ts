@@ -12,7 +12,8 @@ import {
 } from '../src/core/overworld.ts';
 import { setLevelNameTiles, encodeName } from '../src/core/levelnames.ts';
 import { writeTeleport } from '../src/core/owteleport.ts';
-import { editorImage, cleanImage } from './fixture.ts';
+import { loadAsar } from '../src/core/asar.ts';
+import { editorImage, cleanImage, applyHardPathsPatch } from './fixture.ts';
 
 let bad = 0;
 const check = (ok: boolean, what: string) => { console.log((ok ? 'ok   ' : 'FAIL ') + what); if (!ok) bad++; };
@@ -50,6 +51,9 @@ check(kinds.length === 0x200, '512 tiles (pages 0 and 1)');
   const count = (k: PathKind) => kinds.filter((v) => v === k).length;
   console.log(`     ${PATH_KINDS.map((k) => `${k} ${count(k)}`).join(', ')}`);
   check(kinds[0x05] === 'walk' && kinds[0x28] === 'swim' && kinds[0x3f] === 'climb' && kinds[0x44] === 'exit', 'walk 05, swim 28, climb 3F, exit 44');
+  // 55: the look-ahead onto the tile after it comes in the same frame as the one onto it – its kind by the pose the
+  // look-ahead gave on 55 (0F, read past the game's pose table: bit 3, swimming), not by the next tile's
+  check(kinds[0x55] === 'swim' && kinds[0x155] === 'swim', `swim 55, 155: the pose the look-ahead gave on it (${kinds[0x55]}, ${kinds[0x155]})`);
   check(kinds[0] === 'none' && Array.from({ length: 0x100 - 0x87 }, (_, k) => kinds[k + 0x87]).every((k) => k === 'none'), 'tile 00 and 87–FF: no path');
   check(kinds[0x56] === 'level' && kinds[0x80] === 'level', 'level tiles 56, 80: enter a level');
   check([0x81, 0x86].every((t) => kinds[t] === 'stop'), 'tiles 81, 86: Mario stops, enters no level, A does nothing');
@@ -105,6 +109,17 @@ check(kinds.length === 0x200, '512 tiles (pages 0 and 1)');
   const l1b = readL1(rom), tb = readTranslevels(rom);
   placeTile(l1b, tb, i, 0x81, before);
   check(t[i] > 0 && tb[i] === 0, `tile 81 painted: a translevel there (${hx(t[i])}), none in the unpatched game`);
+}
+
+{
+  // a patch changing where Mario stands once he stopped (Kevin's "Custom Overworld Hardcoded Paths": his tile from his
+  // pixel position, $04952D) – after the swimming tiles 29 and 37, whose vectors leave him short of the tile after,
+  // that is the probed tile's cell – while the tiles do as before: the kinds as the clean game's, a tile's kind told
+  // by what the look-ahead onto it does, not by where Mario stands in the end
+  await loadAsar();
+  const k = learn(applyHardPathsPatch(new Rom(rom.data.slice()))).kinds;
+  const differ = k.flatMap((v, t) => (v !== kinds[t] ? [`${hx(t)} ${v} (${kinds[t]})`] : []));
+  check(!differ.length, `Kevin's hardcoded paths patch: the kinds as the clean game's${differ.length ? ` – ${differ.join(', ')}` : ''}`);
 }
 
 if (bad) { console.log(`${bad} failed`); process.exit(1); }

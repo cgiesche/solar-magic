@@ -225,7 +225,7 @@ export type LearnLane =
   | 'sprites' | 'variants' | 'bytes' | 'spritemem' | 'animated' | 'layer3' | 'l2' | 'lt' | 'uses' | 'arcs' | 'thumbs'
   | 'placement' | 'sizes' | 'prefab-suggest' | 'msgr' | 'level-png' | 'level-images' | 'gamebg' | 'prefab-places'
   | 'breakup' | 'slippery' | 'otab'
-  | 'ow' | 'owpick' | 'owpk2' | 'owsh' | 'owreach' | 'owrw' | 'owhw' | 'owlw' | 'owmb' | 'owps' | 'owpn' | 'owpa' | 'owxe' | 'owwc' | 'owv' | 'owt' | 'owgc' | 'ows' | 'owbs' | 'owbt' | 'owl' | 'owan' | 'owas' | `owc${number}`;
+  | 'ow' | 'owpick' | 'owpk3' | 'owsh' | 'owreach' | 'owrw' | 'owhw' | 'owlw' | 'owmb' | 'owps' | 'owpn' | 'owpa' | 'owxe' | 'owwc' | 'owv' | 'owt' | 'owgc' | 'ows' | 'owbs' | 'owbt' | 'owl' | 'owan' | 'owas' | `owc${number}`;
 
 // Who asks for the save at an event progress (owSave, App.progressSave) and the lane it is asked in (#388): a test play
 // (owps: it waits for its own), the event progress shown (owpn: a new one replaces the one asked before, clicking

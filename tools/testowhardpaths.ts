@@ -3,17 +3,14 @@
 // with Kevin's "Custom Overworld Hardcoded Paths" (test/fixtures/more_hardcoded_paths.zip) its tables' – the game's 5
 // paths with its default tables, a path added to them learned as well – and none with Lunar Magic's switch off then
 // too (the option's note says so). docs/research/smw-hardcoded-overworld-paths.md
-import { readFileSync } from 'node:fs';
-import { unzipSync, strFromU8 } from 'fflate';
 import { Rom, snesToPc } from '../src/core/rom.ts';
 import { loadAsar } from '../src/core/asar.ts';
-import { applyPatch } from '../src/core/patchapply.ts';
 import { l1Index, l1XY, readTranslevels, translevelToLevel, DIR_NAMES } from '../src/core/overworld.ts';
 import { layer1AtEveryProgress } from '../src/core/owcellhistory.ts';
 import { neighbor } from '../src/core/owreach.ts';
 import { owOptionValue, setOwOption, owOption, hardPathsHooked } from '../src/core/owoptions.ts';
 import type { HardWalk } from '../src/core/owhardpaths.ts';
-import { editorImage, pathKinds, hardWalks } from './fixture.ts';
+import { editorImage, pathKinds, hardWalks, applyHardPathsPatch } from './fixture.ts';
 
 let bad = 0;
 const check = (ok: boolean, what: string) => { console.log((ok ? 'ok   ' : 'FAIL ') + what); if (!ok) bad++; };
@@ -63,15 +60,8 @@ check(!!dp1 && dp1.dir === 2 && dp1.path.length === 5 && translevelToLevel(readT
 }
 
 // ---- Kevin's patch ----
-const zip = unzipSync(new Uint8Array(readFileSync('test/fixtures/more_hardcoded_paths.zip')));
-const MAIN = 'more_hardcoded_paths.asm', TABLES = 'more_hardcoded_paths_tables.asm';
 // the ROM with the patch applied, its tables file changed by `edit`
-function patched(edit = (s: string) => s): Rom {
-  const rom = fresh();
-  const res = applyPatch(rom, { name: 'More Hardcoded Paths', main: MAIN, files: new Map<string, string>([[MAIN, strFromU8(zip[MAIN])], [TABLES, edit(strFromU8(zip[TABLES]))]]) });
-  if (res.errors.length) throw new Error(res.errors.join(' '));
-  return rom;
-}
+const patched = (edit?: (s: string) => string): Rom => applyHardPathsPatch(fresh(), edit);
 {
   const rom = patched(), got = hardWalks(rom, kinds);
   check(hardPathsHooked(rom) && !hardPathsHooked(fresh()) && owOptionValue(rom, 'hardcodedPaths') === true, 'the patch hooks the lookup ($049312), Lunar Magic\'s switch reads on');
