@@ -1578,6 +1578,7 @@ export class OverworldView {
     this.selected = -1;
     this.infoTile = -1;
     this.links.selectAt(-1);
+    this.sprites.sel = null;
     this.buildProps();
     this.buildLeft(); // (levels without a level tile are dragged onto the map in the layer 1 mode)
     if (isLayerMode(m) && this.brush.kind !== m) this.brush = { kind: m, w: 1, h: 1, entries: [m === 'l1' ? FIRST_L1_TILE : 0] };
@@ -1626,7 +1627,7 @@ export class OverworldView {
       this.mapPop.root,
       h('span', { class: 'sep' }),
       h('div', { class: 'btn-group' },
-        h('button', { class: `ow-l1${this.mode === 'l1' ? ' active' : ''}`, title: 'Layer 1 (1): paths painted as tiles, the level tiles objects on top (hatched) – click selects one, drag moves it, right click: its menu, Delete removes it; placed with a look from "Levels" in the Paint panel; the overworld links\' tiles objects too (marked, right click: Link to…, Remove link), a star or pipe without a link selected by a click (Link to… in its properties) · the path tiles marked; layer 2 dimmed (View → Layers), hold Q to hide it', onclick: () => this.setMode('l1') }, 'Layer 1 (paths, levels & links)'),
+        h('button', { class: `ow-l1${this.mode === 'l1' ? ' active' : ''}`, title: 'Layer 1 (1): paths painted as tiles, the level tiles objects on top (hatched) – click selects one, drag moves it, right click: its menu, Delete removes it; placed with a look from "Levels" in the Paint tab; the overworld links\' tiles objects too (marked, right click: Link to…, Remove link), a star or pipe without a link selected by a click (Link to… in its properties) · the path tiles marked; layer 2 dimmed (View → Layers), hold Q to hide it', onclick: () => this.setMode('l1') }, 'Layer 1 (paths, levels & links)'),
         h('button', { class: `ow-l2${this.mode === 'l2' ? ' active' : ''}`, title: 'Layer 2 (2) · layer 1 with its path marks dimmed or hidden (View → Layers), hold Q for the other', onclick: () => this.setMode('l2') }, 'Layer 2 (terrain)'),
         h('button', { class: this.mode === 'sprites' ? 'active' : '', title: 'Sprites (3): the overworld\'s sprites as the game shows them at the event progress, the start positions and the Koopa Kids\' places; drag to move', onclick: () => this.setMode('sprites') }, 'Sprites')),
       h('span', { class: 'sep' }),
@@ -1796,30 +1797,31 @@ export class OverworldView {
   // popover beside the map select (mapPop), the overworld's options and reveal list in the "Overworld options …" dialog
   // (openOptions)
   buildProps(): void {
-    const sprites = this.mode === 'sprites', own = sprites ? this.sprites.props() : null; // (a sprite gone: no longer selected)
-    const selected = sprites ? !!this.sprites.sel : this.selected >= 0;
+    const sprites = this.mode === 'sprites';
+    const selected = sprites ? this.sprites.hasSelection() : this.selected >= 0;
     if (!selected) this.sideTab = 'paint'; // (the selection ended: Paint again, the next selection shows its properties)
     const tabs = sideTabs(this.mode, this.sideTab, selected, (this.eventPick?.at ?? -1) >= 0);
-    const how = sprites ? this.sprites.howToSelect() : this.mode === 'l1' ? 'Click a level tile, star, pipe or link end on the map to select it, any tile with Alt/Ctrl+click'
+    const howToSelect = sprites ? this.sprites.howToSelect() : this.mode === 'l1' ? 'Click a level tile, star, pipe or link end on the map to select it, any tile with Alt/Ctrl+click'
       : 'Alt/Ctrl+click a tile on the map – a level tile too – to select it';
     const tab = (t: SideTab) => h('button', {
       class: tabs.shown === t ? 'active' : '', disabled: t === 'props' && !tabs.propsEnabled,
       title: t === 'paint' ? (sprites ? 'The sprites to place' : 'The tiles to paint with (right click/Shift+click on the map)') + (selected ? ' – the selection stays' : '')
-        : tabs.propsEnabled ? 'The settings of what is selected' : `Nothing selected: ${how}`,
+        : tabs.propsEnabled ? 'The settings of what is selected' : selected ? 'Pick the tile it becomes in the sheet first (Esc cancels)' : `Nothing selected: ${howToSelect}`,
       onclick: () => { this.sideTab = t; this.buildProps(); },
     }, tabs.labels[t]);
     this.tabBar.replaceChildren(tab('paint'), tab('props'));
+    const propsShown = tabs.shown === 'props';
+    this.props.hidden = !propsShown;
+    if (propsShown) {
+      const links = this.mode === 'l1' ? this.links.props() : null;
+      this.props.replaceChildren(...sprites ? [this.sprites.props()] : [this.tileInfo(this.selected), ...links ? [links] : []]);
+    } else this.props.replaceChildren();
     // (Paint shown again: drawn at its width, scrolled where it was)
-    const hide = tabs.shown !== 'paint';
-    this.props.hidden = !hide;
-    if (hide !== this.palPanel.hidden) {
-      if (hide) this.palScroll = this.palPanel.scrollTop;
-      this.palPanel.hidden = hide;
-      if (!hide) { this.props.replaceChildren(); this.buildSide(); return; }
+    if (propsShown !== this.palPanel.hidden) {
+      if (propsShown) this.palScroll = this.palPanel.scrollTop;
+      this.palPanel.hidden = propsShown;
+      if (!propsShown) this.buildSide();
     }
-    if (!hide) { this.props.replaceChildren(); return; }
-    const links = this.mode === 'l1' ? this.links.props() : null;
-    this.props.replaceChildren(...own ? [own] : [this.tileInfo(this.selected), ...links ? [links] : []]);
   }
 
   // the settings of the map shown, in the popover from "⚙" beside the map select (ADR 0015): its song (one ROM edit),

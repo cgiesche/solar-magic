@@ -12,7 +12,7 @@ export type SideTab = 'paint' | 'props';
 export interface SideTabs {
   shown: SideTab; // the tab shown
   labels: Record<SideTab, string>;
-  propsEnabled: boolean; // something is selected
+  propsEnabled: boolean; // something is selected (not while a reveal's new tile is picked)
 }
 
 // the side panel's tabs in mode `mode`, the tab chosen last `chosen` (by a selection or a click on a tab), whether
@@ -21,7 +21,7 @@ export function sideTabs(mode: OwMode, chosen: SideTab, selected: boolean, revea
   return {
     shown: selected && !revealPick ? chosen : 'paint',
     labels: mode === 'sprites' ? { paint: 'Sprites', props: 'Sprite' } : { paint: 'Paint', props: 'Properties' },
-    propsEnabled: selected,
+    propsEnabled: selected && !revealPick,
   };
 }
 

@@ -225,9 +225,14 @@ export class SpriteLayer {
     return 'Click a sprite, a start position (M, L) or where a Koopa Kid jumps out (K1–K3) to select it – again for the next one under it; drag to move it (8 pixels, 1 with Shift). ' +
       (hasOwSpriteSlots(this.rom) ? 'The sprite slots are the same on every submap: each sprite shows where its code lets it. ' : '') + 'Custom sprites: pick one in the palette and click on the map to place it; Ctrl+C / Ctrl+V copy one, Delete removes it.';
   }
+  // whether a sprite is selected (one gone – undone, deleted, BOWSIE's MaxTile took the Koopa Kids' table – no longer)
+  hasSelection(): boolean {
+    if (this.sel?.kind === 'custom' && !this.custom.has(this.sel)) this.sel = null;
+    if (this.sel?.kind === 'koopa' && !hasKoopaKidTable(this.rom)) this.sel = null;
+    return !!this.sel;
+  }
   props(): HTMLElement {
-    if (this.sel?.kind === 'custom' && !this.custom.has(this.sel)) this.sel = null; // (gone: undone, deleted)
-    if (this.sel?.kind === 'koopa' && !hasKoopaKidTable(this.rom)) this.sel = null; // (gone: BOWSIE's MaxTile)
+    this.hasSelection();
     const s = this.sel, rom = this.rom;
     if (!s) return h('div', { class: 'ow-info' }, emptyState(this.howToSelect()));
     if (s.kind === 'custom') return this.custom.props(s);

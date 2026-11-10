@@ -18,7 +18,7 @@ check(sideTabs('l1', 'props', true, false).shown === 'props', 'a selection with 
 check(sideTabs('l1', 'paint', true, false).shown === 'paint', 'Paint clicked with the selection kept: Paint shown');
 check(sideTabs('l2', 'props', false, false).shown === 'paint', 'nothing selected: Paint');
 check(!sideTabs('l1', 'paint', false, false).propsEnabled && sideTabs('l2', 'paint', true, false).propsEnabled, 'Properties enabled only with a selection');
-check(sideTabs('l1', 'props', true, true).shown === 'paint', 'a reveal\'s new tile picked in the sheet: Paint shown');
+check(sideTabs('l1', 'props', true, true).shown === 'paint' && !sideTabs('l1', 'props', true, true).propsEnabled, 'a reveal\'s new tile picked in the sheet: Paint shown, Properties disabled');
 const l = sideTabs('l1', 'paint', false, false).labels, s = sideTabs('sprites', 'paint', false, false).labels;
 check(l.paint === 'Paint' && l.props === 'Properties', 'the layer modes: Paint | Properties');
 check(s.paint === 'Sprites' && s.props === 'Sprite', 'the sprites mode: Sprites | Sprite');

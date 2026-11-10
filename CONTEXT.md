@@ -81,7 +81,7 @@ The panel beside the level or the overworld that something to place or paint is 
 _Avoid_: palette (that is colors), Insert panel, tile selector
 
 **Side panel**:
-The panel at the right of an editor: what the user works with now – the tool (the picker, "Paint") and the selection ("Properties") – nothing else (ADR 0015). Settings of the whole map or game are in popovers or dialogs where they are chosen, reference (a legend, a font's characters) in popovers shown when asked or in the status bar on hover. The overworld follows it first.
+The panel at the right of an editor: what the user works with now – the tool (the picker, "Paint") and the selection ("Properties") – nothing else (ADR 0015). Settings of the whole map or game are in popovers or dialogs where they are chosen, reference (a legend, a font's characters) in popovers shown when asked or in the status bar on hover. The overworld follows it first: two tabs "Paint | Properties" ("Sprites | Sprite"), a selection switches to Properties, its end back to Paint (#460).
 _Avoid_: sidebar, inspector
 
 **Picked item**:
