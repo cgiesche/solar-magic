@@ -134,7 +134,6 @@ export class OverworldView {
   private sideTab: SideTab = 'paint';
   private tabBar = h('div', { class: 'tabs seg ow-side-tabs' });
   private evList = h('div', { class: 'level-list ow-event-list' }); // the event list (buildLeft)
-  private evCount = h('span', { class: 'hint' });
   private unrunOpen = false; // the event list's "Run by no level exit" group open (for the session)
   private scrolledTo: number | null = null; // the edited event the list was last scrolled to
   private eventsBadge = h('div', { class: 'ow-badge' });
@@ -267,7 +266,7 @@ export class OverworldView {
     this.side = h('div', { class: 'ow-side' }, this.check.root, this.tabBar, this.palPanel, this.props);
     this.bar = h('div', { class: 'ctxbar' });
     this.left = h('div', { class: 'left' }, h('div', { class: 'panel levels ow-events' },
-      h('div', { class: 'panel-title' }, 'Events ', this.evCount), this.evList));
+      h('div', { class: 'panel-title' }, 'Events'), this.evList));
     this.root = h('div', { class: 'center' }, h('div', { class: 'level-view' }, this.scroller, this.eventsBadge), this.timeline, this.status);
     this.scroller.addEventListener('scroll', () => { this.cellHistory.close(); this.paint(); });
     // next frame: layout() resizes the canvas inside the observed scroller (no ResizeObserver loop error); the zoom
@@ -1763,8 +1762,7 @@ export class OverworldView {
   // on its text edits it (the timeline under the map), its context menu "Up to here" checks the events up to it in
   // number order; the edited row highlighted, kept in view
   private buildLeftNow(): void {
-    const list = this.events(), checked = this.checked, n = passedEvents(checked).length;
-    this.evCount.textContent = `${n} of ${hex(OW_EVENTS, 2)} checked`;
+    const list = this.events(), checked = this.checked;
     const row = (x: EventEntry) => {
       const e = x.event, box = eventCheckbox(isPassed(checked, e), `Checked: the map shows event ${hex(e, 2)} passed (Space for the edited one)`, () => this.toggleChecked(e));
       return h('div', {
