@@ -845,6 +845,7 @@ button.danger:hover:not(:disabled) { border-color: var(--danger); }
 .search-foot { padding: 0 2px; }
 .search-note { padding: 4px 6px; font-style: italic; }
 .ow-legend { display: inline-block; width: 22px; height: 0; margin-right: 6px; vertical-align: middle; }
+.ow-legend-mark { width: 16px; height: 16px; margin: 0 9px 0 3px; flex: none; vertical-align: middle; }
 .ow-option-sub { margin-left: 22px; }
 /* a sheet with its running selection outlines on an overlay (ants.ts AntsOverlay), stacked in one grid cell */
 .ants-host { display: grid; grid-template-columns: minmax(0, 1fr); justify-items: start; align-items: start; }

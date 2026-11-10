@@ -18,8 +18,8 @@ import { refusedToast, refusalWords } from './owrefusal.ts';
 import { OwRefusal, type OwRefusalData } from '../core/owrefusal.ts';
 import { linkTableFix } from './owfixes.ts';
 import {
-  readLinks, linkEndCells, warpCells, makeLink, removeLink, setBothWays, moveLocation, locationUses, pathSide, koopaTeleport, setKoopaTeleport, sidesMatch, exitOut, exitOutText,
-  KOOPAS, KOOPA_TILE, koopaOfTile, koopaPlaceRefusal, linkCheck, locationMoveRefusal, type OwLink, type LinkEnd, type LinkKind,
+  readLinks, linkMarks, warpCells, makeLink, removeLink, setBothWays, moveLocation, locationUses, pathSide, koopaTeleport, setKoopaTeleport, sidesMatch, exitOut, exitOutText,
+  KOOPAS, KOOPA_TILE, koopaOfTile, koopaPlaceRefusal, linkCheck, locationMoveRefusal, type OwLink, type LinkEnd, type LinkKind, type LinkMark,
 } from '../core/owlinks.ts';
 import { readTeleports, tileText, sameTile, type OwTile } from '../core/owteleport.ts';
 import { l1Index, l1XY, DIR_NAMES, DIR_ARROWS, MAP_NAMES } from '../core/overworld.ts';
@@ -46,6 +46,15 @@ type Source = { kind: LinkKind | 'koopa'; why?: undefined } | { kind: null; why:
 export type OffMapEnd = { i: number; text: string; link: OwLink | null; there: OwTile };
 
 const COLORS = { star: '#c58cff', exit: '#ff6b6b', location: '#4cc2ff', koopa: '#ffa94c' };
+// what each colour of the link marks and arrows means: the legend's rows (the "?" popover, ADR 0015), the words the
+// status bar starts a hovered mark's meaning with (markText); dashed: its arrows dashed (from the tiles it belongs to)
+export const LINK_LEGEND: { color: string; text: string; dashed: boolean }[] = [
+  { color: COLORS.star, text: 'Star / pipe', dashed: false },
+  { color: COLORS.exit, text: 'Exit path to another submap', dashed: false },
+  { color: COLORS.location, text: 'Location an exit to the overworld teleports to', dashed: true },
+  { color: COLORS.koopa, text: 'Where a Koopa Kid puts Mario', dashed: true },
+];
+export const LINK_ARROWS_HINT = 'One head: one-way, two heads: both ways.';
 const center = (t: { x: number; y: number }) => ({ x: t.x * 16 + 8, y: t.y * 16 + 8 });
 
 export class LinkLayer {
@@ -92,12 +101,33 @@ export class LinkLayer {
     return d.levels.get(i) ?? [];
   }
 
-  // the layer 1 cells link ends are at on the map shown (owlinks.ts linkEndCells): objects there, left alone by painting
-  private cellsOf: { gen: number; l1: ArrayLike<number>; cells: Set<number> } | null = null;
-  cells(): Set<number> {
+  // what ends at each layer 1 cell of the map shown (owlinks.ts linkMarks): objects there, left alone by painting
+  private marksOf: { gen: number; l1: ArrayLike<number>; marks: Map<number, LinkMark[]>; cells: Set<number> } | null = null;
+  private ends(): NonNullable<LinkLayer['marksOf']> {
     const gen = this.rom.gen, l1 = this.view.shown.l1;
-    if (this.cellsOf?.gen !== gen || this.cellsOf.l1 !== l1) this.cellsOf = { gen, l1, cells: linkEndCells(this.rom, l1, this.info().links) };
-    return this.cellsOf.cells;
+    if (this.marksOf?.gen !== gen || this.marksOf.l1 !== l1) {
+      const marks = linkMarks(this.rom, l1, this.info().links);
+      this.marksOf = { gen, l1, marks, cells: new Set(marks.keys()) };
+    }
+    return this.marksOf;
+  }
+  private linkMarks(): Map<number, LinkMark[]> { return this.ends().marks; }
+  // the layer 1 cells link ends are at on the map shown
+  cells(): ReadonlySet<number> { return this.ends().cells; }
+  // what the marks at cell i (l1Index) mean, for the status bar while it is hovered (ADR 0015): "Star / pipe to Donut
+  // Plains 03,04 and back", "Where Koopa Kid 1 puts Mario"; '' nothing ends there
+  markText(i: number): string {
+    const words = (m: LinkMark): string => {
+      if (m.kind === 'link') {
+        const l = m.link, name = LINK_LEGEND[l.kind === 'star' ? 0 : 1].text, from = this.endsAt(l.a, i), other = from ? l.b : l.a;
+        return `${name}: ${l.both ? 'both ways with' : from ? 'leads to' : 'leads here from'} ${tileText(other)}`;
+      }
+      if (m.kind === 'location') return `${LINK_LEGEND[2].text} (set in the level's entrance)`;
+      const p = koopaTeleport(this.rom, m.k);
+      return m.kind === 'koopaPlace' ? `Where Koopa Kid ${m.k + 1} puts Mario (losing to it)`
+        : `Koopa Kid ${m.k + 1}'s tile: losing to it puts Mario at ${p ? `${hex(p.x, 2)},${hex(p.y, 2)}` : 'no place'}`;
+    };
+    return [...new Set((this.linkMarks().get(i) ?? []).map(words))].join(' · ');
   }
 
   // ---- tiles ----
@@ -249,18 +279,13 @@ export class LinkLayer {
       if (k) arrow(ctx, lw, center(p.from), { x: hover.x * 16 + 8, y: hover.y * 16 + 8 }, COLORS[k], back, true, k === 'koopa');
     }
   }
-  // a small dot of its kind's colour in the top right corner of each cell a link ends at (the region shown)
+  // a small dot of its kind's colour in the top right corner of each cell a link ends at (the region shown; a Koopa
+  // Kid's before the others)
   private marks(ctx: CanvasRenderingContext2D, lw: number): void {
-    const { links, uses } = this.info(), dots = new Map<number, string>();
-    const put = (t: OwTile, c: string) => { if (this.shown(t) && !dots.has(this.index(t))) dots.set(this.index(t), c); };
-    for (const l of links) { put(l.a, COLORS[l.kind]); put(l.b, COLORS[l.kind]); }
-    const teleports = readTeleports(this.rom);
-    for (const [i] of uses) { const to = teleports[i].to; if (to) put(to, COLORS.location); }
-    for (let k = 0; k < KOOPAS; k++) {
-      const p = koopaTeleport(this.rom, k), from = this.koopaTiles(k);
-      if (!p || !from.length) continue;
-      for (const t of from) dots.set(t, COLORS.koopa);
-      dots.set(l1Index(this.view.region, p.x, p.y), COLORS.koopa);
+    const dots = new Map<number, string>(), color = (m: LinkMark) => m.kind === 'link' ? COLORS[m.link.kind] : m.kind === 'location' ? COLORS.location : COLORS.koopa;
+    for (const [i, ms] of this.linkMarks()) {
+      if (i >> 10 !== this.view.region) continue;
+      dots.set(i, color(ms.find((m) => m.kind === 'koopaTile' || m.kind === 'koopaPlace') ?? ms[0]));
     }
     for (const [i, c] of dots) {
       const { x, y } = l1XY(i);

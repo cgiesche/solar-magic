@@ -316,19 +316,32 @@ export function setKoopaTeleport(rom: Rom, k: number, t: { x: number; y: number 
 }
 
 // ---- link ends as objects on layer 1 (#413) ----
-// The layer 1 cells (l1Index) a link ends at: both ends of every star/pipe and exit path link, the tile of a Koopa Kid
-// with a place on `l1` and that place, the locations exits to the overworld teleport to. Painting and the route brush
-// leave them alone; a level tile moved takes them along (moveLinkEnds).
-export function linkEndCells(rom: Rom, l1: ArrayLike<number>, links: readonly OwLink[] = readLinks(rom)): Set<number> {
-  const out = new Set<number>(), cell = (t: OwTile) => l1Index(t.submap ? 1 : 0, t.x, t.y);
-  for (const l of links) { out.add(cell(l.a)); out.add(cell(l.b)); }
+// what ends at a layer 1 cell, each with a mark there (owlinkview.ts): an end of a star/pipe link or exit path, a
+// location exits to the overworld teleport to (teleports index), a Koopa Kid's tile with a place, Koopa Kid k's place
+export type LinkMark = { kind: 'link'; link: OwLink } | { kind: 'location'; i: number } | { kind: 'koopaTile'; k: number } | { kind: 'koopaPlace'; k: number };
+// The layer 1 cells (l1Index) a link ends at, with what ends there (in this order: links, locations, Koopa Kids): both
+// ends of every star/pipe and exit path link, the locations exits to the overworld teleport to, the tile of a Koopa Kid
+// with a place on `l1` and that place (on the tile's region)
+export function linkMarks(rom: Rom, l1: ArrayLike<number>, links: readonly OwLink[] = readLinks(rom)): Map<number, LinkMark[]> {
+  const out = new Map<number, LinkMark[]>(), cell = (t: OwTile) => l1Index(t.submap ? 1 : 0, t.x, t.y);
+  const put = (i: number, m: LinkMark) => (out.get(i) ?? out.set(i, []).get(i)!).push(m);
+  for (const link of links) { put(cell(link.a), { kind: 'link', link }); if (cell(link.b) !== cell(link.a)) put(cell(link.b), { kind: 'link', link }); }
   const all = readTeleports(rom);
-  for (const [k] of locationUses(rom)) { const to = all[k].to; if (to) out.add(cell(to)); }
+  for (const [i] of locationUses(rom)) { const to = all[i].to; if (to) put(cell(to), { kind: 'location', i }); }
+  const placed = new Set<number>();
   for (let i = 0; i < 0x800; i++) {
     const k = koopaOfTile(l1[i]), p = k >= 0 ? koopaTeleport(rom, k) : null;
-    if (p) { out.add(i); out.add(l1Index(i >> 10, p.x, p.y)); }
+    if (!p) continue;
+    put(i, { kind: 'koopaTile', k });
+    const at = l1Index(i >> 10, p.x, p.y), key = at * KOOPAS + k;
+    if (!placed.has(key)) { placed.add(key); put(at, { kind: 'koopaPlace', k }); }
   }
   return out;
+}
+// The layer 1 cells (l1Index) a link ends at (linkMarks). Painting and the route brush leave them alone; a level tile
+// moved takes them along (moveLinkEnds).
+export function linkEndCells(rom: Rom, l1: ArrayLike<number>, links: readonly OwLink[] = readLinks(rom)): Set<number> {
+  return new Set(linkMarks(rom, l1, links).keys());
 }
 
 // The link ends at layer 1 cells `from` and `to` (l1Index, one region) swapped, as a level tile moved there swaps with

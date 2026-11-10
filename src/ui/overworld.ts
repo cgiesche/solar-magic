@@ -23,14 +23,14 @@ import {
 } from '../core/owevents.ts';
 import { OverworldStroke, shownMaps } from '../core/owstroke.ts';
 import { PathTool } from './owpathtool.ts';
-import { isPathKind, type PathKind, type PathShapes } from '../core/owpaths.ts';
+import { isPathKind, PATH_KIND_NAMES, type PathKind, type PathShapes } from '../core/owpaths.ts';
 import { mapWays, usualWays, pathTileText, type PathWay } from '../core/owpathshape.ts';
 import { emptyL1Tiles, freeL1Tiles, sheetPages, l1TileLines, l1Hex, l1BrushEntries, NO_TILE, SHEET_COLS, type SheetPage } from '../core/owl1sheet.ts';
 import { findL2Brush, l2BrushPalettes, l2SharedBits, l2SheetEntry, L2_SHEET_COLS, L2_SHEET_ROWS, L2_FLIP_X, L2_FLIP_Y, L2_PRIORITY, type SheetMark } from '../core/owl2sheet.ts';
 import { mapPieces, piecesAt, replacePiece, samePiece, gridInside, l2Block, PIECE_COLS } from '../core/owl2pieces.ts';
 import { skipsRevealWalk, handledWithoutEvent } from '../core/revealwalk.ts';
 import type { OwSpriteView } from '../core/owsprites.ts';
-import { LinkLayer, type OffMapEnd } from './owlinkview.ts';
+import { LinkLayer, LINK_LEGEND, LINK_ARROWS_HINT, type OffMapEnd } from './owlinkview.ts';
 import { LevelTileLayer, tilePlace } from './owlevelview.ts';
 import { TileLabels } from './owlevelname.ts';
 import { sideTabs, clickSelects, type SideTab } from './owselection.ts';
@@ -1174,6 +1174,8 @@ export class OverworldView {
         }
         const unreached = s1.l1 ? this.reach.status(i) : '';
         if (unreached) t += `  ·  ${unreached}`;
+        const ends = s1.l1 && this.mode === 'l1' ? this.links.markText(i) : '';
+        if (ends) t += `  ·  ${ends}`;
       }
     } else if (c.x >= 0 && c.y >= 0 && c.x < 64 && c.y < 64) {
       const i = l2Index(this.region, c.x, c.y), shown = this.shown.l2[i];
@@ -1185,6 +1187,8 @@ export class OverworldView {
       if (k && isPathKind(k)) t += `  ·  ${pathTileText(this.shown.l1[j], k, this.pathShapes())}`;
       const unreached = s1.l1 ? this.reach.status(j) : '';
       if (unreached) t += `  ·  ${unreached}`;
+      const ends = s1.l1 ? this.links.markText(j) : '';
+      if (ends) t += `  ·  ${ends}`;
     }
     this.statusText.textContent = t;
   }
@@ -1559,6 +1563,7 @@ export class OverworldView {
     this.redrawMap();
     this.buildBar();
     this.mapPop.refresh(); // (the new map's settings)
+    this.legendPop.refresh(); // (its budgets)
     this.buildSide();
     this.buildLeft();
     this.onNav();
@@ -1656,6 +1661,7 @@ export class OverworldView {
       ] }),
       h('span', { class: 'sep' }),
       this.zoomCtl.root,
+      this.legendPop.root,
       h('span', { class: 'spacer' }),
       h('button', { class: 'ow-options-btn', onclick: () => this.openOptions(), title: 'The settings of the whole overworld: the game\'s overworld options and the reveal list (which tile a revealed tile becomes)' }, 'Overworld options …'),
     );
@@ -1782,7 +1788,7 @@ export class OverworldView {
     this.palPixels = 0;
     this.palPanel.replaceChildren(...(this.mode === 'sprites' ? this.sprites.palette() : [
       h('div', { class: 'hint' }, 'Right click/Shift+click paints'),
-      ...this.mode === 'l1' ? [this.l1Palette(), this.linkLegend()] : [this.l2Palette()]]));
+      ...this.mode === 'l1' ? [this.l1Palette()] : [this.l2Palette()]]));
     this.palPanel.scrollTop = scroll;
     this.buildProps();
   }
@@ -1868,14 +1874,27 @@ export class OverworldView {
       h('div', { class: 'level-list ow-without' }, ...this.levelTiles.withoutTile(without))] : [];
   }
 
-  // what the overworld links' arrows mean, the tables' budgets
-  private linkLegend(): HTMLElement {
-    const row = (color: string, text: string, dashed = false) => h('div', { class: 'row' },
-      h('span', { class: 'ow-legend', style: `border-top: 2px ${dashed ? 'dashed' : 'solid'} ${color}` }), text);
+  // the legend, in the popover from "?" beside View and zoom (ADR 0015; a hovered mark's meaning is in the status bar):
+  // the path marks, what the overworld links' marks and arrows mean, the tables' budgets (what it reads watched: drawn
+  // again after undo/redo)
+  private readonly legendPop = popover('?', 'Legend: what the marks on the map mean (a mark hovered: its meaning in the status bar)', () => this.watch.add(() => this.legend()));
+  private legend(): HTMLElement {
+    const row = (sym: HTMLElement, text: string) => h('div', { class: 'row' }, sym, text);
+    const line = (color: string, dashed: boolean) => h('span', { class: 'ow-legend', style: `border-top: 2px ${dashed ? 'dashed' : 'solid'} ${color}` });
+    const mark = (k: PathKind) => {
+      const c = h('canvas', { width: 32, height: 32, class: 'ow-legend-mark' }), ctx = c.getContext('2d')!;
+      ctx.scale(2, 2);
+      drawPathMark(ctx, k, 0, 0, 0.5, []);
+      return c;
+    };
+    const kinds: PathKind[] = ['walk', 'climb', 'swim', 'exit', 'stop', 'warp'];
     return h('div', { class: 'ow-info' },
-      row('#c58cff', 'Star / pipe'), row('#ff6b6b', 'Exit path to another submap'),
-      row('#4cc2ff', 'Location an exit to the overworld teleports to', true), row('#ffa94c', 'Where a Koopa Kid puts Mario', true),
-      h('div', { class: 'hint' }, 'One head: one-way, two heads: both ways.'),
+      h('div', { class: 'gt-list-head' }, 'Path marks (layer 1)'),
+      ...kinds.map((k) => row(mark(k), PATH_KIND_NAMES[k])),
+      h('div', { class: 'hint' }, 'White lines: where Mario walks over the tile.'),
+      h('div', { class: 'gt-list-head' }, 'Overworld links'),
+      ...LINK_LEGEND.map((l) => row(line(l.color, l.dashed), l.text)),
+      h('div', { class: 'hint' }, `A dot in a tile's corner: a link ends there. ${LINK_ARROWS_HINT}`),
       budgetRow('Star / pipe entries', this.budget('stars')),
       budgetRow('Exit path entries', this.budget('exitPaths')));
   }
@@ -2456,6 +2475,7 @@ export class OverworldView {
     this.syncEvent();
     this.buildBar(); // (the badge naming the edited event)
     this.mapPop.refresh(); // (the map's settings as in the ROM: undo/redo)
+    this.legendPop.refresh(); // (the budgets)
     this.buildSide();
     this.buildLeft();
     this.redrawMap();

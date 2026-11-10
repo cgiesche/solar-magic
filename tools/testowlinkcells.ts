@@ -1,9 +1,12 @@
 // Overworld link ends as objects on layer 1 (#413, owlinks.ts linkEndCells, moveLinkEnds): the cells links, Koopa
 // Kids' places and locations end at; a paint stroke and the route brush leave them alone; a level tile moved takes
-// them along – star/pipe and exit path links (both ends, swapped with the tile there), a Koopa Kid's place.
+// them along – star/pipe and exit path links (both ends, swapped with the tile there), a Koopa Kid's place. What ends
+// at a cell (linkMarks): its mark's meaning in the status bar (#461).
 import { Rom } from '../src/core/rom.ts';
-import { readLinks, linkEndCells, moveLinkEnds, koopaTeleport, warpCells, type OwLink, type LinkEnd } from '../src/core/owlinks.ts';
+import { readLinks, linkEndCells, linkMarks, moveLinkEnds, koopaTeleport, warpCells, type OwLink, type LinkEnd } from '../src/core/owlinks.ts';
 import { endTile } from '../src/core/owlinkends.ts';
+import { sameTile } from '../src/core/owteleport.ts';
+import { readSecondaryEntrance, writeSecondaryEntrance, newOverworldExit } from '../src/core/level.ts';
 import { l1Index, readL1, readL2, gameL1, OverworldLoads, OverworldEmulator, OW_EVENTS } from '../src/core/overworld.ts';
 import { OverworldStroke } from '../src/core/owstroke.ts';
 import { levelTileTest } from '../src/core/owpaths.ts';
@@ -30,6 +33,21 @@ const find = (ls: OwLink[], s: number, x: number, y: number) => ls.find((l) => a
   check(cells.has(0x766) && cells.has(l1Index(1, k0.x, k0.y)), 'a Koopa Kid\'s tile with a place and its place');
   check(!cells.has(0x768) && koopaTeleport(rom, 1) === null, 'a Koopa Kid\'s tile without a place: none');
   check(!cells.has(l1Index(0, 0, 0)), 'a cell nothing ends at: none');
+}
+
+// ---- what ends at a cell (its mark's meaning on hover, #461) ----
+{
+  const marks = linkMarks(rom, l1), k0 = koopaTeleport(rom, 0)!;
+  const star = find(links, 0, 17, 7)!;
+  check((marks.get(endTile(star.a)) ?? []).some((m) => m.kind === 'link' && sameTile(m.link.a, star.a)), 'a star\'s tile: its link');
+  check((marks.get(0x766) ?? []).some((m) => m.kind === 'koopaTile' && m.k === 0), 'Koopa Kid 1\'s tile: its tile');
+  check((marks.get(l1Index(1, k0.x, k0.y)) ?? []).filter((m) => m.kind === 'koopaPlace' && m.k === 0).length === 1, 'and its place, once');
+  // (an entrance's exit to the overworld teleporting to the star's entry: its target a location too)
+  const r = fresh(), loc = star.entries[0];
+  writeSecondaryEntrance(r, 0x40, { ...readSecondaryEntrance(r, 0x40), destLevel: 0x105, overworld: { ...newOverworldExit(), teleport: 1, location: loc } });
+  check((linkMarks(r, l1).get(endTile(star.b)) ?? []).some((m) => m.kind === 'location' && m.i === loc), 'the tile an exit to the overworld teleports to: a location');
+  check(!marks.has(l1Index(0, 0, 0)), 'a cell nothing ends at: no mark');
+  check([...marks.keys()].every((i) => linkEndCells(rom, l1).has(i)) && marks.size === linkEndCells(rom, l1).size, 'the cells: linkEndCells');
 }
 
 // ---- painting and routes leave them alone ----
