@@ -1567,6 +1567,11 @@ export class OverworldView {
     this.pathTool.cancel();
     if (m !== 'l1' && (this.eventPick?.at ?? -1) >= 0) this.cancelEventPick(); // (the tile a reveal becomes is picked in the layer 1 sheet)
     if (m !== 'l2') { this.replacing = null; this.l2Sel = null; }
+    // (the selection – a level tile, a link end, a tile's info – ends: it belongs to the mode it was made in)
+    this.selected = -1;
+    this.infoTile = -1;
+    this.links.selectAt(-1);
+    this.buildProps();
     this.buildLeft(); // (levels without a level tile are dragged onto the map in the layer 1 mode)
     if (isLayerMode(m) && this.brush.kind !== m) this.brush = { kind: m, w: 1, h: 1, entries: [m === 'l1' ? FIRST_L1_TILE : 0] };
     this.buildBar();
