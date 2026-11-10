@@ -54,6 +54,7 @@ import { tileText } from '../core/owteleport.ts';
 import { owActionShort } from '../core/level.ts';
 import { TileCache, blit8 } from '../core/render.ts';
 import { hex } from '../core/names.ts';
+import { tileLabel } from './owlabel.ts';
 import { menuButton, contextMenu } from './menu.ts';
 import { fillPixels, fitScale, sized, previewSheet, hidePickerPreview, showPickerPreview, crop } from './pickerview.ts';
 import { loadMusicProject, submapSongs, submapMusic, setSubmapMusic, songHex, type SongInfo } from '../core/music.ts';
@@ -524,15 +525,12 @@ export class OverworldView {
     // stroke leaves them: they are objects on top of it)
     const levels = this.levelL1(), shared = sharedTranslevels(levels, this.tls, this.isLevelTile);
     if (this.mode === 'l1') this.hatchLevelTiles(ctx, levels, lw);
-    ctx.font = `bold ${8}px monospace`;
     ctx.globalAlpha = s1.l1;
     if (s1.l1) for (let y = 0; y < 32; y++) for (let x = 0; x < 32; x++) {
       const i = l1Index(this.region, x, y), tl = this.tls[i];
       if (!this.isLevelTile(levels[i])) continue;
-      ctx.fillStyle = i === this.selected ? 'rgba(76,194,255,0.85)' : shared.has(tl) || !tl ? 'rgba(230,120,0,0.85)' : 'rgba(0,0,0,0.6)';
-      ctx.fillRect(x * 16, y * 16 + 10, 16, 7);
-      ctx.fillStyle = '#fff';
-      ctx.fillText(tl ? hex(translevelToLevel(tl), 3) : '---', x * 16 + 1, y * 16 + 16);
+      tileLabel(ctx, tl ? hex(translevelToLevel(tl), 3) : '---', x * 16, y * 16 + 10,
+        i === this.selected ? 'rgba(76,194,255,0.85)' : shared.has(tl) || !tl ? 'rgba(230,120,0,0.85)' : undefined);
     }
     ctx.globalAlpha = s1.marks;
     if (s1.marks) this.paintPaths(lw);

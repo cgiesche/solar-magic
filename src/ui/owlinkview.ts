@@ -29,6 +29,7 @@ import { isPathKind, PATH_KIND_NAMES } from '../core/owpaths.ts';
 import { ExitGraph } from '../core/exitgraph.ts';
 import { readSecondaryEntrance, levelTranslevel } from '../core/level.ts';
 import { hex } from '../core/names.ts';
+import { tileLabel } from './owlabel.ts';
 import { stuckOnArrival, stuckOnArrivalText, ARRIVAL_RULE, type ArrivalHow } from '../core/owreach.ts';
 
 // what is selected: a link, a location (a star/pipe entry exits to the overworld teleport to), a Koopa Kid's place,
@@ -259,7 +260,7 @@ export class LinkLayer {
     const p = center(here), q = { x: p.x + 18, y: p.y - 18 };
     if (out) arrow(ctx, lw, p, q, color, false, on, false);
     else arrow(ctx, lw, q, p, color, false, on, false);
-    label(ctx, `${both ? '↔' : out ? '→' : '←'} ${tileText(there)}`, q.x + 2, q.y - 2, color);
+    tileLabel(ctx, `${both ? '↔' : out ? '→' : '←'} ${tileText(there)}`, q.x + 1, q.y - 8);
   }
 
   // the pick pending (#348): the tiles the link dragged (or chosen to lead to a tile on another map) can lead to, where
@@ -594,12 +595,4 @@ function marker(ctx: CanvasRenderingContext2D, lw: number, p: { x: number; y: nu
     ctx.arc(p.x, p.y, 5, 0, Math.PI * 2);
     ctx.stroke();
   }
-}
-function label(ctx: CanvasRenderingContext2D, text: string, x: number, y: number, color: string): void {
-  ctx.font = 'bold 7px monospace';
-  const w = ctx.measureText(text).width;
-  ctx.fillStyle = 'rgba(0,0,0,0.75)';
-  ctx.fillRect(x - 1, y - 7, w + 2, 9);
-  ctx.fillStyle = color;
-  ctx.fillText(text, x, y);
 }
