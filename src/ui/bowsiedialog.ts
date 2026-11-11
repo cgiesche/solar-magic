@@ -1,4 +1,4 @@
-// Overworld sprites (BOWSIE): the Overworld sprites tab of the Packages dialog, a configuration view – assigns the
+// Overworld sprites (BOWSIE): the Overworld sprites tab of the Packages workspace, a configuration view – assigns the
 // overworld sprites packages brought to numbers (list.txt entries, 01–7E); the project's files with their settings,
 // export as a BOWSIE folder (.zip).
 

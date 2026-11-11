@@ -1,4 +1,4 @@
-// The upload preview of the Packages dialog: what was detected in an upload (each part with its kind,
+// The upload preview of the Packages workspace: what was detected in an upload (each part with its kind,
 // the settings of a patch part, where blocks and graphics go – pkgplace.ts – and what is not installed) – or, when detection is ambiguous, the manual assignment prefilled with
 // the suggestion – and "Install", which applies the whole package as one undoable ROM edit. Cancel
 // leaves the ROM untouched.

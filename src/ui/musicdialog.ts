@@ -1,4 +1,4 @@
-// Music: the Music tab of the Packages dialog, a configuration view over the songs packages brought
+// Music: the Music tab of the Packages workspace, a configuration view over the songs packages brought
 // (AddmusicK songs: MML .txt with BRR samples). Every song can be listened to in the current level as the
 // emulated game plays it and set as the music of the current level (music per level, like Lunar Magic's
 // music bypass); custom songs have their volume and settings. Changes insert the whole project with

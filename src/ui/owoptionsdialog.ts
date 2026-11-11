@@ -1,7 +1,7 @@
 // The "Overworld options …" dialog (ADR 0015): what concerns the whole overworld, out of the side panel. Two tabs:
 // Options (the game's overworld options – Lunar Magic's "Extra Options" –, each switch one ROM edit) and Reveal list
 // (Lunar Magic's "Edit Reveal Tile List": which tile a revealed tile becomes). Drawn again after every ROM change while
-// open (its own edits, undo/redo – Ctrl+Z / Ctrl+Y work in it, as in the Packages dialog); one open at a time.
+// open (its own edits, undo/redo – Ctrl+Z / Ctrl+Y work in it, as in every dialog that applies at once); one open at a time.
 
 import type { App } from './app.ts';
 import { h, modal, toast, checkbox, hexInput } from './dom.ts';

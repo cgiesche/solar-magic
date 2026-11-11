@@ -1,4 +1,4 @@
-// Blocks tab of the Packages dialog (GPS format), a configuration view: assigns the blocks packages brought
+// Blocks tab of the Packages workspace (GPS format), a configuration view: assigns the blocks packages brought
 // to Map16 tiles (with optional acts like); the project's files with their settings, export as a GPS
 // folder (.zip).
 

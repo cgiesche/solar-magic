@@ -1,4 +1,4 @@
-// Custom sprites (PIXI format): the Sprites tab of the Packages dialog, a configuration view – assigns the
+// Custom sprites (PIXI format): the Sprites tab of the Packages workspace, a configuration view – assigns the
 // sprites packages brought to numbers (list.txt entries); the project's files with their settings,
 // export as a PIXI folder (.zip).
 

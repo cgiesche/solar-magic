@@ -1,4 +1,4 @@
-// UberASM tab of the Packages dialog, a configuration view: assigns the UberASM code packages brought to
+// UberASM tab of the Packages workspace, a configuration view: assigns the UberASM code packages brought to
 // levels, overworld maps and game modes, the global and status bar code; the project's files with their
 // settings, export as an UberASM Tool folder (.zip).
 

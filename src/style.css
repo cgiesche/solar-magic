@@ -965,3 +965,13 @@ button.danger:hover:not(:disabled) { border-color: var(--danger); }
 .ants-host { display: grid; grid-template-columns: minmax(0, 1fr); justify-items: start; align-items: start; }
 .ants-host > * { grid-area: 1 / 1; }
 .ants-over { pointer-events: none; }
+/* the Packages workspace (#484): the kinds in the navigator, what one holds in the main area (no side panel) */
+.layout.pkg-mode { grid-template-columns: 200px 1fr 0; }
+.layout.pkg-mode .side-split, .layout.pkg-mode .pkg-side { display: none; }
+.pkg-main { overflow: auto; padding: 14px 18px; }
+.pkg-main .resources, .pkg-main .resources:has(.pkg-pane), .pkg-main .resources:has(.music-pane) { width: auto; max-width: 1200px; }
+.pkg-main .pkg-list, .pkg-main .pkg-detail { max-height: none; }
+.tabbar.pkg-kinds { flex-direction: column; flex-wrap: nowrap; gap: 1px; border-bottom: 0; }
+.tabbar.pkg-kinds button { text-align: left; margin: 0; border-bottom: 0; border-left: 2px solid transparent; border-radius: 0 4px 4px 0; padding: 5px 10px; }
+.tabbar.pkg-kinds button:hover:not(:disabled) { border-bottom-color: transparent; background: var(--surface-2); }
+.tabbar.pkg-kinds button.active { border-left-color: var(--accent); background: var(--selection-bg); }

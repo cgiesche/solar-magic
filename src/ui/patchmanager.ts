@@ -69,5 +69,5 @@ export function patchDone(name: string, again: boolean, r: ApplyResult): void {
   logTool(`Patch “${name}”`, r);
 }
 
-// the tabs of the Packages dialog: the package list and the configuration view of each tool
+// the tabs of the Packages workspace: the package list and the configuration view of each tool
 export type PackagesTab = 'packages' | ToolKind | 'music';
