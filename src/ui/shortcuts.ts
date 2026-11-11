@@ -14,8 +14,8 @@ export const GO_PLACES: { key: string; label: string; workspace: WorkspaceId; vi
   { key: '4', label: 'Game', workspace: 'game' },
   { key: '5', label: 'Packages', workspace: 'pkg' },
   { key: 'P', label: 'Palettes', workspace: 'gfx', view: 'pal' },
-  { key: 'M', label: 'Map16 tiles', workspace: 'gfx', view: 'map16' },
   { key: 'G', label: 'Graphics', workspace: 'gfx', view: 'gfx' },
+  { key: 'M', label: 'Map16 tiles', workspace: 'gfx', view: 'map16' },
   { key: 'A', label: 'Animations', workspace: 'gfx', view: 'anim' },
 ];
 const goKeys = (views: boolean) => GO_PLACES.filter((g) => !!g.view === views);

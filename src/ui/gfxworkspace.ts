@@ -372,7 +372,7 @@ export class GfxWorkspace {
     this.specialLabel.hidden = true;
     // one context bar (#486): the views, then the open view's own actions (its bar moved here), the View menu
     this.bar = h('div', { class: 'ctxbar ws-tabs' },
-      h('div', { class: 'tabbar', role: 'tablist' }, tabBtn('pal', 'Palettes', 'G P'), tabBtn('map16', 'Map16 tiles', 'G M'), tabBtn('gfx', 'Graphics', 'G G'), tabBtn('anim', 'Animations', 'G A')),
+      h('div', { class: 'tabbar', role: 'tablist' }, tabBtn('pal', 'Palettes', 'G P'), tabBtn('gfx', 'Graphics', 'G G'), tabBtn('map16', 'Map16 tiles', 'G M'), tabBtn('anim', 'Animations', 'G A')),
       h('span', { class: 'sep' }),
       this.tools,
       h('span', { class: 'spacer' }),
