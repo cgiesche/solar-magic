@@ -10,6 +10,7 @@ import { messageLevels, messageProblems, type MessageLevel } from '../core/messa
 import { loadLevel } from '../core/level.ts';
 import { levelMessages, spriteOpens } from './messagepanel.ts';
 import { MESSAGE_ROUTINE_CHECKING, messageRoutineUnknown } from '../core/messagedraw.ts';
+import { icon, iconLabel, type IconName } from './icons.ts';
 
 // the sprites of the other levels showing the open level's messages, read again after a ROM change
 let sharing: { key: string; levels: MessageLevel[] } | null = null;
@@ -50,7 +51,7 @@ export function collectProblems(app: App, reveal: (uids: number[]) => void): Pro
   return sortProblems(out);
 }
 
-const ICON: Record<Severity, string> = { error: '⛔', warn: '⚠', info: 'ℹ' };
+const ICON: Record<Severity, IconName> = { error: 'error', warn: 'warning', info: 'info' };
 
 // the status bar button of the level; update() recounts (call it after changes and finished checks)
 export function problemsButton(app: App, reveal: (uids: number[]) => void): HTMLButtonElement & { update: () => void } {
@@ -83,7 +84,7 @@ export function problemListButton<P extends ListedProblem>(o: {
     pop.append(h('div', { class: 'menu-heading' }, list.length ? o.heading : 'No problems found'));
     for (const p of list) {
       const row = h('div', { class: `problem problem-${p.severity}`, title: p.title ?? '' },
-        h('span', { class: 'problem-icon' }, ICON[p.severity]),
+        h('span', { class: 'problem-icon' }, icon(ICON[p.severity])),
         h('button', { class: 'problem-text', disabled: !o.canOpen(p), onclick: () => o.open(p) }, p.text),
         p.fix ? h('button', { class: 'problem-fix', onclick: () => { close(); p.fix!.run(); } }, p.fix.label) : null);
       pop.append(row);
@@ -115,7 +116,7 @@ export function problemListButton<P extends ListedProblem>(o: {
     const shown = list.filter((p) => p.severity !== 'info').length;
     btn.hidden = !list.length;
     btn.classList.toggle('status-info', !worst);
-    btn.textContent = shown ? `⚠ ${shown} problem${shown > 1 ? 's' : ''}` : `ℹ ${list.length} note${list.length > 1 ? 's' : ''}`;
+    btn.replaceChildren(...(shown ? iconLabel('warning', `${shown} problem${shown > 1 ? 's' : ''}`) : iconLabel('info', `${list.length} note${list.length > 1 ? 's' : ''}`)));
     fill();
   };
   return btn;

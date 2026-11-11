@@ -34,6 +34,7 @@ import { MessagePanel, levelMessages } from './ui/messagepanel.ts';
 import { NavHistory, fromHash, type NavLoc } from './ui/navhistory.ts';
 import { initLanding } from './ui/landing.ts';
 import { clearPrefs } from './ui/prefs.ts';
+import { icon, iconLabel } from './ui/icons.ts';
 
 const root = document.getElementById('app')!;
 
@@ -233,13 +234,13 @@ function buildUi(app: App): { start: (at: NavLoc | null) => Promise<void> } {
   ]);
   const wsBtn = (w: typeof workspace, label: string, key: string) => h('button', { 'data-ws': w, title: key ? `${label} (${key})` : label, onclick: () => setWorkspace(w) }, label);
   const wsSwitch = h('div', { class: 'btn-group ws-switch' }, wsBtn('level', 'Level', 'Esc'), wsBtn('ow', 'Overworld', 'O'), wsBtn('gfx', 'Graphics', 'P / M / G / A'), wsBtn('game', 'Game', ''));
-  const backBtn = h('button', { onclick: () => history.back(), title: 'Back to the place before (Alt+←, mouse back button)', disabled: true }, '←');
-  const fwdBtn = h('button', { onclick: () => history.forward(), title: 'Forward (Alt+→, mouse forward button)', disabled: true }, '→');
-  const undoBtn = h('button', { onclick: () => app.undo(), title: 'Undo (Ctrl+Z)' }, '↶');
-  const redoBtn = h('button', { onclick: () => app.redo(), title: 'Redo (Ctrl+Y)' }, '↷');
+  const backBtn = h('button', { onclick: () => history.back(), title: 'Back to the place before (Alt+←, mouse back button)', 'aria-label': 'Back', disabled: true }, icon('back'));
+  const fwdBtn = h('button', { onclick: () => history.forward(), title: 'Forward (Alt+→, mouse forward button)', 'aria-label': 'Forward', disabled: true }, icon('forward'));
+  const undoBtn = h('button', { onclick: () => app.undo(), title: 'Undo (Ctrl+Z)', 'aria-label': 'Undo' }, icon('undo'));
+  const redoBtn = h('button', { onclick: () => app.redo(), title: 'Redo (Ctrl+Y)', 'aria-label': 'Redo' }, icon('redo'));
   const saveBtn = h('button', { class: 'primary', onclick: () => app.saveLevel(), title: 'Write level to ROM (Ctrl+S)' });
   const testLevelTitle = 'Test the level in the built-in emulator (T, Shift+T: from the mouse position)';
-  const testBtn = h('button', { onclick: () => (workspace === 'ow' ? testOverworld() : openTestPlay(app)), title: testLevelTitle }, '▶ Test');
+  const testBtn = h('button', { onclick: () => (workspace === 'ow' ? testOverworld() : openTestPlay(app)), title: testLevelTitle }, iconLabel('play', 'Test'));
   // loops the open level's music while editing; anything else that plays (test play, a song in a dialog) ends it
   const musicTitle = 'Play the level\'s music in a loop while editing';
   let musicOf = ''; // level and header music playing
@@ -249,7 +250,7 @@ function buildUi(app: App): { start: (at: NavLoc | null) => Promise<void> } {
       if (musicPlayer.error) toast(`Could not play: ${musicPlayer.error}`, 'error');
     });
   };
-  const musicBtn = h('button', { title: musicTitle, onclick: () => { if (musicPlayer.label === LEVEL_MUSIC) musicPlayer.stop(); else playLevelMusic(); } }, '♪ Music');
+  const musicBtn = h('button', { title: musicTitle, onclick: () => { if (musicPlayer.label === LEVEL_MUSIC) musicPlayer.stop(); else playLevelMusic(); } }, iconLabel('music', 'Music'));
   musicPlayer.onChange((l) => musicBtn.classList.toggle('active', l === LEVEL_MUSIC));
   // another level or other header music: its music
   const followLevel = () => { if (musicPlayer.label === LEVEL_MUSIC && musicOf !== `${app.level.number}:${app.level.header.music}`) playLevelMusic(); };

@@ -20,8 +20,9 @@ import { progressWords } from '../core/eventset.ts';
 import { worldProblems, applyFix, errorCount, checkAgainst, diffText, budgetPlace, problemShow, budgetShow, isFoundAtEveryProgress, CHECK_GROUPS, type CheckBaseline, type WorldProblem, type CheckSeverity, type WorldCheckLearned } from '../core/worldcheck.ts';
 import type { Budget } from '../core/owbudget.ts';
 import { budgetGauge } from './budgetgauge.ts';
+import { icon, iconLabel, type IconName } from './icons.ts';
 
-const ICON: Record<CheckSeverity, string> = { error: '⛔', warn: '⚠' };
+const ICON: Record<CheckSeverity, IconName> = { error: 'error', warn: 'warning' };
 const SECTIONS: { severity: CheckSeverity; name: string; title: string }[] = [
   { severity: 'error', name: 'Errors', title: 'Mario gets stuck or can\'t get somewhere: the world can\'t be played through' },
   { severity: 'warn', name: 'Warnings', title: 'May be fine – e.g. the hack\'s own code does it' },
@@ -89,7 +90,8 @@ export class WorldCheck {
     const b = this.button;
     b.classList.toggle('status-info', !errors);
     b.classList.toggle('status-error', errors > 0);
-    b.textContent = !ps ? 'World check …' : errors ? `⛔ ${errors} error${errors > 1 ? 's' : ''}` : `World check ✓${warnings ? ` · ${warnings} ⚠` : ''}`;
+    b.replaceChildren(...(!ps ? ['World check …'] : errors ? iconLabel('error', `${errors} error${errors > 1 ? 's' : ''}`)
+      : warnings ? iconLabel('warning', `World check: ${warnings} warning${warnings > 1 ? 's' : ''}`) : iconLabel('check', 'World check')));
     b.title = !ps ? 'World check: being searched (the path tiles, the maps or the saves are being learned)'
       : `World check: ${errors} error${errors === 1 ? '' : 's'}, ${warnings} warning${warnings === 1 ? '' : 's'} – click to ${this.open ? 'close' : 'open'} the list`;
     if (this.open) this.fill(ps);
@@ -119,7 +121,7 @@ export class WorldCheck {
   private fill(ps: WorldProblem[] | null): void {
     const scroll = this.root.scrollTop;
     const head = h('div', { class: 'panel-title' }, 'World check',
-      h('button', { class: 'msg-close', title: 'Close', onclick: () => this.toggle(false) }, '×'));
+      h('button', { class: 'msg-close', title: 'Close', 'aria-label': 'Close', onclick: () => this.toggle(false) }, icon('close')));
     if (!ps) { this.root.replaceChildren(head, emptyState('Searching… (the path tiles, the maps or the saves are being learned)')); return; }
     const body: HTMLElement[] = [];
     if (!ps.length) body.push(emptyState('No problems found: Mario gets everywhere, every way ends at a level or stop tile.'));
@@ -142,7 +144,7 @@ export class WorldCheck {
   private row(p: WorldProblem): HTMLElement {
     if (p.budget) {
       return h('div', { class: `problem problem-${p.severity}`, title: p.title ?? '' },
-        h('span', { class: 'problem-icon' }, ICON[p.severity]),
+        h('span', { class: 'problem-icon' }, icon(ICON[p.severity])),
         h('span', { class: 'wc-text' }, p.text),
         budgetGauge(p.budget),
         this.budgetShow(p.budget));
@@ -150,7 +152,7 @@ export class WorldCheck {
     const map = progressWords(p.progress);
     const noFix = p.noFix && refusalWords(this.view.app.rom, p.noFix), why = noFix ? `${noFix.reason}${noFix.instead ? ` – ${noFix.instead}` : ''}` : '';
     return h('div', { class: `problem problem-${p.severity}`, title: `${p.title ? `${p.title}\n` : ''}Found on the map ${map}${why ? `\nNo fix: ${why}` : ''}` },
-      h('span', { class: 'problem-icon' }, ICON[p.severity]),
+      h('span', { class: 'problem-icon' }, icon(ICON[p.severity])),
       h('span', { class: 'wc-text' }, p.text),
       h('button', { class: 'problem-fix', disabled: p.tile < 0, onclick: () => this.show(p),
         title: p.tile < 0 ? 'Not on the map' : p.show ? `Show the tile, in event ${hex2(p.show.event)}'s ${MODE_WORDS[p.show.mode] ?? p.show.mode}` : `Show the tile, on the map ${map}` }, 'Show'),

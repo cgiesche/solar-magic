@@ -911,7 +911,7 @@ export class LevelView {
     items.push({ heading: `Screen ${hex2(scr)}` });
     if (ex) {
       items.push({ label: 'Edit exit', onClick: () => app.selectScreen(scr) });
-      items.push({ label: '→ Open exit target', onClick: () => app.gotoExitTarget(ex) });
+      items.push({ label: 'Open exit target', onClick: () => app.gotoExitTarget(ex) });
     } else {
       items.push({ label: 'Create exit', onClick: () => { app.selectScreen(scr); app.editLevel(() => { app.level.exits.push({ uid: newUid(), screen: scr, dest: app.level.number, secondary: false, flags: EXIT_NEW }); }, false); } });
     }

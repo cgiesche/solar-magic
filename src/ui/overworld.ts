@@ -79,6 +79,7 @@ import { animationMenuItem } from './viewmenu.ts';
 import { OwAnimPlayer } from './owanim.ts';
 import { animateTiles } from './pickeranim.ts';
 import { MARK, rgba, uiToken } from './marks.ts';
+import { icon, iconLabel } from './icons.ts';
 
 // a w×h block of L1 tiles (16x16) or L2 tilemap entries (8x8), row-major; a L1 brush has no level tiles (NO_TILE
 // where one was picked: they are objects on layer 1, placed with a look from the picker's "Levels", ADR 0012)
@@ -1253,7 +1254,7 @@ export class OverworldView {
         class: 'ow-badge-fix',
         title: `The event's steps are found against the map before it in number order: events ${missing.map((x) => hex(x, 2)).join(', ')} come before it but are not checked, so the map shown differs from the one it is stored against (what you paint still goes into the event) – click to check them`,
         onclick: () => this.setChecked(eventSetOf([...passedEvents(this.checked), ...missing])),
-      }, `⚠ ${missing.length} event${missing.length > 1 ? 's' : ''} before it not checked – check`) : null,
+      }, icon('warning'), ` ${missing.length} event${missing.length > 1 ? 's' : ''} before it not checked – check`) : null,
       loading ? h('span', { class: 'hint' }, ' · Loading…') : null].filter((x) => x !== null));
   }
 
@@ -1378,9 +1379,9 @@ export class OverworldView {
         h('b', null, eventTitle(ev.runners, e)), h('span', { class: 'hint' }, ` · event ${hex(e, 2)} · the map as after it – the editor finds its steps`),
         h('span', { class: 'grow' }),
         budgetGauge(this.budget('eventStorage'), 'Tile storage'),
-        h('button', { title: 'Show the steps as the game does (path fade)', disabled: !steps.length, onclick: () => this.play() }, '▶ Play'),
+        h('button', { title: 'Show the steps as the game does (path fade)', disabled: !steps.length, onclick: () => this.play() }, iconLabel('play', 'Play')),
         h('button', { title: 'The steps in the opposite order (from the other end of the path)', disabled: steps.length < 2,
-          onclick: () => this.editSteps('steps reversed', steps.map((_, i) => steps.length - 1 - i)) }, '⇄ Reverse'),
+          onclick: () => this.editSteps('steps reversed', steps.map((_, i) => steps.length - 1 - i)) }, iconLabel('reverse', 'Reverse')),
         h('button', { title: 'End editing the event: painting goes into the map before events (Esc)', onclick: () => this.setEvent(-1) }, 'Done')),
       h('div', { class: 'ow-steps' },
         h('span', { class: 'hint' }, steps.length ? `Steps on ${where}:` : `No steps on ${where}`),
@@ -1411,7 +1412,7 @@ export class OverworldView {
     const reveal = eventReveal(rom, e), destroys = hasDestroyPatch(rom) ? eventDestroys(rom, e) : [];
     const entry = (kind: StepKind, k: number, i: number, text: string, title: string, what: string, remove: () => void) =>
       h('div', { class: 'ow-step silent ow-tile-change', title: `${title} – click to show it`, ...hover(kind, k), onclick: () => this.showTile(i) }, text,
-        h('button', { class: 'link-btn', title: `The event no longer ${what} it`, onclick: (ev: MouseEvent) => { ev.stopPropagation(); this.tileEdit(`no longer ${what} ${cellText(i)}`, remove); } }, '×'));
+        h('button', { class: 'link-btn', title: `The event no longer ${what} it`, onclick: (ev: MouseEvent) => { ev.stopPropagation(); this.tileEdit(`no longer ${what} ${cellText(i)}`, remove); }, 'aria-label': 'Remove' }, icon('close')));
     const into = reveal >= 0 ? revealedTile(rom, this.l1[reveal]) : -1, noReveal = revealRefusal(rom, e);
     return [
       reveal >= 0 ? entry('reveal', 0, reveal, `Reveals tile at ${cellText(reveal)}: ${l1Hex(this.l1[reveal])} → ${into < 0 ? '(not in the reveal list)' : l1Hex(into)}`,
@@ -1787,7 +1788,7 @@ export class OverworldView {
       });
       box.indeterminate = on > 0 && on < entries.length;
       return [h('div', { class: 'gt-list-head ow-ev-group' }, box,
-        toggle ? h('button', { class: 'link-btn', title: open ? 'Collapse' : 'Expand', onclick: toggle }, `${open ? '▾' : '▸'} ${name} (${entries.length})`) : h('span', null, `${name} (${entries.length})`)),
+        toggle ? h('button', { class: 'link-btn', title: open ? 'Collapse' : 'Expand', onclick: toggle }, icon(open ? 'chevron-down' : 'chevron-right'), ` ${name} (${entries.length})`) : h('span', null, `${name} (${entries.length})`)),
       ...open ? entries.map(row) : []];
     };
     const before = h('div', { class: `level-item ow-ev-row ow-ev-before${this.event < 0 ? ' current' : ''}`, 'data-event': '-1',
@@ -1796,7 +1797,7 @@ export class OverworldView {
       h('div', { class: 'ow-ev-head' },
         h('button', { title: 'Check every event: the map with every event passed', onclick: () => this.setChecked(eventBits(OW_EVENTS)) }, 'All'),
         h('button', { title: 'Check no event: the map before events', onclick: () => this.setChecked(eventSetOf([])) }, 'None'),
-        h('button', { title: 'Test play from the selected tile with a save of exactly the checked events (T)', onclick: () => this.onTestPlay() }, '▶ Test play')),
+        h('button', { title: 'Test play from the selected tile with a save of exactly the checked events (T)', onclick: () => this.onTestPlay() }, iconLabel('play', 'Test play'))),
       before,
       // (while the submaps' views are learned the submaps' events are one group)
       ...list.groups.flatMap((g) => group(this.views || !g.submap ? MAP_NAMES[g.submap] : 'Submaps', g.entries, true)),
@@ -1864,7 +1865,7 @@ export class OverworldView {
 
   // the settings of the map shown, in the popover from "⚙" beside the map select (ADR 0015): its song (one ROM edit),
   // from the ROM's songs as for levels, its graphics and border (what it reads watched: drawn again after undo/redo)
-  private readonly mapPop = popover('⚙', 'Settings of the map shown: its music, graphics and border', () => this.watch.add(() => this.mapSettings()));
+  private readonly mapPop = popover(icon('settings'), 'Settings of the map shown: its music, graphics and border', () => this.watch.add(() => this.mapSettings()));
   private mapSettings(): HTMLElement {
     const rom = this.app.rom, map = this.map, cur = submapMusic(rom, map);
     let songs: SongInfo[];
@@ -1978,8 +1979,8 @@ export class OverworldView {
       this.levelTiles.lookPicker(this.levelL1()[i], (t) => this.levelTiles.setLook(i, t)),
     ];
     const place = h('div', { class: 'hint' }, `Tile ${hex(x, 2)},${hex(y, 2)}${tl ? ` · translevel ${hex(tl, 2)}` : ''}`);
-    const alsoHere = others.map((k) => h('div', { class: 'hint warn-text' }, `⚠ The level tile at ${tilePlace(k)} enters this level too.`));
-    if (!tl) return h('div', { class: 'ow-info' }, enters, place, h('div', { class: 'hint warn-text' }, '⚠ This level tile enters no level.'), ...look, ...alsoHere);
+    const alsoHere = others.map((k) => h('div', { class: 'hint warn-text' }, icon('warning'), `The level tile at ${tilePlace(k)} enters this level too.`));
+    if (!tl) return h('div', { class: 'ow-info' }, enters, place, h('div', { class: 'hint warn-text' }, icon('warning'), 'This level tile enters no level.'), ...look, ...alsoHere);
     const ev = baseEvent(rom, tl), msgs = [1, 2].filter((n) => !isBlank(readMessage(rom, tl, n)));
     // (a package drawing the message boxes: the editor's messages are not what players see; checked meanwhile)
     const routine = this.app.messageRoutine();
@@ -1992,8 +1993,8 @@ export class OverworldView {
       ...this.levelSettings(tl),
       ...this.exitResultRows(tl),
       h('div', { class: 'prop' }, h('label', null, 'Message boxes'), !routine ? h('span', { class: 'hint', title: MESSAGE_ROUTINE_CHECKING }, `${shown} · checking…`)
-        : routine.game === false ? h('span', { class: 'warn-text', title: messageRoutineNote(routine) }, '⚠ drawn by a package')
-        : routine.game === null ? h('span', { class: 'warn-text', title: messageRoutineUnknown(routine) }, `${shown} · ⚠ not checked`)
+        : routine.game === false ? h('span', { class: 'warn-text', title: messageRoutineNote(routine) }, icon('warning'), 'drawn by a package')
+        : routine.game === null ? h('span', { class: 'warn-text', title: messageRoutineUnknown(routine) }, `${shown} · `, icon('warning'), ` not checked`)
         : h('span', null, shown),
         h('button', { onclick: () => { this.onOpenLevel(lvl); this.app.openMessages(tl, 1); }, title: 'Edit the level\'s two messages beside the level' }, 'Edit …')),
       hasLevelName(rom, tl) || ev !== NO_EVENT || msgs.length || exitDirections(rom, tl).some((d) => d) || initialFlags(rom, tl)
@@ -2019,8 +2020,8 @@ export class OverworldView {
       onclick: () => this.setEvent(e),
     }, c.text, c.remove ? h('button', {
       class: 'link-btn', title: `The event no longer ${c.remove.kind === 'reveal' ? 'reveals' : 'destroys'} the tile at ${cellText(c.remove.tile)}`,
-      onclick: (ev: MouseEvent) => { ev.stopPropagation(); this.removeEventTile(e, c.remove!); },
-    }, '×') : null);
+      onclick: (ev: MouseEvent) => { ev.stopPropagation(); this.removeEventTile(e, c.remove!); }, 'aria-label': 'Remove',
+    }, icon('close')) : null);
     // (an exit to the overworld passing an exit without a sentence, or none of them)
     const others = teleports.filter((t) => !sentences.some((x) => x.exit === teleportExit(t.action)));
     // (where an exit to the overworld teleports to: moved by a click on the tile – the pick pending, #413)
@@ -2082,7 +2083,7 @@ export class OverworldView {
     const gauge = budgetRow('Levels on the overworld (level tiles, stops, stars and pipes)', this.budget('translevels'));
     if (!tl) {
       return h('div', { class: 'ow-info' }, head,
-        h('div', { class: 'hint warn-text' }, '⚠ No translevel of its own: Mario walks off it only in the ways translevel 00\'s flags open – shared with every tile without one – and the status bar shows a blank name.'),
+        h('div', { class: 'hint warn-text' }, icon('warning'), 'No translevel of its own: Mario walks off it only in the ways translevel 00\'s flags open – shared with every tile without one – and the status bar shows a blank name.'),
         h('div', { class: 'row' }, h('button', {
           title: `A free translevel without name, base event or messages, its flags the ways the paths next to the ${what} lead (as a ${what} painted gets one)`,
           onclick: () => {
@@ -2101,7 +2102,7 @@ export class OverworldView {
       h('div', { class: 'prop' }, h('label', { title: `The ways Mario walks off the ${what} in a new game (its translevel's initial flags): arriving by a path opens the way back, the reveal walk of a level whose path leads here too` }, 'Mario walks off'), ...switches),
       ...levelNameField(this.app, tl, this.render(), `${What} ${hex(x, 2)},${hex(y, 2)}: name`),
       h('div', { class: 'hint' }, `The status bar shows it while Mario stands on the ${what} (its translevel's name)`),
-      ...others.map((k) => h('div', { class: 'hint warn-text' }, `⚠ The tile at ${tilePlace(k)} has this translevel too: the ways and the name are both's.`)),
+      ...others.map((k) => h('div', { class: 'hint warn-text' }, icon('warning'), `The tile at ${tilePlace(k)} has this translevel too: the ways and the name are both's.`)),
       gauge);
   }
   // "New tile…": the first free layer 1 tile in the Map16 tab; none: refused – a copy of tile 000 on a map taken
@@ -2181,7 +2182,7 @@ export class OverworldView {
     if (!evs.length) return [h('div', { class: 'hint' }, 'Revealed on no event (an event reveals a tile: "+ Reveal" in its timeline under the map – edit the event in the event list).')];
     return [
       h('div', { class: 'prop' }, h('label', null, 'Revealed on'), h('div', null, ...evs.map((e) => h('div', null, this.eventLink(names, e))))),
-      into < 0 ? h('div', { class: 'hint warn-text' }, `⚠ Tile ${l1Hex(t)} is not in the reveal list: revealing it changes nothing.`)
+      into < 0 ? h('div', { class: 'hint warn-text' }, icon('warning'), `Tile ${l1Hex(t)} is not in the reveal list: revealing it changes nothing.`)
         : h('div', { class: 'hint' }, `Revealed, tile ${l1Hex(t)} becomes ${l1Hex(into)}.`),
     ];
   }
@@ -2202,7 +2203,7 @@ export class OverworldView {
       h('div', { class: 'prop' }, h('label', null, 'Destroyed on'), h('div', null, ...evs.map((e) => h('div', null, this.eventLink(names, e))))),
       j !== i ? h('div', { class: 'hint' }, `Set on the tile at ${cellText(j)}, whose destroy changes this one too (a castle's top).`) : null,
       t !== undefined ? h('div', { class: 'hint' }, `Destroyed, tile ${l1Hex(t)} ${changes.join(', ')}.`)
-        : h('div', { class: 'hint warn-text' }, '⚠ The game destroys no such tile: destroying it changes nothing.'),
+        : h('div', { class: 'hint warn-text' }, icon('warning'), 'The game destroys no such tile: destroying it changes nothing.'),
     ].filter((v): v is HTMLDivElement => !!v);
   }
 
@@ -2422,7 +2423,7 @@ export class OverworldView {
         title: 'Every piece of one kind (on its 16-pixel grid) in the selection becomes another one: click the piece to replace, then the new one – on the map or below. Without a selection: the whole map, after a confirmation. One undo step; with an event edited (the event list) painted into the event',
       }, 'Replace piece…'),
       h('span', { class: 'hint' }, r ? (r.from ? 'now the new piece' : 'click the piece to replace') : sel ? `in the selection ${sel.w}×${sel.h}` : 'on the whole map'),
-      ...(sel && !r ? [h('button', { title: 'Drop the selection: replace on the whole map', onclick: () => { this.l2Sel = null; this.buildSide(); this.paint(); } }, '×')] : []));
+      ...(sel && !r ? [h('button', { title: 'Drop the selection: replace on the whole map', 'aria-label': 'Drop the selection', onclick: () => { this.l2Sel = null; this.buildSide(); this.paint(); } }, icon('close'))] : []));
   }
   private l2TilesOpen = true; // the 8x8 sheet below the pieces shown (folded: the pieces alone)
   // "Pieces on this map" (#337, core/owl2pieces.ts): the 2x2 entry blocks on the 16-pixel grid of the submap's view (the

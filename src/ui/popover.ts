@@ -16,7 +16,7 @@ let current: Popover | null = null;
 onCloseMenus(() => current?.close());
 
 // label: the button's text; title: its tooltip; content: made anew whenever it opens or is refreshed
-export function popover(label: string, title: string, content: () => HTMLElement): Popover {
+export function popover(label: string | Node, title: string, content: () => HTMLElement): Popover {
   const btn = h('button', { class: 'pop-btn', title, 'aria-haspopup': 'dialog', 'aria-expanded': 'false' }, label);
   const wrap = h('div', { class: 'pop-wrap' }, btn);
   const box = h('div', { class: 'popover', role: 'dialog', 'aria-label': title });

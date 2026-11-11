@@ -2,6 +2,7 @@
 // disabled/checked are callbacks evaluated whenever a menu opens, so items never go stale.
 
 import { h } from './dom.ts';
+import { icon } from './icons.ts';
 
 export type MenuItem =
   | { label: string; shortcut?: string; title?: string; onClick: () => void; disabled?: () => boolean }
@@ -25,7 +26,7 @@ export function closeMenus(): void {
 
 // one dropdown button; `bar` groups buttons so hovering switches between open menus
 function dropdown(menu: Menu, bar?: HTMLElement): HTMLElement {
-  const btn = h('button', { class: 'menu-btn', 'aria-haspopup': 'menu', 'aria-expanded': 'false', title: menu.title, role: bar ? 'menuitem' : undefined }, menu.label, h('span', { class: 'caret' }, '▾'));
+  const btn = h('button', { class: 'menu-btn', 'aria-haspopup': 'menu', 'aria-expanded': 'false', title: menu.title, role: bar ? 'menuitem' : undefined }, menu.label, h('span', { class: 'caret' }, icon('chevron-down')));
   const wrap = h('div', { class: 'menu-wrap' }, btn);
   const open = () => {
     if (current?.owner === wrap) return;
@@ -42,7 +43,7 @@ function dropdown(menu: Menu, bar?: HTMLElement): HTMLElement {
         class: 'menu-item', role: isCheck ? 'menuitemcheckbox' : 'menuitem', disabled, title: it.title, tabindex: '-1',
         'aria-checked': isCheck ? String(on) : undefined,
       },
-        h('span', { class: 'menu-check' }, isCheck ? (on ? '✓' : '') : ''),
+        h('span', { class: 'menu-check' }, isCheck && on ? icon('check') : null),
         h('span', { class: 'menu-label' }, it.label),
         it.shortcut ? h('kbd', null, it.shortcut) : null);
       e.addEventListener('click', () => {
@@ -51,7 +52,7 @@ function dropdown(menu: Menu, bar?: HTMLElement): HTMLElement {
           const show = () => {
             const now = it.checked();
             e.setAttribute('aria-checked', String(now));
-            (e.firstChild as HTMLElement).textContent = now ? '✓' : '';
+            (e.firstChild as HTMLElement).replaceChildren(...(now ? [icon('check')] : []));
           };
           // onToggle may ask first (async): show the state once it is settled
           void Promise.resolve(it.onToggle(!it.checked())).then(show);

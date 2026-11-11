@@ -12,6 +12,7 @@ import {
   FOLDER, KIND_LABEL, type PixiProject,
 } from '../core/pixi.ts';
 import type { SpriteFolder } from '../core/pixirt.ts';
+import { icon } from './icons.ts';
 
 const KINDS = Object.keys(FOLDER) as SpriteFolder[];
 
@@ -51,7 +52,7 @@ export function pixiPane(app: App, changed: () => void): Pane {
       h('td', { class: proj.files.has(e.file) ? '' : 'err', title: proj.files.has(e.file) ? e.file : `${e.file} is missing from the project` }, e.file.slice(FOLDER[e.kind].length)),
       h('td', null, label(e)),
       h('td', null, origin(e.file)),
-      h('td', { class: 'actions' }, definesButton(proj.files, asmOf(e), change), h('button', { class: 'icon-btn', title: 'Remove entry (the sprite stays)', onclick: () => { proj.list = proj.list.filter((x) => x !== e); change(); } }, '✕'))));
+      h('td', { class: 'actions' }, definesButton(proj.files, asmOf(e), change), h('button', { class: 'icon-btn', title: 'Remove entry (the sprite stays)', onclick: () => { proj.list = proj.list.filter((x) => x !== e); change(); } }, icon('close')))));
     const out = [
       rows.length ? h('table', { class: 'uber-table' }, h('tr', null, h('th', null, 'Type'), h('th', null, 'No.'), h('th', null, 'File'), h('th', null, 'Name'), h('th', null, 'Package'), h('th')), rows)
         : h('p', { class: 'hint' }, 'No custom sprites yet – “Upload package …” above installs a sprite package; its sprites get the next free numbers.'),

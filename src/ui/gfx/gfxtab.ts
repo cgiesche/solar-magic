@@ -44,6 +44,7 @@ import { slotRemapLine } from '../../core/remap.ts';
 import { AntsOverlay } from '../ants.ts';
 import { PaletteHover } from '../palhover.ts';
 import { MARK, rgba } from '../marks.ts';
+import { icon, iconLabel, type IconName } from '../icons.ts';
 
 
 // a color as CGRAM's RGBA word gives it, for CSS
@@ -53,6 +54,7 @@ const spriteRange = (first: number) => first < 0x100 ? `${hex(first, 2)}–${hex
 const spriteTile = (first: number, t: number) => first + t < 0x100 ? hex(first + t, 2) : `${hex(first + t, 3)} (page 2: ${hex((first + t) & 0xff, 2)} with T bit)`;
 
 type Tool = 'pen' | 'erase' | 'fill' | 'pick' | 'select';
+const TOOL_ICON: Record<Tool, IconName> = { select: 'select', pen: 'pen', erase: 'eraser', fill: 'fill', pick: 'eyedropper' };
 interface Rect { x: number; y: number; w: number; h: number }
 interface Float extends Rect { pix: Uint8Array; label: string } // pixels lifted out of the sheet, the edit's name when put down
 
@@ -583,20 +585,20 @@ export class GfxTab implements WsPanel {
   private buildPaneHead(): void {
     const b = this.paneHead;
     clear(b);
-    const tool = (t: Tool, label: string, key: string, title: string) => h('button', { class: this.tool === t ? 'active' : '', title: `${title} (${key})`, onclick: () => this.setTool(t) }, label);
+    const tool = (t: Tool, label: string, key: string, title: string) => h('button', { class: this.tool === t ? 'active' : '', title: `${title} (${key})`, onclick: () => this.setTool(t) }, iconLabel(TOOL_ICON[t], label));
     const a = this.area, first = a.y * 16 + a.x, last = (a.y + a.h - 1) * 16 + a.x + a.w - 1;
     b.append(
       h('b', { class: 'mono' }, a.w * a.h === 1 ? `Tile ${hex(first, 2)}` : `Tiles ${hex(first, 2)}–${hex(last, 2)} (${a.w}×${a.h})`),
       h('span', { class: 'btn-group' },
-        tool('select', '⬚ Select', 'S', 'Select pixels; dragging inside moves them, Enter puts them down, Esc cancels'),
-        tool('pen', '✎ Pen', 'B', 'Draw: left button with the left color, right button with the right color; Shift+click: line from the last point'),
-        tool('erase', '⌫ Eraser', 'E', 'Draw transparent'),
-        tool('fill', '▧ Fill', 'F', 'Fill an area of the same color (inside the selection, else these tiles)'),
-        tool('pick', '⌖ Eyedropper', 'I', 'Take a color for the button clicked with (also Alt+click)')),
+        tool('select', 'Select', 'S', 'Select pixels; dragging inside moves them, Enter puts them down, Esc cancels'),
+        tool('pen', 'Pen', 'B', 'Draw: left button with the left color, right button with the right color; Shift+click: line from the last point'),
+        tool('erase', 'Eraser', 'E', 'Draw transparent'),
+        tool('fill', 'Fill', 'F', 'Fill an area of the same color (inside the selection, else these tiles)'),
+        tool('pick', 'Eyedropper', 'I', 'Take a color for the button clicked with (also Alt+click)')),
       h('span', { class: 'btn-group' },
-        h('button', { onclick: () => this.transform('h'), title: 'Flip the selection (else these tiles) horizontally' }, '↔'),
-        h('button', { onclick: () => this.transform('v'), title: 'Flip vertically' }, '↕'),
-        h('button', { onclick: () => this.transform('r'), title: 'Rotate by 90° (square selection only)' }, '⟳')),
+        h('button', { onclick: () => this.transform('h'), title: 'Flip the selection (else these tiles) horizontally', 'aria-label': 'Flip horizontally' }, icon('flip-h')),
+        h('button', { onclick: () => this.transform('v'), title: 'Flip vertically', 'aria-label': 'Flip vertically' }, icon('flip-v')),
+        h('button', { onclick: () => this.transform('r'), title: 'Rotate by 90° (square selection only)', 'aria-label': 'Rotate' }, icon('rotate'))),
       h('button', { onclick: () => this.copySel(), title: 'Copy the selection, else these tiles (Ctrl+C)' }, 'Copy'),
       h('button', { onclick: () => this.pasteSel(), title: 'Paste at the selection, movable afterwards (Ctrl+V)' }, 'Paste'));
     this.pane.dataset.tool = this.tool;

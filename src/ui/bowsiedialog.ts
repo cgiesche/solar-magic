@@ -10,6 +10,7 @@ import { definesButton } from './defineedit.ts';
 import {
   loadBowsieProject, saveBowsieProject, bowsieToZip, bowsieSpriteInfo, assignOwSprite, bowsieSpriteFiles, BOWSIE_FIRST, BOWSIE_LAST, type BowsieProject,
 } from '../core/bowsie.ts';
+import { icon } from './icons.ts';
 
 export function bowsiePane(app: App, changed: () => void): Pane {
   let num = BOWSIE_FIRST;
@@ -33,7 +34,7 @@ export function bowsiePane(app: App, changed: () => void): Pane {
         h('td', { title: info.description }, info.name),
         h('td', { class: 'mono' }, String(info.extra)),
         h('td', null, origin(e.file)),
-        h('td', { class: 'actions' }, definesButton(proj.files, e.file, change), h('button', { class: 'icon-btn', title: 'Remove entry (the sprite stays)', onclick: () => { proj.list = proj.list.filter((x) => x !== e); change(); } }, '✕')));
+        h('td', { class: 'actions' }, definesButton(proj.files, e.file, change), h('button', { class: 'icon-btn', title: 'Remove entry (the sprite stays)', onclick: () => { proj.list = proj.list.filter((x) => x !== e); change(); } }, icon('close'))));
     });
     return [
       rows.length ? h('table', { class: 'uber-table' }, h('tr', null, h('th', null, 'No.'), h('th', null, 'File'), h('th', null, 'Name'), h('th', null, 'Extra bytes'), h('th', null, 'Package'), h('th')), rows)

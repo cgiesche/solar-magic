@@ -38,6 +38,12 @@ button:disabled { opacity: 0.4; cursor: default; }
 button.primary { background: var(--accent-strong); border-color: var(--accent-strong); color: var(--on-accent); }
 button.active { background: var(--accent-strong); border-color: var(--accent); color: var(--on-accent); }
 button.big { font-size: 16px; padding: 10px 22px; }
+/* icons (ui/icons.ts, Lucide, #475): sized by the text around them, in its color */
+.icon { width: 1.15em; height: 1.15em; vertical-align: -0.22em; flex: none; }
+.icon + .icon-label, .icon-label + .icon { margin-left: .4em; }
+.warn-text > .icon:first-child, .warn-box > .icon:first-child, .hint > .icon:first-child { margin-right: .2em; }
+.menu-check .icon { width: 14px; height: 14px; vertical-align: -2px; }
+.menu-btn .caret .icon { width: 12px; height: 12px; vertical-align: -1px; }
 input, select { background: var(--field-bg); color: var(--text); border: 1px solid var(--border); border-radius: 3px; padding: 3px 5px; font: inherit; }
 input.hex { font-family: var(--font-mono); width: 5.5em; text-transform: uppercase; }
 input:focus, select:focus { outline: 1px solid var(--accent); }

@@ -2,6 +2,7 @@
 // history with times (toasts vanish after a few seconds, the log keeps them).
 import { h, logEntries, onLog, clearLog, type LogEntry } from './dom.ts';
 import { boolPref } from './prefs.ts';
+import { iconLabel } from './icons.ts';
 
 const logOpen = boolPref('log-open', false);
 const KIND_LABEL = { info: 'Message', error: 'Error', warn: 'Warning', output: 'Tool output', event: 'Event' } as const;
@@ -43,7 +44,7 @@ export class LogBar {
   private setOpen(open: boolean): void {
     this.open = open;
     this.root.classList.toggle('open', open);
-    this.toggleBtn.textContent = open ? '▾ Log' : '▸ Log';
+    this.toggleBtn.replaceChildren(...iconLabel(open ? 'chevron-down' : 'chevron-right', 'Log'));
     logOpen.set(open);
     if (open) this.list.scrollTop = this.list.scrollHeight;
     this.updateLatest();

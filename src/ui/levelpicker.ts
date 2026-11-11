@@ -4,13 +4,14 @@ import type { App } from './app.ts';
 import { h, clear, emptyState } from './dom.ts';
 import { hex3 } from '../core/names.ts';
 import { closeMenus } from './menu.ts';
+import { icon } from './icons.ts';
 
 // any of the 0x200 levels (or of opts.levels, each with its opts.note); the list starts with "only used": main
 // levels, relocated ones and those an exit leads to
 export interface PickerOptions { levels?: number[]; note?: (n: number) => string }
 export function levelPicker(app: App, value: number, onPick: (n: number) => void, opts: PickerOptions = {}): HTMLElement {
   const g = app.entrances.graph();
-  const btn = h('button', { class: 'level-pick', title: 'Choose another level' }, h('span', { class: 'mono' }, hex3(value)), ' ', h('span', { class: 'lname' }, g.name(value)), h('span', { class: 'caret' }, ' ▾'));
+  const btn = h('button', { class: 'level-pick', title: 'Choose another level' }, h('span', { class: 'mono' }, hex3(value)), ' ', h('span', { class: 'lname' }, g.name(value)), h('span', { class: 'caret' }, ' ', icon('chevron-down')));
   btn.addEventListener('click', () => openPicker(app, btn, value, onPick, opts));
   return btn;
 }

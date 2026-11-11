@@ -1,5 +1,7 @@
 // Tiny DOM helpers.
 
+import { icon } from './icons.ts';
+
 type Attrs = Record<string, unknown> & { style?: string | Partial<CSSStyleDeclaration> };
 export type Child = Node | string | number | null | undefined | false | Child[];
 
@@ -293,7 +295,7 @@ export function modal(title: string, body: HTMLElement, buttons: { label: string
     onclick: () => { if (b.onClick?.() !== false) close(); },
   }, b.label));
   const box = h('div', { class: 'modal' },
-    h('div', { class: 'modal-title' }, title, h('button', { class: 'icon-btn', onclick: () => close(), title: 'Close' }, '✕')),
+    h('div', { class: 'modal-title' }, title, h('button', { class: 'icon-btn', onclick: () => close(), title: 'Close', 'aria-label': 'Close' }, icon('close'))),
     h('div', { class: 'modal-body' }, body),
     h('div', { class: 'modal-buttons' }, els),
   );

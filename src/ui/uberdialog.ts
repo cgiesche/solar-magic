@@ -9,6 +9,7 @@ import { resourceFiles, ALL, CONTEXT_SIZE, type UberContext } from '../core/uber
 import { hex } from '../core/names.ts';
 import { definesButton } from './defineedit.ts';
 import { projectPane, type Pane } from './projectpane.ts';
+import { icon } from './icons.ts';
 
 const CTX_LABEL: Record<UberContext, string> = { level: 'Level', overworld: 'Overworld maps', gamemode: 'Game modes' };
 
@@ -41,7 +42,7 @@ export function uberPane(app: App, changed: () => void): UberPane {
       h('td', { class: files.has(c.file) ? '' : 'err', title: files.has(c.file) ? c.file : `${c.file} is missing from the project` }, c.file.replace(/^(level|overworld|gamemode)\//, '')),
       h('td', { class: 'mono' }, bytesText(c.bytes)),
       h('td', null, origin(c.file)),
-      h('td', { class: 'actions' }, definesButton(files, c.file, change), h('button', { class: 'icon-btn', title: 'Remove assignment (the file stays)', onclick: () => { calls.splice(i, 1); if (!calls.length) map.delete(num); change(); } }, '✕')),
+      h('td', { class: 'actions' }, definesButton(files, c.file, change), h('button', { class: 'icon-btn', title: 'Remove assignment (the file stays)', onclick: () => { calls.splice(i, 1); if (!calls.length) map.delete(num); change(); } }, icon('close'))),
     )));
     // new assignment of a file already in the project
     let num = ctx === 'level' ? app.level.number : 0;

@@ -27,6 +27,7 @@ import { definesButton, editButton, isTextFile } from './defineedit.ts';
 import { openDocs, packageDocs } from './docview.ts';
 import { gfxName } from './gfx/map16tab.ts';
 import { TOOL_KINDS, type ToolKind } from '../core/parts.ts';
+import { icon } from './icons.ts';
 
 const CTX_LABEL: Record<UberContext, string> = { level: 'Level', gamemode: 'Game Mode', overworld: 'Overworld map' };
 
@@ -190,7 +191,7 @@ export function packagesPane(app: App, host: PackagesHost): { el: HTMLElement; r
         calls.length ? h('table', { class: 'uber-table' }, h('tr', null, h('th', null, 'runs in'), h('th', null, 'File'), h('th')),
           calls.map((c) => h('tr', null, h('td', null, where(c)), h('td', { class: 'mono' }, c[2]),
             h('td', { class: 'actions' }, definesButton(proj.files, c[2], () => touch('uberasm')), editButton(proj.files, c[2], () => touch('uberasm')),
-              h('button', { class: 'icon-btn', title: 'Remove assignment (the file stays)', onclick: () => unassign(c) }, '✕'))))) : h('p', { class: 'hint' }, 'Runs nowhere – assign it in the UberASM tab.'),
+              h('button', { class: 'icon-btn', title: 'Remove assignment (the file stays)', onclick: () => unassign(c) }, icon('close')))))) : h('p', { class: 'hint' }, 'Runs nowhere – assign it in the UberASM tab.'),
         rest.length ? h('details', { class: 'pkg-files' }, h('summary', null, `More files (${rest.length}): libraries, settings`),
           h('table', { class: 'uber-table' }, rest.map((f) => fileRow('uberasm', proj.files, f)))) : ''));
     }

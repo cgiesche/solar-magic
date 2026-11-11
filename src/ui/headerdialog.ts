@@ -17,6 +17,7 @@ import { levelSizeOptions, applyHeaderChange, headerRefusal, objectsBelow, NO_HE
 import { RATE_OPTIONS, hRate, motionText, type Layer2Motions, type LayerMotion } from '../core/l2scroll.ts';
 import { incompleteSprites, leftOutSprites, spriteMemText, missingText, SPRITE_MEM_HELP, MISSING_HELP } from './spritemem.ts';
 import { slipperyText } from './exitpanel.ts';
+import { icon } from './icons.ts';
 
 function range(n: number, fmt: (i: number) => string = (i) => String(i)): [number, string][] {
   return Array.from({ length: n }, (_, i) => [i, fmt(i)]);
@@ -40,8 +41,8 @@ export function openHeaderDialog(app: App): void {
   const checked = sm && sm.level === lv.number && sm.mem === (lv.spriteHeader & SPRITE_MEMORY);
   const problems = [...(incomplete ? [`${spriteMemText(incomplete)}: not enough sprite memory.`] : []), ...(missing ? [`${missingText(missing)}: no sprite slot free.`] : [])];
   const memStatus = !checked ? h('p', { class: 'hint' }, 'Checking sprite memory …')
-    : !problems.length ? h('p', { class: 'hint' }, '✓ All sprites appear and are shown completely.')
-    : h('div', { class: 'warn-box', title: [...(incomplete ? [SPRITE_MEM_HELP] : []), ...(missing ? [MISSING_HELP] : [])].join('\n') }, `⚠ ${problems.join(' ')} `,
+    : !problems.length ? h('p', { class: 'hint' }, icon('check'), ' All sprites appear and are shown completely.')
+    : h('div', { class: 'warn-box', title: [...(incomplete ? [SPRITE_MEM_HELP] : []), ...(missing ? [MISSING_HELP] : [])].join('\n') }, icon('warning'), ` ${problems.join(' ')} `,
       sm.suggestion !== null
         ? h('button', { onclick: () => { memInput.value = hex2(sm.suggestion!); memInput.dispatchEvent(new Event('change')); } }, `Set to fit (${hex2(sm.suggestion)})`)
         : 'No other value shows all of them – place the sprites further apart.');

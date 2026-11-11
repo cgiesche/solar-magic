@@ -49,6 +49,7 @@ import { numberPref } from '../prefs.ts';
 import { AntsOverlay, type AntsMark } from '../ants.ts';
 import { PaletteHover, map16Preview, type Map16Preview } from '../palhover.ts';
 import { MARK, rgba, uiToken } from '../marks.ts';
+import { iconLabel, type IconName } from '../icons.ts';
 
 const Z = 2; // sheet zoom
 const M = 34; // sheet margin for the ranges and row numbers
@@ -703,7 +704,7 @@ export class Map16Tab implements WsPanel {
       class: st === 'on' ? 'active' : st === 'mixed' ? 'mt-is-mixed' : '', title: 'Drawn in front of sprites/Mario', disabled: !marks.size,
       onclick: () => this.togglePrio(),
     }, 'Priority', st === 'mixed' ? h('span', { class: 'mt-mixed' }, 'mixed') : '');
-    const flip = (label: string, bit: number, title: string) => h('button', { title, disabled: !marks.size, onclick: () => this.flip(bit, label) }, label);
+    const flip = (label: string, name: IconName, bit: number, title: string) => h('button', { title, disabled: !marks.size, onclick: () => this.flip(bit, label) }, iconLabel(name, 'Flip'));
     const allPal = cgramToRGBA(this.cgram());
     const palDot = (p: number) => {
       const c = h('canvas', { width: 7, height: 1, class: 'mt-paldot' });
@@ -752,8 +753,8 @@ export class Map16Tab implements WsPanel {
       h('div', { class: 'hint' }, 'Palette (keys 1–8)'),
       h('div', { class: 'mt-pals' }, Array.from({ length: 8 }, (_, p) => palDot(p))),
       h('div', { class: 'row' },
-        flip('↔ Flip', FLIP_X, 'Mirror the marked quarters horizontally as a whole (X)'),
-        flip('↕ Flip', FLIP_Y, 'Mirror the marked quarters vertically as a whole (Y)'),
+        flip('Flip horizontally', 'flip-h', FLIP_X, 'Mirror the marked quarters horizontally as a whole (X)'),
+        flip('Flip vertically', 'flip-v', FLIP_Y, 'Mirror the marked quarters vertically as a whole (Y)'),
         prio(s.prio)),
       !this.shown() ? h('div', { class: 'hint' }, 'Loading the overworld …') : '',
       h('div', { class: 'mt-section' }, one ? 'Tile' : 'Tiles'),
@@ -1648,8 +1649,8 @@ export class Map16Tab implements WsPanel {
     if (k === 'Escape') { if (!this.marked().size) return false; this.setMarks(new Set()); return true; }
     if (k === 'Enter' && !this.remapping) { this.fillMarked(); return true; }
     if (k === 'F2' && !this.remapping && !this.moving && this.t.names) { this.nameInput.focus(); this.nameInput.select(); return true; }
-    if (k === 'x' || k === 'X') { this.flip(FLIP_X, '↔ Flip'); return true; }
-    if (k === 'y' || k === 'Y') { this.flip(FLIP_Y, '↕ Flip'); return true; }
+    if (k === 'x' || k === 'X') { this.flip(FLIP_X, 'Flip horizontally'); return true; }
+    if (k === 'y' || k === 'Y') { this.flip(FLIP_Y, 'Flip vertically'); return true; }
     if (k >= '1' && k <= '8') { const p = Number(k) - 1; this.editQuarters(setPalette(p), `Palette ${p}`); return true; }
     if (k === 'q' || k === 'Q') {
       // only the next quarter of the followed quarter's tile (in reading order)

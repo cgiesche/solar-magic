@@ -46,6 +46,7 @@ import { triggerPanel, owTriggerPanel } from '../triggerpanel.ts';
 import { eventTriggerState } from '../../core/owanimview.ts';
 import { AntsOverlay, type AntsMark } from '../ants.ts';
 import { MARK } from '../marks.ts';
+import { icon } from '../icons.ts';
 
 const TILE_TYPES = [0x01, 0x02, 0x04, 0x08, 0x10, 0x11, 0x12, 0x03, 0x05, 0x06, 0x07, 0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e];
 const COLOR_TYPES = [0x14, 0x13, 0x15, 0x16, 0x17];
@@ -466,8 +467,8 @@ export class AnimTab implements WsPanel {
           h('div', null, kind === 'tiles' ? `Tile ${hex(this.targetTile(s), 3)} · ${TYPE_NAMES[s.type] ?? ''}` : kind === 'colors' ? `Color ${hex(s.dest & 0xff, 2)} · ${TYPE_NAMES[s.type]}` : `Colors ${rangeName(s)} · ${TYPE_NAMES[s.type] ?? ''}`),
           h('div', { class: 'hint' }, kind === 'rotation' ? `${this.triggerName(s.trigger)} · ${speedName(s.framesLess1 + 1)}` : `${this.triggerName(s.trigger)} · ${s.framesLess1 + 1} frame${s.framesLess1 ? 's' : ''}`)),
         h('span', { class: 'at-slot-acts' },
-          h('button', { class: 'icon-btn', title: 'Duplicate (into the next free slot)', 'aria-label': 'Duplicate', onclick: (e: Event) => { e.stopPropagation(); pick(); void this.duplicate(); } }, '⧉'),
-          h('button', { class: 'icon-btn', title: 'Delete (Ctrl+Z brings it back)', 'aria-label': 'Delete', onclick: (e: Event) => { e.stopPropagation(); pick(); void this.remove(); } }, '✕'))));
+          h('button', { class: 'icon-btn', title: 'Duplicate (into the next free slot)', 'aria-label': 'Duplicate', onclick: (e: Event) => { e.stopPropagation(); pick(); void this.duplicate(); } }, icon('duplicate')),
+          h('button', { class: 'icon-btn', title: 'Delete (Ctrl+Z brings it back)', 'aria-label': 'Delete', onclick: (e: Event) => { e.stopPropagation(); pick(); void this.remove(); } }, icon('delete')))));
     }
     if (!l.slots.size) items.append(h('p', { class: 'hint' }, 'No animations yet. A tile animation keeps replacing 8x8 tiles in VRAM with frames from an animation graphic – all Map16 tiles that use them animate along.'));
     const noSlot = l.slots.size >= SLOTS;
@@ -885,13 +886,13 @@ export class AnimTab implements WsPanel {
           [cs[this.frame - 1], cs[this.frame]] = [cs[this.frame], cs[this.frame - 1]];
           this.setColumns(x, cs);
           this.frame--;
-        }, 'Frame moved') }, '◀'),
+        }, 'Frame moved'), 'aria-label': 'Earlier' }, icon('chevron-left')),
         h('button', { disabled: this.frame >= cols.length - 1, title: 'Move later', onclick: () => void this.editSlot((x) => {
           const cs = this.columns(x);
           [cs[this.frame + 1], cs[this.frame]] = [cs[this.frame], cs[this.frame + 1]];
           this.setColumns(x, cs);
           this.frame++;
-        }, 'Frame moved') }, '▶')),
+        }, 'Frame moved'), 'aria-label': 'Later' }, icon('chevron-right'))),
       h('p', { class: 'hint' }, `Each frame shows for 8 game frames (≈0.13 s); “Longer” repeats it. Select a frame, then click the source tile in the animation graphic on the right (${shape.w * shape.h > 1 ? `${shape.w * shape.h} consecutive tiles` : 'one tile'}).`),
     );
   }

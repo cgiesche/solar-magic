@@ -10,6 +10,7 @@ import { hex } from '../core/names.ts';
 import { definesButton } from './defineedit.ts';
 import { projectPane, type Pane } from './projectpane.ts';
 import type { Rom } from '../core/rom.ts';
+import { icon } from './icons.ts';
 
 // block file per tile of the ROM's block project (cached per registry entry)
 let cache: { id: string; tiles: Map<number, string> } | null = null;
@@ -50,7 +51,7 @@ export function blockPane(app: App, changed: () => void): BlockPane {
       h('td', { class: proj.files.has(b.file) ? '' : 'err', title: proj.files.has(b.file) ? b.file : `${b.file} is missing from the project` }, b.file.replace(/^blocks\//, '')),
       h('td', { class: 'mono' }, b.acts !== undefined ? hex(b.acts, 3) : '–'),
       h('td', null, origin(b.file)),
-      h('td', { class: 'actions' }, definesButton(proj.files, b.file, change), h('button', { class: 'icon-btn', title: 'Remove assignment (the block stays)', onclick: () => { proj.list = proj.list.filter((x) => x !== b); change(); } }, '✕'))));
+      h('td', { class: 'actions' }, definesButton(proj.files, b.file, change), h('button', { class: 'icon-btn', title: 'Remove assignment (the block stays)', onclick: () => { proj.list = proj.list.filter((x) => x !== b); change(); } }, icon('close')))));
     return [
       rows.length ? h('table', { class: 'uber-table' }, h('tr', null, h('th', null, 'Tile'), h('th', null, 'Block'), h('th', null, 'acts like'), h('th', null, 'Package'), h('th')), rows)
         : h('p', { class: 'hint' }, 'No blocks yet – “Upload package …” above installs a block package; its blocks go on free Map16 tiles.'),
