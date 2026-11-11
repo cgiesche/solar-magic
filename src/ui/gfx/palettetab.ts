@@ -10,7 +10,7 @@ import type { App } from '../app.ts';
 import type { Watch } from '../../core/romwatch.ts';
 import type { GfxWorkspace, WsPanel } from '../gfxworkspace.ts';
 import { menuButton } from '../menu.ts';
-import { h, clear, toast, choose, pickerOpen } from '../dom.ts';
+import { h, clear, toast, choose, pickerOpen, isGoto } from '../dom.ts';
 import { downloadBytes, pickFile } from '../platform.ts';
 import { snesColorToRGBA } from '../../core/gfx.ts';
 import { pcToSnes } from '../../core/rom.ts';
@@ -74,7 +74,8 @@ export class PaletteTab implements WsPanel {
   private rows = h('div', { class: 'pt-rows' });
   private detail = h('div', { class: 'pt-detail' });
   private headerBox = h('div', { class: 'pt-header' });
-  private bar = h('div', { class: 'ws-bar' });
+  readonly bar = h('div', { class: 'ws-bar' }); // (in the workspace's context bar, #486)
+  get side(): HTMLElement { return this.detail; } // (under the preview, #486)
   private swatches: HTMLElement[] = [];
   private rowLabels: HTMLElement[] = [];
   private visible = false;
@@ -311,10 +312,10 @@ export class PaletteTab implements WsPanel {
       const cells = h('div', { class: 'pt-cells' });
       for (let c = 0; c < 16; c++) {
         const i = row * 16 + c;
-        const sw = h('div', { class: 'pt-sw' });
+        const sw = h('div', { class: 'pt-sw', 'data-goto': '' }); // (F12: its animation)
         sw.addEventListener('mousedown', (e) => {
           e.preventDefault();
-          if (e.button === 0 && (e.ctrlKey || e.metaKey)) { this.gotoAnim(i); return; }
+          if (e.button === 0 && isGoto(e)) { this.gotoAnim(i); return; }
           if (e.shiftKey && (this.sel >> 4) === row) this.selEnd = i;
           else this.sel = this.selEnd = i;
           this.paint();
@@ -343,7 +344,7 @@ export class PaletteTab implements WsPanel {
       const faded = !!fade?.has(i);
       sw.classList.toggle('animated', animated);
       sw.classList.toggle('faded', faded);
-      sw.title = `Color ${hex(i >> 4, 1)}·${hex(i & 15, 1)} – ${locked ? 'set by the game, not editable (only with an own palette)' : fixed !== null ? `palette of ${this.ownerName()}` : originName(this.origin(i))}${animated ? ` · animated: the game ${fixed !== null ? `rewrites it as the ${this.t.where} loads` : 'keeps rewriting it'}${this.t.anims ? ' (Ctrl+click: open its animation)' : ''}` : ''}${faded ? ' · rewritten while an event\'s path fades in' : ''}`;
+      sw.title = `Color ${hex(i >> 4, 1)}·${hex(i & 15, 1)} – ${locked ? 'set by the game, not editable (only with an own palette)' : fixed !== null ? `palette of ${this.ownerName()}` : originName(this.origin(i))}${animated ? ` · animated: the game ${fixed !== null ? `rewrites it as the ${this.t.where} loads` : 'keeps rewriting it'}${this.t.anims ? ' (F12: open its animation)' : ''}` : ''}${faded ? ' · rewritten while an event\'s path fades in' : ''}`;
     }
     for (let row = 0; row < 16; row++) {
       const names: string[] = [];
@@ -525,7 +526,7 @@ export class PaletteTab implements WsPanel {
     return { rgba: this.ws.preview.pixel(px, py).rgba, label: i >= 0 ? `Color ${hex(i >> 4, 1)}·${hex(i & 15, 1)}` : 'not in the palette' };
   }
 
-  // Ctrl+click: the own animation that rewrites the color, in the Animations tab
+  // F12 (go to definition): the own animation that rewrites the color, in the Animations tab
   private gotoAnim(i: number): void {
     if (!this.t.anims) return;
     const own = colorAnimsAt(this.app, i);

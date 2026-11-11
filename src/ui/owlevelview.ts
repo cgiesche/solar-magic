@@ -29,6 +29,8 @@ import { mainTranslevel } from '../core/level.ts';
 import { l1Hex } from '../core/owl1sheet.ts';
 import { cellText, crumbleState, setCrumbles, destroyTarget } from '../core/oweventtiles.ts';
 import { hex } from '../core/names.ts';
+import { MARK } from './marks.ts';
+import { icon } from './icons.ts';
 
 // the level picker's note for a level no tile enters: what a tile choosing it gets (translevelUse)
 function freeNote(rom: Rom, tl: number): string {
@@ -222,7 +224,7 @@ export class LevelTileLayer {
     const body = h('div', { class: 'ow-place' });
     const build = () => body.replaceChildren(
       h('div', { class: 'prop' }, h('label', null, 'Level'), this.levelChoice(tl, i, (t) => { tl = t; build(); })),
-      ...(free ? [] : [h('div', { class: 'hint warn-text' }, '⚠ Every level (001–024, 101–13B) already has a level tile: the one chosen will be entered from two.')]),
+      ...(free ? [] : [h('div', { class: 'hint warn-text' }, icon('warning'), 'Every level (001–024, 101–13B) already has a level tile: the one chosen will be entered from two.')]),
       ...(v.event >= 0 ? [h('div', { class: 'hint' }, `Placed as after event ${hex(v.event, 2)}: the map before it stays.`)] : []),
       h('div', { class: 'hint' }, `Tile ${hex(x, 2)},${hex(y, 2)} · now ${l1Hex(v.levelL1()[i])}${this.isLevelAt(i) ? ` (level ${levelHex(v.tls[i])}, which will have no level tile)` : ''}`),
       h('div', { class: 'prop' }, h('label', null, 'Look')),
@@ -308,7 +310,7 @@ export class LevelTileLayer {
       ctx.drawImage(l1, a.x * 16, a.y * 16, 16, 16, b.x * 16, b.y * 16, 16, 16);
       ctx.lineWidth = lw;
       ctx.setLineDash([3 * lw, 2 * lw]);
-      ctx.strokeStyle = '#4cc2ff';
+      ctx.strokeStyle = MARK.select;
       ctx.strokeRect(a.x * 16, a.y * 16, 16, 16);
       ctx.setLineDash([]);
       ctx.strokeStyle = 'rgba(255,255,0,0.9)';

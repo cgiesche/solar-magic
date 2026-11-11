@@ -3,6 +3,7 @@
 // visitor's system stands out.
 
 import { h } from './dom.ts';
+import { icon } from './icons.ts';
 
 export function initLanding(landing: HTMLElement): void {
   lightbox([...landing.querySelectorAll<HTMLAnchorElement>('a.landing-shot')]);
@@ -18,7 +19,7 @@ function lightbox(shots: HTMLAnchorElement[]): void {
   const step = (d: number) => show((at + d + shots.length) % shots.length);
   const dlg = h('dialog', { class: 'lightbox', 'aria-label': 'Screenshot' },
     h('figure', null, img, caption),
-    h('button', { class: 'lb-close', title: 'Close (Esc)', 'aria-label': 'Close', onclick: () => dlg.close() }, '✕'),
+    h('button', { class: 'lb-close', title: 'Close (Esc)', 'aria-label': 'Close', onclick: () => dlg.close() }, icon('close')),
     h('button', { class: 'lb-prev', title: 'Previous (←)', 'aria-label': 'Previous screenshot', onclick: () => step(-1) }, '‹'),
     h('button', { class: 'lb-next', title: 'Next (→)', 'aria-label': 'Next screenshot', onclick: () => step(1) }, '›'));
   // a click anywhere but the arrows closes it (the backdrop, the screenshot, the caption)

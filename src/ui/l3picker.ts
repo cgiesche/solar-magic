@@ -9,6 +9,7 @@ import { TileCache } from '../core/render.ts';
 import { blankTile, l3Palette, withL3Palette, L3_TILE, L3_PAL, L3_PRIO, L3_FLIP_X, L3_FLIP_Y } from '../core/layer3map.ts';
 import { hex3 } from '../core/names.ts';
 import { AntsOverlay } from './ants.ts';
+import { MARK } from './marks.ts';
 
 // layer 3's graphics and colors as shown
 export interface L3Graphics { vram: Uint8Array; cgram: Uint8Array; charBase: number }
@@ -44,7 +45,7 @@ export function layer3Picker(body: HTMLElement, g: L3Graphics, b: Brush, setBrus
   const ants = new AntsOverlay(c, () => ({ w: 16, h: 32 }));
   ctx.drawImage(sheet, 0, 0, c.width, c.height);
   // (the chosen rectangle of tiles running on the overlay)
-  const show = (x: number, y: number, w: number, hh: number) => ants.set(x < 0 ? [] : [{ x, y, w, h: hh, color: '#4cc2ff' }]);
+  const show = (x: number, y: number, w: number, hh: number) => ants.set(x < 0 ? [] : [{ x, y, w, h: hh, color: MARK.select }]);
   if (onSheet) show(w0 & 15, (w0 & L3_TILE) >> 4, b.w, b.h); else show(-1, 0, 0, 0);
   attachRectPick(c, 16, 32, (q) => show(q.x, q.y, q.w, q.h), (q) =>
     setBrush({ w: q.w, h: q.h, tiles: Array.from({ length: q.w * q.h }, (_, i) => ((q.y + Math.floor(i / q.w)) * 16 + q.x + (i % q.w)) | (attr & (L3_PAL | L3_PRIO))) }));

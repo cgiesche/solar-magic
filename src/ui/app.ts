@@ -76,6 +76,7 @@ import { hardWalksInput, type HardWalk } from '../core/owhardpaths.ts';
 import { OW_EVENTS, type OwRender } from '../core/overworld.ts';
 import type { OwTriggerSwitches } from '../core/owanimview.ts';
 import { animationPref } from './motion.ts';
+import { keptShown } from './viewprefs.ts';
 import type { Rect } from '../core/owevents.ts';
 import type { OwSpriteView } from '../core/owsprites.ts';
 import type { ProgressSave } from '../core/owprogress.ts';
@@ -245,6 +246,7 @@ export class App {
     // made now, outside any ROM edit (undo never takes it away), and stored with the ROM soon
     if (makeProjectId(rom)) this.persistTimer = window.setTimeout(() => { this.persistTimer = 0; this.persist(); }, 1000);
     this.view.show.anim = animationPref.get();
+    this.view.show = keptShown(this.view.show); // (the View options kept, #488)
     this.emu = new LevelEmulator(rom);
     this.emu.skipMask = this.gfxSkipMask;
     // the level is loaded anew for every edit and drag step: frames that read the same are taken over (#448)

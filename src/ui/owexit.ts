@@ -10,6 +10,7 @@ import { hex2, hex3 } from '../core/names.ts';
 import { OW_ACTIONS, owActionName, type OverworldExit } from '../core/level.ts';
 import { MAP_NAMES, OW_EVENTS, eventNames, readL1, readL2, readTranslevels, translevelToLevel, l1Index, drawOwMap, owMapAt, owShownCopies } from '../core/overworld.ts';
 import { readTeleport, readTeleports, locationText, tileText, overworldExitText, type OwTile } from '../core/owteleport.ts';
+import { MARK } from './marks.ts';
 
 type Rows = [string, HTMLElement][];
 type Edit = (label: string, f: (x: OverworldExit) => void) => void;
@@ -104,7 +105,7 @@ export function pickOverworldTile(app: App, cur: OwTile | null): Promise<OwTile 
         ctx.fillStyle = '#fff'; ctx.fillText(hex2(i), t.to.x * 16 + 2, t.to.y * 16 + 7);
       });
       const frame = (t: { x: number; y: number }, color: string) => { ctx.strokeStyle = color; ctx.lineWidth = 1; ctx.strokeRect(t.x * 16 + 0.5, t.y * 16 + 0.5, 15, 15); };
-      if (cur && cur.submap === map) frame(cur, '#4cc2ff');
+      if (cur && cur.submap === map) frame(cur, MARK.select);
       if (hover) frame(hover, '#ffff00');
     };
     const cell = (e: MouseEvent) => {

@@ -14,6 +14,7 @@ import { levelNameTiles, setLevelNameTiles, decodeName, encodeName, tileChar, ti
 import { boolPref } from './prefs.ts';
 import { closeMenus, onCloseMenus } from './menu.ts';
 import { placeLabel } from './owlevelname.ts';
+import { icon } from './icons.ts';
 
 const COLS = 32, ROWS = 3, FIRST_ROW = 3; // the border's rows shown: the name's (4) with the one above and below
 const W = COLS * 8, H = ROWS * 8;
@@ -82,7 +83,7 @@ export function levelNameField(app: App, tl: number, r: OwRender | null, edit = 
   const update = () => {
     enc = encodeName(input.value, multiChar);
     const p = problem();
-    note.textContent = p ? `⚠ ${p}` : `${enc.tiles.length} of ${NAME_LEN} tiles`;
+    note.replaceChildren(...(p ? [icon('warning'), ` ${p}`] : [`${enc.tiles.length} of ${NAME_LEN} tiles`]));
     note.classList.toggle('warn-text', !!p);
     input.classList.toggle('bad', !!p);
     drawBorder(canvas, r, enc.shown);

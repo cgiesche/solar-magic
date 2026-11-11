@@ -1,15 +1,17 @@
-// The problem list of the level view: a status bar button "⚠ N problems" that opens a list of
-// everything the checks found (see core/problems.ts); an entry shows where the problem is.
+// The problem list of the level view: a status bar button counting the problems, the list of everything the checks
+// found (see core/problems.ts) in the bottom panel's Problems tab (#479); an entry shows where the problem is.
 
 import type { App } from './app.ts';
 import { h, clear } from './dom.ts';
 import { closeMenus } from './menu.ts';
+import { bottomPanel, type ProblemCount } from './logbar.ts';
 import { exitProblems, levelProblems, scanProblems, sortProblems, type Problem, type ProblemPlace, type Severity } from '../core/problems.ts';
 import { incompleteSprites, leftOutSprites, spriteMemDialog, spriteMemText, missingText, SPRITE_MEM_HELP, MISSING_HELP } from './spritemem.ts';
 import { messageLevels, messageProblems, type MessageLevel } from '../core/messageuse.ts';
 import { loadLevel } from '../core/level.ts';
 import { levelMessages, spriteOpens } from './messagepanel.ts';
 import { MESSAGE_ROUTINE_CHECKING, messageRoutineUnknown } from '../core/messagedraw.ts';
+import { icon, iconLabel, type IconName } from './icons.ts';
 
 // the sprites of the other levels showing the open level's messages, read again after a ROM change
 let sharing: { key: string; levels: MessageLevel[] } | null = null;
@@ -50,10 +52,10 @@ export function collectProblems(app: App, reveal: (uids: number[]) => void): Pro
   return sortProblems(out);
 }
 
-const ICON: Record<Severity, string> = { error: '⛔', warn: '⚠', info: 'ℹ' };
+const ICON: Record<Severity, IconName> = { error: 'error', warn: 'warning', info: 'info' };
 
 // the status bar button of the level; update() recounts (call it after changes and finished checks)
-export function problemsButton(app: App, reveal: (uids: number[]) => void): HTMLButtonElement & { update: () => void } {
+export function problemsButton(app: App, reveal: (uids: number[]) => void): ReturnType<typeof problemListButton<Problem>> {
   const show = (p: ProblemPlace) => {
     if ('sprites' in p) reveal(p.sprites);
     else if ('screen' in p && p.exit) app.gotoExit(app.level.number, p.screen);
@@ -61,7 +63,7 @@ export function problemsButton(app: App, reveal: (uids: number[]) => void): HTML
     else { app.reveal = { x: p.tx * 16 + 8, y: p.ty * 16 + 8 }; app.emit('reveal'); }
   };
   return problemListButton<Problem>({
-    title: 'Problems found in this level', heading: 'Problems in this level', collect: () => collectProblems(app, reveal),
+    title: 'Problems found in this level', heading: 'Problems in this level', collect: () => collectProblems(app, reveal), scope: () => app.level?.number,
     canOpen: (p) => !!p.where || !!p.message,
     open: (p) => { if (p.where) show(p.where); if (p.message) app.openMessages(p.message.translevel, p.message.msg); },
   });
@@ -69,54 +71,45 @@ export function problemsButton(app: App, reveal: (uids: number[]) => void): HTML
 
 // what a problem list shows of a problem
 export interface ListedProblem { key: string; severity: Severity; text: string; title?: string; fix?: { label: string; run: () => void } }
-// A status bar button "⚠ N problems" opening the list of what `collect` finds (an entry `open`s where the problem is);
-// update() recounts
+// A status bar button counting what `collect` finds; it opens the bottom panel's Problems tab (#479), where `list` shows
+// them (an entry `open`s where the problem is, Fix runs its fix). A new error opens the panel. update() recounts
 export function problemListButton<P extends ListedProblem>(o: {
   title: string; heading: string; collect: () => P[]; canOpen: (p: P) => boolean; open: (p: P) => void;
-}): HTMLButtonElement & { update: () => void } {
-  let list: P[] = [];
-  let pop: HTMLDivElement | null = null;
-  const btn = h('button', { class: 'status-warn', hidden: true, title: o.title }) as HTMLButtonElement & { update: () => void };
+  scope?: () => unknown; // what the problems are of (the level): another one's errors are not new
+}): HTMLButtonElement & { update: () => void; list: HTMLElement; count: () => ProblemCount } {
+  let found: P[] = [];
+  // the errors listed before (by key) and what they were of: an error not among them is new
+  let errorsBefore: { scope: unknown; keys: Set<string> } | null = null;
+  const list = h('div', { class: 'problem-list', role: 'list', 'aria-label': o.heading });
+  const btn = h('button', { class: 'status-warn', hidden: true, title: `${o.title} – shown in the Problems panel` }) as HTMLButtonElement & { update: () => void; list: HTMLElement; count: () => ProblemCount };
   const fill = () => {
-    if (!pop) return;
-    clear(pop);
-    pop.append(h('div', { class: 'menu-heading' }, list.length ? o.heading : 'No problems found'));
-    for (const p of list) {
-      const row = h('div', { class: `problem problem-${p.severity}`, title: p.title ?? '' },
-        h('span', { class: 'problem-icon' }, ICON[p.severity]),
-        h('button', { class: 'problem-text', disabled: !o.canOpen(p), onclick: () => o.open(p) }, p.text),
-        p.fix ? h('button', { class: 'problem-fix', onclick: () => { close(); p.fix!.run(); } }, p.fix.label) : null);
-      pop.append(row);
+    clear(list);
+    if (!found.length) { list.append(h('p', { class: 'hint' }, 'No problems found.')); return; }
+    for (const p of found) {
+      list.append(h('div', { class: `problem problem-${p.severity}`, role: 'listitem', title: p.title ?? '' },
+        h('span', { class: 'problem-icon' }, icon(ICON[p.severity])),
+        h('span', { class: 'problem-text' }, p.text),
+        o.canOpen(p) ? h('button', { class: 'problem-fix', title: 'Show where it is', onclick: () => o.open(p) }, 'Show') : null,
+        p.fix ? h('button', { class: 'problem-fix', onclick: () => p.fix!.run() }, p.fix.label) : null));
     }
   };
-  const outside = (e: MouseEvent) => { if (pop && !pop.contains(e.target as Node) && !btn.contains(e.target as Node)) close(); };
-  const key = (e: KeyboardEvent) => { if (e.key === 'Escape') close(); };
-  const close = () => {
-    pop?.remove();
-    pop = null;
-    window.removeEventListener('mousedown', outside, true);
-    window.removeEventListener('keydown', key, true);
-  };
-  btn.onclick = () => {
-    if (pop) { close(); return; }
-    closeMenus();
-    pop = h('div', { class: 'menu problems-pop' });
-    fill();
-    document.body.append(pop);
-    const r = btn.getBoundingClientRect();
-    pop.style.right = `${Math.max(4, window.innerWidth - r.right)}px`;
-    pop.style.bottom = `${window.innerHeight - r.top + 4}px`;
-    window.addEventListener('mousedown', outside, true);
-    window.addEventListener('keydown', key, true);
-  };
+  btn.onclick = () => { closeMenus(); bottomPanel()?.toggleProblems(); };
+  btn.list = list;
+  btn.count = () => ({ errors: found.filter((p) => p.severity === 'error').length, warnings: found.filter((p) => p.severity === 'warn').length });
   btn.update = () => {
-    list = o.collect();
-    const worst = list.find((p) => p.severity !== 'info');
-    const shown = list.filter((p) => p.severity !== 'info').length;
-    btn.hidden = !list.length;
+    found = o.collect();
+    const worst = found.find((p) => p.severity !== 'info');
+    const shown = found.filter((p) => p.severity !== 'info').length;
+    btn.hidden = !found.length;
     btn.classList.toggle('status-info', !worst);
-    btn.textContent = shown ? `⚠ ${shown} problem${shown > 1 ? 's' : ''}` : `ℹ ${list.length} note${list.length > 1 ? 's' : ''}`;
+    btn.replaceChildren(...(shown ? iconLabel('warning', `${shown} problem${shown > 1 ? 's' : ''}`) : iconLabel('info', `${found.length} note${found.length > 1 ? 's' : ''}`)));
     fill();
+    // (a new error – not one listed before, nor another level's – opens the panel, #479's decision; warnings only count)
+    const scope = o.scope?.(), keys = new Set(found.filter((p) => p.severity === 'error').map((p) => p.key));
+    const fresh = errorsBefore !== null && errorsBefore.scope === scope && [...keys].some((k) => !errorsBefore!.keys.has(k));
+    if (fresh && list.isConnected) bottomPanel()?.showProblems();
+    errorsBefore = { scope, keys };
+    if (list.isConnected) bottomPanel()?.refreshProblems();
   };
   return btn;
 }

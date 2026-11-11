@@ -1,4 +1,4 @@
-// "Test level": runs the edited level in the built-in emulator (video, sound, input) – or the game from the
+// Test play: runs the edited level in the built-in emulator (video, sound, input) – or the game from the
 // overworld (core/playsession.ts fromOverworld). The sound unit is emulated too (apu.ts): the game uploads and
 // plays its music and sound effects itself.
 
@@ -27,6 +27,7 @@ import { applyTriggers, emptyTriggerView, customOn, switchName, isCustom, isManu
 import { shownSwitches } from './triggerpanel.ts';
 import { SaveSlot } from '../core/savestate.ts';
 import type { SnesState } from '../core/snes.ts';
+import { iconLabel } from './icons.ts';
 
 const KEYMAP: Record<string, number> = {
   ArrowUp: PAD.up, ArrowDown: PAD.down, ArrowLeft: PAD.left, ArrowRight: PAD.right,
@@ -153,9 +154,9 @@ function start(app: App, o: Origin, audio: AudioOut, fromSave: boolean): void {
 
 // what the title says the test starts from
 function originText(app: App, o: Origin): string {
-  if (o.kind === 'level') return `Test level – ${hex(app.level.number, 3)}${o.at ? ` from ${hex(o.at.tx, 2)}/${hex(o.at.ty, 2)}` : ''}`;
+  if (o.kind === 'level') return `Level ${hex(app.level.number, 3)}${o.at ? ` from ${hex(o.at.tx, 2)}/${hex(o.at.ty, 2)}` : ''}`;
   const { x, y } = l1XY(o.tile);
-  return `Test play – overworld, ${o.tile < 0 ? 'start position' : `tile ${hex(x, 2)},${hex(y, 2)} (${o.tile >= 0x400 ? 'submaps' : 'main map'})`}, the map ${progressWords(o.progress)}`;
+  return `Overworld, ${o.tile < 0 ? 'start position' : `tile ${hex(x, 2)},${hex(y, 2)} (${o.tile >= 0x400 ? 'submaps' : 'main map'})`}, the map ${progressWords(o.progress)}`;
 }
 
 function play(app: App, o: Origin, audio: AudioOut, p: PlaySession, ppu: PPU, ok: boolean, fromSave: boolean): void {
@@ -311,18 +312,30 @@ function play(app: App, o: Origin, audio: AudioOut, p: PlaySession, ppu: PPU, ok
   };
   // (the open level's triggers: from the overworld other levels are played)
   const triggers = o.kind === 'level' ? triggerControls(app, p.wram, () => canvas.focus()) : '';
-  const m = modal(`${originText(app, o)}${fromSave ? ' – from the savestate' : ''}${ok ? '' : ' (load error)'}`, h('div', { class: 'play' },
-    h('div', { class: 'play-main' }, canvas, meter.el),
-    info,
-    triggers,
-    h('div', { class: 'hint play-help' }, `Controls: arrows · X = jump (B) · Z/Y = run/fire (Y) · S = spin jump · A = X button · Enter = Start · Shift = Select · Q/W = L/R · P = pause. Gamepad: d-pad/left stick, buttons by position as on the SNES pad (bottom = B, right = A, left = Y, top = X), shoulder buttons/triggers = L/R, Start/Select, Home = pause. M = sound on/off. Backspace (held) = rewind, up to ${REWIND_EVERY * REWIND_STATES / 60} s (gamepad: a stick pressed). F5 = save state, F8 = load state (gamepad: Select+L / Select+R; one slot, kept for this ${o.kind === 'level' ? 'level' : 'test from the overworld'} until it or the ROM changes). ${o.kind === 'level' ? 'The level is saved before the test.' : 'The open level is saved before the test; levels entered on the overworld play as saved.'}`),
-  ), [
-    { label: 'Restart from savestate', onClick: () => { setTimeout(() => begin(app, o, true), 0); } },
-    { label: 'Restart', onClick: () => { setTimeout(() => begin(app, o, false), 0); } },
-    { label: 'Quit', primary: true },
-  ], stop);
+  // a full-window overlay (#485): the game in the middle with the transport bar under it (each button with its key) and
+  // the controls, the meters as a side panel; Esc or ✕ quits
+  const kbd = (k: string) => h('kbd', null, k);
+  const btnRestartSaved = h('button', { title: 'Restart from the savestate (F8)', onclick: () => { m.close(); setTimeout(() => begin(app, o, true), 0); } }, 'Restart from savestate ', kbd('F8'));
+  const btnSave = h('button', { title: 'Save the state (F5)', onclick: () => { saveState(); canvas.focus(); } }, 'Save state ', kbd('F5'));
+  const btnRestart = h('button', { title: 'Start again', onclick: () => { m.close(); setTimeout(() => begin(app, o, false), 0); } }, iconLabel('play', 'Restart'));
+  const btnPause = h('button', { title: 'Pause (P)', onclick: () => { setPaused(!paused); canvas.focus(); } }, 'Pause ', kbd('P'));
+  const btnRewind = h('button', { title: `Rewind while held (Backspace), up to ${REWIND_EVERY * REWIND_STATES / 60} s`, onpointerdown: () => { keyRewind = true; }, onpointerup: () => { keyRewind = false; canvas.focus(); }, onpointerleave: () => { keyRewind = false; } }, 'Rewind ', kbd('⌫ held'));
+  const btnSound = h('button', { title: 'Sound on/off (M)', onclick: () => { soundMuted = !soundMuted; audio.setMuted(soundMuted || rewinding); canvas.focus(); } }, 'Sound ', kbd('M'));
+  const transport = h('div', { class: 'play-transport', role: 'toolbar', 'aria-label': 'Test play' },
+    btnRestartSaved, btnSave, btnRestart, h('span', { class: 'play-sep' }), btnPause, btnRewind, btnSound, h('span', { class: 'play-sep' }), info,
+    h('span', { class: 'play-sep' }), h('button', { title: 'End the test (Esc)', onclick: () => m.close() }, 'Quit test play ', kbd('Esc')));
+  const legend = h('div', { class: 'hint play-help' },
+    h('span', null, kbd('←→↑↓'), ' move'), h('span', null, kbd('X'), ' jump'), h('span', null, kbd('Z'), ' / ', kbd('Y'), ' run, fire'), h('span', null, kbd('S'), ' spin'),
+    h('span', null, kbd('A'), ' X button'), h('span', null, kbd('Enter'), ' Start'), h('span', null, kbd('Shift'), ' Select'), h('span', null, kbd('Q'), ' / ', kbd('W'), ' L / R'));
+  const more = h('details', { class: 'hint play-more' }, h('summary', null, 'Gamepad, savestates'),
+    `Gamepad: d-pad/left stick, buttons by position as on the SNES pad (bottom = B, right = A, left = Y, top = X), shoulder buttons/triggers = L/R, Start/Select, Home = pause; a stick pressed rewinds; Select+L / Select+R save / load the state. One savestate slot, kept for this ${o.kind === 'level' ? 'level' : 'test from the overworld'} until it or the ROM changes. ${o.kind === 'level' ? 'The level is saved before the test.' : 'The open level is saved before the test; levels entered on the overworld play as saved.'}`);
+  const m = modal(`Test play · ${originText(app, o)}${fromSave ? ' – from the savestate' : ''}${ok ? '' : ' (load error)'}`, h('div', { class: 'play' },
+    h('div', { class: 'play-stage' }, canvas, transport, legend, more),
+    // (the meters and the level's animation triggers as the side panel, #485)
+    h('div', { class: 'play-side' }, meter.el, triggers),
+  ), [], stop, undefined, { className: 'modal-full' });
   // shown while there is a savestate to start from
-  function showRestartSaved(): void { m.buttons[0].hidden = !usable(); }
+  function showRestartSaved(): void { btnRestartSaved.hidden = !usable(); }
   showRestartSaved();
   canvas.focus();
 }

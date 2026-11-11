@@ -20,6 +20,7 @@ import { boxOf, boxMessage, trimLine, typeCode, newline, backspace, del, move, c
 import { messageTranslevel, messageLevels } from '../core/messageuse.ts';
 import { messageRoutineNote, messageRoutineUnknown, MESSAGE_ROUTINE_CHECKING } from '../core/messagedraw.ts';
 import { openTestPlay } from './testplay.ts';
+import { icon, iconLabel } from './icons.ts';
 
 const W = MSG_COLS * 8 + 16, H = MSG_LINES * 8 + 16; // the box with its black border, in pixels
 const FONT_CODES = 0x80; // the codes the character picker shows (16 × 8)
@@ -166,10 +167,10 @@ export class MessagePanel {
     const show = messageToShow(rom, t, n);
     const playable = t === YOSHI_THANKS.translevel && n === YOSHI_THANKS.msg ? true : t === here;
     this.root.append(
-      h('div', { class: 'panel-title' }, 'Message boxes', h('button', { class: 'msg-close', title: 'Close (Esc in the box) – back to the picker', onclick: () => app.closeMessages() }, '×')),
+      h('div', { class: 'panel-title' }, 'Message boxes', h('button', { class: 'msg-close', title: 'Close (Esc in the box) – back to the picker', 'aria-label': 'Close', onclick: () => app.closeMessages() }, icon('close'))),
       ...this.context(t),
-      h('div', { class: 'btn-group msg-tabs' }, tabs),
-      ...(routine.game === null ? [h('div', { class: 'hint warn-text' }, `⚠ ${messageRoutineUnknown(routine)}`)] : []),
+      h('div', { class: 'tabbar msg-tabs', role: 'tablist' }, tabs),
+      ...(routine.game === null ? [h('div', { class: 'hint warn-text' }, icon('warning'), `${messageRoutineUnknown(routine)}`)] : []),
       h('div', { class: 'msg-box' }, this.canvas, this.input, this.left),
       this.where,
       this.note,
@@ -180,7 +181,7 @@ export class MessagePanel {
       h('div', { class: 'row' }, h('button', {
         disabled: !playable, onclick: () => openTestPlay(app, undefined, false, show),
         title: playable ? `Test play this level with the message box open${show.yoshi ? ' (on Yoshi: Yoshi\'s house shows its message 2 then)' : ''}` : 'The open level shows other messages',
-      }, '▶ Show in game')),
+      }, iconLabel('play', 'Show in game'))),
       h('div', { class: 'hint' }, 'Characters of the ROM\'s font (click to type one):'),
       this.fontPicker(),
     );
@@ -194,7 +195,7 @@ export class MessagePanel {
     const app = this.app;
     this.box = null; this.shown = ''; this.canvas = null; this.input = null; this.where = null; this.note = null;
     this.root.append(
-      h('div', { class: 'panel-title' }, 'Message boxes', h('button', { class: 'msg-close', title: 'Close – back to the picker', onclick: () => app.closeMessages() }, '×')),
+      h('div', { class: 'panel-title' }, 'Message boxes', h('button', { class: 'msg-close', title: 'Close – back to the picker', 'aria-label': 'Close', onclick: () => app.closeMessages() }, icon('close'))),
       h('div', { class: 'hint' }, MESSAGE_ROUTINE_CHECKING),
     );
   }
@@ -204,13 +205,13 @@ export class MessagePanel {
     const app = this.app, show = messageToShow(app.rom, t, n);
     this.box = null; this.shown = ''; this.canvas = null; this.input = null; this.where = null; this.note = null;
     this.root.append(
-      h('div', { class: 'panel-title' }, 'Message boxes', h('button', { class: 'msg-close', title: 'Close – back to the picker', onclick: () => app.closeMessages() }, '×')),
-      h('div', { class: 'hint warn-text' }, `⚠ ${note}`),
+      h('div', { class: 'panel-title' }, 'Message boxes', h('button', { class: 'msg-close', title: 'Close – back to the picker', 'aria-label': 'Close', onclick: () => app.closeMessages() }, icon('close'))),
+      h('div', { class: 'hint warn-text' }, icon('warning'), `${note}`),
       h('div', { class: 'hint' }, 'Edit them as that package says (its manual). Message editing comes back here when the package is removed.'),
       h('div', { class: 'row' }, h('button', {
         disabled: t !== YOSHI_THANKS.translevel && t !== levelMessages(app), onclick: () => openTestPlay(app, undefined, false, show),
         title: 'Test play this level with the message box open: what the package shows',
-      }, '▶ Show in game')),
+      }, iconLabel('play', 'Show in game'))),
     );
   }
 
@@ -219,7 +220,7 @@ export class MessagePanel {
     const app = this.app, rom = app.rom;
     if (!t) {
       return [
-        h('div', { class: 'hint warn-text' }, `⚠ No level on the overworld leads to level ${hex3(app.level.number)}, also not through exits: its message boxes show translevel 0's messages – message 1 is the intro's, message 2 Yoshi's thank-you. Writing them here changes those.`),
+        h('div', { class: 'hint warn-text' }, icon('warning'), `No level on the overworld leads to level ${hex3(app.level.number)}, also not through exits: its message boxes show translevel 0's messages – message 1 is the intro's, message 2 Yoshi's thank-you. Writing them here changes those.`),
         h('div', { class: 'row' }, h('span', { class: 'hint' }, 'Give it messages of its own: connect it to a level on the overworld through an exit.'),
           h('button', { title: 'Exits mode: the screen exits of this level (the levels leading here need one to it)', onclick: () => app.setMode('exit') }, 'Exits')),
       ];

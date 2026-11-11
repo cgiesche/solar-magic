@@ -1,7 +1,8 @@
-// Central search (Ctrl+F or Ctrl+Space), like "Search Everywhere" in IntelliJ or the quick open of VS Code: one input over
+// Central search and command palette (Ctrl+K, Ctrl+F or Ctrl+Space; #483), like "Search Everywhere" in IntelliJ or VS Code's
+// command palette: one input over
 // everything the providers offer, the results grouped by provider. A row of groups above the list narrows the
 // search to one of them (Tab / Shift+Tab switch); choosing a result runs its pick(). For now the providers are
-// the tabs of the picker (Picker.searchProviders).
+// the commands (every menu entry, the places of G …; main.ts) and the tabs of the picker (Picker.searchProviders).
 
 import { h, clear, emptyState } from './dom.ts';
 
@@ -49,7 +50,7 @@ export function openSearch(providers: SearchProvider[], opts: SearchOptions = {}
   let group = ''; // '' all groups, else a provider id
   let rows: { el: HTMLElement; pick: () => void }[] = [];
   let active = 0;
-  const input = h('input', { class: 'filter search-input', placeholder: 'Search objects, prefabs, Map16, sprites …', spellcheck: false, autocomplete: 'off', value: last });
+  const input = h('input', { class: 'filter search-input', placeholder: 'Search commands, objects, prefabs, Map16, sprites …', spellcheck: false, autocomplete: 'off', value: last });
   const groups = h('div', { class: 'tabs seg search-groups' });
   const list = h('div', { class: 'search-list' });
   const box = h('div', { class: 'search-box' }, h('div', { class: 'row' }, input), groups, list,
@@ -92,7 +93,10 @@ export function openSearch(providers: SearchProvider[], opts: SearchOptions = {}
     active = 0;
     const terms = searchTerms(input.value);
     noted = false;
-    if (!terms.length) { list.append(emptyState('Type a number or a name.')); return; }
+    // (nothing typed: the commands, all of them – the palette to browse, #483)
+    const browse = !terms.length && providers.some((p) => p.id === 'commands') && (!group || group === 'commands');
+    if (!terms.length && !browse) { list.append(emptyState('Type a number or a name.')); return; }
+    const shownGroup = browse ? 'commands' : group;
     // results whose number or name is the query come first, then those with every term in the number or name,
     // then those found by the rest (detail, behavior, …); a group is ranked by its best result
     const q = terms.join(' ');
@@ -101,7 +105,7 @@ export function openSearch(providers: SearchProvider[], opts: SearchOptions = {}
       return label === q || name === q ? 0 : matchesAll(`${label} ${name}`, terms) ? 1 : 2;
     };
     const notes: string[] = [];
-    const groupsFound = providers.filter((p) => !group || p.id === group).map((p) => {
+    const groupsFound = providers.filter((p) => !shownGroup || p.id === shownGroup).map((p) => {
       const found = p.search(terms).map((r) => ({ r, rank: rank(r) })).sort((a, b) => a.rank - b.rank); // (stable)
       const note = p.note?.();
       if (note) notes.push(`${p.label}: ${note}`);
@@ -111,8 +115,8 @@ export function openSearch(providers: SearchProvider[], opts: SearchOptions = {}
     for (const n of notes) list.append(h('div', { class: 'hint search-note' }, n));
     groupsFound.sort((a, b) => a.best - b.best);
     for (const { p, found } of groupsFound) {
-      const max = group ? MAX : PER_GROUP;
-      if (!group) list.append(h('div', { class: 'picker-head' }, p.label, h('span', { class: 'hint' }, ` ${found.length}`)));
+      const max = shownGroup ? MAX : PER_GROUP;
+      if (!shownGroup || browse) list.append(h('div', { class: 'picker-head' }, p.label, h('span', { class: 'hint' }, ` ${found.length}`)));
       for (const r of found.slice(0, max)) {
         const thumb = h('span', { class: 'picker-thumb-s' });
         if (r.thumb) { thumbs.set(thumb, r.thumb); obs.observe(thumb); }

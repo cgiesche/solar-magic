@@ -1,4 +1,4 @@
-// "Packages" tab of the patches dialog: the installed packages on the left, the chosen one on the right
+// The "Packages" kind of the Packages workspace: the installed packages on the left, the chosen one on the right
 // with everything it brought – its patch with the settings, where its UberASM code runs, its blocks and
 // sprites with their files' settings, its ExGFX files – the graphics and other files in the package to
 // take later (import a graphic, add a part), and removing it with all of that.
@@ -27,6 +27,8 @@ import { definesButton, editButton, isTextFile } from './defineedit.ts';
 import { openDocs, packageDocs } from './docview.ts';
 import { gfxName } from './gfx/map16tab.ts';
 import { TOOL_KINDS, type ToolKind } from '../core/parts.ts';
+import { icon } from './icons.ts';
+import { contextMenu } from './menu.ts';
 
 const CTX_LABEL: Record<UberContext, string> = { level: 'Level', gamemode: 'Game Mode', overworld: 'Overworld map' };
 
@@ -74,7 +76,14 @@ export function packagesPane(app: App, host: PackagesHost): { el: HTMLElement; r
   }
 
   function renderList(): void {
-    clear(list).append(...items.map((it) => h('button', { class: 'pkg-item' + (it.key === sel ? ' active' : ''), onclick: () => { sel = it.key; fileFilter = ''; renderList(); renderDetail(); } },
+    clear(list).append(...items.map((it) => h('button', {
+      class: 'pkg-item' + (it.key === sel ? ' active' : ''), onclick: () => { sel = it.key; fileFilter = ''; renderList(); renderDetail(); },
+      // (#480: the package's removal also as a context menu; its other actions are in its detail)
+      oncontextmenu: (e: MouseEvent) => {
+        e.preventDefault();
+        if (sel !== it.key) { sel = it.key; fileFilter = ''; renderList(); renderDetail(); }
+        contextMenu(e.clientX, e.clientY, [{ label: 'Remove …', title: 'Remove the package and what it brought (asks first)', onClick: () => void remove(it) }]);
+      } },
       h('div', { class: 'pkg-item-name' }, it.name),
       h('div', { class: 'hint' }, packageSummary(it.rec).join(' · ')))),
     items.length ? '' : h('p', { class: 'hint' }, 'Nothing installed yet.'),
@@ -190,7 +199,7 @@ export function packagesPane(app: App, host: PackagesHost): { el: HTMLElement; r
         calls.length ? h('table', { class: 'uber-table' }, h('tr', null, h('th', null, 'runs in'), h('th', null, 'File'), h('th')),
           calls.map((c) => h('tr', null, h('td', null, where(c)), h('td', { class: 'mono' }, c[2]),
             h('td', { class: 'actions' }, definesButton(proj.files, c[2], () => touch('uberasm')), editButton(proj.files, c[2], () => touch('uberasm')),
-              h('button', { class: 'icon-btn', title: 'Remove assignment (the file stays)', onclick: () => unassign(c) }, '✕'))))) : h('p', { class: 'hint' }, 'Runs nowhere – assign it in the UberASM tab.'),
+              h('button', { class: 'icon-btn', title: 'Remove assignment (the file stays)', onclick: () => unassign(c) }, icon('close')))))) : h('p', { class: 'hint' }, 'Runs nowhere – assign it in the UberASM tab.'),
         rest.length ? h('details', { class: 'pkg-files' }, h('summary', null, `More files (${rest.length}): libraries, settings`),
           h('table', { class: 'uber-table' }, rest.map((f) => fileRow('uberasm', proj.files, f)))) : ''));
     }

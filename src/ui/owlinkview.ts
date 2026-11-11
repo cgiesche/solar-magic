@@ -31,6 +31,7 @@ import { ExitGraph } from '../core/exitgraph.ts';
 import { readSecondaryEntrance, levelTranslevel } from '../core/level.ts';
 import { hex } from '../core/names.ts';
 import { stuckOnArrival, stuckOnArrivalText, ARRIVAL_RULE, type ArrivalHow } from '../core/owreach.ts';
+import { MARK } from './marks.ts';
 
 // what is selected: a link, a location (a star/pipe entry exits to the overworld teleport to), a Koopa Kid's place,
 // a tile no link starts at (to link it to a tile on another map)
@@ -45,7 +46,7 @@ type Source = { kind: LinkKind | 'koopa'; why?: undefined } | { kind: null; why:
 // a link end shown whose other end lies on another map: its tile (l1Index), the label's text, the link and the end
 export type OffMapEnd = { i: number; text: string; link: OwLink | null; there: OwTile };
 
-const COLORS = { star: '#c58cff', exit: '#ff6b6b', location: '#4cc2ff', koopa: '#ffa94c' };
+const COLORS = { star: '#c58cff', exit: '#ff6b6b', location: MARK.select, koopa: '#ffa94c' };
 // what each colour of the link marks and arrows means, by kind: the legend's rows (the "?" popover, ADR 0015), the
 // words the status bar starts a hovered mark's meaning with (markText); dashed: its arrows dashed (from the tiles it
 // belongs to)

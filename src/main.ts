@@ -4,7 +4,7 @@ import { createBps, crc32 } from './core/bps.ts';
 import { prepareRom } from './core/editorpatches.ts';
 import { SMW_CLEAN_CRC } from './core/cleangame.ts';
 import { App, type EditMode } from './ui/app.ts';
-import { h, clear, toast, log, modal, choose, zoomControl, fieldTakesKey, installStepFields } from './ui/dom.ts';
+import { h, clear, toast, log, modal, choose, zoomControl, fieldTakesKey, installStepFields, keepAriaStates, setDialogUndo, gotoAt } from './ui/dom.ts';
 import { downloadBytes, pickFile, saveFile, filePath, fileName, desktop, guardClose } from './ui/platform.ts';
 import { LogBar } from './ui/logbar.ts';
 import { pasteHintBox } from './ui/pastehint.ts';
@@ -13,7 +13,7 @@ import { LevelView } from './ui/levelview.ts';
 import { exportLevelPng, openLevelImages } from './ui/levelimages.ts';
 import { LevelList, Picker, Properties } from './ui/panels.ts';
 import { sideSplitter } from './ui/pickerview.ts';
-import { openSearch } from './ui/search.ts';
+import { openSearch, matchesAll, type SearchProvider, type SearchResult } from './ui/search.ts';
 import { onBehaviorProgress } from './ui/tilebehaviors.ts';
 import { openHeaderDialog } from './ui/headerdialog.ts';
 import { hex } from './core/names.ts';
@@ -21,10 +21,10 @@ import { GfxWorkspace, type WsTab, type WsTarget } from './ui/gfxworkspace.ts';
 import type { Map16Target } from './ui/gfx/target.ts';
 import { openRemapUses } from './ui/tileuses.ts';
 import { openEntrancesDialog, openRomInfo, openInsertDialog, openExpandDialog, openSaveAsDialog, exportLevel, importLevel, importOverworldFrom, openScreenDialog, clearLevelConfirm } from './ui/tools.ts';
-import { menuBar, closeMenus } from './ui/menu.ts';
+import { menuBar, closeMenus, type Menu } from './ui/menu.ts';
 import { viewMenu } from './ui/viewmenu.ts';
 import { LEVEL_FILE_EXT } from './core/levelfile.ts';
-import { openResources } from './ui/resources.ts';
+import { PackagesWorkspace, setPackagesHost, type PackagesKind, type PackagesOptions } from './ui/pkgworkspace.ts';
 import { OverworldView } from './ui/overworld.ts';
 import { GameView } from './ui/gameview.ts';
 import { overworldReplacement } from './core/overworld.ts';
@@ -34,6 +34,11 @@ import { MessagePanel, levelMessages } from './ui/messagepanel.ts';
 import { NavHistory, fromHash, type NavLoc } from './ui/navhistory.ts';
 import { initLanding } from './ui/landing.ts';
 import { clearPrefs } from './ui/prefs.ts';
+import { icon, iconLabel } from './ui/icons.ts';
+import { THEMES, themePref } from './ui/theme.ts';
+import type { IconName } from './ui/icons.ts';
+import { railButton, toolRail } from './ui/rail.ts';
+import { shortcutSections, GO_PLACES, type WorkspaceId } from './ui/shortcuts.ts';
 
 const root = document.getElementById('app')!;
 
@@ -134,15 +139,46 @@ function buildUi(app: App): { start: (at: NavLoc | null) => Promise<void> } {
   const levels = new LevelList(app);
   const picker = new Picker(app);
   const props = new Properties(app);
+  const messagePanel = new MessagePanel(app);
   app.on('properties', () => {
     if (app.messages) app.closeMessages();
+    showLevelTab('props');
     props.root.scrollIntoView({ block: 'nearest' });
     props.root.querySelector<HTMLElement>('input, select, textarea, button')?.focus();
   });
 
-  let workspace: 'level' | 'ow' | 'gfx' | 'game' = 'level';
+  let workspace: WorkspaceId = 'level';
   // the picker is shown in the level editor unless the message panel takes its place (it prefetches only then)
-  const updatePickerShown = () => picker.setShown(workspace === 'level' && !app.messages);
+  // the level's side panel (ADR 0015, #478): tabs Picker | Properties – a selection shows its properties, picking
+  // something to place the picker; the message panel is the Properties tab's content while it is open
+  let levelTab: 'picker' | 'props' = 'picker';
+  const levelTabs = h('div', { class: 'tabbar side-tabs', role: 'tablist' });
+  const propsHost = h('div', { class: 'side-props' });
+  const updatePickerShown = () => picker.setShown(workspace === 'level' && levelTab === 'picker');
+  const renderLevelSide = () => {
+    const tab = (t: typeof levelTab, label: string, title: string) => h('button', { class: levelTab === t ? 'active' : '', title, onclick: () => showLevelTab(t) }, label);
+    levelTabs.replaceChildren(
+      tab('picker', 'Picker', 'What to place: objects, Map16 tiles, sprites (right click/Shift+click places it)'),
+      tab('props', 'Properties', app.messages ? 'The level\'s message boxes' : 'The settings of what is selected'));
+    picker.root.hidden = levelTab !== 'picker';
+    propsHost.hidden = levelTab !== 'props';
+    const content = app.messages ? messagePanel.root : props.root;
+    if (propsHost.firstChild !== content) propsHost.replaceChildren(content);
+    updatePickerShown();
+  };
+  function showLevelTab(t: typeof levelTab): void {
+    if (levelTab === t) return;
+    levelTab = t;
+    renderLevelSide();
+  }
+  let selectedBefore = 0;
+  app.on('change', () => {
+    const n = app.model.selection.size;
+    if (n && !selectedBefore) showLevelTab('props');
+    else if (!n && selectedBefore && !app.messages) showLevelTab('picker');
+    selectedBefore = n;
+  });
+  app.on('picked-item', () => showLevelTab('picker'));
   let ow: OverworldView | null = null;
   let game: GameView | null = null;
   let gameBorder: number | null = null; // the overworld map whose border the Game workspace shows when switched to
@@ -151,19 +187,21 @@ function buildUi(app: App): { start: (at: NavLoc | null) => Promise<void> } {
   let ws: GfxWorkspace | null = null;
   const inLevel = () => workspace === 'level' || workspace === 'gfx';
   // the workspaces without the open level: their changes are ROM edits (nothing to save), no level to test or hear
-  const romOnly = () => workspace === 'ow' || workspace === 'game';
+  const romOnly = () => workspace === 'ow' || workspace === 'game' || workspace === 'pkg';
+  let pkg: PackagesWorkspace | null = null; // the Packages workspace (#484)
 
   // ---- level context bar: mode, view, zoom
-  const modeBtn = (m: EditMode, label: string, key: string) => h('button', { class: 'mode', 'data-mode': m, title: `${label} (${key})`, onclick: () => app.setMode(m) }, label);
-  const modes = h('div', { class: 'btn-group' },
-    modeBtn('l1', 'Layer 1', '1'), modeBtn('l2', 'Layer 2', '2'), modeBtn('spr', 'Sprites', '3'), modeBtn('exit', 'Entrances/Exits', '4'), modeBtn('bg', 'BG', '5'), modeBtn('l3', 'Layer 3', '6'));
+  // the edit modes in the tool rail at the level's left edge (#477)
+  const modeBtn = (m: EditMode, label: string, key: string, ic: IconName) => railButton({ label, key, icon: ic, className: 'mode', data: { mode: m }, onClick: () => app.setMode(m) });
+  const modes = toolRail('Edit mode');
+  modes.append(modeBtn('l1', 'Layer 1', '1', 'layer-1'), modeBtn('l2', 'Layer 2', '2', 'layer-2'), modeBtn('spr', 'Sprites', '3', 'sprites'),
+    modeBtn('exit', 'Entrances/Exits', '4', 'exits'), modeBtn('bg', 'BG', '5', 'bg'), modeBtn('l3', 'Layer 3', '6', 'layer-3'));
   const levelTitle = h('span', { class: 'level-title' });
+  const unsavedPill = h('span', { class: 'pill pill-info', title: 'The level\'s changes are written to the ROM with Save level (Ctrl+S)', hidden: true }, 'Unsaved changes');
   const zoomCtl = zoomControl(() => app.view.zoom, (z) => view.setZoom(z));
   const levelBar = h('div', { class: 'ctxbar' },
-    levelTitle,
+    levelTitle, unsavedPill,
     h('button', { onclick: () => openHeaderDialog(app), title: 'Level header (H)' }, 'Header …'),
-    h('span', { class: 'sep' }),
-    modes,
     h('span', { class: 'sep' }),
     viewMenu(app, () => view.paint()),
     h('span', { class: 'sep' }),
@@ -171,13 +209,48 @@ function buildUi(app: App): { start: (at: NavLoc | null) => Promise<void> } {
   );
 
   // ---- app bar: menus, workspace switcher, main actions
+  // one undo history; the Packages workspace's panes drawn again after a step (#484)
+  const undo = () => { app.undo(); if (workspace === 'pkg') pkg?.afterUndo(); };
+  const redo = () => { app.redo(); if (workspace === 'pkg') pkg?.afterUndo(); };
   const testHere = () => { const hv = view.hover; openTestPlay(app, hv ? { tx: hv.tx, ty: hv.ty } : undefined); };
   // central search (Ctrl+F or Ctrl+Space): a result is shown in the level workspace
-  const search = () => openSearch(picker.searchProviders().map((p) => ({
-    ...p, search: (terms) => p.search(terms).map((r) => ({ ...r, pick: () => void setWorkspace('level').then((ok) => { if (ok) r.pick(); }) })),
-  })), { refresh: (again) => onBehaviorProgress(app, again) }); // (tiles' behavior determined)
+  // the command palette (#483): commands – every menu entry with its key, the places of G … – and the picker's
+  // groups; a picker result is shown in the level workspace
+  const commands = (): SearchProvider => ({
+    id: 'commands', label: 'Commands',
+    search: (terms) => {
+      const out: SearchResult[] = [];
+      const add = (where: string, name: string, keys: string | undefined, run: () => void, title?: string) => {
+        if (matchesAll(`${where} ${name} ${keys ?? ''}`.toLowerCase(), terms)) out.push({ label: keys ?? '', name, detail: where, title, pick: run });
+      };
+      for (const m of menuDefs) {
+        if (m.disabled?.()) continue;
+        let heading = '';
+        for (const it of typeof m.items === 'function' ? m.items() : m.items) {
+          if (it === 'sep') continue;
+          if ('heading' in it) { heading = it.heading; continue; }
+          if (it.disabled?.()) continue;
+          const where = heading ? `${m.label} → ${heading}` : m.label;
+          if ('onClick' in it) add(where, it.label.replace(/ …$/, ''), it.shortcut, it.onClick, it.title);
+          else add(where, `${it.label}${it.checked() ? ' (on)' : ''}`, it.shortcut, () => void it.onToggle(!it.checked()), it.title);
+        }
+      }
+      for (const g of GO_PLACES) add('Go to', g.view ? `Graphics: ${g.label}` : `${g.label} workspace`, `G ${g.key}`, () => void setWorkspace(g.workspace, g.view ? { tab: g.view } : undefined));
+      add('View', 'Grid on/off', "Ctrl+'", toggleGrid);
+      // (a level by its number or name: opened in the level workspace)
+      if (terms.length) for (const n of app.usedLevels()) {
+        const name = app.entrances.graph().name(n);
+        if (matchesAll(`${hex(n, 3)} ${name}`.toLowerCase(), terms)) add('Open level', `${hex(n, 3)} ${name}`, undefined, () => void setWorkspace('level').then((ok) => { if (ok) app.openLevel(n); }));
+      }
+      add('View', 'Problems', 'L', () => logBar.showProblems());
+      return out;
+    },
+  });
+  const search = () => openSearch([commands(), ...picker.searchProviders().map((p) => ({
+    ...p, search: (terms: string[]) => p.search(terms).map((r) => ({ ...r, pick: () => void setWorkspace('level').then((ok) => { if (ok) r.pick(); }) })),
+  }))], { refresh: (again) => onBehaviorProgress(app, again) }); // (tiles' behavior determined)
   const insertHere = () => { const hv = view.hover, c = view.centerTile(); openInsertDialog(app, hv ? hv.tx : c.tx, hv ? hv.ty : c.ty); };
-  const menus = menuBar([
+  const menuDefs: Menu[] = [
     { label: 'File', items: [
       { label: 'Open project …', title: 'A project file (.smwproj) saved with “Save project”', onClick: openProjectFile },
       { label: 'Save project', title: 'The ROM with the editor data: sources of patches, packages, UberASM, blocks, sprites and music – to keep editing it later or elsewhere', onClick: () => exportProject(app) },
@@ -195,6 +268,10 @@ function buildUi(app: App): { start: (at: NavLoc | null) => Promise<void> } {
       'sep',
       { label: 'Close project …', title: 'Remove the ROM and all editor data from the browser and return to the start page', onClick: () => closeProject(app) },
     ] },
+    { label: 'View', items: [
+      { heading: 'Theme' },
+      ...THEMES.map((t) => ({ label: t.label, title: t.title, checked: () => themePref.get() === t.id, onToggle: () => { themePref.set(t.id); closeMenus(); } })),
+    ] },
     { label: 'Level', disabled: () => !inLevel(), items: [
       { label: 'Save', shortcut: 'Ctrl+S', onClick: () => app.saveLevel() },
       { label: 'Save as …', onClick: () => openSaveAsDialog(app) },
@@ -205,8 +282,8 @@ function buildUi(app: App): { start: (at: NavLoc | null) => Promise<void> } {
       { label: 'Insert screen …', disabled: () => app.level.header.screens >= 32, onClick: () => openScreenDialog(app, 'insert') },
       { label: 'Delete screen …', disabled: () => app.level.header.screens <= 1, onClick: () => openScreenDialog(app, 'delete') },
       { label: 'Clear level …', onClick: () => clearLevelConfirm(app) },
-      { label: 'Remap Direct Map16 …', title: 'Which Map16 tiles the Direct Map16 objects of this level or all levels place (Lunar Magic\'s list syntax); the tiles themselves stay', onClick: () => openRemapUses(app, 'fg') },
-      { label: 'Remap Background Tiles …', title: 'Which BG Map16 tiles the BG tilemaps of this level or all levels use (Lunar Magic\'s list syntax); the tiles themselves stay', onClick: () => openRemapUses(app, 'bg') },
+      { label: 'Remap Direct Map16 uses …', title: 'Which Map16 tiles the Direct Map16 objects of this level or all levels place (Lunar Magic\'s list syntax); the tiles themselves stay', onClick: () => openRemapUses(app, 'fg') },
+      { label: 'Remap Background Tile uses …', title: 'Which BG Map16 tiles the BG tilemaps of this level or all levels use (Lunar Magic\'s list syntax); the tiles themselves stay', onClick: () => openRemapUses(app, 'bg') },
       { label: 'Import LM level file …', title: 'A Lunar Magic level file (.mwl, or a .zip with one): its background, Map16 tiles, graphics slots and colors into this level', onClick: () => void openLevelImport(app) },
       'sep',
       { label: 'Secondary entrances …', onClick: () => openEntrancesDialog(app) },
@@ -221,25 +298,26 @@ function buildUi(app: App): { start: (at: NavLoc | null) => Promise<void> } {
       { label: 'ROM information …', onClick: () => openRomInfo(app) },
       { label: 'Expand ROM …', disabled: () => app.rom.size >= 0x400000, onClick: () => openExpandDialog(app) },
       'sep',
-      { label: 'Packages …', title: 'Third-party content: upload packages (patches, UberASM, blocks, sprites, music) and configure what they brought', onClick: () => openResources(app, 'packages') },
+      { label: 'Packages', shortcut: 'G 5', title: 'Third-party content: upload packages (patches, UberASM, blocks, sprites, music) and configure what they brought', onClick: () => void setWorkspace('pkg') },
     ] },
     { label: 'Search', items: [
       { label: 'Search everywhere …', shortcut: 'Ctrl+F / Ctrl+Space', title: 'Objects, extended objects, Map16 tiles, prefabs and sprites by number, name or behavior', onClick: search },
     ] },
     { label: 'Help', items: [
       { label: 'Keyboard shortcuts …', shortcut: '?', onClick: () => showHelp() },
-      { label: 'Expand/collapse log', shortcut: 'L', onClick: () => logBar.toggle() },
+      { label: 'Problems and log', shortcut: 'L', title: 'Open or close the bottom panel', onClick: () => logBar.toggle() },
     ] },
-  ]);
+  ];
+  const menus = menuBar(menuDefs);
   const wsBtn = (w: typeof workspace, label: string, key: string) => h('button', { 'data-ws': w, title: key ? `${label} (${key})` : label, onclick: () => setWorkspace(w) }, label);
-  const wsSwitch = h('div', { class: 'btn-group ws-switch' }, wsBtn('level', 'Level', 'Esc'), wsBtn('ow', 'Overworld', 'O'), wsBtn('gfx', 'Graphics', 'P / M / G / A'), wsBtn('game', 'Game', ''));
-  const backBtn = h('button', { onclick: () => history.back(), title: 'Back to the place before (Alt+←, mouse back button)', disabled: true }, '←');
-  const fwdBtn = h('button', { onclick: () => history.forward(), title: 'Forward (Alt+→, mouse forward button)', disabled: true }, '→');
-  const undoBtn = h('button', { onclick: () => app.undo(), title: 'Undo (Ctrl+Z)' }, '↶');
-  const redoBtn = h('button', { onclick: () => app.redo(), title: 'Redo (Ctrl+Y)' }, '↷');
+  const wsSwitch = h('div', { class: 'btn-group ws-switch' }, wsBtn('level', 'Level', 'G 1'), wsBtn('ow', 'Overworld', 'G 2'), wsBtn('gfx', 'Graphics', 'G 3'), wsBtn('game', 'Game', 'G 4'), wsBtn('pkg', 'Packages', 'G 5'));
+  const backBtn = h('button', { onclick: () => history.back(), title: 'Back to the place before (Alt+←, mouse back button)', 'aria-label': 'Back', disabled: true }, icon('back'));
+  const fwdBtn = h('button', { onclick: () => history.forward(), title: 'Forward (Alt+→, mouse forward button)', 'aria-label': 'Forward', disabled: true }, icon('forward'));
+  const undoBtn = h('button', { onclick: () => undo(), title: 'Undo (Ctrl+Z)', 'aria-label': 'Undo' }, icon('undo'));
+  const redoBtn = h('button', { onclick: () => redo(), title: 'Redo (Ctrl+Y)', 'aria-label': 'Redo' }, icon('redo'));
   const saveBtn = h('button', { class: 'primary', onclick: () => app.saveLevel(), title: 'Write level to ROM (Ctrl+S)' });
   const testLevelTitle = 'Test the level in the built-in emulator (T, Shift+T: from the mouse position)';
-  const testBtn = h('button', { onclick: () => (workspace === 'ow' ? testOverworld() : openTestPlay(app)), title: testLevelTitle }, '▶ Test');
+  const testBtn = h('button', { onclick: () => (workspace === 'ow' ? testOverworld() : openTestPlay(app)), title: testLevelTitle }, iconLabel('play', 'Test'));
   // loops the open level's music while editing; anything else that plays (test play, a song in a dialog) ends it
   const musicTitle = 'Play the level\'s music in a loop while editing';
   let musicOf = ''; // level and header music playing
@@ -249,17 +327,21 @@ function buildUi(app: App): { start: (at: NavLoc | null) => Promise<void> } {
       if (musicPlayer.error) toast(`Could not play: ${musicPlayer.error}`, 'error');
     });
   };
-  const musicBtn = h('button', { title: musicTitle, onclick: () => { if (musicPlayer.label === LEVEL_MUSIC) musicPlayer.stop(); else playLevelMusic(); } }, '♪ Music');
+  const musicBtn = h('button', { title: musicTitle, 'aria-label': 'Level music', onclick: () => { if (musicPlayer.label === LEVEL_MUSIC) musicPlayer.stop(); else playLevelMusic(); } }, icon('music'));
   musicPlayer.onChange((l) => musicBtn.classList.toggle('active', l === LEVEL_MUSIC));
   // another level or other header music: its music
   const followLevel = () => { if (musicPlayer.label === LEVEL_MUSIC && musicOf !== `${app.level.number}:${app.level.header.music}`) playLevelMusic(); };
   app.on('level', followLevel);
   app.on('level-header', followLevel);
+  const searchBtn = h('button', { class: 'appbar-search', onclick: () => search(), title: 'Search everywhere and run commands (Ctrl+K, Ctrl+F, Ctrl+Space)' },
+    iconLabel('search', 'Search or run …'), h('kbd', null, 'Ctrl K'));
+  // where the changes go (#476): the level's wait for Save level, the other workspaces' are in the ROM at once
+  const savedPill = h('span', { class: 'pill pill-ok', title: 'The overworld\'s, graphics\' and game\'s changes are ROM edits: written at once (Ctrl+Z undoes)' }, 'Saved to ROM');
   const appbar = h('header', { class: 'appbar' },
     // three columns, so nothing moves when the buttons on the right change their labels with the workspace
-    h('div', { class: 'appbar-l' }, h('span', { class: 'brand' }, 'Solar Magic'), menus, h('div', { class: 'btn-group' }, backBtn, fwdBtn)),
+    h('div', { class: 'appbar-l' }, h('span', { class: 'brand' }, 'Solar Magic'), menus, h('div', { class: 'appbar-nav' }, backBtn, fwdBtn)),
     wsSwitch,
-    h('div', { class: 'appbar-r' }, undoBtn, redoBtn, saveBtn, testBtn, musicBtn),
+    h('div', { class: 'appbar-r' }, searchBtn, h('div', { class: 'appbar-nav' }, undoBtn, redoBtn), musicBtn, testBtn, saveBtn, savedPill),
   );
 
   const updateToolbar = () => {
@@ -267,12 +349,15 @@ function buildUi(app: App): { start: (at: NavLoc | null) => Promise<void> } {
     const btnL2 = modes.querySelector('[data-mode="l2"]') as HTMLButtonElement;
     btnL2.disabled = !app.level?.layer2Objects;
     (modes.querySelector('[data-mode="bg"]') as HTMLButtonElement).disabled = !app.level || !app.canEditBg();
-    if (app.level) levelTitle.textContent = `Level ${hex(app.level.number, 3)}${app.dirty ? ' *' : ''}`;
+    if (app.level) levelTitle.textContent = `Level ${hex(app.level.number, 3)}`;
+    unsavedPill.hidden = !app.dirty;
     zoomCtl.update();
     for (const b of wsSwitch.querySelectorAll('button')) b.classList.toggle('active', b.dataset.ws === workspace);
-    saveBtn.textContent = `Save level${app.dirty ? ' *' : ''}`;
-    // (the overworld's changes are ROM edits: nothing to save; hidden, so nothing else moves)
-    saveBtn.style.visibility = romOnly() ? 'hidden' : '';
+    saveBtn.replaceChildren(...iconLabel('save', 'Save level'));
+    saveBtn.disabled = !app.dirty && !romOnly();
+    // (the overworld's and game's changes are ROM edits: nothing to save)
+    saveBtn.hidden = romOnly();
+    savedPill.hidden = !romOnly();
     testBtn.disabled = (workspace === 'ow' && !owShown()) || workspace === 'game';
     testBtn.title = workspace === 'game' ? 'Test play is available in the level and overworld workspaces'
       : workspace !== 'ow' ? testLevelTitle
@@ -290,24 +375,34 @@ function buildUi(app: App): { start: (at: NavLoc | null) => Promise<void> } {
   app.on('zoom', updateToolbar);
 
   const left = h('div', { class: 'left' }, levels.root);
-  const center = h('div', { class: 'center' }, view.root, status);
-  const right = h('div', { class: 'right' }, picker.root, props.root);
+  const gfxLeft = h('div', { class: 'left gfx-left' });
+  const center = h('div', { class: 'center with-rail' }, modes, h('div', { class: 'center-main' }, view.root, status));
+  const right = h('div', { class: 'right' }, levelTabs, picker.root, propsHost);
+  renderLevelSide();
   const logBar = new LogBar();
   const busy = busyIndicator(app);
   const pasteHint = pasteHintBox(app);
   const layout = h('div', { class: 'layout' });
   const split = sideSplitter(layout);
   layout.append(appbar, levelBar, left, center, right, split.root, logBar.root, busy, pasteHint);
+  logBar.setProblems(view.problems.list, () => view.problems.count());
   split.use('level');
   root.append(layout);
   const owRight = h('div', { class: 'right' });
-  const showLayout = (bar: HTMLElement, l: HTMLElement, main: HTMLElement, side: HTMLElement) => layout.replaceChildren(appbar, bar, l, main, side, split.root, logBar.root, busy, pasteHint);
+  const showLayout = (bar: HTMLElement, l: HTMLElement, main: HTMLElement, side: HTMLElement) => {
+    layout.replaceChildren(appbar, bar, l, main, side, split.root, logBar.root, busy, pasteHint);
+    // the bottom panel's Problems: the level's problems, the overworld's World check (#479)
+    if (main === center) logBar.setProblems(view.problems.list, () => view.problems.count());
+    else if (ow && main === ow.root) logBar.setProblems(ow.check.root, () => ow!.check.count());
+    else logBar.setProblems(null);
+  };
 
   // switches between the level editor, the overworld editor and the graphics workspace (palettes, Map16, GFX);
   // gfx: tab to open (default: the last one), Map16 tile to show
   // at: the workspace's target (a submap and the event progress it is shown at)
-  const setWorkspace = async (w: typeof workspace, gfx?: { tab?: WsTab; tile?: number; target?: Map16Target; at?: WsTarget }): Promise<boolean> => {
+  const setWorkspace = async (w: typeof workspace, gfx?: { tab?: WsTab; tile?: number; target?: Map16Target; at?: WsTarget }, pkgAt?: { tab: PackagesKind; opts: PackagesOptions }): Promise<boolean> => {
     closeMenus();
+    if (w === 'pkg' && workspace === 'pkg') { if (pkgAt) await pkg!.enter(pkgAt.tab, pkgAt.opts); return true; }
     if (gfx?.at && ws) ws.setTarget(gfx.at);
     if (w === workspace) {
       if (w === 'gfx' && gfx?.tab) {
@@ -317,7 +412,10 @@ function buildUi(app: App): { start: (at: NavLoc | null) => Promise<void> } {
       return true;
     }
     // leave the current workspace
-    if (romOnly()) {
+    if (workspace === 'pkg') {
+      pkg!.leave();
+      layout.classList.remove('pkg-mode');
+    } else if (romOnly()) {
       layout.classList.remove('ow-mode'); // (the Game workspace's layout is the overworld's)
     } else if (workspace === 'gfx') {
       ws!.leave();
@@ -337,16 +435,30 @@ function buildUi(app: App): { start: (at: NavLoc | null) => Promise<void> } {
       layout.classList.add('ow-mode');
       if (gameBorder !== null) game.select('border', gameBorder); else game.show();
       gameBorder = null;
+    } else if (w === 'pkg') {
+      // (a package's install or removal rewrites the ROM the level is saved into: the open level saved first, as
+      // for the overworld and game workspaces)
+      if (app.dirty) app.saveLevel(true);
+      if (!pkg) {
+        pkg = new PackagesWorkspace(app);
+        pkg.onLeave = (then) => void setWorkspace('level').then((ok) => { if (ok) then(); });
+      }
+      showLayout(pkg.bar, pkg.left, pkg.root, pkg.side);
+      layout.classList.add('pkg-mode');
+      void pkg.enter(pkgAt?.tab ?? 'packages', pkgAt?.opts ?? {});
     } else if (w === 'gfx') {
       if (!ws) { ws = new GfxWorkspace(app); ws.onNav = (jump) => nav?.mark(jump); }
       if (gfx?.at) ws.setTarget(gfx.at);
-      showLayout(ws.bar, left, ws.root, ws.side);
+      // (the navigator: the target, then the level list – another level's graphics, #486)
+      gfxLeft.replaceChildren(ws.nav, levels.root);
+      showLayout(ws.bar, gfxLeft, ws.root, ws.side);
       layout.classList.add('gfx-mode');
       // the level view is only up to date when coming from it
       const hv = from === 'level' ? view.hover : null;
       ws.enter(gfx?.tab ?? ws.tab, hv ? { tx: hv.tx, ty: hv.ty } : view.centerTile());
       if (gfx?.tab === 'map16' && gfx.tile !== undefined) ws.showMap16(gfx.tile, gfx.target, gfx.at);
     } else {
+      left.replaceChildren(levels.root);
       showLayout(levelBar, left, center, right);
       view.layout();
     }
@@ -397,14 +509,14 @@ function buildUi(app: App): { start: (at: NavLoc | null) => Promise<void> } {
   app.gotoOverworldTile = async (i) => { if (await setWorkspace('ow')) owShown()?.showTile(i); };
 
   // the message panel takes the picker's place while it is open
-  const messagePanel = new MessagePanel(app);
   app.on('messages', () => {
-    if (!app.messages) right.replaceChildren(picker.root, props.root);
-    else {
+    if (app.messages) {
       if (workspace !== 'level') void setWorkspace('level');
-      if (messagePanel.root.parentElement !== right) { right.replaceChildren(messagePanel.root); messagePanel.focus(); }
-    }
-    updatePickerShown();
+      const opened = messagePanel.root.parentElement !== propsHost;
+      levelTab = 'props';
+      renderLevelSide();
+      if (opened) messagePanel.focus();
+    } else renderLevelSide();
   });
 
   // ---- browser back/forward through the places (navhistory.ts)
@@ -477,33 +589,85 @@ function buildUi(app: App): { start: (at: NavLoc | null) => Promise<void> } {
   });
 
   installStepFields();
+  keepAriaStates(document.body);
+  setDialogUndo(() => app.undo(), () => app.redo());
+  setPackagesHost((tab, opts) => void setWorkspace('pkg', undefined, { tab, opts }));
+  const mouseAt = { x: -1, y: -1 }; // (the last mouse position: F12 and the keyboard's context menu act there)
+  // the context menu from the keyboard everywhere (#480): Menu key or Shift+F10 opens the one of the focused control,
+  // else (the level's canvas has its own: the selection's or the mouse tile's) of what is under the mouse
+  {
+    window.addEventListener('mousemove', (e) => { mouseAt.x = e.clientX; mouseAt.y = e.clientY; }, { passive: true });
+    const mx = () => mouseAt.x, my = () => mouseAt.y;
+    window.addEventListener('keydown', (e) => {
+      if (e.key !== 'ContextMenu' && !(e.key === 'F10' && e.shiftKey)) return;
+      const f = document.activeElement as HTMLElement | null;
+      const focused = f && f !== document.body && !f.matches('.level-scroller, canvas') ? f : null;
+      if (!focused && workspace === 'level' && !document.querySelector('.modal-back')) return; // (the level view's keyMenu)
+      const r = focused?.getBoundingClientRect();
+      const x = r ? r.left + Math.min(r.width / 2, 24) : mx(), y = r ? r.top + r.height / 2 : my();
+      const at = focused ?? (x >= 0 ? document.elementFromPoint(x, y) : null);
+      if (!at) return;
+      e.preventDefault();
+      e.stopPropagation();
+      at.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: x, clientY: y, button: 2 }));
+    }, true);
+  }
+  // G then a key within a second goes to a place (#482): G 1 … G 5 the workspaces, G P / G M / G G / G A the Graphics
+  // views; "G …" shown meanwhile
+  let goSince = 0;
+  const goHint = h('div', { class: 'key-pending', hidden: true }, h('kbd', null, 'G'), ` … ${GO_PLACES.map((g) => `${g.key} ${g.label}`).join(' · ')}`);
+  document.body.append(goHint);
+  const goEnd = () => { goSince = 0; goHint.hidden = true; };
+  const goKey = (e: KeyboardEvent): boolean => {
+    if (e.ctrlKey || e.metaKey || e.altKey) { goEnd(); return false; }
+    const k = e.key.toLowerCase();
+    if (goSince && performance.now() - goSince < 1000) {
+      goEnd();
+      const to = GO_PLACES.find((g) => g.key.toLowerCase() === k);
+      if (to) void setWorkspace(to.workspace, to.view ? { tab: to.view } : undefined);
+      else if (k === '5') void setWorkspace('pkg');
+      return true;
+    }
+    goEnd();
+    if (k !== 'g' || e.shiftKey) return false;
+    goSince = performance.now();
+    goHint.hidden = false;
+    setTimeout(() => { if (goSince && performance.now() - goSince >= 990) goEnd(); }, 1000);
+    return true;
+  };
+  // the grid of the workspace shown (Ctrl+', #482)
+  const toggleGrid = () => {
+    if (workspace === 'level') { app.view.show.grid = !app.view.show.grid; view.paint(); }
+    else if (workspace === 'ow') owShown()?.toggleGrid();
+  };
   window.onkeydown = (e: KeyboardEvent) => {
-    if ((e.ctrlKey || e.metaKey) && (e.key.toLowerCase() === 'f' || e.code === 'Space') && !e.altKey && !document.querySelector('.modal-back')) { e.preventDefault(); search(); return; }
+    if ((e.ctrlKey || e.metaKey) && (e.key.toLowerCase() === 'f' || e.key.toLowerCase() === 'k' || e.code === 'Space') && !e.altKey && !document.querySelector('.modal-back')) { e.preventDefault(); search(); return; }
     if (fieldTakesKey(e)) return;
     if (document.querySelector('.modal-back')) return;
     const k = e.key;
     const ctrl = e.ctrlKey || e.metaKey;
+    // G then a key: a place (#482)
+    if (goKey(e)) { e.preventDefault(); return; }
     if (k === 'F1' || k === '?') { e.preventDefault(); showHelp(); return; }
-    if (k === 'o' || k === 'O') { setWorkspace(workspace === 'ow' ? 'level' : 'ow'); return; }
+    if (k === 'F12') { e.preventDefault(); if (mouseAt.x < 0 || !gotoAt(mouseAt.x, mouseAt.y)) toast('F12 goes to the definition of an animated tile or color, a Map16 tile or a palette – under the mouse'); return; }
+    if (ctrl && (k === "'" || e.code === 'Backslash' && e.shiftKey)) { e.preventDefault(); toggleGrid(); return; }
     if ((k === 'l' || k === 'L') && !ctrl && !e.altKey) { logBar.toggle(); return; }
     // one undo history in every workspace
     if (ctrl && k.toLowerCase() === 's') { e.preventDefault(); app.saveLevel(); return; }
-    if (ctrl && k.toLowerCase() === 'z') { e.preventDefault(); if (e.shiftKey) app.redo(); else app.undo(); return; }
-    if (ctrl && k.toLowerCase() === 'y') { e.preventDefault(); app.redo(); return; }
+    if (ctrl && k.toLowerCase() === 'z') { e.preventDefault(); if (e.shiftKey) redo(); else undo(); return; }
+    if (ctrl && k.toLowerCase() === 'y') { e.preventDefault(); redo(); return; }
+    if (workspace === 'pkg') return; // (its own controls take their keys)
     if (workspace === 'gfx' && ws) {
-      if (ws.key(e)) { e.preventDefault(); return; }
-      if (k === 'Escape') setWorkspace('level');
+      if (ws.key(e)) e.preventDefault();
       return;
     }
     if (workspace === 'game') {
-      if (game?.key(e)) { e.preventDefault(); return; }
-      if (k === 'Escape') void setWorkspace('level');
+      if (game?.key(e)) e.preventDefault();
       return;
     }
     if (workspace === 'ow') {
       if (owShown()?.key(e)) e.preventDefault();
       else if ((k === 't' || k === 'T') && !ctrl && !e.altKey && !e.shiftKey && owShown()) testOverworld();
-      else if (k === 'Escape') void setWorkspace('level');
       return;
     }
     if (ctrl && k.toLowerCase() === 'c') { app.model.copy(); return; }
@@ -541,15 +705,12 @@ function buildUi(app: App): { start: (at: NavLoc | null) => Promise<void> } {
     else if (k === '/') app.resizeSelection(0, -1);
     else if (k === 'PageUp') app.model.reorderSelection('front');
     else if (k === 'PageDown') app.model.reorderSelection('back');
-    else if (k === 'g' || k === 'G') { app.view.show.grid = !app.view.show.grid; view.paint(); }
     else if (k === 'c' || k === 'C') { app.view.show.collision = !app.view.show.collision; view.paint(); }
     else if ((k === 'v' || k === 'V') && e.shiftKey) view.placeGameViewByMario();
     else if (k === 'v' || k === 'V') { app.view.show.gameView = !app.view.show.gameView; app.updateGameViewCamera(); view.paint(); }
     else if ((k === 'j' || k === 'J') && e.shiftKey) view.toggleArcPin();
     else if (k === 'j' || k === 'J') { app.view.show.arcs = !app.view.show.arcs; if (!app.view.show.arcs) view.arcPin = null; view.paint(); }
     else if (k === 'm' || k === 'M') setWorkspace('gfx', { tab: 'map16', tile: view.hover ? hoverTile(app, view.hover.tx, view.hover.ty) : undefined });
-    else if (k === 'p' || k === 'P') setWorkspace('gfx', { tab: 'pal' });
-    else if (k === 'a' || k === 'A') setWorkspace('gfx', { tab: 'anim' });
   };
   window.onbeforeunload = (e) => { if (app.dirty) { e.preventDefault(); } };
   guardClose(() => app.dirty);
@@ -622,76 +783,11 @@ async function exportProject(app: App, askWhere = false): Promise<void> {
   log(`Project saved as “${res.path ?? `${base}.smwproj`}” (${Math.round(out.length / 1024)} KB, of which ${Math.round(app.rom.extraSize / 1024)} KB editor data)`);
 }
 
+// the keyboard scheme's table (ui/shortcuts.ts, #482): one source, never stale
 function showHelp(): void {
-  const sections: [string, [string, string][]][] = [
-    ['General', [
-      ['Ctrl+S', 'Save the level'],
-      ['Ctrl+Z / Ctrl+Y', 'Undo / Redo'],
-      ['Alt+← / Alt+→ · mouse back/forward buttons', 'Back / forward through the places opened (workspace, level, overworld map, graphics tab, Ctrl+click jumps)'],
-      ['Esc / O / M · P · A', 'Workspace level / overworld / graphics (Map16, palettes, animations)'],
-      ['Ctrl+mouse wheel · Middle mouse button drag', 'Zoom · Pan view'],
-      ['Ctrl+F · Ctrl+Space', 'Search everywhere: objects, Map16 tiles, prefabs, sprites (Tab: only one group)'],
-      ['? / F1', 'This overview'],
-      ['L', 'Expand/collapse log (all messages with time)'],
-      ['Menus: ↑ ↓ ← → / Enter / Esc', 'Choose entry, neighboring menu / run / close'],
-    ]],
-    ['Level', [
-      ['1 / 2 / 3 / 4 / 5', 'Mode layer 1 / layer 2 / sprites / entrances/exits / BG'],
-      ['Click · Ctrl+click · Alt+click', 'Select · add to selection · element underneath'],
-      ['Drag', 'Move selection / drag a selection box'],
-      ['Drag a handle on an edge or corner', 'Resize objects (all selected; the opposite edges stay)'],
-      ['Right click / Shift+click', 'Place the element chosen in “Insert” (View → Placement preview shows it at the mouse) or a copy of the selection'],
-      ['Right click on the selection or with nothing chosen · Menu key / Shift+F10', 'Context menu'],
-      ['Click into nothing', 'Deselect all and clear the element chosen in “Insert”'],
-      ['BG: click/drag · right click/Shift+click', 'Pick up tile(s) as brush · paint'],
-      ['Ctrl+click on a Map16/BG tile in “Insert”', 'Go to definition: the tile in the Map16 tab of the graphics area'],
-      ['Ins / I', 'Insert object/sprite by number (at the mouse)'],
-      ['Drag M / Z / S marker', 'Move main entrance / midway point / secondary entrance'],
-      ['Entrances/Exits: click · right click', 'Choose entrance or screen (exit), edit on the right · new secondary entrance, create exit, entrance here'],
-      ['Arrow keys · Alt+arrow keys · Alt+Shift+arrow keys', 'Move selection by 1 tile · resize on the right/bottom · on the left/top'],
-      ['+ / - · * / /', 'Change width · change height'],
-      ['Del / Backspace', 'Delete selection'],
-      ['F2 · Del over an object or prefab in “Insert”', 'Rename it · delete the prefab'],
-      ['Ctrl+A · Esc', 'Select all · cancel dragging, deselect, then clear the element chosen in “Insert”'],
-      ['Ctrl+C / Ctrl+V / Ctrl+D', 'Copy / paste at the mouse / duplicate'],
-      ['PgUp / PgDn', 'Bring to front / send to back (drawing order)'],
-      ['H · G · C', 'Level header · grid on/off · collision overlay on/off'],
-      ['V · Shift+V · drag its edge', 'Game view frame on/off · placed by Mario at the mouse (the camera the game puts there) · move it'],
-      ['T · Shift+T', 'Test level · Mario starts at the mouse'],
-      ['J · Shift+J', 'Jump arcs at the mouse on/off · pin them to the tile / unpin'],
-    ]],
-    ['Overworld', [
-      ['1 / 2 / 3 / 4 / 5', 'Layer 1 (paths) / layer 2 (terrain) / Levels / Overworld links / Sprites'],
-      ['Levels: drag · Del · right click', 'Move a level tile (swaps with the tile there) · a stop tile in its place · Place level here…'],
-      ['Click/drag · right click/Shift+click', 'Pick up tile(s) as brush · paint'],
-      ['Alt+click / Ctrl+click', 'Level info of the level tile'],
-      ['G', 'Grid on/off'],
-      ['M', 'Edit the selected tile\'s 8x8 tiles in the Map16 tab (target Overworld)'],
-      [', / .', 'Event list: edit the event one row up / down'],
-      ['Space · Esc', 'Check / uncheck the edited event · end editing (paint the map before events)'],
-      ['Q (held)', 'While layer 1 or 2 is painted: the other layer hidden (else dimmed, View → Layers)'],
-      ['T', 'Test play from the overworld: a new game with the checked events passed, Mario on the selected tile (or at the start position)'],
-    ]],
-    ['Graphics', [
-      ['P / M / G / A', 'Tab palettes / Map16 tiles / graphics / animations; Esc back to the level'],
-      ['Ctrl+C / Ctrl+V', 'Copy / paste palette, Map16 tiles or pixels'],
-      ['Ctrl+click', 'Go to definition: an animated tile or color opens its own animation, a Map16 quarter its 8x8 tile, a palette button its palette'],
-      ['Palettes: arrow keys · Shift+click', 'Other color · mark a range (for “Gradient”)'],
-      ['Map16: X / Y / 1–8 / Q', 'Flip quarter / palette 0–7 / next quarter; arrows: other tile'],
-      ['Map16: F2', 'Name the selected tiles (to find them by later)'],
-      ['Map16: double click · Ctrl+click on palette', 'Edit quarter in “Graphics” · open palette in “Palettes”'],
-      ['Graphics sheet: click/drag · right click/Shift+click', 'Pick 8x8 tiles for the pixel editor · paste them at the mouse'],
-      ['Pixel editor: S / B / E / F / I', 'Selection / pencil / eraser / fill / eyedropper'],
-      ['Pixel editor: left · right button', 'Paint with the left color · the right color'],
-      ['Pixel editor: Alt+click · Shift+click', 'Pick the color for that button · line from the last point'],
-      ['Pixel editor: 0–9 · X', 'Left color · swap left and right color'],
-      ['Pixel editor: Enter / Esc', 'Put the floating selection down / cancel it (or deselect)'],
-      ['Animations: Del / Esc', 'Delete animation / cancel selection'],
-    ]],
-  ];
-  modal('Keyboard shortcuts', h('div', { class: 'help-cols' }, sections.map(([title, rows]) => h('section', null,
+  modal('Keyboard shortcuts', h('div', { class: 'help-cols' }, shortcutSections().map(([title, rows]) => h('section', null,
     h('h3', null, title),
-    h('table', { class: 'help' }, rows.map(([a, b]) => h('tr', null, h('td', null, h('kbd', null, a)), h('td', null, b))))))),
+    h('table', { class: 'help' }, rows.map((r) => h('tr', null, h('td', null, h('kbd', null, r.keys)), h('td', null, r.what))))))),
   [{ label: 'Close', primary: true }]);
 }
 
