@@ -14,9 +14,9 @@ const WARN_FRAMES = 60; // a meter stays red this long after a failed spawn or a
 
 // per table: the meter's label, its tooltip, what a slot holds (a / an …), the graph's color (a CSS variable)
 const KINDS: Record<SlotKind, { label: string; help: string; what: string; a: string; color: string }> = {
-  sprite: { label: 'Sprites', help: 'Normal sprites: enemies, items, platforms …', what: 'sprite', a: 'A', color: '--chart-1' },
-  extended: { label: 'Extended', help: 'Extended sprites: fireballs, hammers, bones, smoke of some sprites …', what: 'extended sprite', a: 'An', color: '--chart-2' },
-  cluster: { label: 'Cluster', help: 'Cluster sprites: Boo ceiling and rings, falling spikes, bonus game 1-Ups …', what: 'cluster sprite', a: 'A', color: '--chart-3' },
+  sprite: { label: 'Sprites', help: 'Normal sprites: enemies, items, platforms …', what: 'sprite', a: 'A', color: '--accent' },
+  extended: { label: 'Extended', help: 'Extended sprites: fireballs, hammers, bones, smoke of some sprites …', what: 'extended sprite', a: 'An', color: '--warn' },
+  cluster: { label: 'Cluster', help: 'Cluster sprites: Boo ceiling and rings, falling spikes, bonus game 1-Ups …', what: 'cluster sprite', a: 'A', color: '--cluster' },
 };
 
 export function eventText(e: PlayEvent): string {
@@ -152,7 +152,7 @@ function drawCpu(g: CanvasRenderingContext2D, log: PlayLog): void {
   const hist = log.history.slice(-W), x0 = W - hist.length;
   g.fillStyle = css.getPropertyValue('--danger').trim();
   hist.forEach((f, i) => { if (f.busy === LAG) g.fillRect(x0 + i, 0, 1, H); });
-  g.fillStyle = css.getPropertyValue('--accent-strong').trim();
+  g.fillStyle = css.getPropertyValue('--accent2').trim();
   hist.forEach((f, i) => {
     if (f.busy === LAG) return;
     const t = H - 1 - Math.round(((H - 2) * f.busy) / LINES_PER_FRAME);

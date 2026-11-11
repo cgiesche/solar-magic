@@ -228,8 +228,8 @@ export class CellHistoryPopup {
     v.paint();
     for (const c of v.left.querySelectorAll<HTMLElement>('.ow-ev-row')) {
       const here = to !== null && to !== m.from && c.dataset.event === String(to);
-      c.classList.toggle('drop-ok', here && !refused);
-      c.classList.toggle('drop-refused', here && refused);
+      c.classList.toggle('ow-drop', here && !refused);
+      c.classList.toggle('ow-drop-refused', here && refused);
     }
     const n = `${p.cells.length} tile${p.cells.length === 1 ? '' : 's'}${m.alt ? '' : ' (Alt: this one only)'}`;
     m.label.textContent = to === null ? `Move ${n} from ${words(m.from)}: ${m.drag ? 'drop' : 'click'} on an event in the event list (Esc cancels)`
@@ -269,7 +269,7 @@ export class CellHistoryPopup {
     m.label.remove();
     const v = this.view;
     v.movePreview = null;
-    for (const c of v.left.querySelectorAll('.drop-ok, .drop-refused')) c.classList.remove('drop-ok', 'drop-refused');
+    for (const c of v.left.querySelectorAll('.ow-drop, .ow-drop-refused')) c.classList.remove('ow-drop', 'ow-drop-refused');
     v.paint();
     if (!this.over) this.hide();
     return true;

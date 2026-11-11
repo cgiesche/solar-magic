@@ -12,7 +12,7 @@ import type { App } from '../app.ts';
 import type { Watch } from '../../core/romwatch.ts';
 import type { GfxWorkspace, WsPanel } from '../gfxworkspace.ts';
 import { h, clear, toast, pickerOpen, modal, hexInput } from '../dom.ts';
-import { contextMenu, menuButton, type MenuItem } from '../menu.ts';
+import { menuButton, type MenuItem } from '../menu.ts';
 import { hex } from '../../core/names.ts';
 import { cgramToRGBA, decodeTile, snesColorToRGBA } from '../../core/gfx.ts';
 import { map16Source, levelColorUsers, setFgWords } from '../../core/render.ts';
@@ -45,8 +45,6 @@ const NOTHING_SHOWN: Shown = { vram: new Uint8Array(0x10000), cgram: new Uint8Ar
 import { triggerPanel, owTriggerPanel } from '../triggerpanel.ts';
 import { eventTriggerState } from '../../core/owanimview.ts';
 import { AntsOverlay, type AntsMark } from '../ants.ts';
-import { MARK } from '../marks.ts';
-import { icon } from '../icons.ts';
 
 const TILE_TYPES = [0x01, 0x02, 0x04, 0x08, 0x10, 0x11, 0x12, 0x03, 0x05, 0x06, 0x07, 0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e];
 const COLOR_TYPES = [0x14, 0x13, 0x15, 0x16, 0x17];
@@ -88,7 +86,7 @@ export function colorAnimsAt(app: App, color: number): { global: boolean; slot: 
 }
 // links to own animations, for the warnings of the other tabs
 export function animLinks(ws: GfxWorkspace, own: { global: boolean; slot: number }[]): HTMLElement[] {
-  return own.map((a, i) => h('span', null, i ? ', ' : '', h('a', { href: '#', title: 'Open in the Animations tab (F12 on the tile or color does the same)', onclick: (e: Event) => { e.preventDefault(); ws.showAnim(a.global, a.slot); } }, `Animation ${hex(a.slot, 2)} (${a.global ? 'global' : 'level'})`)));
+  return own.map((a, i) => h('span', null, i ? ', ' : '', h('a', { href: '#', title: 'Open in the Animations tab (Ctrl+click on the tile or color does the same)', onclick: (e: Event) => { e.preventDefault(); ws.showAnim(a.global, a.slot); } }, `Animation ${hex(a.slot, 2)} (${a.global ? 'global' : 'level'})`)));
 }
 
 // a slot's frames at the trigger's limit (extrigger.ts maxFrames), said so
@@ -125,10 +123,10 @@ export class AnimTab implements WsPanel {
   private triggers = false; // the side shows the trigger panel
   // the colors of the selected rotation the game keeps setting itself, from the emulated level (null: not known yet)
   private held: { key: string; render: LevelRender | null; colors: number[] | null; timer: number } = { key: '', render: null, colors: null, timer: 0 };
-  readonly bar = h('div', { class: 'ws-bar' }); // (in the workspace's context bar, #486)
+  private bar = h('div', { class: 'ws-bar' });
   private slotsBox = h('div', { class: 'at-slots' });
   private detail = h('div', { class: 'at-detail' });
-  readonly side = h('div', { class: 'at-side' }); // (under the preview, #486)
+  private side = h('div', { class: 'at-side' });
   private previews: { c: HTMLCanvasElement; slot: number }[] = [];
   // what the ROM holds, read once per build (drawing reads it many times)
   private view: ExList = emptyList();
@@ -461,26 +459,14 @@ export class AnimTab implements WsPanel {
       this.previews.push({ c, slot: n });
       const kind = kindOf(s.type);
       const pick = () => { this.sel = n; this.frame = 0; this.set = 0; };
-      items.append(h('div', {
-        class: `at-slot${n === this.sel ? ' sel' : ''}`, onclick: () => { pick(); this.build(); },
-        // (#480: its actions also as a context menu)
-        oncontextmenu: (e: MouseEvent) => {
-          e.preventDefault();
-          pick();
-          this.build();
-          contextMenu(e.clientX, e.clientY, [
-            { label: 'Duplicate', title: 'Into the next free slot', onClick: () => void this.duplicate() },
-            { label: 'Delete', shortcut: 'Del', title: 'Ctrl+Z brings it back', onClick: () => void this.remove() },
-          ]);
-        },
-      },
+      items.append(h('div', { class: `at-slot${n === this.sel ? ' sel' : ''}`, onclick: () => { pick(); this.build(); } },
         h('span', { class: 'mono hint' }, hex(n, 2)), c,
         h('div', { class: 'at-slot-text' },
           h('div', null, kind === 'tiles' ? `Tile ${hex(this.targetTile(s), 3)} · ${TYPE_NAMES[s.type] ?? ''}` : kind === 'colors' ? `Color ${hex(s.dest & 0xff, 2)} · ${TYPE_NAMES[s.type]}` : `Colors ${rangeName(s)} · ${TYPE_NAMES[s.type] ?? ''}`),
           h('div', { class: 'hint' }, kind === 'rotation' ? `${this.triggerName(s.trigger)} · ${speedName(s.framesLess1 + 1)}` : `${this.triggerName(s.trigger)} · ${s.framesLess1 + 1} frame${s.framesLess1 ? 's' : ''}`)),
         h('span', { class: 'at-slot-acts' },
-          h('button', { class: 'icon-btn', title: 'Duplicate (into the next free slot)', 'aria-label': 'Duplicate', onclick: (e: Event) => { e.stopPropagation(); pick(); void this.duplicate(); } }, icon('duplicate')),
-          h('button', { class: 'icon-btn', title: 'Delete (Ctrl+Z brings it back)', 'aria-label': 'Delete', onclick: (e: Event) => { e.stopPropagation(); pick(); void this.remove(); } }, icon('delete')))));
+          h('button', { class: 'icon-btn', title: 'Duplicate (into the next free slot)', 'aria-label': 'Duplicate', onclick: (e: Event) => { e.stopPropagation(); pick(); void this.duplicate(); } }, '⧉'),
+          h('button', { class: 'icon-btn', title: 'Delete (Ctrl+Z brings it back)', 'aria-label': 'Delete', onclick: (e: Event) => { e.stopPropagation(); pick(); void this.remove(); } }, '✕'))));
     }
     if (!l.slots.size) items.append(h('p', { class: 'hint' }, 'No animations yet. A tile animation keeps replacing 8x8 tiles in VRAM with frames from an animation graphic – all Map16 tiles that use them animate along.'));
     const noSlot = l.slots.size >= SLOTS;
@@ -898,13 +884,13 @@ export class AnimTab implements WsPanel {
           [cs[this.frame - 1], cs[this.frame]] = [cs[this.frame], cs[this.frame - 1]];
           this.setColumns(x, cs);
           this.frame--;
-        }, 'Frame moved'), 'aria-label': 'Earlier' }, icon('chevron-left')),
+        }, 'Frame moved') }, '◀'),
         h('button', { disabled: this.frame >= cols.length - 1, title: 'Move later', onclick: () => void this.editSlot((x) => {
           const cs = this.columns(x);
           [cs[this.frame + 1], cs[this.frame]] = [cs[this.frame], cs[this.frame + 1]];
           this.setColumns(x, cs);
           this.frame++;
-        }, 'Frame moved'), 'aria-label': 'Later' }, icon('chevron-right'))),
+        }, 'Frame moved') }, '▶')),
       h('p', { class: 'hint' }, `Each frame shows for 8 game frames (≈0.13 s); “Longer” repeats it. Select a frame, then click the source tile in the animation graphic on the right (${shape.w * shape.h > 1 ? `${shape.w * shape.h} consecutive tiles` : 'one tile'}).`),
     );
   }
@@ -1111,7 +1097,7 @@ export class AnimTab implements WsPanel {
     const first = cur >> 5;
     // (the frame's source tiles, running; in tiles)
     const ants = new AntsOverlay(c, () => ({ w: 16, h: Math.ceil(tiles / 16) }));
-    ants.set(Array.from({ length: per }, (_, k) => ({ x: (first + k) & 15, y: (first + k) >> 4, w: 1, h: 1, color: MARK.warn })));
+    ants.set(Array.from({ length: per }, (_, k) => ({ x: (first + k) & 15, y: (first + k) >> 4, w: 1, h: 1, color: '#ffb000' })));
     c.addEventListener('mousedown', (e) => {
       const rc = c.getBoundingClientRect();
       const t = Math.floor((e.clientY - rc.top) / (rc.height / Math.ceil(tiles / 16))) * 16 + Math.floor((e.clientX - rc.left) / (rc.width / 16));
@@ -1157,7 +1143,7 @@ export class AnimTab implements WsPanel {
       const tiles: AntsMark[] = [];
       for (let y = 0; y < shape.h; y++) for (let x = 0; x < shape.w; x++) {
         const t = t0 + y * 16 + x;
-        if (t >= 0 && t < 128) tiles.push({ x: t & 15, y: t >> 4, w: 1, h: 1, color: MARK.warn });
+        if (t >= 0 && t < 128) tiles.push({ x: t & 15, y: t >> 4, w: 1, h: 1, color: '#ffb000' });
       }
       ants.set(tiles);
       c.addEventListener('mousedown', (e) => {

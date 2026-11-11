@@ -1,7 +1,5 @@
 // Tiny DOM helpers.
 
-import { icon } from './icons.ts';
-
 type Attrs = Record<string, unknown> & { style?: string | Partial<CSSStyleDeclaration> };
 export type Child = Node | string | number | null | undefined | false | Child[];
 
@@ -270,40 +268,22 @@ export function dialogUndoKeys(body: HTMLElement, undo: () => void, redo: () => 
   return () => window.removeEventListener('keydown', keys);
 }
 
-// what an immediate dialog or workspace says about its changes (#481)
-export const IMMEDIATE_NOTE = 'Changes apply immediately · Ctrl+Z undoes';
-
-// the editor's undo and redo for dialogs whose changes apply at once (main.ts sets them)
-let editorUndo: { undo: () => void; redo: () => void } | null = null;
-export function setDialogUndo(undo: () => void, redo: () => void): void { editorUndo = { undo, redo }; }
-
-// One dialog pattern (#481): a title naming the subject, ✕, the body, the buttons at the right with the primary (or
-// the dangerous) one last; Enter takes the primary one (not in a text area, nor on a button), Esc and ✕ are Cancel.
-// Two kinds besides plain messages:
-// - immediate: every change is a ROM edit at once – the footer says so, Ctrl+Z / Ctrl+Y undo and redo inside
-//   (after: what draws the dialog again afterwards), one button Close
-// - staged: changes wait for the primary button (Apply) – changed fields are marked and counted in the title
-// buttons: the elements of the given buttons, in the given order (e.g. to show one only at times)
-export type ModalOptions = { immediate?: boolean | { after?: () => void }; staged?: boolean; className?: string };
-export function modal(title: string, body: HTMLElement, buttons: { label: string; primary?: boolean; danger?: boolean; onClick?: () => boolean | void }[], onClose?: () => void, beforeClose?: () => boolean, opts: ModalOptions = {}): { close: (force?: boolean) => void; buttons: HTMLButtonElement[] } {
+// buttons: the elements of the given buttons, in order (e.g. to show one only at times)
+export function modal(title: string, body: HTMLElement, buttons: { label: string; primary?: boolean; danger?: boolean; onClick?: () => boolean | void }[], onClose?: () => void, beforeClose?: () => boolean): { close: (force?: boolean) => void; buttons: HTMLButtonElement[] } {
   const back = h('div', { class: 'modal-back' });
   let closed = false;
-  const topmost = () => [...document.querySelectorAll('.modal-back')].pop() === back;
   // Esc closes the topmost dialog
   const esc = (e: KeyboardEvent) => {
-    if (e.key !== 'Escape' || !topmost()) return;
+    if (e.key !== 'Escape' || [...document.querySelectorAll('.modal-back')].pop() !== back) return;
     e.preventDefault();
     e.stopPropagation();
     close();
   };
-  const imm = opts.immediate ? (typeof opts.immediate === 'object' ? opts.immediate : {}) : null;
-  const offUndo = imm && editorUndo ? dialogUndoKeys(body, editorUndo.undo, editorUndo.redo, imm.after) : null;
   const close = (force = false) => {
     if (closed || (!force && beforeClose && !beforeClose())) return;
     closed = true;
     back.remove();
     window.removeEventListener('keydown', esc, true);
-    offUndo?.();
     onClose?.();
     modalsChanged(-1);
   };
@@ -312,52 +292,16 @@ export function modal(title: string, body: HTMLElement, buttons: { label: string
     class: b.danger ? 'danger' : b.primary ? 'primary' : '',
     onclick: () => { if (b.onClick?.() !== false) close(); },
   }, b.label));
-  // (shown with the primary or dangerous ones last: at the right, where the eye ends)
-  const order = els.map((e, i) => ({ e, last: !!(buttons[i].primary || buttons[i].danger), i }))
-    .sort((a, b) => Number(a.last) - Number(b.last) || a.i - b.i).map((x) => x.e);
-  const primary = els.find((_, i) => buttons[i].primary);
-  const count = h('span', { class: 'modal-changes', hidden: true });
-  const box = h('div', { class: `modal${opts.className ? ` ${opts.className}` : ''}`, role: 'dialog', 'aria-label': title },
-    h('div', { class: 'modal-title' }, h('span', { class: 'modal-title-text' }, title, count), h('button', { class: 'icon-btn', onclick: () => close(), title: 'Close (Esc)', 'aria-label': 'Close' }, icon('close'))),
+  const box = h('div', { class: 'modal' },
+    h('div', { class: 'modal-title' }, title, h('button', { class: 'icon-btn', onclick: () => close(), title: 'Close' }, '✕')),
     h('div', { class: 'modal-body' }, body),
-    order.length || imm ? h('div', { class: 'modal-buttons' }, imm ? h('span', { class: 'hint modal-note' }, IMMEDIATE_NOTE) : null, order) : null,
+    h('div', { class: 'modal-buttons' }, els),
   );
-  box.addEventListener('keydown', (e) => {
-    if (e.key !== 'Enter' || e.defaultPrevented || e.ctrlKey || e.altKey || e.metaKey || e.shiftKey || !primary || primary.disabled) return;
-    const t = e.target as HTMLElement;
-    if (t instanceof HTMLTextAreaElement || t instanceof HTMLButtonElement || t instanceof HTMLSelectElement || t.isContentEditable || t.closest('a')) return;
-    e.preventDefault();
-    primary.click();
-  });
-  if (opts.staged) trackChanges(body, count);
   back.appendChild(box);
   back.addEventListener('mousedown', (e) => { if (e.target === back) close(); });
   document.body.appendChild(back);
   modalsChanged(1);
   return { close, buttons: els };
-}
-
-// a staged dialog's changed fields (#481): marked, and their number beside the title. A field's value when it is first
-// touched is its start (fields drawn anew start anew)
-function trackChanges(body: HTMLElement, count: HTMLElement): void {
-  const start = new WeakMap<Element, string>();
-  const valueOf = (el: Element) => el instanceof HTMLInputElement && (el.type === 'checkbox' || el.type === 'radio') ? String(el.checked) : (el as HTMLInputElement).value;
-  const isField = (el: EventTarget | null): el is HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement =>
-    el instanceof HTMLInputElement || el instanceof HTMLSelectElement || el instanceof HTMLTextAreaElement;
-  const remember = (el: Element) => { if (!start.has(el)) start.set(el, valueOf(el)); };
-  for (const el of body.querySelectorAll('input, select, textarea')) remember(el);
-  body.addEventListener('focusin', (e) => { if (isField(e.target)) remember(e.target); });
-  body.addEventListener('pointerdown', (e) => { if (isField(e.target)) remember(e.target); }, true);
-  const update = (e: Event) => {
-    if (!isField(e.target)) return;
-    const el = e.target;
-    if (start.has(el)) el.classList.toggle('changed', valueOf(el) !== start.get(el));
-    const n = body.querySelectorAll('.changed').length;
-    count.hidden = !n;
-    count.textContent = `${n} change${n === 1 ? '' : 's'}`;
-  };
-  body.addEventListener('input', update);
-  body.addEventListener('change', update);
 }
 
 // zoom levels of every view (1: one SNES pixel per screen pixel); a view uses a range of them
@@ -440,7 +384,7 @@ export function attachPanZoom(scroller: HTMLElement, zoom: () => number, setZoom
 
 export type CellRect = { x: number; y: number; w: number; h: number };
 // palette sheets: a click picks a cell, dragging a rectangle of cells; show() previews the rectangle while dragging;
-// Go to definition (F12, isGoto) goes to the cell's definition instead, if there is one (jump)
+// Ctrl+click goes to the cell's definition instead, if there is one (jump)
 export function attachRectPick(c: HTMLElement, cols: number, rows: number, show: (r: CellRect) => void, done: (r: CellRect) => void, jump?: (x: number, y: number) => void): void {
   const cellAt = (e: MouseEvent) => {
     const rc = c.getBoundingClientRect();
@@ -449,12 +393,11 @@ export function attachRectPick(c: HTMLElement, cols: number, rows: number, show:
       y: Math.max(0, Math.min(rows - 1, Math.floor((e.clientY - rc.top) / (rc.height / rows)))),
     };
   };
-  if (jump) c.dataset.goto = ''; // (F12 goes to a cell's definition, gotoAt)
   c.addEventListener('mousedown', (e) => {
     if (e.button !== 0) return;
     e.preventDefault();
     const a = cellAt(e);
-    if (jump && isGoto(e)) { jump(a.x, a.y); return; }
+    if (jump && (e.ctrlKey || e.metaKey)) { jump(a.x, a.y); return; }
     let b = a;
     const rect = (): CellRect => ({ x: Math.min(a.x, b.x), y: Math.min(a.y, b.y), w: Math.abs(a.x - b.x) + 1, h: Math.abs(a.y - b.y) + 1 });
     const move = (ev: MouseEvent) => {
@@ -526,47 +469,4 @@ export function putImage(canvas: HTMLCanvasElement, img: Uint32Array, W = 512, b
   const px = new Uint32Array(id.data.buffer);
   for (let i = 0; i < px.length; i++) px[i] = img[i] || back;
   ctx.putImageData(id, 0, 0);
-}
-
-// the state of tabs and segmented controls for assistive technology (#480): a tab bar's buttons are tabs, the active
-// one selected; a segmented control's active button is pressed – kept from the class 'active' the views set
-const GROUP = '.tabbar, .seg, .btn-group, .tabs.seg, .rail';
-function ariaOf(b: Element): void {
-  const bar = b.parentElement;
-  if (!(b instanceof HTMLButtonElement) || !bar?.matches(GROUP)) return;
-  const on = b.classList.contains('active');
-  if (bar.classList.contains('tabbar')) {
-    if (b.getAttribute('role') !== 'tab') b.setAttribute('role', 'tab');
-    if (b.getAttribute('aria-selected') !== String(on)) b.setAttribute('aria-selected', String(on));
-  } else if (b.getAttribute('aria-pressed') !== String(on)) b.setAttribute('aria-pressed', String(on));
-}
-export function keepAriaStates(root: HTMLElement): void {
-  for (const b of root.querySelectorAll(`:is(${GROUP}) > button`)) ariaOf(b);
-  new MutationObserver((records) => {
-    for (const r of records) {
-      if (r.type === 'attributes') ariaOf(r.target as Element);
-      else for (const n of r.addedNodes) {
-        if (!(n instanceof HTMLElement)) continue;
-        ariaOf(n);
-        for (const b of n.querySelectorAll(`:is(${GROUP}) > button`)) ariaOf(b);
-      }
-    }
-  }).observe(root, { subtree: true, childList: true, attributes: true, attributeFilter: ['class'] });
-}
-
-// Go to definition (#482): F12 over something with a definition – an animated tile or color, a Map16 tile, a palette
-// button – opens it. Sent as a click marked so (gotoAt) to the element under the mouse; its handler asks isGoto. (A
-// Ctrl+click is no longer one: Ctrl+click adds to the selection wherever there is one.)
-export function isGoto(e: MouseEvent): boolean { return (e as MouseEvent & { gotoDefinition?: boolean }).gotoDefinition === true; }
-export function gotoAt(x: number, y: number): boolean {
-  // (only where a definition can be gone to – marked data-goto –: elsewhere the click would be a real one)
-  const el = document.elementFromPoint(x, y);
-  if (!el?.closest('[data-goto]')) return false;
-  for (const type of ['mousedown', 'mouseup', 'click']) {
-    // (ctrlKey too: handlers that leave a Ctrl+click alone leave it alone)
-    const ev = new MouseEvent(type, { bubbles: true, cancelable: true, clientX: x, clientY: y, button: 0, ctrlKey: true });
-    Object.defineProperty(ev, 'gotoDefinition', { value: true });
-    el.dispatchEvent(ev);
-  }
-  return true;
 }

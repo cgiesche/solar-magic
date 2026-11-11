@@ -12,7 +12,6 @@ import { levelName, hasLevelName, levelNamePatch } from '../core/levelnames.ts';
 import { ownsTranslevel } from '../core/owstars.ts';
 import type { Rect } from '../core/owevents.ts';
 import type { OffMapEnd } from './owlinkview.ts';
-import { MARK } from './marks.ts';
 
 // where a label w × h goes for the tile at `tile` with the map in view `view` (all in screen pixels), gap pixels from
 // the tile: under it, centred; shifted sideways to stay in view; above it where there is no room below (neither: in
@@ -82,14 +81,14 @@ export class TileLabels {
         if (!p) break;
         ctx.fillStyle = 'rgba(0,0,0,0.8)';
         ctx.fillRect(p.x, p.y, w, h);
-        ctx.strokeStyle = MARK.select;
+        ctx.strokeStyle = '#4cc2ff';
         ctx.lineWidth = lw;
         ctx.strokeRect(p.x + lw / 2, p.y + lw / 2, w - lw, h - lw);
         ctx.fillStyle = l.dim ? 'rgba(255,255,255,0.6)' : '#fff';
         ctx.fillText(l.text, p.x + px, p.y + Math.round(h / 2));
         if (l.jump) {
           const ix = p.x + px + tw + iconGap, iy = p.y + Math.round((h - icon) / 2);
-          linkSymbol(ctx, ix, iy, icon, lw, MARK.select);
+          linkSymbol(ctx, ix, iy, icon, lw, '#4cc2ff');
           this.jumps.push({ x: ix - iconGap / 2, y: p.y, w: icon + iconGap / 2 + px, h, end: l.jump });
         }
         const top = Math.min(tile.y, p.y), bottom = Math.max(tile.y + tile.h, p.y + h);

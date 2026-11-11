@@ -1,4 +1,4 @@
-// The upload preview of the Packages workspace: what was detected in an upload (each part with its kind,
+// The upload preview of the Packages dialog: what was detected in an upload (each part with its kind,
 // the settings of a patch part, where blocks and graphics go – pkgplace.ts – and what is not installed) – or, when detection is ambiguous, the manual assignment prefilled with
 // the suggestion – and "Install", which applies the whole package as one undoable ROM edit. Cancel
 // leaves the ROM untouched.
@@ -115,10 +115,10 @@ function installDialog(app: App, p: ReadyPreview | ManualPreview, body: HTMLElem
 
 // an upload that could not be recognized: what was found and what is missing
 export function showUploadFailure(name: string, reason: string): void {
-  modal(`Upload: ${name}`, h('div', null, h('p', null, 'This upload cannot be installed.'), h('p', { class: 'hint' }, reason)), [{ label: 'Close', primary: true }]);
+  modal(`Upload: ${name}`, h('div', null, h('p', null, 'This upload cannot be installed.'), h('p', { class: 'hint' }, reason)), [{ label: 'OK', primary: true }]);
 }
 
 // an upload of replaced patches only: the editor already does their work
 export function showReplaced(name: string, notes: string[]): void {
-  modal(`Upload: ${name}`, h('div', null, h('p', null, 'Nothing to install – the editor already does what this upload does.'), notes.map((n) => h('p', { class: 'hint' }, n))), [{ label: 'Close', primary: true }]);
+  modal(`Upload: ${name}`, h('div', null, h('p', null, 'Nothing to install – the editor already does what this upload does.'), notes.map((n) => h('p', { class: 'hint' }, n))), [{ label: 'OK', primary: true }]);
 }

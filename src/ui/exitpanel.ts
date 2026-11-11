@@ -16,7 +16,6 @@ import { arrivesSlippery, slipperyEntrances } from '../core/slippery.ts';
 import { levelPicker } from './levelpicker.ts';
 import { openTestPlay } from './testplay.ts';
 import { readL1, readTranslevels, levelTilesOf, l1XY, translevelToLevel } from '../core/overworld.ts';
-import { iconLabel } from './icons.ts';
 
 const field = (label: string, ...input: (HTMLElement | string)[]) => h('div', { class: 'prop' }, h('label', null, label), ...input);
 const hint = (...txt: (HTMLElement | string)[]) => h('div', { class: 'hint' }, ...txt);
@@ -202,7 +201,7 @@ function secondaryPanel(app: App, body: HTMLElement, idx: number): void {
     ...optionFields(e, (l, f) => set(l, f, l)).map(([l, el]) => field(l, el)),
     users(app, refs, [], 'No exit yet. In another level, select a screen, choose “Create exit”, “Secondary entrance” and this level as the target.'),
     h('div', { class: 'row' },
-      h('button', { title: 'Test play from this entrance', onclick: () => testAt(app, 'sec', idx) }, iconLabel('play', 'Test here')),
+      h('button', { title: 'Test play from this entrance', onclick: () => testAt(app, 'sec', idx) }, '▶ Test here'),
       h('button', {
         class: 'danger',
         onclick: async () => {
@@ -247,7 +246,7 @@ function mainPanel(app: App, body: HTMLElement, kind: 'main' | 'midway'): boolea
       hint('It applies once Mario has touched the level\'s midway tape.'),
       s.midwayOwn ? users(app, app.entrances.graph().exitsInto(n).filter((r) => r.midway), [], 'No exit leads to the midway entrance.')
         : hint('Exits set to “go to midway entrance” lead to the main entrance while it has no own settings.'),
-      h('div', { class: 'row' }, h('button', { onclick: () => testAt(app, 'midway', 0) }, iconLabel('play', 'Test here'))),
+      h('div', { class: 'row' }, h('button', { onclick: () => testAt(app, 'midway', 0) }, '▶ Test here')),
     );
     return false;
   }
@@ -261,7 +260,7 @@ function mainPanel(app: App, body: HTMLElement, kind: 'main' | 'midway'): boolea
     ...optionFields(s, (_, f) => upd((s) => f(s))).map(([l, el]) => field(l, el)),
     hint(slipperyText(app, s)),
     users(app, g.exitsInto(n).filter((r) => !r.secondary && !(r.midway && s.midwayOwn)), extra, 'No exit leads to the main entrance.'),
-    h('div', { class: 'row' }, h('button', { title: 'Test play from the main entrance (T)', onclick: () => testAt(app, 'main', 0) }, iconLabel('play', 'Test here'))),
+    h('div', { class: 'row' }, h('button', { title: 'Test play from the main entrance (T)', onclick: () => testAt(app, 'main', 0) }, '▶ Test here')),
     hint('More settings (scrolling, layer 3 …) in the header dialog (H).'),
   );
   return !rows;

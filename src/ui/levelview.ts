@@ -21,7 +21,6 @@ import { gameViewAt } from '../core/camerareach.ts';
 import { paintBoxName } from './objbox.ts';
 import { projectId } from '../core/projectid.ts';
 import { loadDeaths, killerText, levelVersion, type DeathMark } from './deathmarks.ts';
-import { MARK, onTokensChanged, rgba, uiToken } from './marks.ts';
 
 type Drag =
   | { kind: 'move'; move: MoveDrag; startTx: number; startTy: number } // the selection (levelmodel.ts)
@@ -63,7 +62,6 @@ export class LevelView {
   arcPin: { tx: number; ty: number } | null = null; // jump arcs stay at this tile instead of following the mouse
 
   constructor(app: App, statusBar: HTMLDivElement) {
-    onTokensChanged(() => this.paint()); // (the backdrop is a UI token: another theme)
     this.app = app;
     this.pos = h('span', { class: 'status-pos' });
     this.status = h('span', { class: 'status-text' });
@@ -235,7 +233,7 @@ export class LevelView {
     const z = app.view.zoom * dpr;
     const sx = this.scroller.scrollLeft * dpr, sy = this.scroller.scrollTop * dpr;
     ctx.setTransform(1, 0, 0, 1, 0, 0);
-    ctx.fillStyle = uiToken('--canvas-bg', '#15171b');
+    ctx.fillStyle = '#1b1d22';
     ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
     ctx.imageSmoothingEnabled = false;
     ctx.setTransform(z, 0, 0, z, -sx, -sy);
@@ -256,7 +254,7 @@ export class LevelView {
     // selection
     if (app.model.mode === 'l1' || app.model.mode === 'l2') {
       const sel = app.model.selectedObjects();
-      for (const o of sel) this.outlineObject(ctx, o, MARK.select, lw);
+      for (const o of sel) this.outlineObject(ctx, o, '#4cc2ff', lw);
       for (const o of this.handleObjects()) this.paintHandles(ctx, o, lw);
     }
     // hover
@@ -292,8 +290,8 @@ export class LevelView {
     }
     if (this.drag?.kind === 'band') {
       const d = this.drag;
-      ctx.strokeStyle = MARK.select;
-      ctx.fillStyle = rgba(MARK.select, 0.15);
+      ctx.strokeStyle = '#4cc2ff';
+      ctx.fillStyle = 'rgba(76,194,255,0.15)';
       ctx.lineWidth = lw;
       const x = Math.min(d.x0, d.x1), y = Math.min(d.y0, d.y1);
       ctx.fillRect(x, y, Math.abs(d.x1 - d.x0), Math.abs(d.y1 - d.y0));
@@ -330,7 +328,7 @@ export class LevelView {
   outlineObject(ctx: CanvasRenderingContext2D, o: LevelObject, color: string, lw: number): void {
     const tiles = this.app.objectTiles(o);
     const set = new Set(tiles);
-    ctx.fillStyle = color.startsWith('#') ? rgba(MARK.select, 0.18) : 'rgba(255,255,255,0.12)';
+    ctx.fillStyle = color.startsWith('#') ? 'rgba(76,194,255,0.18)' : 'rgba(255,255,255,0.12)';
     ctx.strokeStyle = color;
     ctx.lineWidth = 2 * lw;
     ctx.beginPath();
@@ -352,7 +350,7 @@ export class LevelView {
   paintHandles(ctx: CanvasRenderingContext2D, o: LevelObject, lw: number): void {
     const b = this.app.objectBounds(o), d = this.app.resizeDrivers(o), hs = this.handleSize();
     const xs = [b.x0 * 16, (b.x0 + b.x1 + 1) * 8, (b.x1 + 1) * 16], ys = [b.y0 * 16, (b.y0 + b.y1 + 1) * 8, (b.y1 + 1) * 16];
-    ctx.fillStyle = MARK.select;
+    ctx.fillStyle = '#4cc2ff';
     ctx.strokeStyle = 'rgba(0,0,0,0.7)';
     ctx.lineWidth = lw;
     for (let i = 0; i < 3; i++) for (let j = 0; j < 3; j++) {
@@ -726,7 +724,7 @@ export class LevelView {
     this.pos.textContent = '';
     this.status.textContent = isBrushMode(m) ? 'Click/drag picks up tiles as brush · Right click/Shift+click paints'
       : m === 'exit' ? 'Click an entrance (M, Z, S) or screen to select it – edit it on the right under “Properties” · Drag moves entrances · Right click: new entrance, create exit …'
-        : 'Click selects, drag moves, click into nothing deselects all · Right click/Shift+click places the picked item, else opens the menu · Alt+click: item underneath';
+        : 'Click selects, drag moves, click into nothing deselects all · Right click/Shift+click places the item chosen in “Insert”, else opens the menu · Alt+click: item underneath';
   }
 
   updateStatus(tx: number, ty: number): void {
@@ -912,7 +910,7 @@ export class LevelView {
     items.push({ heading: `Screen ${hex2(scr)}` });
     if (ex) {
       items.push({ label: 'Edit exit', onClick: () => app.selectScreen(scr) });
-      items.push({ label: 'Open exit target', onClick: () => app.gotoExitTarget(ex) });
+      items.push({ label: '→ Open exit target', onClick: () => app.gotoExitTarget(ex) });
     } else {
       items.push({ label: 'Create exit', onClick: () => { app.selectScreen(scr); app.editLevel(() => { app.level.exits.push({ uid: newUid(), screen: scr, dest: app.level.number, secondary: false, flags: EXIT_NEW }); }, false); } });
     }

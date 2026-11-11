@@ -9,8 +9,8 @@
 import type { App } from '../app.ts';
 import type { Watch } from '../../core/romwatch.ts';
 import type { GfxWorkspace, WsPanel } from '../gfxworkspace.ts';
-import { contextMenu, menuButton, type MenuItem } from '../menu.ts';
-import { h, clear, toast, modal, choose, attachPanZoom, zoomControl, zoomStep, showColorLoupe, hideColorLoupe, isGoto } from '../dom.ts';
+import { menuButton, type MenuItem } from '../menu.ts';
+import { h, clear, toast, modal, choose, attachPanZoom, zoomControl, zoomStep, showColorLoupe, hideColorLoupe } from '../dom.ts';
 import { downloadBytes, pickFile, pickFiles } from '../platform.ts';
 
 const ZOOM_MIN = 1, ZOOM_MAX = 32; // of the shared zoom levels (dom.ts)
@@ -43,9 +43,6 @@ import type { GfxTarget } from './target.ts';
 import { slotRemapLine } from '../../core/remap.ts';
 import { AntsOverlay } from '../ants.ts';
 import { PaletteHover } from '../palhover.ts';
-import { MARK, rgba } from '../marks.ts';
-import { icon, type IconName } from '../icons.ts';
-import { fillRail, toolRail, type RailEntry } from '../rail.ts';
 
 
 // a color as CGRAM's RGBA word gives it, for CSS
@@ -55,7 +52,6 @@ const spriteRange = (first: number) => first < 0x100 ? `${hex(first, 2)}–${hex
 const spriteTile = (first: number, t: number) => first + t < 0x100 ? hex(first + t, 2) : `${hex(first + t, 3)} (page 2: ${hex((first + t) & 0xff, 2)} with T bit)`;
 
 type Tool = 'pen' | 'erase' | 'fill' | 'pick' | 'select';
-const TOOL_ICON: Record<Tool, IconName> = { select: 'select', pen: 'pen', erase: 'eraser', fill: 'fill', pick: 'eyedropper' };
 interface Rect { x: number; y: number; w: number; h: number }
 interface Float extends Rect { pix: Uint8Array; label: string } // pixels lifted out of the sheet, the edit's name when put down
 
@@ -120,10 +116,8 @@ export class GfxTab implements WsPanel {
   private pane = h('canvas', { class: 'gt-pane-canvas', 'data-tool': 'select' });
   private paneView = h('div', { class: 'gt-pane-view' }, this.pane);
   private paneHead = h('div', { class: 'ws-bar gt-pane-head' });
-  private paneRail = toolRail('Pixel tools'); // (#477)
-  readonly side = h('div', { class: 'gt-side' }); // (under the preview, #486)
+  private side = h('div', { class: 'gt-side' });
   private tools = h('div', { class: 'ws-bar' });
-  get bar(): HTMLElement { return this.tools; } // (in the workspace's context bar, #486)
 
   constructor(app: App, ws: GfxWorkspace) {
     this.app = app;
@@ -139,7 +133,7 @@ export class GfxTab implements WsPanel {
         h('div', { class: 'gt-files' }, search, h('label', { class: 'toggle' }, only, 'only used by the level'), this.list,
           h('button', { onclick: () => void this.newExGfx(), title: 'Create an empty 4bpp file; the next free ExGFX number is suggested' }, '+ New ExGFX')),
         this.view,
-        h('div', { class: 'gt-pane' }, this.paneHead, h('div', { class: 'gt-pane-row' }, this.paneRail, this.paneView)),
+        h('div', { class: 'gt-pane' }, this.paneHead, this.paneView),
         this.side));
     this.attachSheet();
     this.attachPane();
@@ -444,8 +438,8 @@ export class GfxTab implements WsPanel {
     const pick = await choose('Remap Map16 tiles?', h('div', { style: 'max-width:480px' },
       h('p', null, !m.levels ? `${gfxName(file)} moved from ${span(from)} to ${span(to)}.` : `${gfxName(file)} is in ${span(from)} in ${m.levels} other level${m.levels > 1 ? 's' : ''}, here in ${span(to)}.`,
         ` Map16 tiles made for it still point at ${from.name}.`),
-      h('p', { class: 'hint' }, `Map16 tiles' Remap tiles … opens with ${line} for the tiles 200–FFF that use these 8x8 tiles; the preview shows them before anything changes. Map16 tiles are shared by all levels: one that keeps ${gfxName(file)} in ${from.name} then shows them wrong.`)),
-      [{ label: 'Remap tiles …', primary: true }, { label: 'Not now' }]);
+      h('p', { class: 'hint' }, `The Map16 tab's remap opens with ${line} for the tiles 200–FFF that use these 8x8 tiles; the preview shows them before anything changes. Map16 tiles are shared by all levels: one that keeps ${gfxName(file)} in ${from.name} then shows them wrong.`)),
+      [{ label: 'Remap …', primary: true }, { label: 'Not now' }]);
     if (pick === 0) this.ws.showRemap({ line, scope: 'uses', target: 'fg' });
   }
 
@@ -485,7 +479,6 @@ export class GfxTab implements WsPanel {
     return h('div', {
       class: `level-item${i === this.cur ? ' current' : ''}${exists ? '' : ' unused'}`,
       onclick: () => this.select(i),
-      oncontextmenu: (e: MouseEvent) => this.fileMenu(e, i, exists),
     }, gfxName(i), name ? h('span', { class: 'lname gt-name', title: name }, name) : '', slot ? h('span', { class: 'gt-used' }, slot) : '',
       unused ? h('span', { class: 'gt-unused', title: 'Inserted, but in no level\'s graphics slots' }, 'unused') : '');
   }
@@ -528,7 +521,7 @@ export class GfxTab implements WsPanel {
       : `ExGFX go in 80–${gfxHex(AS_IS_FIRST - 1)} (also 32–7F)`;
     const field = gfxNumberField(this.app.rom, n, { file: () => f, taken: () => new Set(), onChange: (v) => (n = v), author: want, by: 'file name' });
     modal(title, h('div', null, h('div', { class: 'prop' }, h('label', null, 'ExGFX number'), field), h('p', { class: 'hint' }, range)),
-      [{ label: 'Cancel' }, { label: 'Use this number', primary: true, onClick: () => { done(n); } }], () => done(null));
+      [{ label: 'Cancel' }, { label: 'OK', primary: true, onClick: () => { done(n); } }], () => done(null));
     return result;
   }
 
@@ -589,23 +582,22 @@ export class GfxTab implements WsPanel {
   private buildPaneHead(): void {
     const b = this.paneHead;
     clear(b);
-    const tool = (t: Tool, label: string, key: string, title: string): RailEntry => ({ label, key, icon: TOOL_ICON[t], title, active: this.tool === t, onClick: () => this.setTool(t) });
+    const tool = (t: Tool, label: string, key: string, title: string) => h('button', { class: this.tool === t ? 'active' : '', title: `${title} (${key})`, onclick: () => this.setTool(t) }, label);
     const a = this.area, first = a.y * 16 + a.x, last = (a.y + a.h - 1) * 16 + a.x + a.w - 1;
     b.append(
       h('b', { class: 'mono' }, a.w * a.h === 1 ? `Tile ${hex(first, 2)}` : `Tiles ${hex(first, 2)}–${hex(last, 2)} (${a.w}×${a.h})`),
       h('span', { class: 'btn-group' },
-        h('button', { onclick: () => this.transform('h'), title: 'Flip the selection (else these tiles) horizontally', 'aria-label': 'Flip horizontally' }, icon('flip-h')),
-        h('button', { onclick: () => this.transform('v'), title: 'Flip vertically', 'aria-label': 'Flip vertically' }, icon('flip-v')),
-        h('button', { onclick: () => this.transform('r'), title: 'Rotate by 90° (square selection only)', 'aria-label': 'Rotate' }, icon('rotate'))),
+        tool('select', '⬚ Select', 'S', 'Select pixels; dragging inside moves them, Enter puts them down, Esc cancels'),
+        tool('pen', '✎ Pen', 'B', 'Draw: left button with the left color, right button with the right color; Shift+click: line from the last point'),
+        tool('erase', '⌫ Eraser', 'E', 'Draw transparent'),
+        tool('fill', '▧ Fill', 'F', 'Fill an area of the same color (inside the selection, else these tiles)'),
+        tool('pick', '⌖ Eyedropper', 'I', 'Take a color for the button clicked with (also Alt+click)')),
+      h('span', { class: 'btn-group' },
+        h('button', { onclick: () => this.transform('h'), title: 'Flip the selection (else these tiles) horizontally' }, '↔'),
+        h('button', { onclick: () => this.transform('v'), title: 'Flip vertically' }, '↕'),
+        h('button', { onclick: () => this.transform('r'), title: 'Rotate by 90° (square selection only)' }, '⟳')),
       h('button', { onclick: () => this.copySel(), title: 'Copy the selection, else these tiles (Ctrl+C)' }, 'Copy'),
       h('button', { onclick: () => this.pasteSel(), title: 'Paste at the selection, movable afterwards (Ctrl+V)' }, 'Paste'));
-    fillRail(this.paneRail, [
-      tool('select', 'Select', 'S', 'Select pixels; dragging inside moves them, Enter puts them down, Esc cancels'),
-      tool('pen', 'Pen', 'B', 'Draw: left button with the left color, right button with the right color; Shift+click: line from the last point'),
-      tool('erase', 'Eraser', 'E', 'Draw transparent'),
-      tool('fill', 'Fill', 'F', 'Fill an area of the same color (inside the selection, else these tiles)'),
-      tool('pick', 'Eyedropper', 'I', 'Take a color for the button clicked with (also Alt+click)'),
-    ]);
     this.pane.dataset.tool = this.tool;
   }
 
@@ -689,9 +681,6 @@ export class GfxTab implements WsPanel {
 
   // "Use in slot": puts the open file into one of the level's slots (same as the card's "Swap")
   private assignMenu(num: number, used: boolean): HTMLElement {
-    return h('div', { class: 'row' }, menuButton({ label: used ? 'Into another slot' : 'Use in slot', title: `Put this file into a graphics slot of the current ${this.t.where}`, items: this.slotItems(num) }));
-  }
-  private slotItems(num: number): MenuItem[] {
     const items: MenuItem[] = [{ heading: this.t.heading }];
     for (const s of this.gfxSlots()) {
       items.push({
@@ -700,19 +689,7 @@ export class GfxTab implements WsPanel {
         onClick: () => void this.assignSlot(s, num),
       });
     }
-    return items;
-  }
-  // a file's context menu (#480): the file opened, then where to use it and its exports
-  private fileMenu(e: MouseEvent, i: number, exists: boolean): void {
-    e.preventDefault();
-    if (i !== this.cur) this.select(i);
-    contextMenu(e.clientX, e.clientY, [
-      ...(exists ? this.slotItems(i) : []),
-      ...(exists ? ['sep' as const, { label: 'Export (.png)', title: 'File as PNG in the selected palette', onClick: () => this.exportPng() },
-        { label: 'Export (.bin)', title: 'File as Lunar Magic extracts it', onClick: () => void this.exportBin() }] : []),
-      { label: 'Import (.png) …', onClick: () => void this.importPng() },
-      { label: 'Import (.bin) …', onClick: () => void this.importBin() },
-    ]);
+    return h('div', { class: 'row' }, menuButton({ label: used ? 'Into another slot' : 'Use in slot', title: `Put this file into a graphics slot of the current ${this.t.where}`, items }));
   }
 
   // Map16 tiles that use the focused 8x8 tile (when the file is in one of the level's layer slots)
@@ -825,15 +802,15 @@ export class GfxTab implements WsPanel {
     ctx.drawImage(this.off, 0, 0, W * z, H * z);
     if (this.grid && z >= 8) pixelGrid(ctx, W, H, z);
     if (this.grid === 8) gridLines(ctx, W, H, z, 8, 0, 0, 'rgba(0,0,0,0.7)', 'rgba(255,255,255,0.55)');
-    if (this.grid) gridLines(ctx, W, H, z, 16, 0, 0, 'rgba(0,0,0,0.85)', rgba(MARK.select, 0.9));
+    if (this.grid) gridLines(ctx, W, H, z, 16, 0, 0, 'rgba(0,0,0,0.85)', 'rgba(76,194,255,0.9)');
     this.animCorners(ctx, z, { x: 0, y: 0, w: 16, h: H >> 3 });
     const a = this.area;
     if (this.focusTile >= 0 && this.focusTile < f.tiles && a.w * a.h > 1) {
-      ctx.strokeStyle = MARK.warn;
+      ctx.strokeStyle = '#ffb000';
       ctx.lineWidth = 2;
       ctx.strokeRect((this.focusTile & 15) * 8 * z + 1, (this.focusTile >> 4) * 8 * z + 1, 8 * z - 2, 8 * z - 2);
     }
-    this.ants.set([{ x: a.x * 8, y: a.y * 8, w: a.w * 8, h: a.h * 8, color: MARK.select, out: true }]);
+    this.ants.set([{ x: a.x * 8, y: a.y * 8, w: a.w * 8, h: a.h * 8, color: '#4cc2ff', out: true }]);
   }
 
   // the pixel editor: the area of the sheet, as large as its view allows
@@ -850,12 +827,12 @@ export class GfxTab implements WsPanel {
     ctx.drawImage(this.off, r.x, r.y, r.w, r.h, 0, 0, r.w * z, r.h * z);
     if (this.grid && z >= 6) pixelGrid(ctx, r.w, r.h, z);
     gridLines(ctx, r.w, r.h, z, 8, r.x, r.y, 'rgba(0,0,0,0.7)', 'rgba(255,255,255,0.55)');
-    if (this.grid === 16) gridLines(ctx, r.w, r.h, z, 16, r.x, r.y, 'rgba(0,0,0,0.85)', rgba(MARK.select, 0.9));
+    if (this.grid === 16) gridLines(ctx, r.w, r.h, z, 16, r.x, r.y, 'rgba(0,0,0,0.85)', 'rgba(76,194,255,0.9)');
     this.animCorners(ctx, z, this.area);
     const s = this.float ?? this.sel;
     if (s) {
       ctx.setLineDash([4, 3]);
-      ctx.strokeStyle = MARK.select;
+      ctx.strokeStyle = '#4cc2ff';
       ctx.lineWidth = 2;
       ctx.strokeRect((s.x - r.x) * z + 1, (s.y - r.y) * z + 1, s.w * z - 2, s.h * z - 2);
       ctx.setLineDash([]);
@@ -866,7 +843,7 @@ export class GfxTab implements WsPanel {
   private animCorners(ctx: CanvasRenderingContext2D, z: number, area: Rect): void {
     const anim = this.animatedTiles();
     if (!anim.size) return;
-    ctx.fillStyle = MARK.missing;
+    ctx.fillStyle = '#ff4fd8';
     const m = Math.max(5, z * 2);
     for (const t of anim) {
       const tx = (t & 15) - area.x, ty = (t >> 4) - area.y;
@@ -911,7 +888,7 @@ export class GfxTab implements WsPanel {
     }
     return out;
   }
-  // F12 (go to definition): the own animation that overwrites the tile, in the Animations tab
+  // Ctrl+click: the own animation that overwrites the tile, in the Animations tab
   private gotoAnim(t: number): void {
     const slot = this.gfxSlots().find((s) => s.file === this.cur && s.map16);
     const own = slot ? animsAt(this.app, slot.first + t) : [];
@@ -974,7 +951,7 @@ export class GfxTab implements WsPanel {
 
   // The sheet follows the rules of the other editors: click/drag picks 8x8 tiles (shown in the pixel
   // editor), right click/Shift+click pastes them at the mouse, dragging pastes on (one undo step),
-  // F12 opens a tile's animation. A plain click never changes the file.
+  // Ctrl+click opens a tile's animation. A plain click never changes the file.
   private attachSheet(): void {
     const c = this.canvas;
     c.addEventListener('contextmenu', (e) => e.preventDefault());
@@ -985,12 +962,11 @@ export class GfxTab implements WsPanel {
         y: Math.max(0, Math.min(rows - 1, Math.floor(((e.clientY - rc.top) / rc.height) * rows))),
       };
     };
-    c.dataset.goto = ''; // (F12: an animated tile's animation)
     c.addEventListener('mousedown', (e) => {
       if (!this.file || (e.button !== 0 && e.button !== 2)) return;
       e.preventDefault();
       const a = tileAt(e);
-      if (e.button === 0 && isGoto(e)) { this.gotoAnim(a.y * 16 + a.x); return; }
+      if (e.button === 0 && (e.ctrlKey || e.metaKey)) { this.gotoAnim(a.y * 16 + a.x); return; }
       if (e.button === 2 || e.shiftKey) { this.stamp(a, tileAt); return; }
       this.dropFloat();
       this.sel = null;
@@ -1024,7 +1000,7 @@ export class GfxTab implements WsPanel {
 
   private tileTitle(t: number): string {
     const spr = t < 0x80 ? this.gfxSlots().filter((s) => s.sprite && s.file === this.cur).map((s) => ` · sprite tile ${spriteTile(s.first, t)}`).join('') : '';
-    return `Tile ${hex(t, 2)}${spr}${this.animatedTiles().has(t) ? ' (animated – F12: open its animation)' : ''}`;
+    return `Tile ${hex(t, 2)}${spr}${this.animatedTiles().has(t) ? ' (animated – Ctrl+click: open its animation)' : ''}`;
   }
 
   // right drag on the sheet: pastes the pixel editor's tiles with their top left at each tile under the mouse
@@ -1065,12 +1041,11 @@ export class GfxTab implements WsPanel {
       const rc = c.getBoundingClientRect(), r = this.paneRect();
       return { x: r.x + Math.floor(((e.clientX - rc.left) / rc.width) * r.w), y: r.y + Math.floor(((e.clientY - rc.top) / rc.height) * r.h) };
     };
-    c.dataset.goto = ''; // (F12: an animated tile's animation)
     c.addEventListener('mousedown', (e) => {
       if (!this.file || (e.button !== 0 && e.button !== 2)) return;
       e.preventDefault();
       const p = pos(e);
-      if (e.button === 0 && isGoto(e)) { this.gotoAnim((p.y >> 3) * 16 + (p.x >> 3)); return; }
+      if (e.button === 0 && (e.ctrlKey || e.metaKey)) { this.gotoAnim((p.y >> 3) * 16 + (p.x >> 3)); return; }
       const tool: Tool = e.altKey ? 'pick' : this.tool;
       const right = e.button === 2;
       if (tool === 'pick') {
@@ -1418,9 +1393,7 @@ export class GfxTab implements WsPanel {
     if (k === 'f') { this.setTool('fill'); return true; }
     if (k === 'i') { this.setTool('pick'); return true; }
     if (k === 's') { this.setTool('select'); return true; }
-    if (k === 'x' && !e.shiftKey) { [this.fg, this.bg] = [this.bg, this.fg]; this.buildSide(); return true; }
-    // flips and rotation (#482): Shift+H / Shift+V / Shift+R, as in the Map16 builder
-    if (e.shiftKey && (k === 'h' || k === 'v' || k === 'r')) { this.transform(k); return true; }
+    if (k === 'x') { [this.fg, this.bg] = [this.bg, this.fg]; this.buildSide(); return true; }
     // Esc cancels a floating selection (nothing written), else deselects; Enter puts it down
     if (e.key === 'Escape' && this.float) { this.cancelFloat(); return true; }
     if (e.key === 'Escape' && this.sel) { this.sel = null; this.present(); return true; }

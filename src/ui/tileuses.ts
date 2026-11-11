@@ -117,5 +117,5 @@ export function openRemapUses(app: App, layer: Layer, fill: { line?: string; all
       } catch (e) { toast(String(e instanceof Error ? e.message : e), 'error'); return false; }
     } },
     { label: 'Cancel' },
-  ], () => { open = false; app.dropLoadedBgs(); }, undefined, { staged: true });
+  ], () => { open = false; app.dropLoadedBgs(); });
 }

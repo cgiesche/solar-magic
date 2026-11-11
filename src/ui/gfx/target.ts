@@ -22,7 +22,6 @@ import { tileMatches } from '../tilesearch.ts';
 import { tileBehaviors } from '../tilebehaviors.ts';
 import { blockFilesByTile } from '../blockdialog.ts';
 import { usedInList } from '../usedin.ts';
-import { MARK } from '../marks.ts';
 
 // the Map16 tiles edited: the level's FG or BG tiles, or the overworld's layer 1 tiles
 export type Map16Target = 'fg' | 'bg' | 'ow';
@@ -169,15 +168,15 @@ function levelTarget(app: App, at: WsTarget, layer: 'fg' | 'bg'): GfxTarget {
     pageTitle: (p) => (p < 2 ? `Page ${p}: ${!fg ? 'BG tiles of the original backgrounds' : p ? 'standard tiles' : 'standard and tileset tiles'}`
       : `Page ${hex(p, 1)}: extended ${!fg ? 'BG ' : ''}tiles${!fg ? '' : ' (in the level via Direct Map16 object)'}`),
     bands: () => {
-      if (!fg) return [{ from: 0, to: 0x1ff, color: '#7d8bff', label: 'Background tiles' }, { from: BG_EXT_FIRST, to: EXT_TILES - 1, color: MARK.select, label: 'Extended' }];
+      if (!fg) return [{ from: 0, to: 0x1ff, color: '#7d8bff', label: 'Background tiles' }, { from: BG_EXT_FIRST, to: EXT_TILES - 1, color: '#4cc2ff', label: 'Extended' }];
       // (the tilesets sharing all of them)
       let ts = app.tilesetsOf(0x073);
       for (let t = 0x074; t <= 0x0ff; t++) { const of = app.tilesetsOf(t); ts = ts.filter((x) => of.includes(x)); }
       return [
         { from: 0x000, to: 0x072, color: '#8b93a3', label: 'Standard' },
-        { from: 0x073, to: 0x0ff, color: MARK.warn, label: `Tileset${ts.length > 1 ? 's' : ''} ${ts.map((x) => hex(x, 1)).join('/')}` },
+        { from: 0x073, to: 0x0ff, color: '#ffb000', label: `Tileset${ts.length > 1 ? 's' : ''} ${ts.map((x) => hex(x, 1)).join('/')}` },
         { from: 0x100, to: 0x1ff, color: '#8b93a3', label: 'Standard' },
-        { from: 0x200, to: EXT_TILES - 1, color: MARK.select, label: 'Extended' },
+        { from: 0x200, to: EXT_TILES - 1, color: '#4cc2ff', label: 'Extended' },
       ];
     },
     // custom blocks and behavior are FG tiles' only

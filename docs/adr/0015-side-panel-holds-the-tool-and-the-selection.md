@@ -4,7 +4,7 @@ The overworld editor's right side panel stacked everything under each other: in 
 
 We decided that **the side panel holds what the user works with now – the tool and the selection – and nothing else**. The rule is for every editor; the overworld follows it first (the others are measured against it in their own tickets):
 
-- **Tool and selection as tabs**: the side panel has two tabs, "Paint | Properties" (in the sprite mode "Sprites | Sprite"), one shown. A selection switches to Properties; when it ends (Esc, a click beside it) Paint comes back. The tab can be clicked back to Paint with the selection kept (a right click paints with it meanwhile, as before). Nothing selected: Properties is disabled, its tooltip says how to select. In the layer 2 mode Properties shows the tile info of an Alt+click. This replaces #421's hiding of Paint.
+- **Tool and selection as tabs**: the side panel has two tabs, "Paint | Properties" (in the sprite mode "Sprites | Sprite"), one shown. A selection switches to Properties; when it ends (Esc, a click beside it) Paint comes back. The tab can be clicked back to Paint with the selection kept (a right click paints with it meanwhile, as before). Nothing selected: Properties is disabled, its tooltip says how to select. In the layer 2 mode Properties shows the tile info of an Alt/Ctrl+click. This replaces #421's hiding of Paint.
 - **Properties in one fixed order**: the most used first (a level tile: name, open level / look, the switches), the links and the other tiles entering the same level below; no collapsible sub-sections.
 - **What concerns the whole map or overworld leaves the side panel**, kept where it is chosen:
   - the shown map's settings (music, Edit graphics, Edit border): a popover from a "⚙" button beside the map select in the context bar;
@@ -20,7 +20,3 @@ Why: a panel that always shows everything shows nothing well – the user has to
 - **Paint and Properties stacked, Paint hidden only for some selections (#421)**: rejected as the rule – the user doesn't see where Paint went, and other selections (link ends, a tile's info) still crowd it.
 - **Only switching automatically between Paint and Properties, without tabs**: rejected – a brush can't be taken while something stays selected, and the switch is invisible.
 - **The legend as a map overlay toggled in View, or only as hover tooltips**: rejected – an overlay covers the map; tooltips alone give no overview.
-
-## Amendment (#478, #482): the same tabs in every editor
-
-The UI concept (#472) applies the rule to the level editor and names the tabs the same everywhere: **"Picker | Properties"** (the overworld's "Paint | Properties" and "Sprites | Sprite" renamed). In the Graphics workspace the side panel keeps the preview pinned on top with the open view's properties below it (#478's decision). One difference in the level editor: its Properties tab is never disabled – with nothing selected it holds the level's entrances and exits (the Entrances/Exits mode) and, while open, the message panel, both the level's and not a selection's. Ctrl+click no longer shows a tile's info (#482: Ctrl+click adds to the selection everywhere); Alt+click does.

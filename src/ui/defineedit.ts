@@ -64,17 +64,17 @@ export function openDefines(files: Map<string, Uint8Array>, path: string, onChan
   const form = definesForm(text);
   const dlg = modal(`Settings: ${path.split('/').pop()}`, h('div', { class: 'patch-settings define-dialog' },
     h('div', { class: 'row' },
-      h('span', { class: 'hint grow' }, 'The values are stored in the file itself; “Apply” applies them to the ROM (Ctrl+Z undoes).'),
+      h('span', { class: 'hint grow' }, 'The values are stored in the file itself; “OK” applies them to the ROM (Ctrl+Z undoes).'),
       h('button', { title: 'The whole file as text – for anything that is not a setting of the form !name = value', onclick: () => { dlg.close(); openTextEdit(files, path, onChange); } }, 'Edit as text …')),
     form.rows), [
     { label: 'Cancel' },
-    { label: 'Apply', primary: true, onClick: () => {
+    { label: 'OK', primary: true, onClick: () => {
       const changed = form.read();
       if (!Object.keys(changed).length) return;
       files.set(path, enc.encode(rewriteDefines(text, changed).text));
       onChange();
     } },
-  ], undefined, undefined, { staged: true });
+  ]);
 }
 
 // a project file as text: for settings that are not defines (macro lists, tables) or anything else
@@ -93,9 +93,9 @@ export function openTextEdit(files: Map<string, Uint8Array>, path: string, onCha
     area.setRangeText('\t', area.selectionStart, area.selectionEnd, 'end');
   } });
   modal(`Edit: ${path}`, h('div', { class: 'text-edit-box' },
-    h('p', { class: 'hint' }, '“Apply” applies the change to the ROM (Ctrl+Z undoes); Asar reports errors with file and line.'), area), [
+    h('p', { class: 'hint' }, '“OK” applies the change to the ROM (Ctrl+Z undoes); Asar reports errors with file and line.'), area), [
     { label: 'Cancel' },
-    { label: 'Apply', primary: true, onClick: () => {
+    { label: 'OK', primary: true, onClick: () => {
       if (area.value === text) return;
       files.set(path, enc.encode(area.value));
       onChange();

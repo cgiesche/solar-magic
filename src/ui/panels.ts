@@ -1,4 +1,4 @@
-// The level workspace's panels: the level list (navigator), the picker and the properties (side panel).
+// Sidebar panels: level list, picker (objects / sprites), properties.
 
 import { isBrushMode, type App, type PickedItem } from './app.ts';
 import { h, clear, hexInput, checkbox, attachRectPick, modal, toast, emptyState } from './dom.ts';
@@ -37,7 +37,6 @@ import { blockFilesByTile } from './blockdialog.ts';
 import { contextMenu } from './menu.ts';
 import { collisionMarks, markCanvas, switchMarks, switchCanvas, MARK_TEXT, type CollisionMark } from './collisionmarks.ts';
 import { AntsOverlay } from './ants.ts';
-import { MARK } from './marks.ts';
 
 // behaviour of the given Map16 tiles when hit from below or entered (only tiles with an effect);
 // undefined while probes are still pending (asked for; without ask only those known: a picker tab's come with its prefetch)
@@ -323,7 +322,7 @@ export class Picker {
       const p = behavior(hoverTile), name = nameOf(app.rom, 'fg', hoverTile);
       const c = app.probes.collision(hoverTile), o = c && switchedText(c);
       const marks = (c ? collisionMarks([c]).map((m) => ` · ${MARK_TEXT[m]}`).join('') : '') + (o ? ` · ${o}` : '');
-      if (hoverCanvas) hoverCanvas.title = `Tile ${hex3(hoverTile)}${name ? ` “${name}”` : ''}: ${p ? probeText(p) + marks : 'determining behavior …'}\nF12: edit in Map16 tiles`;
+      if (hoverCanvas) hoverCanvas.title = `Tile ${hex3(hoverTile)}${name ? ` “${name}”` : ''}: ${p ? probeText(p) + marks : 'determining behavior …'}\nCtrl+click: edit in the Map16 tab`;
     };
     this.m16Tip = () => { if (hoverTile >= 0 && hoverCanvas?.isConnected) tip(); };
     // a page is drawn once it scrolls into view
@@ -351,7 +350,7 @@ export class Picker {
       // page plus the chosen rectangle of tiles (x, y, w, h in cells; running on the overlay)
       const draw = (x: number, y: number, w: number, hh: number) => {
         paint();
-        ants.set(x < 0 ? [] : [{ x, y, w, h: hh, color: MARK.select }]);
+        ants.set(x < 0 ? [] : [{ x, y, w, h: hh, color: '#4cc2ff' }]);
       };
       const sel = curTile - base;
       const shown = () => (sel >= 0 && sel < 256 ? draw(sel & 15, sel >> 4, bw, bh) : draw(-1, 0, 0, 0));
@@ -367,7 +366,7 @@ export class Picker {
         const t = base + r.y * 16 + r.x;
         if (r.w * r.h > 1) return [`Block ${r.w}×${r.h} from tile ${hex3(t)}`];
         const pr = behavior(t), name = nameOf(app.rom, 'fg', t);
-        return [`Tile ${hex3(t)}${name ? ` “${name}”` : ''}`, pr ? probeText(pr) : 'determining behavior …', 'F12: edit in Map16 tiles'];
+        return [`Tile ${hex3(t)}${name ? ` “${name}”` : ''}`, pr ? probeText(pr) : 'determining behavior …', 'Ctrl+click: edit in the Map16 tab'];
       }, (r) => {
         const t = base + r.y * 16 + r.x, tiles = Array.from({ length: r.w * r.h }, (_, i) => t + Math.floor(i / r.w) * 16 + (i % r.w));
         tiles.forEach((u) => app.probes.collision(u)); // asked for; shown once known (the next move of the mouse)
@@ -452,7 +451,7 @@ export class Picker {
     const onSheet = t0 >= 0 && t0 < 0x200 && (t0 & 15) + brush.w <= 16 && (t0 >> 4) + brush.h <= 32
       && brush.tiles.every((t, i) => t === brush.tiles[0] + Math.floor(i / brush.w) * 16 + (i % brush.w));
     const k = this.builtPixels = this.sheetPixels(), scale = this.sheetShown();
-    const c = h('canvas', { width: 256 * k, height: 512 * k, class: 'm16-pick sheet-fill', title: 'Click/drag: tile(s) as brush · F12: edit in Map16 tiles' });
+    const c = h('canvas', { width: 256 * k, height: 512 * k, class: 'm16-pick sheet-fill', title: 'Click/drag: tile(s) as brush · Ctrl+click: edit in the Map16 tab' });
     const ctx = c.getContext('2d')!;
     ctx.imageSmoothingEnabled = false;
     const ants = new AntsOverlay(c, () => ({ w: 16, h: 32 }));
@@ -460,18 +459,18 @@ export class Picker {
     // (the chosen rectangle of tiles running on the overlay)
     const draw = (x: number, y: number, w: number, hh: number) => {
       paint();
-      ants.set(x < 0 ? [] : [{ x, y, w, h: hh, color: MARK.select }]);
+      ants.set(x < 0 ? [] : [{ x, y, w, h: hh, color: '#4cc2ff' }]);
     };
     animateSheet(app, sheet, true, this.bgBase, c, paint);
     if (onSheet) draw(t0 & 15, t0 >> 4, brush.w, brush.h); else draw(-1, 0, 0, 0);
-    // click picks a tile, dragging picks a rectangle of tiles (as in Map16 tiles)
+    // click picks a tile, dragging picks a rectangle of tiles (as in the Map16 tab)
     attachRectPick(c, 16, 32, (r) => draw(r.x, r.y, r.w, r.h), (r) => {
       app.bgBrush = { w: r.w, h: r.h, tiles: Array.from({ length: r.w * r.h }, (_, i) => this.bgBase + (r.y + Math.floor(i / r.w)) * 16 + r.x + (i % r.w)) };
       this.build();
     }, (x, y) => app.editTile(this.bgBase + y * 16 + x, 'bg'));
     previewSheet(c, () => sheet, 16, 32, 16, scale, (r) => {
       const t = this.bgBase + r.y * 16 + r.x, name = nameOf(app.rom, 'bg', t);
-      return r.w * r.h > 1 ? [`Block ${r.w}×${r.h} from BG tile ${hex3(t)}`] : [`BG tile ${hex3(t)}${name ? ` “${name}”` : ''}`, 'F12: edit in Map16 tiles'];
+      return r.w * r.h > 1 ? [`Block ${r.w}×${r.h} from BG tile ${hex3(t)}`] : [`BG tile ${hex3(t)}${name ? ` “${name}”` : ''}`, 'Ctrl+click: edit in the Map16 tab'];
     });
     const what = brush.tiles.length > 1 ? `Block ${brush.w}×${brush.h}${onSheet ? ` from BG tile ${hex3(brush.tiles[0])}` : ' from the level'}` : `BG tile ${hex3(brush.tiles[0])}`;
     const pages = h('select', null, Array.from({ length: EXT_TILES / 512 }, (_, i) => h('option', { value: String(i * 512), selected: i * 512 === this.bgBase },
@@ -479,7 +478,7 @@ export class Picker {
     pages.addEventListener('change', () => { this.bgBase = Number(pages.value); this.build(); });
     // same order as the Map16 tab: pages, state, sheet
     this.body.append(h('div', { class: 'row' }, pages,
-      h('button', { title: 'Edit BG tiles in the Graphics workspace (also create tiles from 200 on)', onclick: () => app.editTile(onSheet ? brush.tiles[0] : this.bgBase, 'bg') }, 'Edit …')),
+      h('button', { title: 'Edit BG tiles in the graphics area (also create tiles from 200 on)', onclick: () => app.editTile(onSheet ? brush.tiles[0] : this.bgBase, 'bg') }, 'Edit …')),
     h('div', { class: 'hint' }, `Brush: ${what} – click tiles here or in the level (drag: block). The BG tilemap (32×27) repeats.`));
     if (!onSheet) {
       const p = h('canvas', { width: brush.w * 16, height: brush.h * 16, class: 'bg-brush' });
@@ -932,7 +931,7 @@ export function openSavePrefab(app: App, sug?: { prefab: Prefab; places?: LevelP
     ...[...all].map(([n, st]) => h('option', { value: String(n) }, `Replace ${hex2(n)}: ${st.name || '(unnamed)'}`)));
   const replace = h('input', { type: 'checkbox', checked: true });
   const preview = prefabCanvas(prefabTileSource(app), { ...r, name: '' });
-  preview.style.cssText = `width:${Math.min(r.w * 32, 320)}px;image-rendering:pixelated;background:repeating-conic-gradient(var(--checker-a) 0 25%,var(--checker-b) 0 50%) 0 0/16px 16px`;
+  preview.style.cssText = `width:${Math.min(r.w * 32, 320)}px;image-rendering:pixelated;background:repeating-conic-gradient(#333 0 25%,#222 0 50%) 0 0/16px 16px`;
   const note = h('div', { class: 'hint' });
   // what the prefab costs and saves against the same tiles as Direct Map16 objects (prefabcost.ts); the name is part of it
   const cost = h('div', { class: 'hint' });
@@ -1008,7 +1007,7 @@ function renameObject(app: App, num: number, ext: number): void {
   const save = () => { if (name.value.trim() !== cur) app.renameObject(num, ext, name.value.trim() === builtin ? '' : name.value); };
   const dlg = modal(`Rename ${what}`, h('div', null, h('div', { class: 'prop' }, h('label', null, 'Name'), name),
     h('div', { class: 'hint' }, `${fromPackage ? 'From a package' : 'Built-in'}: ${builtin}.${namedPerTable(num) ? ' Objects 2E–3F are named per object group (this level’s).' : ''} The name is kept with the project, not in the ROM.`)),
-    [{ label: 'Cancel' }, ...(cur !== builtin ? [{ label: 'Reset', onClick: () => app.renameObject(num, ext, '') }] : []), { label: 'Rename', primary: true, onClick: save }]);
+    [{ label: 'Cancel' }, ...(cur !== builtin ? [{ label: 'Reset', onClick: () => app.renameObject(num, ext, '') }] : []), { label: 'OK', primary: true, onClick: save }]);
   name.addEventListener('keydown', (e) => { if (e.key === 'Enter') { save(); dlg.close(); } });
   setTimeout(() => name.select(), 0);
 }
@@ -1021,7 +1020,7 @@ function renamePrefab(app: App, n: number, st: Prefab): void {
     try { app.romEdit(`Prefab ${hex2(n)} renamed`, () => writePrefab(app.rom, n, { ...cur, name: name.value.trim() })); } catch (e) { toast(String(e instanceof Error ? e.message : e), 'error'); }
   };
   const dlg = modal(`Rename prefab ${hex2(n)}`, h('div', null, h('div', { class: 'prop' }, h('label', null, 'Name'), name)),
-    [{ label: 'Cancel' }, { label: 'Rename', primary: true, onClick: save }]);
+    [{ label: 'Cancel' }, { label: 'OK', primary: true, onClick: save }]);
   name.addEventListener('keydown', (e) => { if (e.key === 'Enter') { save(); dlg.close(); } });
   setTimeout(() => name.select(), 0);
 }
@@ -1204,7 +1203,7 @@ export class Properties {
       o.num === 0 && o.ext === PREFAB_EXT && o.prefab !== undefined ? this.field('Prefab', hexInput(o.prefab, 2, (v) => upd((o) => (o.prefab = v)), 0xff)) : '',
       isPlacedPrefab(o) && !pf ? h('div', { class: 'hint' }, 'This prefab does not exist – the object places nothing.') : '',
       o.num === 0 && o.ext === DM16_EXT ? this.field('Map16 tile', hexInput(o.tile ?? 0, 3, (v) => upd((o) => (o.tile = v)), EXT_TILES - 1 - (o.cond?.always ? COND_ADD : 0)),
-        h('button', { title: 'Edit the tile in Map16 tiles (Graphics workspace)', onclick: () => app.editTile(o.tile ?? 0) }, 'Edit …')) : '',
+        h('button', { title: 'Edit the tile in the graphics area', onclick: () => app.editTile(o.tile ?? 0) }, 'Edit …')) : '',
       o.num === 0 && o.ext === DM16_EXT ? this.field('Size (hw)', hexInput(o.size, 2, (v) => upd((o) => (o.size = v)))) : '',
       ...this.condFields(isDm16(o) ? [o] : []),
       this.field('X', hexInput(o.x, 3, (v) => upd((o) => (o.x = v)), app.levelWidthTiles() - 1)),

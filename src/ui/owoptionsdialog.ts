@@ -1,16 +1,15 @@
 // The "Overworld options …" dialog (ADR 0015): what concerns the whole overworld, out of the side panel. Two tabs:
 // Options (the game's overworld options – Lunar Magic's "Extra Options" –, each switch one ROM edit) and Reveal list
 // (Lunar Magic's "Edit Reveal Tile List": which tile a revealed tile becomes). Drawn again after every ROM change while
-// open (its own edits, undo/redo – Ctrl+Z / Ctrl+Y work in it, as in every dialog that applies at once); one open at a time.
+// open (its own edits, undo/redo – Ctrl+Z / Ctrl+Y work in it, as in the Packages dialog); one open at a time.
 
 import type { App } from './app.ts';
-import { h, modal, toast, checkbox, hexInput } from './dom.ts';
+import { h, modal, toast, checkbox, hexInput, dialogUndoKeys } from './dom.ts';
 import { syncBowsieMaxTile } from '../core/bowsie.ts';
 import { MAP_NAMES, readRevealList, writeRevealList } from '../core/overworld.ts';
 import { OW_OPTIONS, owOption, owOptionValue, setOwOption, revealSpeed, setRevealSpeed, MAX_REVEAL_SPEED, DEFAULT_REVEAL_SPEED, submapLightning, setSubmapLightning, LIGHTNING_TITLE, lightningEditLabel } from '../core/owoptions.ts';
 import { refusedToast } from './owrefusal.ts';
 import { hex } from '../core/names.ts';
-import { icon } from './icons.ts';
 
 export type OwOptionsTab = 'options' | 'reveals';
 const TAB_LABEL: Record<OwOptionsTab, string> = { options: 'Options', reveals: 'Reveal list' };
@@ -25,7 +24,7 @@ let shown: { show: (tab: OwOptionsTab, ctx: OwOptionsContext) => void } | null =
 // opens the dialog on tab (the one open: switched to it)
 export function openOwOptions(app: App, ctx: OwOptionsContext, tab: OwOptionsTab = 'options'): void {
   if (shown) { shown.show(tab, ctx); return; }
-  const tabBar = h('div', { class: 'tabbar ow-options-tabs', role: 'tablist' });
+  const tabBar = h('div', { class: 'tabs seg ow-options-tabs' });
   const content = h('div', { class: 'ow-options-content' });
   const body = h('div', { class: 'ow-options' }, tabBar, content);
   const draw = () => {
@@ -40,13 +39,15 @@ export function openOwOptions(app: App, ctx: OwOptionsContext, tab: OwOptionsTab
   };
   const show = (k: OwOptionsTab, c = ctx) => { if (k !== tab) content.scrollTop = 0; tab = k; ctx = c; draw(); };
   // undo/redo while the dialog is the topmost one (drawn again by the ROM change)
+  const offKeys = dialogUndoKeys(body, () => app.undo(), () => app.redo());
   const off = app.on('rom-change', draw);
   shown = { show };
   draw();
   modal('Overworld options', body, [{ label: 'Close', primary: true }], () => {
+    offKeys();
     off();
     shown = null;
-  }, undefined, { immediate: true });
+  });
 }
 
 // the game's overworld options (core/owoptions.ts): each switch one ROM edit
@@ -56,7 +57,7 @@ function optionsPanel(app: App, redraw: () => void): HTMLElement {
   for (const o of OW_OPTIONS) {
     if (o.sub && owOptionValue(rom, o.sub.of) !== o.sub.when) continue;
     const v = owOptionValue(rom, o.id);
-    if (v === null) { rows.push(h('div', { class: 'row hint warn-text', title: o.title }, icon('warning'), `${o.label}: its code was changed by a patch`)); continue; }
+    if (v === null) { rows.push(h('div', { class: 'row hint warn-text', title: o.title }, `⚠ ${o.label}: its code was changed by a patch`)); continue; }
     // (the path fade: BOWSIE re-inserted with or without MaxTile; refused when that fails)
     const c = checkbox(o.label, o.title, v, (on) => {
       try {
@@ -80,7 +81,7 @@ function optionsPanel(app: App, redraw: () => void): HTMLElement {
     }
   }
   // the game's lightning (color 4·7), per submap: each one ROM edit of the same byte
-  if (submapLightning(rom, 0) === null) rows.push(h('div', { class: 'row hint warn-text', title: LIGHTNING_TITLE }, icon('warning'), 'Lightning: its code was changed by a patch'));
+  if (submapLightning(rom, 0) === null) rows.push(h('div', { class: 'row hint warn-text', title: LIGHTNING_TITLE }, '⚠ Lightning: its code was changed by a patch'));
   else {
     rows.push(h('div', { class: 'row hint' }, 'Lightning (color 4·7) on'));
     MAP_NAMES.forEach((name, m) => {
@@ -105,5 +106,5 @@ function revealList(app: App, ctx: OwOptionsContext): HTMLElement {
       class: `row ow-reveal${k === last(sel) ? ' current' : ''}`,
       title: last(p.from) !== k ? `Tile ${hex(p.from, 2)} has a later entry: this one is not used` : `A tile ${hex(p.from, 2)} an event reveals becomes ${hex(p.to, 2)}`,
     }, ctx.tileImage(p.from), hexInput(p.from, 2, (v) => set(k, { from: v })), '→', ctx.tileImage(p.to), hexInput(p.to, 2, (v) => set(k, { to: v })),
-    last(p.from) !== k ? h('span', { class: 'hint warn-text' }, icon('warning')) : null))));
+    last(p.from) !== k ? h('span', { class: 'hint warn-text' }, '⚠') : null))));
 }

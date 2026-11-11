@@ -5,7 +5,6 @@
 import type { App } from './app.ts';
 import { h, toast } from './dom.ts';
 import { openSavePrefab } from './panels.ts';
-import { icon } from './icons.ts';
 
 export function pasteHintBox(app: App): HTMLElement {
   const text = h('span');
@@ -17,7 +16,7 @@ export function pasteHintBox(app: App): HTMLElement {
       if (ok) openSavePrefab(app); else toast('The pasted objects are no longer in the level.', 'error');
     },
   }, 'Save as prefab …');
-  const dismiss = h('button', { class: 'icon-btn', title: 'Don’t suggest this again for these objects', 'aria-label': 'Dismiss', onclick: () => app.dismissPasteHint() }, icon('close'));
+  const dismiss = h('button', { class: 'icon-btn', title: 'Don’t suggest this again for these objects', 'aria-label': 'Dismiss', onclick: () => app.dismissPasteHint() }, '✕');
   const el = h('div', { class: 'paste-hint', role: 'status' }, text, save, dismiss);
   app.on('paste-hint', () => {
     const p = app.pasteHint;

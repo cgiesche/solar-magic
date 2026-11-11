@@ -117,7 +117,7 @@ export function openEntrancesDialog(app: App): void {
   buildDetail();
   const dlg = modal('Secondary entrances', h('div', { class: 'ent-editor' },
     h('div', null, h('div', { class: 'row small' }, 'Show: ', filter, h('button', { title: 'Next free number, into the current level (at the main entrance)', onclick: newEntry }, '+ New')), list), detail),
-  [{ label: 'Close', primary: true }], undefined, undefined, { immediate: { after: () => { buildList(); buildDetail(); } } });
+  [{ label: 'Close', primary: true }]);
 }
 
 export function openRomInfo(app: App): void {

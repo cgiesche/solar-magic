@@ -1,4 +1,4 @@
-// A tool project (UberASM, GPS blocks, PIXI sprites) as a configuration view of the Packages workspace: it
+// A tool project (UberASM, GPS blocks, PIXI sprites) as a configuration view of the Packages dialog: it
 // assigns and unassigns what installed packages brought (each item names its package), and shows the
 // project files with their settings and the export of the tool folder. It never adds content and never
 // deletes a part – that is what uploading and removing packages do. Every change is written to the ROM

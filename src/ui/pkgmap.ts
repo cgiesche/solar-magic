@@ -9,7 +9,6 @@ import { loadProject } from '../core/uberproject.ts';
 import { ALL, CONTEXT_SIZE, type UberContext } from '../core/uberasm.ts';
 import { folders, placed, suggestCalls } from '../core/pkgmap.ts';
 import type { ManualPreview, ManualAssignment } from '../core/packages.ts';
-import { icon } from './icons.ts';
 
 const CTX_LABEL: Record<UberContext, string> = { level: 'Level', gamemode: 'Game Mode', overworld: 'Overworld map' };
 const INHERIT = '\u0000inherit';
@@ -55,7 +54,7 @@ export function assignmentEditor(app: App, p: ManualPreview): { el: HTMLElement;
     const sel = h('select', { onchange: () => setRule(node, sel.value) },
       options(node).map(([v, l]) => h('option', { value: v, selected: v === value(node) }, l)));
     const dest = isDir ? null : place.get(node);
-    const toggle = isDir && node ? h('button', { class: 'icon-btn', title: open.has(node) ? 'Collapse' : 'Expand', onclick: () => { if (open.has(node)) open.delete(node); else open.add(node); render(); } }, icon(open.has(node) ? 'chevron-down' : 'chevron-right')) : h('span', { class: 'pkg-indent' });
+    const toggle = isDir && node ? h('button', { class: 'icon-btn', title: open.has(node) ? 'Collapse' : 'Expand', onclick: () => { if (open.has(node)) open.delete(node); else open.add(node); render(); } }, open.has(node) ? '▾' : '▸') : h('span', { class: 'pkg-indent' });
     return h('div', { class: 'row pkg-node' + (rules.has(node) ? ' ruled' : '') + (isDir || dest ? '' : ' off'), style: `padding-left: ${depth * 14}px` },
       toggle,
       h('span', { class: 'mono grow', title: node || name }, label),

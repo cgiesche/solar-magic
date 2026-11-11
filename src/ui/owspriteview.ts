@@ -21,7 +21,6 @@ import { l1Index, MAP_NAMES } from '../core/overworld.ts';
 import { hex } from '../core/names.ts';
 import { hasOwSpriteSlots, hasKoopaKidTable } from '../core/owsprites.ts';
 import { bowsieInstalled } from '../core/owcustom.ts';
-import { MARK } from './marks.ts';
 
 // what is selected or dragged: a sprite slot, a player's start, where a Koopa Kid jumps out, a custom sprite
 type Item = { kind: 'sprite'; k: number } | { kind: 'start'; player: number } | { kind: 'koopa'; k: number } | CustomItem;
@@ -105,7 +104,7 @@ export class SpriteLayer {
         ctx.strokeStyle = color; ctx.lineWidth = 1.5 * lw; ctx.strokeRect(b.x + 0.5, b.y + 0.5, 15, 15);
         tag(ctx, it.kind === 'start' ? PLAYERS[it.player][0] : `K${it.k + 1}`, b.x + 1, b.y + 7, color);
       }
-      if (on) { ctx.strokeStyle = MARK.select; ctx.lineWidth = 2 * lw; ctx.strokeRect(b.x - 1, b.y - 1, b.w + 2, b.h + 2); }
+      if (on) { ctx.strokeStyle = '#4cc2ff'; ctx.lineWidth = 2 * lw; ctx.strokeRect(b.x - 1, b.y - 1, b.w + 2, b.h + 2); }
     }
   }
 

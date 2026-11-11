@@ -4,15 +4,13 @@ import type { App } from './app.ts';
 import { h, clear, emptyState } from './dom.ts';
 import { hex3 } from '../core/names.ts';
 import { closeMenus } from './menu.ts';
-import { icon } from './icons.ts';
-import { dismissable } from './layer.ts';
 
 // any of the 0x200 levels (or of opts.levels, each with its opts.note); the list starts with "only used": main
 // levels, relocated ones and those an exit leads to
 export interface PickerOptions { levels?: number[]; note?: (n: number) => string }
 export function levelPicker(app: App, value: number, onPick: (n: number) => void, opts: PickerOptions = {}): HTMLElement {
   const g = app.entrances.graph();
-  const btn = h('button', { class: 'level-pick', title: 'Choose another level' }, h('span', { class: 'mono' }, hex3(value)), ' ', h('span', { class: 'lname' }, g.name(value)), h('span', { class: 'caret' }, ' ', icon('chevron-down')));
+  const btn = h('button', { class: 'level-pick', title: 'Choose another level' }, h('span', { class: 'mono' }, hex3(value)), ' ', h('span', { class: 'lname' }, g.name(value)), h('span', { class: 'caret' }, ' ▾'));
   btn.addEventListener('click', () => openPicker(app, btn, value, onPick, opts));
   return btn;
 }
@@ -51,6 +49,7 @@ function openPicker(app: App, anchor: HTMLElement, value: number, onPick: (n: nu
   filter.addEventListener('input', build);
   onlyUsed.addEventListener('change', build);
   filter.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') { close(); e.stopPropagation(); return; }
     if (e.key !== 'Enter') return;
     const v = filter.value.trim(), n = parseInt(v, 16);
     if (/^[0-9a-f]{1,3}$/i.test(v) && (opts.levels ? opts.levels.includes(n) : n < 0x200)) pick(n);
@@ -62,11 +61,12 @@ function openPicker(app: App, anchor: HTMLElement, value: number, onPick: (n: nu
   document.body.append(pop);
   if (pop.getBoundingClientRect().bottom > window.innerHeight - 4) pop.style.top = `${Math.max(4, r.top - 3 - pop.offsetHeight)}px`;
   filter.focus();
-  const stop = dismissable({ contains: (n) => pop.contains(n) || anchor.contains(n), close, returnFocus: () => anchor });
+  const outside = (ev: MouseEvent) => { if (!pop.contains(ev.target as Node) && ev.target !== anchor && !anchor.contains(ev.target as Node)) close(); };
+  window.addEventListener('mousedown', outside, true);
   openPop = { anchor, close };
   function close() {
     pop.remove();
-    stop();
+    window.removeEventListener('mousedown', outside, true);
     if (openPop?.anchor === anchor) openPop = null;
   }
 }

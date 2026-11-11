@@ -4,7 +4,7 @@
 // the preview then shows the submap's map as the game loads it (emulated, App.overworldMap).
 
 import type { App } from './app.ts';
-import { h, toast, attachPanZoom, zoomControl, showColorLoupe, hideColorLoupe, IMMEDIATE_NOTE } from './dom.ts';
+import { h, toast, attachPanZoom, zoomControl, showColorLoupe, hideColorLoupe } from './dom.ts';
 import { viewMenu } from './viewmenu.ts';
 import { hex } from '../core/names.ts';
 import { PaletteTab } from './gfx/palettetab.ts';
@@ -15,11 +15,6 @@ import { AnimTab } from './gfx/animtab.ts';
 import { MAP_NAMES, gameL2, owTileAt, drawOwMap, owShownAt, owMapAt, type OwRender } from '../core/overworld.ts';
 import { cgramToRGBA } from '../core/gfx.ts';
 import { sameProgress, type EventProgress } from '../core/eventset.ts';
-import { MARK, rgba } from './marks.ts';
-import { numberPref } from './prefs.ts';
-
-// the side panel's preview height (#486)
-const previewHeight = numberPref('gfx-preview-h', 320, (v) => v >= 80 && v <= 4000);
 
 export type WsTab = 'pal' | 'map16' | 'gfx' | 'anim';
 
@@ -37,10 +32,6 @@ export interface WsPanel {
   targetChanged?(): void;
   // the panel edits a submap's graphics (else it shows a note while a submap is the target)
   submaps?: boolean;
-  // its actions, shown in the workspace's one context bar (#486)
-  bar?: HTMLElement;
-  // its properties (what is selected in it), shown under the pinned preview in the side panel (#486)
-  side?: HTMLElement;
 }
 
 // what the workspace edits: the open level's graphics (submap null) or those of a submap (0–6); progress: the
@@ -299,9 +290,9 @@ export class LevelPreview {
     ctx.clearRect(0, 0, this.over.width, this.over.height);
     const im = this.app.images;
     if (!im || this.ow || !this.highlight.size && !this.highlight2.size && !this.highlightBg.size) return;
-    ctx.strokeStyle = MARK.warn;
+    ctx.strokeStyle = '#ffb000';
     ctx.lineWidth = 1;
-    ctx.fillStyle = rgba(MARK.warn, 0.4);
+    ctx.fillStyle = 'rgba(255,176,0,0.4)';
     const mark = (x: number, y: number) => { ctx.fillRect(x * 16, y * 16, 16, 16); ctx.strokeRect(x * 16 + 0.5, y * 16 + 0.5, 15, 15); };
     const g = im.geom1;
     for (let y = 0; y < g.height; y++) for (let x = 0; x < g.width; x++) if (this.highlight.has(im.tiles1[y * g.width + x])) mark(x, y);
@@ -343,13 +334,10 @@ export class GfxWorkspace {
   gfx: GfxTab;
   anim: AnimTab;
   private body = h('div', { class: 'ws-body' });
-  private tools = h('div', { class: 'ws-tools' }); // the open view's actions in the context bar
-  private props = h('div', { class: 'ws-props' }); // the open view's properties under the preview
-  private targetList = h('div', { class: 'level-list ws-target-list', role: 'listbox', 'aria-label': 'Target' });
-  readonly nav: HTMLElement;
   bar: HTMLElement;
   active = false;
   target: WsTarget = { submap: null, progress: 0 };
+  private targetSel: HTMLSelectElement;
   // a submap's preview and colors after the special world
   private specialBox = h('input', { type: 'checkbox' });
   private specialLabel = h('label', { class: 'toggle', title: 'The submap as the game shows it once the special world is passed (its last level\'s passed flag): its second set of colors, which the Palettes tab then edits' }, this.specialBox, 'After the special world');
@@ -366,38 +354,21 @@ export class GfxWorkspace {
     this.gfx = new GfxTab(app, this);
     this.anim = new AnimTab(app, this);
     const tabBtn = (t: WsTab, label: string, key: string) => h('button', { 'data-tab': t, title: `${label} (${key})`, onclick: () => this.open(t) }, label);
+    this.targetSel = h('select', { class: 'ws-target', title: 'Whose graphics are edited: the open level\'s or those of a submap of the overworld' });
+    this.targetSel.addEventListener('change', () => this.setTarget({ ...this.target, submap: this.targetSel.value === 'level' ? null : Number(this.targetSel.value) }));
     app.on('level', () => this.fillTargets());
     this.fillTargets();
     this.specialBox.addEventListener('change', () => this.setTarget({ ...this.target, special: this.specialBox.checked }));
     this.specialLabel.hidden = true;
-    // one context bar (#486): the views, then the open view's own actions (its bar moved here), the View menu
     this.bar = h('div', { class: 'ctxbar ws-tabs' },
-      h('div', { class: 'tabbar', role: 'tablist' }, tabBtn('pal', 'Palettes', 'G P'), tabBtn('map16', 'Map16 tiles', 'G M'), tabBtn('gfx', 'Graphics', 'G G'), tabBtn('anim', 'Animations', 'G A')),
-      h('span', { class: 'sep' }),
-      this.tools,
+      this.targetSel,
+      this.specialLabel,
+      h('div', { class: 'btn-group' }, tabBtn('pal', 'Palettes', 'P'), tabBtn('map16', 'Map16 tiles', 'M'), tabBtn('gfx', 'Graphics', 'G'), tabBtn('anim', 'Animations', 'A')),
       h('span', { class: 'spacer' }),
-      h('span', { class: 'hint', title: 'Exception: the palette choice in the header (Palettes, in the properties) belongs to the level and is written with “Save level”.' }, IMMEDIATE_NOTE),
+      h('span', { class: 'hint', title: 'Exception: the palette choice in the header (Palettes tab, below) belongs to the level and is written with “Save level”.' }, 'Changes go straight into the ROM · Ctrl+Z / Ctrl+Y'),
       viewMenu(app, () => this.preview.update(), false));
     this.root = h('div', { class: 'ws' }, this.body);
-    // the navigator: whose graphics – the open level's or a submap's (#486, the target select before)
-    this.nav = h('div', { class: 'panel ws-targets' }, h('div', { class: 'panel-title' }, 'Target'), this.targetList, this.specialLabel);
-    // the side panel: the preview pinned on top (its height by the handle, kept), the open view's properties below
-    const split = h('div', { class: 'ws-prev-split', title: 'Drag: the preview\'s height', role: 'separator', 'aria-orientation': 'horizontal' });
-    this.side = h('div', { class: 'right ws-side' }, this.preview.root, split, this.props);
-    const clampH = (px: number) => Math.round(Math.max(120, Math.min(px, window.innerHeight - 260)));
-    const setH = (px: number) => this.preview.root.style.setProperty('flex', `0 0 ${clampH(px)}px`);
-    setH(previewHeight.get());
-    split.addEventListener('pointerdown', (e) => {
-      e.preventDefault();
-      const y0 = e.clientY, h0 = this.preview.root.getBoundingClientRect().height;
-      const move = (ev: PointerEvent) => setH(h0 + ev.clientY - y0);
-      const up = (ev: PointerEvent) => {
-        window.removeEventListener('pointermove', move); window.removeEventListener('pointerup', up);
-        previewHeight.set(clampH(h0 + ev.clientY - y0)); // (as shown: within what the preference takes)
-      };
-      window.addEventListener('pointermove', move);
-      window.addEventListener('pointerup', up);
-    });
+    this.side = h('div', { class: 'right ws-side' }, this.preview.root);
     this.preview.onClick = (px, py, e) => this.panel().previewClick?.(px, py, e);
   }
 
@@ -410,13 +381,8 @@ export class GfxWorkspace {
 
   private fillTargets(): void {
     const lv = this.app.level ? `Level ${hex(this.app.level.number, 3)}` : 'Level';
-    const item = (submap: number | null, label: string, title: string) => h('div', {
-      class: `level-item${this.target.submap === submap ? ' current' : ''}`, role: 'option', 'aria-selected': String(this.target.submap === submap), title,
-      onclick: () => this.setTarget({ ...this.target, submap }),
-    }, label);
-    this.targetList.replaceChildren(item(null, lv, 'The open level\'s graphics (another level: the level list below)'),
-      h('div', { class: 'picker-sub' }, 'Submaps'),
-      ...MAP_NAMES.map((n, k) => item(k, `${k} ${n}`, `Submap ${k}: ${n}`)));
+    this.targetSel.replaceChildren(h('option', { value: 'level' }, lv), ...MAP_NAMES.map((n, k) => h('option', { value: String(k) }, `Submap ${k}: ${n}`)));
+    this.targetSel.value = this.target.submap === null ? 'level' : String(this.target.submap);
   }
 
   // edits the level's graphics (submap null) or a submap's; the open tab shows them
@@ -426,7 +392,7 @@ export class GfxWorkspace {
     t = { ...t, special: t.submap !== null && !!t.special };
     const same = t.submap === this.target.submap && sameProgress(t.progress, this.target.progress) && t.special === !!this.target.special;
     this.target = t;
-    this.fillTargets();
+    this.targetSel.value = t.submap === null ? 'level' : String(t.submap);
     this.specialBox.checked = t.special!;
     this.specialLabel.hidden = t.submap === null;
     if (same) return;
@@ -446,16 +412,12 @@ export class GfxWorkspace {
       this.note.replaceChildren(h('p', null, `${({ pal: 'Palettes', map16: 'Map16 tiles', gfx: 'Graphics', anim: 'Animations' })[t]} of a submap are not edited here yet.`),
         h('button', { onclick: () => this.setTarget({ ...this.target, submap: null }) }, 'Edit the level\'s'));
       this.body.replaceChildren(this.note);
-      this.tools.replaceChildren();
-      this.props.replaceChildren();
       this.preview.setHint('');
       this.preview.colorAt = null;
       this.preview.update();
       return;
     }
     this.body.replaceChildren(this.panel().root);
-    this.tools.replaceChildren(...(this.panel().bar ? [this.panel().bar!] : []));
-    this.props.replaceChildren(...(this.panel().side ? [this.panel().side!] : []));
     this.preview.clearHighlight();
     this.preview.setHint(this.panel().previewHint?.() ?? '');
     const p = this.panel();
@@ -513,8 +475,16 @@ export class GfxWorkspace {
     this.onNav(true);
   }
 
-  // (the views are opened by G P / G M / G G / G A, main.ts #482)
   key(e: KeyboardEvent): boolean {
-    return !!this.panel().key?.(e);
+    const ctrl = e.ctrlKey || e.metaKey;
+    if (this.panel().key?.(e)) return true;
+    if (!ctrl && !e.altKey) {
+      const k = e.key.toLowerCase();
+      if (k === 'p') { this.open('pal'); return true; }
+      if (k === 'm') { this.open('map16'); return true; }
+      if (k === 'g') { this.open('gfx'); return true; }
+      if (k === 'a') { this.open('anim'); return true; }
+    }
+    return false;
   }
 }

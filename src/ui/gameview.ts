@@ -4,7 +4,7 @@
 // stroke is one ROM edit when the mouse is released.
 
 import type { App } from './app.ts';
-import { h, toast, attachPanZoom, zoomControl } from './dom.ts';
+import { h, toast, attachPanZoom } from './dom.ts';
 import { LevelEmulator } from '../core/levelemu.ts';
 import { TileCache } from '../core/render.ts';
 import { TITLE_COLS, TITLE_ROWS, TITLE_SHOWN_ROWS, titleTilemap, titlePicture, writeTitleScreen, type TitlePicture } from '../core/titlescreen.ts';
@@ -15,7 +15,6 @@ import type { Brush } from './app.ts';
 import { BorderView } from './owborder.ts';
 import { MAP_NAMES } from '../core/overworld.ts';
 import { BrushSurface, PAINT_HINT, PAINT_TITLE } from './brushsurface.ts';
-import { onTokensChanged, uiToken } from './marks.ts';
 
 // the title screen, or the border of an overworld map (0 the main map, 1–6 the submaps)
 export type GameTab = 'title' | 'border';
@@ -45,20 +44,17 @@ export class GameView {
   private error = ''; // why there is no title screen to edit
   private frame = 0; // a picture to draw at the next animation frame (painting)
   private zoom = 3;
-  private zoomCtl: { root: HTMLElement; update: () => void } | undefined;
   private brush: Brush = { w: 1, h: 1, tiles: [0x38fc] };
   private surface: BrushSurface;
 
   constructor(app: App) {
-    onTokensChanged(() => this.paint()); // (the backdrop is a UI token: another theme)
     this.app = app;
     this.border = new BorderView(app);
     this.border.setStatus = (t) => { this.status.textContent = t; };
-    // the zoom as in every view (#489): whole SNES pixels 1×–6×, shown in percent
-    this.zoomCtl = zoomControl(() => this.zoom, (z) => this.setZoom(z), 1, 6, () => [1, 2, 3, 4, 5, 6]);
     this.bar = h('div', { class: 'ctxbar' }, this.title,
       h('span', { class: 'sep' }),
-      this.zoomCtl.root,
+      h('button', { title: 'Zoom out', onclick: () => this.setZoom(this.zoom - 1) }, '−'),
+      h('button', { title: 'Zoom in', onclick: () => this.setZoom(this.zoom + 1) }, '+'),
       h('span', { class: 'sep' }));
     this.left = h('div', { class: 'left' }, h('div', { class: 'panel levels' }, h('div', { class: 'panel-title' }, 'Game'), this.list));
     this.surface = new BrushSurface(this.canvas, {
@@ -153,7 +149,6 @@ export class GameView {
     this.canvas.style.width = `${W * this.zoom}px`;
     this.canvas.style.height = `${H * this.zoom}px`;
     this.border.setZoom(this.zoom);
-    this.zoomCtl?.update();
     this.surface.frames();
     // (the picture starts after the scroller's padding)
     const pad = SCROLLER_PAD, at = (s: number, a: number) => (s + a - pad) / old * this.zoom + pad - a;
@@ -173,7 +168,7 @@ export class GameView {
 
   private paint(): void {
     const ctx = this.canvas.getContext('2d')!;
-    ctx.fillStyle = uiToken('--canvas-bg', '#15171b');
+    ctx.fillStyle = '#1b1d22';
     ctx.fillRect(0, 0, W, H);
     const p = this.pic, map = this.map;
     if (!p || !map) return;

@@ -28,7 +28,6 @@ import { gameViewAt, type CameraReach } from '../core/camerareach.ts';
 import { projectId } from '../core/projectid.ts';
 import type { ArcSpeed, JumpArc } from '../core/jumparcs.ts';
 import { loadDeaths, killerTile, levelVersion, type DeathMark } from './deathmarks.ts';
-import { MARK } from './marks.ts';
 
 // ---------------- what the overlays are drawn from ----------------
 
@@ -220,7 +219,7 @@ export function paintExits(ctx: CanvasRenderingContext2D, app: App, lv: Level, g
       const ty = y + (12 + i * 14) * px;
       ctx.fillStyle = 'rgba(0,0,0,0.6)';
       ctx.fillRect(x + 18 * px, ty - 11 * px, ctx.measureText(txt).width + 4 * px, 14 * px);
-      ctx.fillStyle = ok ? MARK.warn : MARK.error;
+      ctx.fillStyle = ok ? '#ffb000' : '#ff5050';
       ctx.fillText(txt, x + 20 * px, ty);
     };
     line(t.overworld ? 'Exit → Overworld' : `Exit → ${g.label(t.to)}`, 0);
