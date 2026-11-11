@@ -9,7 +9,7 @@
 import type { App } from '../app.ts';
 import type { Watch } from '../../core/romwatch.ts';
 import type { GfxWorkspace, WsPanel } from '../gfxworkspace.ts';
-import { menuButton, type MenuItem } from '../menu.ts';
+import { contextMenu, menuButton, type MenuItem } from '../menu.ts';
 import { h, clear, toast, modal, choose, attachPanZoom, zoomControl, zoomStep, showColorLoupe, hideColorLoupe } from '../dom.ts';
 import { downloadBytes, pickFile, pickFiles } from '../platform.ts';
 
@@ -482,6 +482,7 @@ export class GfxTab implements WsPanel {
     return h('div', {
       class: `level-item${i === this.cur ? ' current' : ''}${exists ? '' : ' unused'}`,
       onclick: () => this.select(i),
+      oncontextmenu: (e: MouseEvent) => this.fileMenu(e, i, exists),
     }, gfxName(i), name ? h('span', { class: 'lname gt-name', title: name }, name) : '', slot ? h('span', { class: 'gt-used' }, slot) : '',
       unused ? h('span', { class: 'gt-unused', title: 'Inserted, but in no level\'s graphics slots' }, 'unused') : '');
   }
@@ -684,6 +685,9 @@ export class GfxTab implements WsPanel {
 
   // "Use in slot": puts the open file into one of the level's slots (same as the card's "Swap")
   private assignMenu(num: number, used: boolean): HTMLElement {
+    return h('div', { class: 'row' }, menuButton({ label: used ? 'Into another slot' : 'Use in slot', title: `Put this file into a graphics slot of the current ${this.t.where}`, items: this.slotItems(num) }));
+  }
+  private slotItems(num: number): MenuItem[] {
     const items: MenuItem[] = [{ heading: this.t.heading }];
     for (const s of this.gfxSlots()) {
       items.push({
@@ -692,7 +696,19 @@ export class GfxTab implements WsPanel {
         onClick: () => void this.assignSlot(s, num),
       });
     }
-    return h('div', { class: 'row' }, menuButton({ label: used ? 'Into another slot' : 'Use in slot', title: `Put this file into a graphics slot of the current ${this.t.where}`, items }));
+    return items;
+  }
+  // a file's context menu (#480): the file opened, then where to use it and its exports
+  private fileMenu(e: MouseEvent, i: number, exists: boolean): void {
+    e.preventDefault();
+    if (i !== this.cur) this.select(i);
+    contextMenu(e.clientX, e.clientY, [
+      ...(exists ? this.slotItems(i) : []),
+      ...(exists ? ['sep' as const, { label: 'Export (.png)', title: 'File as PNG in the selected palette', onClick: () => this.exportPng() },
+        { label: 'Export (.bin)', title: 'File as Lunar Magic extracts it', onClick: () => void this.exportBin() }] : []),
+      { label: 'Import (.png) …', onClick: () => void this.importPng() },
+      { label: 'Import (.bin) …', onClick: () => void this.importBin() },
+    ]);
   }
 
   // Map16 tiles that use the focused 8x8 tile (when the file is in one of the level's layer slots)

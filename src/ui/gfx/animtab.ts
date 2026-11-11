@@ -12,7 +12,7 @@ import type { App } from '../app.ts';
 import type { Watch } from '../../core/romwatch.ts';
 import type { GfxWorkspace, WsPanel } from '../gfxworkspace.ts';
 import { h, clear, toast, pickerOpen, modal, hexInput } from '../dom.ts';
-import { menuButton, type MenuItem } from '../menu.ts';
+import { contextMenu, menuButton, type MenuItem } from '../menu.ts';
 import { hex } from '../../core/names.ts';
 import { cgramToRGBA, decodeTile, snesColorToRGBA } from '../../core/gfx.ts';
 import { map16Source, levelColorUsers, setFgWords } from '../../core/render.ts';
@@ -461,7 +461,19 @@ export class AnimTab implements WsPanel {
       this.previews.push({ c, slot: n });
       const kind = kindOf(s.type);
       const pick = () => { this.sel = n; this.frame = 0; this.set = 0; };
-      items.append(h('div', { class: `at-slot${n === this.sel ? ' sel' : ''}`, onclick: () => { pick(); this.build(); } },
+      items.append(h('div', {
+        class: `at-slot${n === this.sel ? ' sel' : ''}`, onclick: () => { pick(); this.build(); },
+        // (#480: its actions also as a context menu)
+        oncontextmenu: (e: MouseEvent) => {
+          e.preventDefault();
+          pick();
+          this.build();
+          contextMenu(e.clientX, e.clientY, [
+            { label: 'Duplicate', title: 'Into the next free slot', onClick: () => void this.duplicate() },
+            { label: 'Delete', shortcut: 'Del', title: 'Ctrl+Z brings it back', onClick: () => void this.remove() },
+          ]);
+        },
+      },
         h('span', { class: 'mono hint' }, hex(n, 2)), c,
         h('div', { class: 'at-slot-text' },
           h('div', null, kind === 'tiles' ? `Tile ${hex(this.targetTile(s), 3)} · ${TYPE_NAMES[s.type] ?? ''}` : kind === 'colors' ? `Color ${hex(s.dest & 0xff, 2)} · ${TYPE_NAMES[s.type]}` : `Colors ${rangeName(s)} · ${TYPE_NAMES[s.type] ?? ''}`),

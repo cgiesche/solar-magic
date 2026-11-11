@@ -484,6 +484,25 @@ function buildUi(app: App): { start: (at: NavLoc | null) => Promise<void> } {
 
   installStepFields();
   keepAriaStates(document.body);
+  // the context menu from the keyboard everywhere (#480): Menu key or Shift+F10 opens the one of the focused control,
+  // else (the level's canvas has its own: the selection's or the mouse tile's) of what is under the mouse
+  {
+    let mx = -1, my = -1;
+    window.addEventListener('mousemove', (e) => { mx = e.clientX; my = e.clientY; }, { passive: true });
+    window.addEventListener('keydown', (e) => {
+      if (e.key !== 'ContextMenu' && !(e.key === 'F10' && e.shiftKey)) return;
+      const f = document.activeElement as HTMLElement | null;
+      const focused = f && f !== document.body && !f.matches('.level-scroller, canvas') ? f : null;
+      if (!focused && workspace === 'level' && !document.querySelector('.modal-back')) return; // (the level view's keyMenu)
+      const r = focused?.getBoundingClientRect();
+      const x = r ? r.left + Math.min(r.width / 2, 24) : mx, y = r ? r.top + r.height / 2 : my;
+      const at = focused ?? (x >= 0 ? document.elementFromPoint(x, y) : null);
+      if (!at) return;
+      e.preventDefault();
+      e.stopPropagation();
+      at.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: x, clientY: y, button: 2 }));
+    }, true);
+  }
   window.onkeydown = (e: KeyboardEvent) => {
     if ((e.ctrlKey || e.metaKey) && (e.key.toLowerCase() === 'f' || e.code === 'Space') && !e.altKey && !document.querySelector('.modal-back')) { e.preventDefault(); search(); return; }
     if (fieldTakesKey(e)) return;

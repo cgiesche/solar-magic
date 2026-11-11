@@ -28,6 +28,7 @@ import { openDocs, packageDocs } from './docview.ts';
 import { gfxName } from './gfx/map16tab.ts';
 import { TOOL_KINDS, type ToolKind } from '../core/parts.ts';
 import { icon } from './icons.ts';
+import { contextMenu } from './menu.ts';
 
 const CTX_LABEL: Record<UberContext, string> = { level: 'Level', gamemode: 'Game Mode', overworld: 'Overworld map' };
 
@@ -75,7 +76,14 @@ export function packagesPane(app: App, host: PackagesHost): { el: HTMLElement; r
   }
 
   function renderList(): void {
-    clear(list).append(...items.map((it) => h('button', { class: 'pkg-item' + (it.key === sel ? ' active' : ''), onclick: () => { sel = it.key; fileFilter = ''; renderList(); renderDetail(); } },
+    clear(list).append(...items.map((it) => h('button', {
+      class: 'pkg-item' + (it.key === sel ? ' active' : ''), onclick: () => { sel = it.key; fileFilter = ''; renderList(); renderDetail(); },
+      // (#480: the package's removal also as a context menu; its other actions are in its detail)
+      oncontextmenu: (e: MouseEvent) => {
+        e.preventDefault();
+        if (sel !== it.key) { sel = it.key; fileFilter = ''; renderList(); renderDetail(); }
+        contextMenu(e.clientX, e.clientY, [{ label: 'Remove …', title: 'Remove the package and what it brought (asks first)', onClick: () => void remove(it) }]);
+      } },
       h('div', { class: 'pkg-item-name' }, it.name),
       h('div', { class: 'hint' }, packageSummary(it.rec).join(' · ')))),
     items.length ? '' : h('p', { class: 'hint' }, 'Nothing installed yet.'),
