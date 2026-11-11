@@ -285,6 +285,11 @@ input.invalid, input.invalid:focus { outline: 1px solid var(--danger); border-co
 .filter { width: 100%; }
 .picker { flex: 1 1 60%; }
 .props { flex: 0 0 auto; max-height: 40%; border-top: 1px solid var(--border); overflow-y: auto; }
+/* the level's side panel as tabs (#478): the picker or the properties (or the message panel) fill it */
+.side-tabs { flex: none; padding: 4px 6px 0; }
+.side-props { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.side-props[hidden], .right > .picker[hidden] { display: none; }
+.side-props > .props { flex: 1 1 auto; max-height: none; border-top: none; }
 .tabs { display: flex; gap: 3px; }
 .tabs button { flex: 1; padding: 3px; }
 .picker-body { overflow-y: auto; flex: 1; min-height: 0; scrollbar-gutter: stable; }

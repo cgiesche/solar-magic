@@ -20,8 +20,8 @@ check(sideTabs('l2', 'props', false, false).shown === 'paint', 'nothing selected
 check(!sideTabs('l1', 'paint', false, false).propsEnabled && sideTabs('l2', 'paint', true, false).propsEnabled, 'Properties enabled only with a selection');
 check(sideTabs('l1', 'props', true, true).shown === 'paint' && !sideTabs('l1', 'props', true, true).propsEnabled, 'a reveal\'s new tile picked in the sheet: Paint shown, Properties disabled');
 const l = sideTabs('l1', 'paint', false, false).labels, s = sideTabs('sprites', 'paint', false, false).labels;
-check(l.paint === 'Paint' && l.props === 'Properties', 'the layer modes: Paint | Properties');
-check(s.paint === 'Sprites' && s.props === 'Sprite', 'the sprites mode: Sprites | Sprite');
+check(l.paint === 'Picker' && l.props === 'Properties', 'the layer modes: Picker | Properties (#478)');
+check(s.paint === 'Picker' && s.props === 'Properties', 'the sprites mode: Picker | Properties, as every editor');
 
 // what a plain click (and a right click: its menu) on layer 1 takes as an object rather than a brush tile (#434)
 check(clickSelects(STAR_TILE, false, kinds) && clickSelects(PIPE_TILE, false, kinds), 'a star or pipe 5B without a link: selected (Link to… reachable)');

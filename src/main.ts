@@ -138,15 +138,46 @@ function buildUi(app: App): { start: (at: NavLoc | null) => Promise<void> } {
   const levels = new LevelList(app);
   const picker = new Picker(app);
   const props = new Properties(app);
+  const messagePanel = new MessagePanel(app);
   app.on('properties', () => {
     if (app.messages) app.closeMessages();
+    showLevelTab('props');
     props.root.scrollIntoView({ block: 'nearest' });
     props.root.querySelector<HTMLElement>('input, select, textarea, button')?.focus();
   });
 
   let workspace: 'level' | 'ow' | 'gfx' | 'game' = 'level';
   // the picker is shown in the level editor unless the message panel takes its place (it prefetches only then)
-  const updatePickerShown = () => picker.setShown(workspace === 'level' && !app.messages);
+  // the level's side panel (ADR 0015, #478): tabs Picker | Properties – a selection shows its properties, picking
+  // something to place the picker; the message panel is the Properties tab's content while it is open
+  let levelTab: 'picker' | 'props' = 'picker';
+  const levelTabs = h('div', { class: 'tabbar side-tabs', role: 'tablist' });
+  const propsHost = h('div', { class: 'side-props' });
+  const updatePickerShown = () => picker.setShown(workspace === 'level' && levelTab === 'picker');
+  const renderLevelSide = () => {
+    const tab = (t: typeof levelTab, label: string, title: string) => h('button', { class: levelTab === t ? 'active' : '', title, onclick: () => showLevelTab(t) }, label);
+    levelTabs.replaceChildren(
+      tab('picker', 'Picker', 'What to place: objects, Map16 tiles, sprites (right click/Shift+click places it)'),
+      tab('props', 'Properties', app.messages ? 'The level\'s message boxes' : 'The settings of what is selected'));
+    picker.root.hidden = levelTab !== 'picker';
+    propsHost.hidden = levelTab !== 'props';
+    const content = app.messages ? messagePanel.root : props.root;
+    if (propsHost.firstChild !== content) propsHost.replaceChildren(content);
+    updatePickerShown();
+  };
+  function showLevelTab(t: typeof levelTab): void {
+    if (levelTab === t) return;
+    levelTab = t;
+    renderLevelSide();
+  }
+  let selectedBefore = 0;
+  app.on('change', () => {
+    const n = app.model.selection.size;
+    if (n && !selectedBefore) showLevelTab('props');
+    else if (!n && selectedBefore && !app.messages) showLevelTab('picker');
+    selectedBefore = n;
+  });
+  app.on('picked-item', () => showLevelTab('picker'));
   let ow: OverworldView | null = null;
   let game: GameView | null = null;
   let gameBorder: number | null = null; // the overworld map whose border the Game workspace shows when switched to
@@ -307,7 +338,8 @@ function buildUi(app: App): { start: (at: NavLoc | null) => Promise<void> } {
 
   const left = h('div', { class: 'left' }, levels.root);
   const center = h('div', { class: 'center with-rail' }, modes, h('div', { class: 'center-main' }, view.root, status));
-  const right = h('div', { class: 'right' }, picker.root, props.root);
+  const right = h('div', { class: 'right' }, levelTabs, picker.root, propsHost);
+  renderLevelSide();
   const logBar = new LogBar();
   const busy = busyIndicator(app);
   const pasteHint = pasteHintBox(app);
@@ -413,14 +445,14 @@ function buildUi(app: App): { start: (at: NavLoc | null) => Promise<void> } {
   app.gotoOverworldTile = async (i) => { if (await setWorkspace('ow')) owShown()?.showTile(i); };
 
   // the message panel takes the picker's place while it is open
-  const messagePanel = new MessagePanel(app);
   app.on('messages', () => {
-    if (!app.messages) right.replaceChildren(picker.root, props.root);
-    else {
+    if (app.messages) {
       if (workspace !== 'level') void setWorkspace('level');
-      if (messagePanel.root.parentElement !== right) { right.replaceChildren(messagePanel.root); messagePanel.focus(); }
-    }
-    updatePickerShown();
+      const opened = messagePanel.root.parentElement !== propsHost;
+      levelTab = 'props';
+      renderLevelSide();
+      if (opened) messagePanel.focus();
+    } else renderLevelSide();
   });
 
   // ---- browser back/forward through the places (navhistory.ts)

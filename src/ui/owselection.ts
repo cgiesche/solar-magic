@@ -20,7 +20,7 @@ export interface SideTabs {
 export function sideTabs(mode: OwMode, chosen: SideTab, selected: boolean, revealPick: boolean): SideTabs {
   return {
     shown: selected && !revealPick ? chosen : 'paint',
-    labels: mode === 'sprites' ? { paint: 'Sprites', props: 'Sprite' } : { paint: 'Paint', props: 'Properties' },
+    labels: { paint: 'Picker', props: 'Properties' }, // (the same in every editor, #478)
     propsEnabled: selected && !revealPick,
   };
 }
