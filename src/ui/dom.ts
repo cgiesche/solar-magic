@@ -281,7 +281,7 @@ export function setDialogUndo(undo: () => void, redo: () => void): void { editor
 //   (after: what draws the dialog again afterwards), one button Close
 // - staged: changes wait for the primary button (Apply) – changed fields are marked and counted in the title
 // buttons: the elements of the given buttons, in the given order (e.g. to show one only at times)
-export type ModalOptions = { immediate?: boolean | { after?: () => void }; staged?: boolean };
+export type ModalOptions = { immediate?: boolean | { after?: () => void }; staged?: boolean; className?: string };
 export function modal(title: string, body: HTMLElement, buttons: { label: string; primary?: boolean; danger?: boolean; onClick?: () => boolean | void }[], onClose?: () => void, beforeClose?: () => boolean, opts: ModalOptions = {}): { close: (force?: boolean) => void; buttons: HTMLButtonElement[] } {
   const back = h('div', { class: 'modal-back' });
   let closed = false;
@@ -314,10 +314,10 @@ export function modal(title: string, body: HTMLElement, buttons: { label: string
     .sort((a, b) => Number(a.last) - Number(b.last) || a.i - b.i).map((x) => x.e);
   const primary = els.find((_, i) => buttons[i].primary);
   const count = h('span', { class: 'modal-changes', hidden: true });
-  const box = h('div', { class: 'modal', role: 'dialog', 'aria-label': title },
+  const box = h('div', { class: `modal${opts.className ? ` ${opts.className}` : ''}`, role: 'dialog', 'aria-label': title },
     h('div', { class: 'modal-title' }, h('span', { class: 'modal-title-text' }, title, count), h('button', { class: 'icon-btn', onclick: () => close(), title: 'Close (Esc)', 'aria-label': 'Close' }, icon('close'))),
     h('div', { class: 'modal-body' }, body),
-    h('div', { class: 'modal-buttons' }, imm ? h('span', { class: 'hint modal-note' }, 'Changes apply immediately · Ctrl+Z undoes') : null, order),
+    order.length || imm ? h('div', { class: 'modal-buttons' }, imm ? h('span', { class: 'hint modal-note' }, 'Changes apply immediately · Ctrl+Z undoes') : null, order) : null,
   );
   box.addEventListener('keydown', (e) => {
     if (e.key !== 'Enter' || e.defaultPrevented || e.ctrlKey || e.altKey || e.metaKey || e.shiftKey || !primary || primary.disabled) return;

@@ -550,10 +550,20 @@ canvas.sheet-fill { width: 100%; height: auto; image-rendering: auto; }
 .level-item { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .level-item .lname { font-family: system-ui, sans-serif; font-size: 11px; color: var(--text-muted); }
 .level-item.current .lname { color: var(--on-accent); }
-.play { display: flex; flex-direction: column; gap: 6px; align-items: center; }
-.play-canvas { width: 768px; height: 672px; image-rendering: pixelated; background: var(--screen-bg); outline: none; max-width: calc(85vw - 266px); max-height: 70vh; object-fit: contain; }
-.play-help { align-self: stretch; contain: inline-size; } /* wraps at the canvas width instead of widening the dialog */
-.play-main { display: flex; gap: 10px; align-items: flex-start; } /* the meters (256px) beside the canvas */
+/* test play (#485): a full-window overlay – the game with the transport bar under it, the meters as a side panel */
+.modal.modal-full { width: calc(100vw - 24px); max-width: none; height: calc(100% - 16px); max-height: none; }
+.modal-full .modal-body { flex: 1; min-height: 0; padding: 0; overflow: hidden; }
+.play { display: grid; grid-template-columns: minmax(0, 1fr) 300px; height: 100%; }
+.play-stage { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; padding: 14px; min-width: 0; min-height: 0; overflow: auto; }
+.play-side { border-left: 1px solid var(--border); background: var(--surface); padding: 12px; overflow-y: auto; }
+.play-canvas { width: 768px; height: 672px; image-rendering: pixelated; background: var(--screen-bg); outline: none; max-width: 100%; max-height: calc(100% - 130px); min-height: 224px; object-fit: contain; }
+.play-transport { display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 6px; padding: 6px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-l); max-width: 100%; }
+.play-transport kbd { font-size: 11px; padding: 0 4px; }
+.play-transport > .hint { font-family: var(--font-mono); font-size: 11px; max-width: 360px; }
+.play-sep { width: 1px; height: 22px; background: var(--border); }
+.play-help { display: flex; flex-wrap: wrap; justify-content: center; gap: 4px 14px; }
+.play-more { max-width: 760px; }
+.play-more summary { cursor: pointer; }
 .play-meter { width: 256px; display: flex; flex-direction: column; gap: 4px; font-size: 12px; }
 .meter-row { display: flex; align-items: center; gap: 6px; }
 .meter-label { width: 62px; color: var(--text-muted); }
