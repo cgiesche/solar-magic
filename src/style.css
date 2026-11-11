@@ -198,6 +198,18 @@ input.invalid, input.invalid:focus { outline: 1px solid var(--danger); border-co
 .appbar-l, .appbar-r { display: flex; align-items: center; gap: 6px; min-width: 0; }
 .appbar-r { justify-content: flex-end; }
 .appbar .brand { font-weight: 700; color: var(--accent); margin-right: 8px; white-space: nowrap; }
+.appbar-nav { display: flex; gap: 2px; }
+.appbar-nav button, .appbar-r > button[aria-label] { padding: 4px 6px; }
+.appbar-search { min-width: 200px; display: flex; align-items: center; gap: 6px; color: var(--text-muted); background: var(--field-bg); text-align: left; }
+.appbar-search .icon-label { flex: 1; }
+.appbar-search kbd { font-size: 11px; }
+/* small state labels (#476): unsaved level, saved to ROM */
+.pill { display: inline-flex; align-items: center; height: 20px; padding: 0 8px; border-radius: 10px; font-size: 11px; font-weight: 600; white-space: nowrap; }
+.pill[hidden] { display: none; }
+.pill-info { background: var(--info-bg); color: var(--info); }
+.pill-ok { background: var(--success-bg); color: var(--success); }
+.pill-warn { background: var(--warning-bg); color: var(--warning); }
+.pill-error { background: var(--danger-bg); color: var(--danger); }
 .appbar .spacer, .ctxbar .spacer { flex: 1; }
 .ctxbar { grid-column: 1 / 4; display: flex; align-items: center; gap: 6px; padding: 5px 8px; background: var(--surface); border-bottom: 1px solid var(--border); flex-wrap: wrap; min-height: 38px; }
 .ctxbar .sep { width: 1px; height: 22px; background: var(--border); margin: 0 4px; }
@@ -346,13 +358,13 @@ input.invalid, input.invalid:focus { outline: 1px solid var(--danger); border-co
 .refusal .refusal-instead { opacity: .85; }
 .refusal details { font-size: 11px; opacity: .75; }
 .refusal summary { cursor: pointer; }
-.busy { position: fixed; right: 342px; bottom: calc(var(--log-h, 0px) + 34px); z-index: 900; display: flex; align-items: center; gap: 8px; padding: 6px 12px 6px 9px; background: var(--accent-strong); color: var(--on-accent); border: 1px solid var(--accent); border-radius: 16px; box-shadow: 0 2px 10px rgba(0,0,0,.45); font-size: 12px; pointer-events: none; opacity: 0; transform: translateY(8px); transition: opacity .2s, transform .2s; max-width: 45vw; white-space: nowrap; }
+.busy { position: fixed; right: calc(var(--side-w, 330px) + 12px); bottom: calc(var(--log-h, 0px) + 34px); z-index: 900; display: flex; align-items: center; gap: 8px; padding: 6px 12px 6px 9px; background: var(--accent-strong); color: var(--on-accent); border: 1px solid var(--accent); border-radius: 16px; box-shadow: 0 2px 10px rgba(0,0,0,.45); font-size: 12px; pointer-events: none; opacity: 0; transform: translateY(8px); transition: opacity .2s, transform .2s; max-width: 45vw; white-space: nowrap; }
 .busy span:last-child { overflow: hidden; text-overflow: ellipsis; }
 .busy.show { opacity: 1; transform: none; }
 .busy-spin { flex: none; width: 14px; height: 14px; border: 2px solid color-mix(in srgb, var(--on-accent) 35%, transparent); border-top-color: var(--on-accent); border-radius: 50%; animation: busy-spin .8s linear infinite; }
 @keyframes busy-spin { to { transform: rotate(360deg); } }
 /* hint to save repeated pastes as a prefab: beside the level, never covering more than itself */
-.paste-hint { position: fixed; right: 342px; bottom: calc(var(--log-h, 0px) + 70px); z-index: 900; display: none; align-items: center; gap: 8px; padding: 6px 6px 6px 12px; background: var(--surface-2); border: 1px solid var(--accent-strong); border-radius: 6px; box-shadow: 0 2px 10px rgba(0,0,0,.45); font-size: 12px; max-width: 45vw; }
+.paste-hint { position: fixed; right: calc(var(--side-w, 330px) + 12px); bottom: calc(var(--log-h, 0px) + 70px); z-index: 900; display: none; align-items: center; gap: 8px; padding: 6px 6px 6px 12px; background: var(--surface-2); border: 1px solid var(--accent-strong); border-radius: 6px; box-shadow: 0 2px 10px rgba(0,0,0,.45); font-size: 12px; max-width: 45vw; }
 .paste-hint.show { display: flex; }
 .layout.ow-mode .paste-hint, .layout.gfx-mode .paste-hint { display: none; }
 /* log bar: all toasts and notable events with times; collapsed it shows only the latest line */
@@ -583,7 +595,7 @@ canvas.sheet-fill { width: 100%; height: auto; image-rendering: auto; }
 .inline-details[open] > div { margin-top: 4px; }
 .mono { font-family: monospace; font-size: 12px; }
 /* graphics workspace */
-.layout.gfx-mode { grid-template-columns: 190px 1fr 380px; }
+.layout.gfx-mode { --side-w: 380px; grid-template-columns: 190px 1fr 380px; }
 .ws { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
 .ws-body { flex: 1; min-height: 0; display: flex; flex-direction: column; }
 .ws-body > * { flex: 1; min-height: 0; }

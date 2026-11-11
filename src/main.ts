@@ -160,9 +160,10 @@ function buildUi(app: App): { start: (at: NavLoc | null) => Promise<void> } {
   const modes = h('div', { class: 'btn-group' },
     modeBtn('l1', 'Layer 1', '1'), modeBtn('l2', 'Layer 2', '2'), modeBtn('spr', 'Sprites', '3'), modeBtn('exit', 'Entrances/Exits', '4'), modeBtn('bg', 'BG', '5'), modeBtn('l3', 'Layer 3', '6'));
   const levelTitle = h('span', { class: 'level-title' });
+  const unsavedPill = h('span', { class: 'pill pill-info', title: 'The level\'s changes are written to the ROM with Save level (Ctrl+S)', hidden: true }, 'Unsaved changes');
   const zoomCtl = zoomControl(() => app.view.zoom, (z) => view.setZoom(z));
   const levelBar = h('div', { class: 'ctxbar' },
-    levelTitle,
+    levelTitle, unsavedPill,
     h('button', { onclick: () => openHeaderDialog(app), title: 'Level header (H)' }, 'Header …'),
     h('span', { class: 'sep' }),
     modes,
@@ -255,17 +256,21 @@ function buildUi(app: App): { start: (at: NavLoc | null) => Promise<void> } {
       if (musicPlayer.error) toast(`Could not play: ${musicPlayer.error}`, 'error');
     });
   };
-  const musicBtn = h('button', { title: musicTitle, onclick: () => { if (musicPlayer.label === LEVEL_MUSIC) musicPlayer.stop(); else playLevelMusic(); } }, iconLabel('music', 'Music'));
+  const musicBtn = h('button', { title: musicTitle, 'aria-label': 'Level music', onclick: () => { if (musicPlayer.label === LEVEL_MUSIC) musicPlayer.stop(); else playLevelMusic(); } }, icon('music'));
   musicPlayer.onChange((l) => musicBtn.classList.toggle('active', l === LEVEL_MUSIC));
   // another level or other header music: its music
   const followLevel = () => { if (musicPlayer.label === LEVEL_MUSIC && musicOf !== `${app.level.number}:${app.level.header.music}`) playLevelMusic(); };
   app.on('level', followLevel);
   app.on('level-header', followLevel);
+  const searchBtn = h('button', { class: 'appbar-search', onclick: () => search(), title: 'Search everywhere (Ctrl+F, Ctrl+Space)' },
+    iconLabel('search', 'Search …'), h('kbd', null, 'Ctrl F'));
+  // where the changes go (#476): the level's wait for Save level, the other workspaces' are in the ROM at once
+  const savedPill = h('span', { class: 'pill pill-ok', title: 'The overworld\'s, graphics\' and game\'s changes are ROM edits: written at once (Ctrl+Z undoes)' }, 'Saved to ROM');
   const appbar = h('header', { class: 'appbar' },
     // three columns, so nothing moves when the buttons on the right change their labels with the workspace
-    h('div', { class: 'appbar-l' }, h('span', { class: 'brand' }, 'Solar Magic'), menus, h('div', { class: 'btn-group' }, backBtn, fwdBtn)),
+    h('div', { class: 'appbar-l' }, h('span', { class: 'brand' }, 'Solar Magic'), menus, h('div', { class: 'appbar-nav' }, backBtn, fwdBtn)),
     wsSwitch,
-    h('div', { class: 'appbar-r' }, undoBtn, redoBtn, saveBtn, testBtn, musicBtn),
+    h('div', { class: 'appbar-r' }, searchBtn, h('div', { class: 'appbar-nav' }, undoBtn, redoBtn), musicBtn, testBtn, saveBtn, savedPill),
   );
 
   const updateToolbar = () => {
@@ -273,12 +278,15 @@ function buildUi(app: App): { start: (at: NavLoc | null) => Promise<void> } {
     const btnL2 = modes.querySelector('[data-mode="l2"]') as HTMLButtonElement;
     btnL2.disabled = !app.level?.layer2Objects;
     (modes.querySelector('[data-mode="bg"]') as HTMLButtonElement).disabled = !app.level || !app.canEditBg();
-    if (app.level) levelTitle.textContent = `Level ${hex(app.level.number, 3)}${app.dirty ? ' *' : ''}`;
+    if (app.level) levelTitle.textContent = `Level ${hex(app.level.number, 3)}`;
+    unsavedPill.hidden = !app.dirty;
     zoomCtl.update();
     for (const b of wsSwitch.querySelectorAll('button')) b.classList.toggle('active', b.dataset.ws === workspace);
-    saveBtn.textContent = `Save level${app.dirty ? ' *' : ''}`;
-    // (the overworld's changes are ROM edits: nothing to save; hidden, so nothing else moves)
-    saveBtn.style.visibility = romOnly() ? 'hidden' : '';
+    saveBtn.replaceChildren(...iconLabel('save', 'Save level'));
+    saveBtn.disabled = !app.dirty && !romOnly();
+    // (the overworld's and game's changes are ROM edits: nothing to save)
+    saveBtn.hidden = romOnly();
+    savedPill.hidden = !romOnly();
     testBtn.disabled = (workspace === 'ow' && !owShown()) || workspace === 'game';
     testBtn.title = workspace === 'game' ? 'Test play is available in the level and overworld workspaces'
       : workspace !== 'ow' ? testLevelTitle

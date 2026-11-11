@@ -3,7 +3,7 @@
 
 import {
   createElement, ArrowLeft, ArrowRight, ArrowRightLeft, Check, ChevronDown, ChevronLeft, ChevronRight, CircleX, Copy,
-  Eraser, FlipHorizontal2, FlipVertical2, Info, Music, PaintBucket, Pencil, Pipette, Play, Redo2, RotateCw,
+  Eraser, FlipHorizontal2, FlipVertical2, Info, Music, PaintBucket, Pencil, Pipette, Play, Redo2, RotateCw, Save, Search,
   SlidersHorizontal, SquareDashed, Trash2, TriangleAlert, Undo2, X,
 } from 'lucide';
 import { h } from './dom.ts';
@@ -14,7 +14,7 @@ const ICONS = {
   settings: SlidersHorizontal, reverse: ArrowRightLeft, duplicate: Copy, delete: Trash2,
   warning: TriangleAlert, error: CircleX, info: Info,
   select: SquareDashed, pen: Pencil, eraser: Eraser, fill: PaintBucket, eyedropper: Pipette,
-  rotate: RotateCw, 'flip-h': FlipHorizontal2, 'flip-v': FlipVertical2,
+  rotate: RotateCw, save: Save, search: Search, 'flip-h': FlipHorizontal2, 'flip-v': FlipVertical2,
 };
 export type IconName = keyof typeof ICONS;
 
