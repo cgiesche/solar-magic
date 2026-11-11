@@ -268,7 +268,7 @@ function buildUi(app: App): { start: (at: NavLoc | null) => Promise<void> } {
     ] },
     { label: 'Help', items: [
       { label: 'Keyboard shortcuts …', shortcut: '?', onClick: () => showHelp() },
-      { label: 'Expand/collapse log', shortcut: 'L', onClick: () => logBar.toggle() },
+      { label: 'Problems and log', shortcut: 'L', title: 'Open or close the bottom panel', onClick: () => logBar.toggle() },
     ] },
   ]);
   const wsBtn = (w: typeof workspace, label: string, key: string) => h('button', { 'data-ws': w, title: key ? `${label} (${key})` : label, onclick: () => setWorkspace(w) }, label);
@@ -346,10 +346,17 @@ function buildUi(app: App): { start: (at: NavLoc | null) => Promise<void> } {
   const layout = h('div', { class: 'layout' });
   const split = sideSplitter(layout);
   layout.append(appbar, levelBar, left, center, right, split.root, logBar.root, busy, pasteHint);
+  logBar.setProblems(view.problems.list, () => view.problems.count());
   split.use('level');
   root.append(layout);
   const owRight = h('div', { class: 'right' });
-  const showLayout = (bar: HTMLElement, l: HTMLElement, main: HTMLElement, side: HTMLElement) => layout.replaceChildren(appbar, bar, l, main, side, split.root, logBar.root, busy, pasteHint);
+  const showLayout = (bar: HTMLElement, l: HTMLElement, main: HTMLElement, side: HTMLElement) => {
+    layout.replaceChildren(appbar, bar, l, main, side, split.root, logBar.root, busy, pasteHint);
+    // the bottom panel's Problems: the level's problems, the overworld's World check (#479)
+    if (main === center) logBar.setProblems(view.problems.list, () => view.problems.count());
+    else if (ow && main === ow.root) logBar.setProblems(ow.check.root, () => ow!.check.count());
+    else logBar.setProblems(null);
+  };
 
   // switches between the level editor, the overworld editor and the graphics workspace (palettes, Map16, GFX);
   // gfx: tab to open (default: the last one), Map16 tile to show

@@ -268,7 +268,7 @@ export class OverworldView {
     this.sizer = h('div', { class: 'level-sizer' });
     this.scroller = h('div', { class: 'level-scroller', tabIndex: 0 }, this.canvas, this.sizer);
     this.status = h('div', { class: 'statusbar' }, this.statusText, this.statusStats, this.check.button);
-    this.side = h('div', { class: 'ow-side' }, this.check.root, this.tabBar, this.palPanel, this.props);
+    this.side = h('div', { class: 'ow-side' }, this.tabBar, this.palPanel, this.props);
     this.bar = h('div', { class: 'ctxbar' });
     this.left = h('div', { class: 'left' }, h('div', { class: 'panel levels ow-events' },
       h('div', { class: 'panel-title' }, 'Events'), this.evList));

@@ -390,15 +390,24 @@ input.invalid, input.invalid:focus { outline: 1px solid var(--danger); border-co
 :root:has(.logbar.open) { --log-h: 178px; }
 .log-head { display: flex; align-items: center; gap: 8px; padding: 2px 8px; height: 26px; cursor: pointer; min-width: 0; }
 .log-head:hover .log-toggle { border-color: var(--accent); }
-.log-toggle { padding: 1px 8px; font-size: 12px; flex: none; }
+.log-toggle { padding: 1px 4px; font-size: 12px; flex: none; }
 .log-latest { flex: 1; min-width: 0; display: flex; gap: 10px; overflow: hidden; white-space: nowrap; }
 .log-latest .log-msg { overflow: hidden; text-overflow: ellipsis; }
 .log-actions { display: none; gap: 4px; flex: none; }
-.logbar.open .log-actions { display: flex; }
+.logbar.open.tab-log .log-actions { display: flex; }
 .log-build { flex: none; color: var(--text-muted); font-family: var(--font-mono); font-size: 11px; cursor: text; user-select: all; }
 .log-actions button { padding: 1px 8px; font-size: 12px; }
 .log-list { display: none; height: 150px; overflow-y: auto; padding: 2px 0 4px; border-top: 1px solid var(--border); font-family: var(--font-mono); }
-.logbar.open .log-list { display: block; }
+.logbar.open.tab-log .log-list { display: block; }
+/* the bottom panel's tabs (#479) and the problems of the workspace shown */
+.bottom-tabs { border-bottom: 0; flex: none; }
+.bottom-tabs button { padding: 3px 8px; font-size: 12px; display: inline-flex; align-items: center; gap: 6px; }
+.bottom-tabs .pill { height: 17px; padding: 0 6px; gap: 3px; }
+.bottom-tabs .pill .icon { width: 12px; height: 12px; }
+.problems-host { display: none; height: 150px; overflow-y: auto; padding: 4px 8px; border-top: 1px solid var(--border); }
+.logbar.open.tab-problems .problems-host { display: block; }
+.problems-host .world-check { max-height: none; border: 0; padding: 0; }
+.problem-list .problem { padding: 3px 4px; border-bottom: 1px solid var(--border); }
 .log-row { display: flex; gap: 10px; padding: 1px 8px; }
 .log-row:hover { background: var(--surface); }
 .log-time { flex: none; color: var(--text-muted); font-family: var(--font-mono); }

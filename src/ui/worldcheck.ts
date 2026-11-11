@@ -21,6 +21,7 @@ import { worldProblems, applyFix, errorCount, checkAgainst, diffText, budgetPlac
 import type { Budget } from '../core/owbudget.ts';
 import { budgetGauge } from './budgetgauge.ts';
 import { icon, iconLabel, type IconName } from './icons.ts';
+import { bottomPanel, type ProblemCount } from './logbar.ts';
 
 const ICON: Record<CheckSeverity, IconName> = { error: 'error', warn: 'warning' };
 const SECTIONS: { severity: CheckSeverity; name: string; title: string }[] = [
@@ -31,7 +32,7 @@ const SECTIONS: { severity: CheckSeverity; name: string; title: string }[] = [
 export class WorldCheck {
   private view: OverworldView;
   readonly button = h('button', { class: 'status-warn world-check-btn', title: 'World check: is the world beatable? (opens the list)' });
-  readonly root = h('div', { class: 'panel world-check', hidden: true });
+  readonly root = h('div', { class: 'world-check', role: 'list', 'aria-label': 'World check' }); // (shown in the bottom panel's Problems tab, #479)
   // (the tiles' places named once the submaps' views are known: searched again then)
   private found: { from: object; views: boolean; learned: WorldCheckLearned; problems: WorldProblem[] } | null = null;
   // (what the probe worker learned, for the ROM generation and the levels' exits – the open one's as edited)
@@ -51,10 +52,18 @@ export class WorldCheck {
     if (this.view.root.isConnected) this.update();
   };
 
-  get open(): boolean { return !this.root.hidden; }
+  get open(): boolean { return this.root.isConnected && !!bottomPanel()?.problemsShown; }
   toggle(open = !this.open): void {
-    this.root.hidden = !open;
+    const p = bottomPanel();
+    if (open) p?.showProblems(); else if (this.open) p?.toggleProblems();
     this.update();
+  }
+  /** The errors and warnings for the bottom panel's tab (checking: still searched). */
+  count(): ProblemCount {
+    const ps = this.found?.problems ?? null;
+    if (!ps) return { errors: 0, warnings: 0, checking: true };
+    const errors = errorCount(ps);
+    return { errors, warnings: ps.length - errors };
   }
 
   // the problems at the event progress shown, null while what the search needs or what the probe worker learns is
@@ -94,7 +103,8 @@ export class WorldCheck {
       : warnings ? iconLabel('warning', `World check: ${warnings} warning${warnings > 1 ? 's' : ''}`) : iconLabel('check', 'World check')));
     b.title = !ps ? 'World check: being searched (the path tiles, the maps or the saves are being learned)'
       : `World check: ${errors} error${errors === 1 ? '' : 's'}, ${warnings} warning${warnings === 1 ? '' : 's'} – click to ${this.open ? 'close' : 'open'} the list`;
-    if (this.open) this.fill(ps);
+    this.fill(ps);
+    if (this.root.isConnected) bottomPanel()?.refreshProblems();
   }
 
   // what the ROM edits since the problems last checked changed, in a toast (at most one per check, none when nothing
@@ -108,6 +118,8 @@ export class WorldCheck {
     this.everyBaseline = every.baseline;
     const change = main.change && every.change ? { added: [...main.change.added, ...every.change.added], gone: [...main.change.gone, ...every.change.gone] } : main.change ?? every.change;
     const said = change && diffText(change);
+    // (a new error opens the Problems panel, #479's decision)
+    if (change?.added.some((p) => p.severity === 'error') && this.root.isConnected) bottomPanel()?.showProblems();
     if (!said) return;
     const show = said.show && canShow(said.show) ? said.show : null;
     toast(`World check: ${said.text}`, show ? 'error' : 'info', show ? { label: 'Show', run: () => this.show(show) } : undefined);
@@ -120,8 +132,7 @@ export class WorldCheck {
 
   private fill(ps: WorldProblem[] | null): void {
     const scroll = this.root.scrollTop;
-    const head = h('div', { class: 'panel-title' }, 'World check',
-      h('button', { class: 'msg-close', title: 'Close', 'aria-label': 'Close', onclick: () => this.toggle(false) }, icon('close')));
+    const head = h('div', { class: 'panel-title' }, 'World check');
     if (!ps) { this.root.replaceChildren(head, emptyState('Searching… (the path tiles, the maps or the saves are being learned)')); return; }
     const body: HTMLElement[] = [];
     if (!ps.length) body.push(emptyState('No problems found: Mario gets everywhere, every way ends at a level or stop tile.'));
