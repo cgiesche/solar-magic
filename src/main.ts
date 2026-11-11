@@ -4,7 +4,7 @@ import { createBps, crc32 } from './core/bps.ts';
 import { prepareRom } from './core/editorpatches.ts';
 import { SMW_CLEAN_CRC } from './core/cleangame.ts';
 import { App, type EditMode } from './ui/app.ts';
-import { h, clear, toast, log, modal, choose, zoomControl, fieldTakesKey, installStepFields, keepAriaStates } from './ui/dom.ts';
+import { h, clear, toast, log, modal, choose, zoomControl, fieldTakesKey, installStepFields, keepAriaStates, setDialogUndo } from './ui/dom.ts';
 import { downloadBytes, pickFile, saveFile, filePath, fileName, desktop, guardClose } from './ui/platform.ts';
 import { LogBar } from './ui/logbar.ts';
 import { pasteHintBox } from './ui/pastehint.ts';
@@ -484,6 +484,7 @@ function buildUi(app: App): { start: (at: NavLoc | null) => Promise<void> } {
 
   installStepFields();
   keepAriaStates(document.body);
+  setDialogUndo(() => app.undo(), () => app.redo());
   // the context menu from the keyboard everywhere (#480): Menu key or Shift+F10 opens the one of the focused control,
   // else (the level's canvas has its own: the selection's or the mouse tile's) of what is under the mouse
   {

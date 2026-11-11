@@ -160,7 +160,7 @@ export function openSongSettings(proj: MusicProject, song: MusicSong, save: (s: 
       h('button', { title: 'The whole song file as text – for anything that is not one of its #defines', onclick: () => { dlg.close(); editText(); } }, 'Edit as text …')),
     rows, status), [
     { label: 'Cancel' },
-    { label: 'OK', primary: true, onClick: () => {
+    { label: 'Apply', primary: true, onClick: () => {
       const v = values();
       if (!v) return false;
       const before = JSON.stringify(song.defines ?? {});
@@ -169,7 +169,7 @@ export function openSongSettings(proj: MusicProject, song: MusicSong, save: (s: 
       if (!Object.keys(v).length) delete next.defines;
       save(next);
     } },
-  ], stop);
+  ], stop, undefined, { staged: true });
 }
 
 // A song file as text, for anything its settings don't cover; save: the new text (settings it no longer
@@ -182,11 +182,11 @@ export function openSongText(proj: MusicProject, song: MusicSong, save: (text: s
     area.setRangeText('\t', area.selectionStart, area.selectionEnd, 'end');
   } });
   modal(`Edit: ${song.file}`, h('div', { class: 'text-edit-box' },
-    h('p', { class: 'hint' }, 'AddmusicK inserts the music again with “OK”; if it reports an error, nothing changes. “Export songs” keeps a copy of the songs as they are now.'),
+    h('p', { class: 'hint' }, 'AddmusicK inserts the music again with “Apply”; if it reports an error, nothing changes. “Export songs” keeps a copy of the songs as they are now.'),
     song.defines ? h('p', { class: 'hint' }, `Set on top of the file by the song’s settings: ${Object.entries(song.defines).map(([n, v]) => (v === null ? `${n} off` : `${n} = ${v || 'on'}`)).join(', ')}.`) : '',
     area), [
     { label: 'Cancel' },
-    { label: 'OK', primary: true, onClick: () => { if (area.value !== text) save(area.value); } },
+    { label: 'Apply', primary: true, onClick: () => { if (area.value !== text) save(area.value); } },
   ]);
 }
 

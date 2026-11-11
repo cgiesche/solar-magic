@@ -265,6 +265,6 @@ export function openHeaderDialog(app: App): void {
         app.emit('level-header');
       },
     },
-  ], () => { open = false; if (musicPlayer.label === 'header') musicPlayer.stop(); });
+  ], () => { open = false; if (musicPlayer.label === 'header') musicPlayer.stop(); }, undefined, { staged: true });
   measured();
 }

@@ -4,7 +4,7 @@
 // open (its own edits, undo/redo – Ctrl+Z / Ctrl+Y work in it, as in the Packages dialog); one open at a time.
 
 import type { App } from './app.ts';
-import { h, modal, toast, checkbox, hexInput, dialogUndoKeys } from './dom.ts';
+import { h, modal, toast, checkbox, hexInput } from './dom.ts';
 import { syncBowsieMaxTile } from '../core/bowsie.ts';
 import { MAP_NAMES, readRevealList, writeRevealList } from '../core/overworld.ts';
 import { OW_OPTIONS, owOption, owOptionValue, setOwOption, revealSpeed, setRevealSpeed, MAX_REVEAL_SPEED, DEFAULT_REVEAL_SPEED, submapLightning, setSubmapLightning, LIGHTNING_TITLE, lightningEditLabel } from '../core/owoptions.ts';
@@ -40,15 +40,13 @@ export function openOwOptions(app: App, ctx: OwOptionsContext, tab: OwOptionsTab
   };
   const show = (k: OwOptionsTab, c = ctx) => { if (k !== tab) content.scrollTop = 0; tab = k; ctx = c; draw(); };
   // undo/redo while the dialog is the topmost one (drawn again by the ROM change)
-  const offKeys = dialogUndoKeys(body, () => app.undo(), () => app.redo());
   const off = app.on('rom-change', draw);
   shown = { show };
   draw();
   modal('Overworld options', body, [{ label: 'Close', primary: true }], () => {
-    offKeys();
     off();
     shown = null;
-  });
+  }, undefined, { immediate: true });
 }
 
 // the game's overworld options (core/owoptions.ts): each switch one ROM edit

@@ -1008,7 +1008,7 @@ function renameObject(app: App, num: number, ext: number): void {
   const save = () => { if (name.value.trim() !== cur) app.renameObject(num, ext, name.value.trim() === builtin ? '' : name.value); };
   const dlg = modal(`Rename ${what}`, h('div', null, h('div', { class: 'prop' }, h('label', null, 'Name'), name),
     h('div', { class: 'hint' }, `${fromPackage ? 'From a package' : 'Built-in'}: ${builtin}.${namedPerTable(num) ? ' Objects 2E–3F are named per object group (this level’s).' : ''} The name is kept with the project, not in the ROM.`)),
-    [{ label: 'Cancel' }, ...(cur !== builtin ? [{ label: 'Reset', onClick: () => app.renameObject(num, ext, '') }] : []), { label: 'OK', primary: true, onClick: save }]);
+    [{ label: 'Cancel' }, ...(cur !== builtin ? [{ label: 'Reset', onClick: () => app.renameObject(num, ext, '') }] : []), { label: 'Rename', primary: true, onClick: save }]);
   name.addEventListener('keydown', (e) => { if (e.key === 'Enter') { save(); dlg.close(); } });
   setTimeout(() => name.select(), 0);
 }
@@ -1021,7 +1021,7 @@ function renamePrefab(app: App, n: number, st: Prefab): void {
     try { app.romEdit(`Prefab ${hex2(n)} renamed`, () => writePrefab(app.rom, n, { ...cur, name: name.value.trim() })); } catch (e) { toast(String(e instanceof Error ? e.message : e), 'error'); }
   };
   const dlg = modal(`Rename prefab ${hex2(n)}`, h('div', null, h('div', { class: 'prop' }, h('label', null, 'Name'), name)),
-    [{ label: 'Cancel' }, { label: 'OK', primary: true, onClick: save }]);
+    [{ label: 'Cancel' }, { label: 'Rename', primary: true, onClick: save }]);
   name.addEventListener('keydown', (e) => { if (e.key === 'Enter') { save(); dlg.close(); } });
   setTimeout(() => name.select(), 0);
 }

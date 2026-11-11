@@ -5,7 +5,7 @@
 // undo and redo it (ADR 0001).
 
 import type { App } from './app.ts';
-import { h, modal, clear, toast, choose, dialogUndoKeys } from './dom.ts';
+import { h, modal, clear, toast, choose } from './dom.ts';
 import { pickFile } from './platform.ts';
 import { hex } from '../core/names.ts';
 import { openLevelImportDialog } from './levelimport.ts';
@@ -34,11 +34,9 @@ export async function openResources(app: App, tab: ResourceTab = 'packages', opt
   const body = h('div', { class: 'resources' }, h('p', { class: 'hint' }, 'Loading Asar …'));
   // undo/redo while the dialog is the topmost one; the tabs show the ROM afterwards
   let afterUndo = () => {};
-  const offKeys = dialogUndoKeys(body, () => app.undo(), () => app.redo(), () => afterUndo());
   const dlg = modal('Packages', body, [{ label: 'Close', primary: true }], () => {
-    offKeys();
     if (musicPlayer.label?.startsWith('song:')) musicPlayer.stop();
-  });
+  }, undefined, { immediate: { after: () => afterUndo() } });
 
   try { await loadAsar(); } catch (e) {
     clear(body).appendChild(h('p', { class: 'hint error' }, `Asar could not be loaded: ${errorText(e)}`));
@@ -81,7 +79,7 @@ export async function openResources(app: App, tab: ResourceTab = 'packages', opt
     if (pv.status === 'level-import') {
       // not a package: imported into a level from the level editor
       const i = await choose(`Upload: ${pv.name}`, `“${pv.name}” is a Lunar Magic level file (.mwl): a level import, not a package. It changes a level, so it is imported in the level editor – Level → Import LM level file …`,
-        [{ label: 'OK' }, { label: `Import into level ${hex(app.level.number, 3)} …`, primary: true }]);
+        [{ label: 'Not now' }, { label: `Import into level ${hex(app.level.number, 3)} …`, primary: true }]);
       if (i === 1) { dlg.close(true); openLevelImportDialog(app, f.name, pv.files); }
       return;
     }

@@ -384,7 +384,10 @@ input.invalid, input.invalid:focus { outline: 1px solid var(--danger); border-co
 .modal { margin: auto; background: var(--surface); border: 1px solid var(--border); border-radius: 8px; min-width: 360px; max-width: 92vw; max-height: calc(100% - 16px); display: flex; flex-direction: column; box-shadow: 0 10px 40px rgba(0,0,0,.5); }
 .modal-title { display: flex; justify-content: space-between; align-items: center; padding: 10px 14px; font-weight: 600; border-bottom: 1px solid var(--border); }
 .modal-body { padding: 12px 14px; overflow: auto; }
-.modal-buttons { display: flex; justify-content: flex-end; gap: 8px; padding: 10px 14px; border-top: 1px solid var(--border); }
+.modal-buttons { display: flex; justify-content: flex-end; align-items: center; gap: 8px; padding: 10px 14px; border-top: 1px solid var(--border); }
+.modal-note { margin-right: auto; }
+.modal-changes { margin-left: 10px; font-size: 11px; font-weight: 600; padding: 1px 8px; border-radius: 10px; background: var(--info-bg); color: var(--info); }
+.modal-body .changed { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
 .icon-btn { border: none; background: none; font-size: 15px; }
 .header-dialog { max-width: 920px; }
 .header-dialog .grid2 { align-items: start; }

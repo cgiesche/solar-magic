@@ -38,7 +38,7 @@ export function openLevelImportDialog(app: App, fileName: string, files: Map<str
   if (!canBg && !plan.fg && !plan.layer3) {
     modal(`Import level file: ${name}`, h('p', null, plan.level.bg
       ? `“${name}” has a background (BG tilemap). But level ${lvl} has layer 2 objects instead of a BG background – open a level with a BG first.`
-      : `“${name}” has neither a BG background, FG Map16 tiles nor layer 3 graphics to take over.`), [{ label: 'OK', primary: true }]);
+      : `“${name}” has neither a BG background, FG Map16 tiles nor layer 3 graphics to take over.`), [{ label: 'Close', primary: true }]);
     return;
   }
   let at = plan.at, fgAt = plan.fgAt, useBg = canBg, useFg = !!plan.fg, use3 = !!plan.layer3;

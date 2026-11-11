@@ -270,22 +270,37 @@ export function dialogUndoKeys(body: HTMLElement, undo: () => void, redo: () => 
   return () => window.removeEventListener('keydown', keys);
 }
 
-// buttons: the elements of the given buttons, in order (e.g. to show one only at times)
-export function modal(title: string, body: HTMLElement, buttons: { label: string; primary?: boolean; danger?: boolean; onClick?: () => boolean | void }[], onClose?: () => void, beforeClose?: () => boolean): { close: (force?: boolean) => void; buttons: HTMLButtonElement[] } {
+// the editor's undo and redo for dialogs whose changes apply at once (main.ts sets them)
+let editorUndo: { undo: () => void; redo: () => void } | null = null;
+export function setDialogUndo(undo: () => void, redo: () => void): void { editorUndo = { undo, redo }; }
+
+// One dialog pattern (#481): a title naming the subject, ✕, the body, the buttons at the right with the primary (or
+// the dangerous) one last; Enter takes the primary one (not in a text area, nor on a button), Esc and ✕ are Cancel.
+// Two kinds besides plain messages:
+// - immediate: every change is a ROM edit at once – the footer says so, Ctrl+Z / Ctrl+Y undo and redo inside
+//   (after: what draws the dialog again afterwards), one button Close
+// - staged: changes wait for the primary button (Apply) – changed fields are marked and counted in the title
+// buttons: the elements of the given buttons, in the given order (e.g. to show one only at times)
+export type ModalOptions = { immediate?: boolean | { after?: () => void }; staged?: boolean };
+export function modal(title: string, body: HTMLElement, buttons: { label: string; primary?: boolean; danger?: boolean; onClick?: () => boolean | void }[], onClose?: () => void, beforeClose?: () => boolean, opts: ModalOptions = {}): { close: (force?: boolean) => void; buttons: HTMLButtonElement[] } {
   const back = h('div', { class: 'modal-back' });
   let closed = false;
+  const topmost = () => [...document.querySelectorAll('.modal-back')].pop() === back;
   // Esc closes the topmost dialog
   const esc = (e: KeyboardEvent) => {
-    if (e.key !== 'Escape' || [...document.querySelectorAll('.modal-back')].pop() !== back) return;
+    if (e.key !== 'Escape' || !topmost()) return;
     e.preventDefault();
     e.stopPropagation();
     close();
   };
+  const imm = opts.immediate ? (typeof opts.immediate === 'object' ? opts.immediate : {}) : null;
+  const offUndo = imm && editorUndo ? dialogUndoKeys(body, editorUndo.undo, editorUndo.redo, imm.after) : null;
   const close = (force = false) => {
     if (closed || (!force && beforeClose && !beforeClose())) return;
     closed = true;
     back.remove();
     window.removeEventListener('keydown', esc, true);
+    offUndo?.();
     onClose?.();
     modalsChanged(-1);
   };
@@ -294,16 +309,52 @@ export function modal(title: string, body: HTMLElement, buttons: { label: string
     class: b.danger ? 'danger' : b.primary ? 'primary' : '',
     onclick: () => { if (b.onClick?.() !== false) close(); },
   }, b.label));
-  const box = h('div', { class: 'modal' },
-    h('div', { class: 'modal-title' }, title, h('button', { class: 'icon-btn', onclick: () => close(), title: 'Close', 'aria-label': 'Close' }, icon('close'))),
+  // (shown with the primary or dangerous ones last: at the right, where the eye ends)
+  const order = els.map((e, i) => ({ e, last: !!(buttons[i].primary || buttons[i].danger), i }))
+    .sort((a, b) => Number(a.last) - Number(b.last) || a.i - b.i).map((x) => x.e);
+  const primary = els.find((_, i) => buttons[i].primary);
+  const count = h('span', { class: 'modal-changes', hidden: true });
+  const box = h('div', { class: 'modal', role: 'dialog', 'aria-label': title },
+    h('div', { class: 'modal-title' }, h('span', { class: 'modal-title-text' }, title, count), h('button', { class: 'icon-btn', onclick: () => close(), title: 'Close (Esc)', 'aria-label': 'Close' }, icon('close'))),
     h('div', { class: 'modal-body' }, body),
-    h('div', { class: 'modal-buttons' }, els),
+    h('div', { class: 'modal-buttons' }, imm ? h('span', { class: 'hint modal-note' }, 'Changes apply immediately · Ctrl+Z undoes') : null, order),
   );
+  box.addEventListener('keydown', (e) => {
+    if (e.key !== 'Enter' || e.defaultPrevented || e.ctrlKey || e.altKey || e.metaKey || e.shiftKey || !primary || primary.disabled) return;
+    const t = e.target as HTMLElement;
+    if (t instanceof HTMLTextAreaElement || t instanceof HTMLButtonElement || t instanceof HTMLSelectElement || t.isContentEditable || t.closest('a')) return;
+    e.preventDefault();
+    primary.click();
+  });
+  if (opts.staged) trackChanges(body, count);
   back.appendChild(box);
   back.addEventListener('mousedown', (e) => { if (e.target === back) close(); });
   document.body.appendChild(back);
   modalsChanged(1);
   return { close, buttons: els };
+}
+
+// a staged dialog's changed fields (#481): marked, and their number beside the title. A field's value when it is first
+// touched is its start (fields drawn anew start anew)
+function trackChanges(body: HTMLElement, count: HTMLElement): void {
+  const start = new WeakMap<Element, string>();
+  const valueOf = (el: Element) => el instanceof HTMLInputElement && (el.type === 'checkbox' || el.type === 'radio') ? String(el.checked) : (el as HTMLInputElement).value;
+  const isField = (el: EventTarget | null): el is HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement =>
+    el instanceof HTMLInputElement || el instanceof HTMLSelectElement || el instanceof HTMLTextAreaElement;
+  const remember = (el: Element) => { if (!start.has(el)) start.set(el, valueOf(el)); };
+  for (const el of body.querySelectorAll('input, select, textarea')) remember(el);
+  body.addEventListener('focusin', (e) => { if (isField(e.target)) remember(e.target); });
+  body.addEventListener('pointerdown', (e) => { if (isField(e.target)) remember(e.target); }, true);
+  const update = (e: Event) => {
+    if (!isField(e.target)) return;
+    const el = e.target;
+    if (start.has(el)) el.classList.toggle('changed', valueOf(el) !== start.get(el));
+    const n = body.querySelectorAll('.changed').length;
+    count.hidden = !n;
+    count.textContent = `${n} change${n === 1 ? '' : 's'}`;
+  };
+  body.addEventListener('input', update);
+  body.addEventListener('change', update);
 }
 
 // zoom levels of every view (1: one SNES pixel per screen pixel); a view uses a range of them

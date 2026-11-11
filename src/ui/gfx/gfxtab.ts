@@ -525,7 +525,7 @@ export class GfxTab implements WsPanel {
       : `ExGFX go in 80–${gfxHex(AS_IS_FIRST - 1)} (also 32–7F)`;
     const field = gfxNumberField(this.app.rom, n, { file: () => f, taken: () => new Set(), onChange: (v) => (n = v), author: want, by: 'file name' });
     modal(title, h('div', null, h('div', { class: 'prop' }, h('label', null, 'ExGFX number'), field), h('p', { class: 'hint' }, range)),
-      [{ label: 'Cancel' }, { label: 'OK', primary: true, onClick: () => { done(n); } }], () => done(null));
+      [{ label: 'Cancel' }, { label: 'Use this number', primary: true, onClick: () => { done(n); } }], () => done(null));
     return result;
   }
 
