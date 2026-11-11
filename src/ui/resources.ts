@@ -45,7 +45,7 @@ export async function openResources(app: App, tab: ResourceTab = 'packages', opt
     return;
   }
 
-  const tabBar = h('div', { class: 'tabs res-tabs' });
+  const tabBar = h('div', { class: 'tabbar res-tabs', role: 'tablist' });
   const content = h('div', { class: 'res-content' });
   const changed = () => { patches.reload(); opts.onChange?.(); };
   const renderTabs = () => clear(tabBar).append(...(Object.keys(TAB_LABEL) as ResourceTab[]).map((k) =>

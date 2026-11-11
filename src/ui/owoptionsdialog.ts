@@ -25,7 +25,7 @@ let shown: { show: (tab: OwOptionsTab, ctx: OwOptionsContext) => void } | null =
 // opens the dialog on tab (the one open: switched to it)
 export function openOwOptions(app: App, ctx: OwOptionsContext, tab: OwOptionsTab = 'options'): void {
   if (shown) { shown.show(tab, ctx); return; }
-  const tabBar = h('div', { class: 'tabs seg ow-options-tabs' });
+  const tabBar = h('div', { class: 'tabbar ow-options-tabs', role: 'tablist' });
   const content = h('div', { class: 'ow-options-content' });
   const body = h('div', { class: 'ow-options' }, tabBar, content);
   const draw = () => {

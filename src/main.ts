@@ -4,7 +4,7 @@ import { createBps, crc32 } from './core/bps.ts';
 import { prepareRom } from './core/editorpatches.ts';
 import { SMW_CLEAN_CRC } from './core/cleangame.ts';
 import { App, type EditMode } from './ui/app.ts';
-import { h, clear, toast, log, modal, choose, zoomControl, fieldTakesKey, installStepFields } from './ui/dom.ts';
+import { h, clear, toast, log, modal, choose, zoomControl, fieldTakesKey, installStepFields, keepAriaStates } from './ui/dom.ts';
 import { downloadBytes, pickFile, saveFile, filePath, fileName, desktop, guardClose } from './ui/platform.ts';
 import { LogBar } from './ui/logbar.ts';
 import { pasteHintBox } from './ui/pastehint.ts';
@@ -483,6 +483,7 @@ function buildUi(app: App): { start: (at: NavLoc | null) => Promise<void> } {
   });
 
   installStepFields();
+  keepAriaStates(document.body);
   window.onkeydown = (e: KeyboardEvent) => {
     if ((e.ctrlKey || e.metaKey) && (e.key.toLowerCase() === 'f' || e.code === 'Space') && !e.altKey && !document.querySelector('.modal-back')) { e.preventDefault(); search(); return; }
     if (fieldTakesKey(e)) return;

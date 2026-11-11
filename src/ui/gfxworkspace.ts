@@ -364,7 +364,7 @@ export class GfxWorkspace {
     this.bar = h('div', { class: 'ctxbar ws-tabs' },
       this.targetSel,
       this.specialLabel,
-      h('div', { class: 'btn-group' }, tabBtn('pal', 'Palettes', 'P'), tabBtn('map16', 'Map16 tiles', 'M'), tabBtn('gfx', 'Graphics', 'G'), tabBtn('anim', 'Animations', 'A')),
+      h('div', { class: 'tabbar', role: 'tablist' }, tabBtn('pal', 'Palettes', 'P'), tabBtn('map16', 'Map16 tiles', 'M'), tabBtn('gfx', 'Graphics', 'G'), tabBtn('anim', 'Animations', 'A')),
       h('span', { class: 'spacer' }),
       h('span', { class: 'hint', title: 'Exception: the palette choice in the header (Palettes tab, below) belongs to the level and is written with “Save level”.' }, 'Changes go straight into the ROM · Ctrl+Z / Ctrl+Y'),
       viewMenu(app, () => this.preview.update(), false));

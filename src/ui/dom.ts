@@ -472,3 +472,29 @@ export function putImage(canvas: HTMLCanvasElement, img: Uint32Array, W = 512, b
   for (let i = 0; i < px.length; i++) px[i] = img[i] || back;
   ctx.putImageData(id, 0, 0);
 }
+
+// the state of tabs and segmented controls for assistive technology (#480): a tab bar's buttons are tabs, the active
+// one selected; a segmented control's active button is pressed – kept from the class 'active' the views set
+const GROUP = '.tabbar, .seg, .btn-group, .tabs.seg';
+function ariaOf(b: Element): void {
+  const bar = b.parentElement;
+  if (!(b instanceof HTMLButtonElement) || !bar?.matches(GROUP)) return;
+  const on = b.classList.contains('active');
+  if (bar.classList.contains('tabbar')) {
+    if (b.getAttribute('role') !== 'tab') b.setAttribute('role', 'tab');
+    if (b.getAttribute('aria-selected') !== String(on)) b.setAttribute('aria-selected', String(on));
+  } else if (b.getAttribute('aria-pressed') !== String(on)) b.setAttribute('aria-pressed', String(on));
+}
+export function keepAriaStates(root: HTMLElement): void {
+  for (const b of root.querySelectorAll(`:is(${GROUP}) > button`)) ariaOf(b);
+  new MutationObserver((records) => {
+    for (const r of records) {
+      if (r.type === 'attributes') ariaOf(r.target as Element);
+      else for (const n of r.addedNodes) {
+        if (!(n instanceof HTMLElement)) continue;
+        ariaOf(n);
+        for (const b of n.querySelectorAll(`:is(${GROUP}) > button`)) ariaOf(b);
+      }
+    }
+  }).observe(root, { subtree: true, childList: true, attributes: true, attributeFilter: ['class'] });
+}

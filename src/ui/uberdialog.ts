@@ -98,7 +98,7 @@ export function uberPane(app: App, changed: () => void): UberPane {
     toZip: projectToZip,
     zipName: 'uberasm.zip',
     content: (proj, change, origin) => [
-      h('div', { class: 'tabs seg sub-tabs' }, (['level', 'overworld', 'gamemode'] as UberContext[]).map((c) =>
+      h('div', { class: 'tabbar sub-tabs', role: 'tablist' }, (['level', 'overworld', 'gamemode'] as UberContext[]).map((c) =>
         h('button', { class: c === ctx ? 'mode active' : 'mode', onclick: () => { ctx = c; pane.render(); } }, CTX_LABEL[c]))),
       assignments(proj, change, origin),
       other(proj, change),

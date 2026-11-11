@@ -169,7 +169,7 @@ export class MessagePanel {
     this.root.append(
       h('div', { class: 'panel-title' }, 'Message boxes', h('button', { class: 'msg-close', title: 'Close (Esc in the box) – back to the picker', 'aria-label': 'Close', onclick: () => app.closeMessages() }, icon('close'))),
       ...this.context(t),
-      h('div', { class: 'btn-group msg-tabs' }, tabs),
+      h('div', { class: 'tabbar msg-tabs', role: 'tablist' }, tabs),
       ...(routine.game === null ? [h('div', { class: 'hint warn-text' }, icon('warning'), `${messageRoutineUnknown(routine)}`)] : []),
       h('div', { class: 'msg-box' }, this.canvas, this.input, this.left),
       this.where,

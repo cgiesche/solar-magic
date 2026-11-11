@@ -134,7 +134,7 @@ export class OverworldView {
   private props = h('div', { class: 'panel props', hidden: true });
   // the side panel's tabs "Paint | Properties" (ADR 0015, owselection.ts): the tab chosen (a selection chooses Properties)
   private sideTab: SideTab = 'paint';
-  private tabBar = h('div', { class: 'tabs seg ow-side-tabs' });
+  private tabBar = h('div', { class: 'tabbar ow-side-tabs', role: 'tablist' });
   private evList = h('div', { class: 'level-list ow-event-list' }); // the event list (buildLeft)
   private unrunOpen = false; // the event list's "Run by no level exit" group open (for the session)
   private scrolledTo: number | null = null; // the edited event the list was last scrolled to
@@ -1363,11 +1363,11 @@ export class OverworldView {
       const p = steps[k];
       const el = h('div', { class: 'ow-step', draggable: true, title: `Step ${k + 1}: ${isBig(ev.data, p.at) ? '6×6' : '2×2'} tiles – drag to change the order`, ...hover('step', k),
         ondragstart: (de: DragEvent) => { dragged = k; de.dataTransfer?.setData('text/plain', String(k)); },
-        ondragover: (de: DragEvent) => { de.preventDefault(); el.classList.add('drop'); },
-        ondragleave: () => el.classList.remove('drop'),
+        ondragover: (de: DragEvent) => { de.preventDefault(); el.classList.add('drop-ok'); },
+        ondragleave: () => el.classList.remove('drop-ok'),
         ondrop: (de: DragEvent) => {
           de.preventDefault();
-          el.classList.remove('drop');
+          el.classList.remove('drop-ok');
           if (dragged < 0 || dragged === k) return;
           const order = steps.map((_, i) => i).filter((i) => i !== dragged);
           order.splice(order.indexOf(k) + (dragged < k ? 1 : 0), 0, dragged);
