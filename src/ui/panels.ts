@@ -37,6 +37,7 @@ import { blockFilesByTile } from './blockdialog.ts';
 import { contextMenu } from './menu.ts';
 import { collisionMarks, markCanvas, switchMarks, switchCanvas, MARK_TEXT, type CollisionMark } from './collisionmarks.ts';
 import { AntsOverlay } from './ants.ts';
+import { MARK } from './marks.ts';
 
 // behaviour of the given Map16 tiles when hit from below or entered (only tiles with an effect);
 // undefined while probes are still pending (asked for; without ask only those known: a picker tab's come with its prefetch)
@@ -350,7 +351,7 @@ export class Picker {
       // page plus the chosen rectangle of tiles (x, y, w, h in cells; running on the overlay)
       const draw = (x: number, y: number, w: number, hh: number) => {
         paint();
-        ants.set(x < 0 ? [] : [{ x, y, w, h: hh, color: '#4cc2ff' }]);
+        ants.set(x < 0 ? [] : [{ x, y, w, h: hh, color: MARK.select }]);
       };
       const sel = curTile - base;
       const shown = () => (sel >= 0 && sel < 256 ? draw(sel & 15, sel >> 4, bw, bh) : draw(-1, 0, 0, 0));
@@ -459,7 +460,7 @@ export class Picker {
     // (the chosen rectangle of tiles running on the overlay)
     const draw = (x: number, y: number, w: number, hh: number) => {
       paint();
-      ants.set(x < 0 ? [] : [{ x, y, w, h: hh, color: '#4cc2ff' }]);
+      ants.set(x < 0 ? [] : [{ x, y, w, h: hh, color: MARK.select }]);
     };
     animateSheet(app, sheet, true, this.bgBase, c, paint);
     if (onSheet) draw(t0 & 15, t0 >> 4, brush.w, brush.h); else draw(-1, 0, 0, 0);
@@ -931,7 +932,7 @@ export function openSavePrefab(app: App, sug?: { prefab: Prefab; places?: LevelP
     ...[...all].map(([n, st]) => h('option', { value: String(n) }, `Replace ${hex2(n)}: ${st.name || '(unnamed)'}`)));
   const replace = h('input', { type: 'checkbox', checked: true });
   const preview = prefabCanvas(prefabTileSource(app), { ...r, name: '' });
-  preview.style.cssText = `width:${Math.min(r.w * 32, 320)}px;image-rendering:pixelated;background:repeating-conic-gradient(#333 0 25%,#222 0 50%) 0 0/16px 16px`;
+  preview.style.cssText = `width:${Math.min(r.w * 32, 320)}px;image-rendering:pixelated;background:repeating-conic-gradient(var(--checker-a) 0 25%,var(--checker-b) 0 50%) 0 0/16px 16px`;
   const note = h('div', { class: 'hint' });
   // what the prefab costs and saves against the same tiles as Direct Map16 objects (prefabcost.ts); the name is part of it
   const cost = h('div', { class: 'hint' });

@@ -15,6 +15,7 @@ import type { Brush } from './app.ts';
 import { BorderView } from './owborder.ts';
 import { MAP_NAMES } from '../core/overworld.ts';
 import { BrushSurface, PAINT_HINT, PAINT_TITLE } from './brushsurface.ts';
+import { uiToken } from './marks.ts';
 
 // the title screen, or the border of an overworld map (0 the main map, 1–6 the submaps)
 export type GameTab = 'title' | 'border';
@@ -168,7 +169,7 @@ export class GameView {
 
   private paint(): void {
     const ctx = this.canvas.getContext('2d')!;
-    ctx.fillStyle = '#1b1d22';
+    ctx.fillStyle = uiToken('--canvas-bg', '#15171b');
     ctx.fillRect(0, 0, W, H);
     const p = this.pic, map = this.map;
     if (!p || !map) return;

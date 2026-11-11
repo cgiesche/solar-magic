@@ -1,5 +1,9 @@
 // The page's entry: the start page (static HTML in index.html) is painted first, the editor's code (main.ts) is
 // loaded after that – it is most of the download, and nothing on the start page needs it to be seen.
+// the UI's fonts, bundled (offline, the desktop app too; #473): Inter for text, JetBrains Mono for numbers and code
+import '@fontsource-variable/inter/wght.css';
+import '@fontsource/jetbrains-mono/400.css';
+import '@fontsource/jetbrains-mono/500.css';
 import './style.css';
 
 declare global { interface Window { landingShown?: Promise<boolean> } }

@@ -48,6 +48,7 @@ import { QuarterGrid, markRect, editMarked, setPalette, setBit, setTileNum, stam
 import { numberPref } from '../prefs.ts';
 import { AntsOverlay, type AntsMark } from '../ants.ts';
 import { PaletteHover, map16Preview, type Map16Preview } from '../palhover.ts';
+import { MARK, rgba, uiToken } from '../marks.ts';
 
 const Z = 2; // sheet zoom
 const M = 34; // sheet margin for the ranges and row numbers
@@ -506,7 +507,7 @@ export class Map16Tab implements WsPanel {
     this.dirty.delete(p);
     const c = this.pages[p], ctx = c.getContext('2d')!;
     const base = p * 256;
-    ctx.fillStyle = '#1b1d22';
+    ctx.fillStyle = uiToken('--canvas-bg', '#15171b');
     ctx.fillRect(0, 0, c.width, c.height);
     ctx.imageSmoothingEnabled = false;
     const t = this.t;
@@ -534,7 +535,7 @@ export class Map16Tab implements WsPanel {
     ctx.textAlign = 'left';
     if (this.sameActs && t.acts) {
       const a = actsLike(this.app.rom, this.sel);
-      ctx.fillStyle = 'rgba(255,176,0,0.35)';
+      ctx.fillStyle = rgba(MARK.warn, 0.35);
       for (let k = 0; k < 256; k++) if (actsLike(this.app.rom, base + k) === a) ctx.fillRect(M + (k & 15) * 16 * Z, (k >> 4) * 16 * Z, 16 * Z, 16 * Z);
     }
     const unused = this.markUnused && t.acts ? this.unusedTiles() : null;
@@ -552,8 +553,8 @@ export class Map16Tab implements WsPanel {
     const to = this.moving?.to ?? -1, toRow = (to >> 4) - p * 16;
     const box = (t: number, r: number, color: string): AntsMark => ({ x: M + (t & 15) * 16 * Z, y: r * 16 * Z, w: this.selW * 16 * Z, h: this.selH * 16 * Z, color });
     this.pageAnts[p].set([
-      ...(row < 16 && row + this.selH > 0 ? [box(this.sel, row, '#4cc2ff')] : []),
-      ...(to >= 0 && toRow < 16 && toRow + this.selH > 0 ? [box(to, toRow, '#ffb000')] : []),
+      ...(row < 16 && row + this.selH > 0 ? [box(this.sel, row, MARK.select)] : []),
+      ...(to >= 0 && toRow < 16 && toRow + this.selH > 0 ? [box(to, toRow, MARK.warn)] : []),
     ]);
   }
 
@@ -833,7 +834,7 @@ export class Map16Tab implements WsPanel {
     const anim = this.t.animated();
     if (anim?.tiles.size) {
       const a = Math.max(3, Math.min(16, sx / 3));
-      ctx.fillStyle = '#ff4fd8';
+      ctx.fillStyle = MARK.missing;
       for (let k = 0; k < g.cols * g.rows; k++) {
         const { x, y } = g.pos(k), { tile, q } = g.locate(k);
         if (!anim.tiles.has(words[tile][q] & 0x3ff)) continue;
@@ -843,10 +844,10 @@ export class Map16Tab implements WsPanel {
     }
     // marks: tinted (not while a palette is previewed on them), the outline of the marked area
     if (!view.preview) {
-      ctx.fillStyle = 'rgba(255,176,0,0.22)';
+      ctx.fillStyle = rgba(MARK.warn, 0.22);
       for (const k of marks) { const { x, y } = g.pos(k); ctx.fillRect(x * sx, y * sy, sx, sy); }
     }
-    ctx.strokeStyle = '#ffb000';
+    ctx.strokeStyle = MARK.warn;
     ctx.lineWidth = 2;
     ctx.beginPath();
     const on = (x: number, y: number) => x >= 0 && y >= 0 && x < g.cols && y < g.rows && marks.has(g.key(x, y));
@@ -863,7 +864,7 @@ export class Map16Tab implements WsPanel {
       // where a drop or a right click would put the 8x8 tiles
       const d = this.drag, p = this.pick;
       const bw = d ? Math.abs(d.a.x - d.b.x) + 1 : p?.w ?? 1, bh = d ? Math.abs(d.a.y - d.b.y) + 1 : p?.h ?? 1;
-      ctx.strokeStyle = d || p ? '#4cc2ff' : 'rgba(255,255,255,0.8)';
+      ctx.strokeStyle = d || p ? MARK.select : 'rgba(255,255,255,0.8)';
       ctx.lineWidth = 2;
       ctx.setLineDash(d || p ? [4, 3] : []);
       ctx.strokeRect(x * sx + 1, y * sy + 1, bw * sx - 2, bh * sy - 2);
@@ -1029,7 +1030,7 @@ export class Map16Tab implements WsPanel {
     const sheet = renderMap16Sheet(app, false, 0);
     const cur = actsLike(app.rom, tiles[0]);
     const ants = new AntsOverlay(c);
-    ants.set([{ x: (cur & 15) * 32, y: (cur >> 4) * 32, w: 32, h: 32, color: '#ffb000' }]);
+    ants.set([{ x: (cur & 15) * 32, y: (cur >> 4) * 32, w: 32, h: 32, color: MARK.warn }]);
     const scroll = h('div', { class: 'mt-acts-scroll' }, ants.root);
     const tip = `Click a tile or type its number, name or behavior: the ${tiles.length > 1 ? 'marked tiles then act' : 'tile then acts'} like this one.`;
     const info = h('div', { class: 'hint mt-acts-info' }, tip);
@@ -1287,7 +1288,7 @@ export class Map16Tab implements WsPanel {
       ctx.imageSmoothingEnabled = false;
       ctx.drawImage(off, 0, 0, c.width, c.height);
       if (mark) {
-        ctx.strokeStyle = '#ffb000'; ctx.lineWidth = 1;
+        ctx.strokeStyle = MARK.warn; ctx.lineWidth = 1;
         shown.forEach((x, i) => { if (x.changed) ctx.strokeRect((i % cols) * 16 * z + 0.5, Math.floor(i / cols) * 16 * z + 0.5, 16 * z - 1, 16 * z - 1); });
       }
       c.title = 'Marked: tiles that change';
@@ -1387,7 +1388,7 @@ export class Map16Tab implements WsPanel {
       const si = slots.findIndex((s) => n >= s.first && n < s.first + 0x80);
       if (si < 0) return;
       const k = n - slots[si].first;
-      ctx.strokeStyle = strong ? '#ffb000' : 'rgba(255,176,0,0.55)'; ctx.lineWidth = strong ? 2 : 1;
+      ctx.strokeStyle = strong ? MARK.warn : rgba(MARK.warn, 0.55); ctx.lineWidth = strong ? 2 : 1;
       ctx.strokeRect((k & 15) * 8 * this.gzPx + 1, (si * 64 + (k >> 4) * 8) * this.gzPx + 1, 8 * this.gzPx - 2, 8 * this.gzPx - 2);
     };
     const words = this.selWords(), g = this.grid();
@@ -1396,7 +1397,7 @@ export class Map16Tab implements WsPanel {
     // tiles the game animates: hatched corner
     const anim = this.t.animated();
     if (anim?.tiles.size) {
-      ctx.fillStyle = '#ff4fd8';
+      ctx.fillStyle = MARK.missing;
       slots.forEach((s, si) => {
         for (let k = 0; k < 128; k++) {
           if (!anim.tiles.has(s.first + k)) continue;
@@ -1412,8 +1413,8 @@ export class Map16Tab implements WsPanel {
     c.style.width = `${W * z}px`; c.style.height = `${Hh * z}px`;
     const box = (x: number, y: number, w: number, hh: number, color: string): AntsMark => ({ x: x * 8 * this.gzPx, y: y * 8 * this.gzPx, w: w * 8 * this.gzPx, h: hh * 8 * this.gzPx, color });
     this.gfxAnts.set([
-      ...(r ? [box(r.x, r.y, r.w, r.h, '#4cc2ff')] : []),
-      ...(from ? [box(from.x, from.y, from.w, from.h, '#4cc2ff')] : []),
+      ...(r ? [box(r.x, r.y, r.w, r.h, MARK.select)] : []),
+      ...(from ? [box(from.x, from.y, from.w, from.h, MARK.select)] : []),
       ...(from && to ? [box(to.x, to.y, from.w, from.h, REMAP_TO)] : []),
     ]);
     this.gfxLabels.replaceChildren(...slots.map((s) => h('div', { class: 'mt-slot', style: { height: `${64 * z}px` } },
@@ -1445,7 +1446,7 @@ export class Map16Tab implements WsPanel {
     const { remap } = this.remapping!.ed.parsed();
     const at = (t: number) => { const si = slots.findIndex((s) => t >= s.first && t < s.first + 0x80); return si < 0 ? null : { x: ((t - slots[si].first) & 15) * 8 * this.gzPx, y: (si * 8 + ((t - slots[si].first) >> 4)) * 8 * this.gzPx }; };
     const fill = (tiles: Iterable<number>, color: string) => { ctx.fillStyle = color; for (const t of tiles) { const p = at(t); if (p) ctx.fillRect(p.x, p.y, 8 * this.gzPx, 8 * this.gzPx); } };
-    fill(new Set([...remap.tiles.keys(), ...remap.tilePals.keys()]), 'rgba(255,176,0,0.35)');
+    fill(new Set([...remap.tiles.keys(), ...remap.tilePals.keys()]), rgba(MARK.warn, 0.35));
     fill(new Set(remap.tiles.values()), 'rgba(80,220,120,0.35)');
   }
 

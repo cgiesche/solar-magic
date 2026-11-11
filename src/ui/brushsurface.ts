@@ -9,8 +9,9 @@
 // workspace's title screen and overworld border).
 
 import type { CellRect } from './dom.ts';
+import { MARK, rgba } from './marks.ts';
 
-const HOVER_STROKE = 'rgba(255,255,0,0.9)', PICK_STROKE = '#4cc2ff', PICK_FILL = 'rgba(76,194,255,0.15)';
+const HOVER_STROKE = 'rgba(255,255,0,0.9)', PICK_STROKE = MARK.select, PICK_FILL = rgba(MARK.select, 0.15);
 // (a selection kept on the picture, as the overworld's layer 2 one "Replace piece…" works in: the pick's colour, dashed)
 export const PAINT_HINT = 'Click/drag picks up tiles · Right click/Shift+click paints';
 export const PAINT_TITLE = 'Right click/Shift+click paints';

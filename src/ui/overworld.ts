@@ -78,6 +78,7 @@ import { antsMenuItem, AntsOverlay, type AntsMark } from './ants.ts';
 import { animationMenuItem } from './viewmenu.ts';
 import { OwAnimPlayer } from './owanim.ts';
 import { animateTiles } from './pickeranim.ts';
+import { MARK, rgba, uiToken } from './marks.ts';
 
 // a w×h block of L1 tiles (16x16) or L2 tilemap entries (8x8), row-major; a L1 brush has no level tiles (NO_TILE
 // where one was picked: they are objects on layer 1, placed with a look from the picker's "Levels", ADR 0012)
@@ -493,7 +494,7 @@ export class OverworldView {
     // whole screen pixels per SNES pixel (half one zoomed out the most), on whole screen pixels
     const z = Math.round(this.zoom * dpr * 2) / 2;
     ctx.setTransform(1, 0, 0, 1, 0, 0);
-    ctx.fillStyle = '#1b1d22';
+    ctx.fillStyle = uiToken('--canvas-bg', '#15171b');
     ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
     ctx.imageSmoothingEnabled = false;
     const sx = Math.round(this.scroller.scrollLeft * dpr), sy = Math.round(this.scroller.scrollTop * dpr);
@@ -539,7 +540,7 @@ export class OverworldView {
       const i = l1Index(this.region, x, y), tl = this.tls[i];
       if (!this.isLevelTile(levels[i])) continue;
       tileLabel(ctx, tl ? hex(translevelToLevel(tl), 3) : '---', x * 16, y * 16 + 10,
-        i === this.selected ? 'rgba(76,194,255,0.85)' : shared.has(tl) || !tl ? 'rgba(230,120,0,0.85)' : undefined);
+        i === this.selected ? rgba(MARK.select, 0.85) : shared.has(tl) || !tl ? 'rgba(230,120,0,0.85)' : undefined);
     }
     ctx.globalAlpha = s1.marks;
     if (s1.marks) this.paintPaths(lw);
@@ -723,8 +724,8 @@ export class OverworldView {
     const m = this.movePreview;
     if (!m) return;
     ctx.lineWidth = 2 * lw;
-    ctx.strokeStyle = m.refused ? '#ff5050' : '#5cff7a';
-    ctx.fillStyle = m.refused ? 'rgba(255,80,80,0.25)' : 'rgba(92,255,122,0.25)';
+    ctx.strokeStyle = m.refused ? MARK.error : MARK.ok;
+    ctx.fillStyle = m.refused ? rgba(MARK.error, 0.25) : rgba(MARK.ok, 0.25);
     for (const i of m.cells) {
       if ((i >= 0x400) !== (this.region === 1)) continue;
       const { x, y } = l1XY(i);
@@ -737,7 +738,7 @@ export class OverworldView {
     const i = this.selected;
     if (i < 0 || (i >= 0x400) !== (this.region === 1)) return;
     const ctx = this.canvas.getContext('2d')!, { x, y } = l1XY(i), cx = x * 16 + 8, cy = y * 16 + 8;
-    ctx.strokeStyle = '#4cc2ff';
+    ctx.strokeStyle = MARK.select;
     ctx.lineWidth = 2 * lw;
     ctx.strokeRect(x * 16, y * 16, 16, 16);
     const tl = this.tls[i];
@@ -754,7 +755,7 @@ export class OverworldView {
       if (!exits.length) continue;
       const [dx, dy] = step[d], px = -dy, py = dx; // (px, py) across the arrow
       const x0 = cx + dx * 9, y0 = cy + dy * 9, x1 = cx + dx * 24, y1 = cy + dy * 24;
-      for (const [c, w] of [['rgba(0,0,0,0.7)', 4], ['#ffd34c', 2]] as [string, number][]) {
+      for (const [c, w] of [['rgba(0,0,0,0.7)', 4], [MARK.highlight, 2]] as [string, number][]) {
         ctx.strokeStyle = c;
         ctx.lineWidth = w * lw;
         ctx.beginPath();
@@ -765,7 +766,7 @@ export class OverworldView {
       const label = exits.join(''), tx = cx + dx * 17 + px * 6, ty = cy + dy * 17 + py * 6;
       ctx.fillStyle = 'rgba(0,0,0,0.7)';
       ctx.fillRect(tx - label.length * 2.2 - 1, ty - 4, label.length * 4.4 + 2, 8);
-      ctx.fillStyle = '#ffd34c';
+      ctx.fillStyle = MARK.highlight;
       ctx.fillText(label, tx, ty);
     }
     ctx.textAlign = 'start';
@@ -788,7 +789,7 @@ export class OverworldView {
   // the first), the teleports of its exits to the overworld as dashed arrows
   paintExitResults(ctx: CanvasRenderingContext2D, lw: number, i: number, tl: number): void {
     const { changes, teleports } = this.exitResults(tl), region = this.region;
-    const colors = ['#ffd34c', '#ff8c4c', '#ff6bd5', '#8cff6b'];
+    const colors = [MARK.highlight, '#ff8c4c', '#ff6bd5', '#8cff6b'];
     ctx.font = 'bold 7px monospace';
     for (const c of changes) {
       const color = colors[c.exit], name = c.exit ? String(c.exit) : 'N';
@@ -809,7 +810,7 @@ export class OverworldView {
     for (const t of teleports) {
       if ((t.to.submap ? 1 : 0) !== region) continue;
       const x0 = from.x * 16 + 8, y0 = from.y * 16 + 8, x1 = t.to.x * 16 + 8, y1 = t.to.y * 16 + 8;
-      for (const [c, w] of [['rgba(0,0,0,0.75)', 3.5], ['#4cc2ff', 1.5]] as [string, number][]) {
+      for (const [c, w] of [['rgba(0,0,0,0.75)', 3.5], [MARK.select, 1.5]] as [string, number][]) {
         ctx.strokeStyle = c;
         ctx.lineWidth = w * lw;
         ctx.setLineDash([8 * lw, 6 * lw]);
@@ -1503,8 +1504,8 @@ export class OverworldView {
     const ev = this.ev, s = this.hoverStep, at = this.eventPick?.at ?? -1;
     if (!ev || (!s && at < 0)) return;
     const ctx = this.canvas.getContext('2d')!;
-    ctx.strokeStyle = '#ffd34c';
-    ctx.fillStyle = 'rgba(255,211,76,0.25)';
+    ctx.strokeStyle = MARK.highlight;
+    ctx.fillStyle = rgba(MARK.highlight, 0.25);
     ctx.lineWidth = 1.5 * lw;
     // (the tile a reveal is being added to)
     if (at >= 0 && (at >= 0x400) === (this.region === 1)) { const p = l1XY(at); ctx.strokeRect(p.x * 16, p.y * 16, 16, 16); }
@@ -2047,8 +2048,8 @@ export class OverworldView {
   private paintClause(ctx: CanvasRenderingContext2D, lw: number): void {
     const c = this.hoverClause;
     if (!c) return;
-    ctx.strokeStyle = '#ffd34c';
-    ctx.fillStyle = 'rgba(255,211,76,0.35)';
+    ctx.strokeStyle = MARK.highlight;
+    ctx.fillStyle = rgba(MARK.highlight, 0.35);
     ctx.lineWidth = 1.5 * lw;
     for (const k of c.l1) {
       if ((k >= 0x400) !== (this.region === 1)) continue;
@@ -2630,10 +2631,10 @@ function listCells(list: readonly number[], w: number, size: number, drawn: (v: 
 // piece k's cell in the "Pieces on this map" sheet
 const pieceBox = (k: number) => ({ x: k % PIECE_COLS, y: Math.floor(k / PIECE_COLS), w: 1, h: 1 });
 // a sheet's brush or pick (cells of `cell` pixels) as a running outline on its overlay (ants.ts), in sheet pixels
-function cellMark(r: { x: number; y: number; w: number; h: number }, cell: number, color = '#4cc2ff'): AntsMark {
+function cellMark(r: { x: number; y: number; w: number; h: number }, cell: number, color = MARK.select): AntsMark {
   return { x: r.x * cell, y: r.y * cell, w: r.w * cell, h: r.h * cell, color };
 }
-const REPLACED_PIECE = '#ffb000'; // the piece "Replace piece…" replaces, in the pieces sheet
+const REPLACED_PIECE = MARK.warn; // the piece "Replace piece…" replaces, in the pieces sheet
 
 // a checkbox of the event list (its change calls `change`)
 function eventCheckbox(on: boolean, title: string, change: () => void): HTMLInputElement {

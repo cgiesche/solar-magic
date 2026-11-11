@@ -29,6 +29,7 @@ import { mainTranslevel } from '../core/level.ts';
 import { l1Hex } from '../core/owl1sheet.ts';
 import { cellText, crumbleState, setCrumbles, destroyTarget } from '../core/oweventtiles.ts';
 import { hex } from '../core/names.ts';
+import { MARK } from './marks.ts';
 
 // the level picker's note for a level no tile enters: what a tile choosing it gets (translevelUse)
 function freeNote(rom: Rom, tl: number): string {
@@ -308,7 +309,7 @@ export class LevelTileLayer {
       ctx.drawImage(l1, a.x * 16, a.y * 16, 16, 16, b.x * 16, b.y * 16, 16, 16);
       ctx.lineWidth = lw;
       ctx.setLineDash([3 * lw, 2 * lw]);
-      ctx.strokeStyle = '#4cc2ff';
+      ctx.strokeStyle = MARK.select;
       ctx.strokeRect(a.x * 16, a.y * 16, 16, 16);
       ctx.setLineDash([]);
       ctx.strokeStyle = 'rgba(255,255,0,0.9)';

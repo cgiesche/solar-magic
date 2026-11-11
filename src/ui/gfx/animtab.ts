@@ -45,6 +45,7 @@ const NOTHING_SHOWN: Shown = { vram: new Uint8Array(0x10000), cgram: new Uint8Ar
 import { triggerPanel, owTriggerPanel } from '../triggerpanel.ts';
 import { eventTriggerState } from '../../core/owanimview.ts';
 import { AntsOverlay, type AntsMark } from '../ants.ts';
+import { MARK } from '../marks.ts';
 
 const TILE_TYPES = [0x01, 0x02, 0x04, 0x08, 0x10, 0x11, 0x12, 0x03, 0x05, 0x06, 0x07, 0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e];
 const COLOR_TYPES = [0x14, 0x13, 0x15, 0x16, 0x17];
@@ -1097,7 +1098,7 @@ export class AnimTab implements WsPanel {
     const first = cur >> 5;
     // (the frame's source tiles, running; in tiles)
     const ants = new AntsOverlay(c, () => ({ w: 16, h: Math.ceil(tiles / 16) }));
-    ants.set(Array.from({ length: per }, (_, k) => ({ x: (first + k) & 15, y: (first + k) >> 4, w: 1, h: 1, color: '#ffb000' })));
+    ants.set(Array.from({ length: per }, (_, k) => ({ x: (first + k) & 15, y: (first + k) >> 4, w: 1, h: 1, color: MARK.warn })));
     c.addEventListener('mousedown', (e) => {
       const rc = c.getBoundingClientRect();
       const t = Math.floor((e.clientY - rc.top) / (rc.height / Math.ceil(tiles / 16))) * 16 + Math.floor((e.clientX - rc.left) / (rc.width / 16));
@@ -1143,7 +1144,7 @@ export class AnimTab implements WsPanel {
       const tiles: AntsMark[] = [];
       for (let y = 0; y < shape.h; y++) for (let x = 0; x < shape.w; x++) {
         const t = t0 + y * 16 + x;
-        if (t >= 0 && t < 128) tiles.push({ x: t & 15, y: t >> 4, w: 1, h: 1, color: '#ffb000' });
+        if (t >= 0 && t < 128) tiles.push({ x: t & 15, y: t >> 4, w: 1, h: 1, color: MARK.warn });
       }
       ants.set(tiles);
       c.addEventListener('mousedown', (e) => {

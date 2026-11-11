@@ -43,6 +43,7 @@ import type { GfxTarget } from './target.ts';
 import { slotRemapLine } from '../../core/remap.ts';
 import { AntsOverlay } from '../ants.ts';
 import { PaletteHover } from '../palhover.ts';
+import { MARK, rgba } from '../marks.ts';
 
 
 // a color as CGRAM's RGBA word gives it, for CSS
@@ -802,15 +803,15 @@ export class GfxTab implements WsPanel {
     ctx.drawImage(this.off, 0, 0, W * z, H * z);
     if (this.grid && z >= 8) pixelGrid(ctx, W, H, z);
     if (this.grid === 8) gridLines(ctx, W, H, z, 8, 0, 0, 'rgba(0,0,0,0.7)', 'rgba(255,255,255,0.55)');
-    if (this.grid) gridLines(ctx, W, H, z, 16, 0, 0, 'rgba(0,0,0,0.85)', 'rgba(76,194,255,0.9)');
+    if (this.grid) gridLines(ctx, W, H, z, 16, 0, 0, 'rgba(0,0,0,0.85)', rgba(MARK.select, 0.9));
     this.animCorners(ctx, z, { x: 0, y: 0, w: 16, h: H >> 3 });
     const a = this.area;
     if (this.focusTile >= 0 && this.focusTile < f.tiles && a.w * a.h > 1) {
-      ctx.strokeStyle = '#ffb000';
+      ctx.strokeStyle = MARK.warn;
       ctx.lineWidth = 2;
       ctx.strokeRect((this.focusTile & 15) * 8 * z + 1, (this.focusTile >> 4) * 8 * z + 1, 8 * z - 2, 8 * z - 2);
     }
-    this.ants.set([{ x: a.x * 8, y: a.y * 8, w: a.w * 8, h: a.h * 8, color: '#4cc2ff', out: true }]);
+    this.ants.set([{ x: a.x * 8, y: a.y * 8, w: a.w * 8, h: a.h * 8, color: MARK.select, out: true }]);
   }
 
   // the pixel editor: the area of the sheet, as large as its view allows
@@ -827,12 +828,12 @@ export class GfxTab implements WsPanel {
     ctx.drawImage(this.off, r.x, r.y, r.w, r.h, 0, 0, r.w * z, r.h * z);
     if (this.grid && z >= 6) pixelGrid(ctx, r.w, r.h, z);
     gridLines(ctx, r.w, r.h, z, 8, r.x, r.y, 'rgba(0,0,0,0.7)', 'rgba(255,255,255,0.55)');
-    if (this.grid === 16) gridLines(ctx, r.w, r.h, z, 16, r.x, r.y, 'rgba(0,0,0,0.85)', 'rgba(76,194,255,0.9)');
+    if (this.grid === 16) gridLines(ctx, r.w, r.h, z, 16, r.x, r.y, 'rgba(0,0,0,0.85)', rgba(MARK.select, 0.9));
     this.animCorners(ctx, z, this.area);
     const s = this.float ?? this.sel;
     if (s) {
       ctx.setLineDash([4, 3]);
-      ctx.strokeStyle = '#4cc2ff';
+      ctx.strokeStyle = MARK.select;
       ctx.lineWidth = 2;
       ctx.strokeRect((s.x - r.x) * z + 1, (s.y - r.y) * z + 1, s.w * z - 2, s.h * z - 2);
       ctx.setLineDash([]);
@@ -843,7 +844,7 @@ export class GfxTab implements WsPanel {
   private animCorners(ctx: CanvasRenderingContext2D, z: number, area: Rect): void {
     const anim = this.animatedTiles();
     if (!anim.size) return;
-    ctx.fillStyle = '#ff4fd8';
+    ctx.fillStyle = MARK.missing;
     const m = Math.max(5, z * 2);
     for (const t of anim) {
       const tx = (t & 15) - area.x, ty = (t >> 4) - area.y;

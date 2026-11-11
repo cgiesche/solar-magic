@@ -15,6 +15,7 @@ import { AnimTab } from './gfx/animtab.ts';
 import { MAP_NAMES, gameL2, owTileAt, drawOwMap, owShownAt, owMapAt, type OwRender } from '../core/overworld.ts';
 import { cgramToRGBA } from '../core/gfx.ts';
 import { sameProgress, type EventProgress } from '../core/eventset.ts';
+import { MARK, rgba } from './marks.ts';
 
 export type WsTab = 'pal' | 'map16' | 'gfx' | 'anim';
 
@@ -290,9 +291,9 @@ export class LevelPreview {
     ctx.clearRect(0, 0, this.over.width, this.over.height);
     const im = this.app.images;
     if (!im || this.ow || !this.highlight.size && !this.highlight2.size && !this.highlightBg.size) return;
-    ctx.strokeStyle = '#ffb000';
+    ctx.strokeStyle = MARK.warn;
     ctx.lineWidth = 1;
-    ctx.fillStyle = 'rgba(255,176,0,0.4)';
+    ctx.fillStyle = rgba(MARK.warn, 0.4);
     const mark = (x: number, y: number) => { ctx.fillRect(x * 16, y * 16, 16, 16); ctx.strokeRect(x * 16 + 0.5, y * 16 + 0.5, 15, 15); };
     const g = im.geom1;
     for (let y = 0; y < g.height; y++) for (let x = 0; x < g.width; x++) if (this.highlight.has(im.tiles1[y * g.width + x])) mark(x, y);
