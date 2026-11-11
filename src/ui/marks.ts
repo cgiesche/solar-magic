@@ -31,5 +31,16 @@ export function uiToken(name: string, fallback: string): string {
   return v;
 }
 
-/** The tokens' values changed (another theme): uiToken reads them anew. */
-export function tokensChanged(): void { tokens.clear(); }
+const listeners = new Set<() => void>();
+
+/** The tokens' values changed (another theme): uiToken reads them anew, the canvases that draw with them repaint. */
+export function tokensChanged(): void {
+  tokens.clear();
+  for (const fn of [...listeners]) fn();
+}
+
+/** fn: called when the tokens change (a canvas drawing with uiToken repaints). */
+export function onTokensChanged(fn: () => void): () => void {
+  listeners.add(fn);
+  return () => listeners.delete(fn);
+}

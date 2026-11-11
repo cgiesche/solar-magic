@@ -5,6 +5,9 @@ import '@fontsource-variable/inter/wght.css';
 import '@fontsource/jetbrains-mono/400.css';
 import '@fontsource/jetbrains-mono/500.css';
 import './style.css';
+import { initTheme } from './ui/theme.ts';
+
+initTheme(); // (the theme chosen, before the start page or the editor is shown; #474)
 
 declare global { interface Window { landingShown?: Promise<boolean> } }
 

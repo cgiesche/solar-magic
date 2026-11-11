@@ -35,6 +35,7 @@ import { NavHistory, fromHash, type NavLoc } from './ui/navhistory.ts';
 import { initLanding } from './ui/landing.ts';
 import { clearPrefs } from './ui/prefs.ts';
 import { icon, iconLabel } from './ui/icons.ts';
+import { THEMES, themePref } from './ui/theme.ts';
 
 const root = document.getElementById('app')!;
 
@@ -195,6 +196,10 @@ function buildUi(app: App): { start: (at: NavLoc | null) => Promise<void> } {
       { label: 'Levels as images …', title: 'Several levels (used, all or chosen) as PNGs in one .zip, drawn as Level as PNG; with a zoom and cropped to the screens each level uses', disabled: () => !inLevel(), onClick: () => openLevelImages(app, () => levels.shown, view.arcPin) },
       'sep',
       { label: 'Close project …', title: 'Remove the ROM and all editor data from the browser and return to the start page', onClick: () => closeProject(app) },
+    ] },
+    { label: 'View', items: [
+      { heading: 'Theme' },
+      ...THEMES.map((t) => ({ label: t.label, title: t.title, checked: () => themePref.get() === t.id, onToggle: () => { themePref.set(t.id); closeMenus(); } })),
     ] },
     { label: 'Level', disabled: () => !inLevel(), items: [
       { label: 'Save', shortcut: 'Ctrl+S', onClick: () => app.saveLevel() },

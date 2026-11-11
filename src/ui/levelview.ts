@@ -21,7 +21,7 @@ import { gameViewAt } from '../core/camerareach.ts';
 import { paintBoxName } from './objbox.ts';
 import { projectId } from '../core/projectid.ts';
 import { loadDeaths, killerText, levelVersion, type DeathMark } from './deathmarks.ts';
-import { MARK, rgba, uiToken } from './marks.ts';
+import { MARK, onTokensChanged, rgba, uiToken } from './marks.ts';
 
 type Drag =
   | { kind: 'move'; move: MoveDrag; startTx: number; startTy: number } // the selection (levelmodel.ts)
@@ -63,6 +63,7 @@ export class LevelView {
   arcPin: { tx: number; ty: number } | null = null; // jump arcs stay at this tile instead of following the mouse
 
   constructor(app: App, statusBar: HTMLDivElement) {
+    onTokensChanged(() => this.paint()); // (the backdrop is a UI token: another theme)
     this.app = app;
     this.pos = h('span', { class: 'status-pos' });
     this.status = h('span', { class: 'status-text' });

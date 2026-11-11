@@ -15,7 +15,7 @@ import type { Brush } from './app.ts';
 import { BorderView } from './owborder.ts';
 import { MAP_NAMES } from '../core/overworld.ts';
 import { BrushSurface, PAINT_HINT, PAINT_TITLE } from './brushsurface.ts';
-import { uiToken } from './marks.ts';
+import { onTokensChanged, uiToken } from './marks.ts';
 
 // the title screen, or the border of an overworld map (0 the main map, 1–6 the submaps)
 export type GameTab = 'title' | 'border';
@@ -49,6 +49,7 @@ export class GameView {
   private surface: BrushSurface;
 
   constructor(app: App) {
+    onTokensChanged(() => this.paint()); // (the backdrop is a UI token: another theme)
     this.app = app;
     this.border = new BorderView(app);
     this.border.setStatus = (t) => { this.status.textContent = t; };

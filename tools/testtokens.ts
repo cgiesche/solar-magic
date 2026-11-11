@@ -29,10 +29,19 @@ const missing = [...used].filter((v) => !defined.has(v));
 check(missing.length === 0, `every token used is defined (${missing.join(', ') || 'all'})`);
 
 // the stylesheet without its token blocks (:root, the start page's own) has no color literals but black ones
-const rules = css.replace(/:root\s*\{[^}]*\}/g, '');
+const rules = css.replace(/:root[^{]*\{[^}]*\}/g, '');
 const literals = [...rules.matchAll(/#[0-9a-fA-F]{3,8}\b|rgba?\([^)]*\)/g)].map((m) => m[0])
   .filter((c) => !/^rgba?\(\s*0\s*,\s*0\s*,\s*0\s*[,)]/.test(c) && !/^#000[0-9a-fA-F]?$/.test(c));
 check(literals.length === 0, `no color literals outside the tokens (${literals.join(', ') || 'none'})`);
+
+// the light theme (#474): the same values for System (the media query) and for View → Theme → Light, and only tokens
+// the dark theme has
+const blocks = [...css.matchAll(/:root(?::not\(\[data-theme="dark"\]\)|\[data-theme="light"\])\s*\{([^}]*)\}/g)].map((m) => m[1].replace(/\s+/g, ' ').trim());
+check(blocks.length === 2 && blocks[0] === blocks[1], 'the light theme: the media query\'s block = data-theme="light"\'s');
+const darkRoot = css.match(/:root\s*\{([^}]*)\}/)![1];
+const darkNames = new Set([...darkRoot.matchAll(/(--[a-z0-9-]+)\s*:/g)].map((m) => m[1]));
+const lightOnly = [...(blocks[0] ?? '').matchAll(/(--[a-z0-9-]+)\s*:/g)].map((m) => m[1]).filter((n) => !darkNames.has(n));
+check(lightOnly.length === 0, `the light theme sets only tokens the dark one has (${lightOnly.join(', ') || 'yes'})`);
 
 if (bad) { console.log(`${bad} FAILED`); process.exit(1); }
 console.log('all ok');

@@ -78,7 +78,7 @@ import { antsMenuItem, AntsOverlay, type AntsMark } from './ants.ts';
 import { animationMenuItem } from './viewmenu.ts';
 import { OwAnimPlayer } from './owanim.ts';
 import { animateTiles } from './pickeranim.ts';
-import { MARK, rgba, uiToken } from './marks.ts';
+import { MARK, onTokensChanged, rgba, uiToken } from './marks.ts';
 import { icon, iconLabel } from './icons.ts';
 
 // a w×h block of L1 tiles (16x16) or L2 tilemap entries (8x8), row-major; a L1 brush has no level tiles (NO_TILE
@@ -255,6 +255,7 @@ export class OverworldView {
   onTestPlay: () => void = () => {};
 
   constructor(app: App) {
+    onTokensChanged(() => this.paint()); // (the backdrop is a UI token: another theme)
     this.app = app;
     this.l1 = readL1(app.rom);
     this.l2 = readL2(app.rom);

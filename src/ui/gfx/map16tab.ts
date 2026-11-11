@@ -48,7 +48,7 @@ import { QuarterGrid, markRect, editMarked, setPalette, setBit, setTileNum, stam
 import { numberPref } from '../prefs.ts';
 import { AntsOverlay, type AntsMark } from '../ants.ts';
 import { PaletteHover, map16Preview, type Map16Preview } from '../palhover.ts';
-import { MARK, rgba, uiToken } from '../marks.ts';
+import { MARK, onTokensChanged, rgba, uiToken } from '../marks.ts';
 import { iconLabel, type IconName } from '../icons.ts';
 
 const Z = 2; // sheet zoom
@@ -166,6 +166,7 @@ export class Map16Tab implements WsPanel {
 
 
   constructor(app: App, ws: GfxWorkspace) {
+    onTokensChanged(() => this.drawSheet()); // (the backdrop is a UI token: another theme)
     this.app = app;
     this.ws = ws;
     this.root = h('div', { class: 'mt' }, this.bar,
