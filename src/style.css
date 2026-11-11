@@ -259,6 +259,18 @@ input.invalid, input.invalid:focus { outline: 1px solid var(--danger); border-co
 .left { border-right: 1px solid var(--border); }
 .right { border-left: 1px solid var(--border); }
 .center { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+/* the tool rail at the canvas's left edge (ui/rail.ts, #477) */
+.center.with-rail { flex-direction: row; }
+.center-main { flex: 1; display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+.rail { flex: none; width: 48px; display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 8px 0; background: var(--surface); border-right: 1px solid var(--border); overflow-y: auto; }
+.rail-btn { position: relative; width: 36px; height: 36px; padding: 0; display: grid; place-items: center; border: 0; border-radius: 8px; background: none; color: var(--text-muted); }
+.rail-btn .icon { width: 18px; height: 18px; }
+.rail-btn:hover:not(:disabled) { color: var(--text); background: var(--surface-2); }
+.rail-btn.active { background: var(--selection-bg); color: var(--accent); }
+.rail-key { position: absolute; right: 3px; bottom: 1px; font: 9px var(--font-mono); color: var(--text-muted); }
+.rail-sep { width: 24px; height: 1px; background: var(--border); margin: 4px 0; }
+.rail-btn.ow-l1 { box-shadow: inset -3px 0 0 var(--layer-1); }
+.rail-btn.ow-l2 { box-shadow: inset -3px 0 0 var(--layer-2); }
 .panel { display: flex; flex-direction: column; min-height: 0; padding: 6px; gap: 5px; }
 .panel-title { font-weight: 600; text-transform: uppercase; font-size: 11px; letter-spacing: .06em; color: var(--text-muted); display: flex; justify-content: space-between; align-items: baseline; gap: 6px; }
 .panel-title .hint { text-transform: none; letter-spacing: 0; font-weight: 400; }
@@ -743,6 +755,8 @@ body.mt-dragging .mt-big { outline: 2px dashed var(--accent); outline-offset: -2
 .gt-canvas { display: block; image-rendering: pixelated; cursor: cell; }
 .gt-pane { flex: 1; min-width: 220px; display: flex; flex-direction: column; gap: 4px; min-height: 0; }
 .gt-pane-head { flex-wrap: wrap; }
+.gt-pane-row { flex: 1; min-height: 0; display: flex; }
+.gt-pane-row .rail { border: 1px solid var(--border); border-right: 0; border-radius: 6px 0 0 6px; }
 .gt-pane-view { flex: 1; min-height: 0; overflow: hidden; display: flex; align-items: center; justify-content: center; border: 1px solid var(--border); background: var(--canvas-bg); }
 .gt-pane-canvas { display: block; image-rendering: pixelated; cursor: crosshair; }
 .gt-pane-canvas[data-tool="select"] { cursor: cell; }

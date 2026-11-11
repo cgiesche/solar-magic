@@ -36,6 +36,8 @@ import { initLanding } from './ui/landing.ts';
 import { clearPrefs } from './ui/prefs.ts';
 import { icon, iconLabel } from './ui/icons.ts';
 import { THEMES, themePref } from './ui/theme.ts';
+import type { IconName } from './ui/icons.ts';
+import { railButton, toolRail } from './ui/rail.ts';
 
 const root = document.getElementById('app')!;
 
@@ -156,17 +158,17 @@ function buildUi(app: App): { start: (at: NavLoc | null) => Promise<void> } {
   const romOnly = () => workspace === 'ow' || workspace === 'game';
 
   // ---- level context bar: mode, view, zoom
-  const modeBtn = (m: EditMode, label: string, key: string) => h('button', { class: 'mode', 'data-mode': m, title: `${label} (${key})`, onclick: () => app.setMode(m) }, label);
-  const modes = h('div', { class: 'btn-group' },
-    modeBtn('l1', 'Layer 1', '1'), modeBtn('l2', 'Layer 2', '2'), modeBtn('spr', 'Sprites', '3'), modeBtn('exit', 'Entrances/Exits', '4'), modeBtn('bg', 'BG', '5'), modeBtn('l3', 'Layer 3', '6'));
+  // the edit modes in the tool rail at the level's left edge (#477)
+  const modeBtn = (m: EditMode, label: string, key: string, ic: IconName) => railButton({ label, key, icon: ic, className: 'mode', data: { mode: m }, onClick: () => app.setMode(m) });
+  const modes = toolRail('Edit mode');
+  modes.append(modeBtn('l1', 'Layer 1', '1', 'layer-1'), modeBtn('l2', 'Layer 2', '2', 'layer-2'), modeBtn('spr', 'Sprites', '3', 'sprites'),
+    modeBtn('exit', 'Entrances/Exits', '4', 'exits'), modeBtn('bg', 'BG', '5', 'bg'), modeBtn('l3', 'Layer 3', '6', 'layer-3'));
   const levelTitle = h('span', { class: 'level-title' });
   const unsavedPill = h('span', { class: 'pill pill-info', title: 'The level\'s changes are written to the ROM with Save level (Ctrl+S)', hidden: true }, 'Unsaved changes');
   const zoomCtl = zoomControl(() => app.view.zoom, (z) => view.setZoom(z));
   const levelBar = h('div', { class: 'ctxbar' },
     levelTitle, unsavedPill,
     h('button', { onclick: () => openHeaderDialog(app), title: 'Level header (H)' }, 'Header …'),
-    h('span', { class: 'sep' }),
-    modes,
     h('span', { class: 'sep' }),
     viewMenu(app, () => view.paint()),
     h('span', { class: 'sep' }),
@@ -304,7 +306,7 @@ function buildUi(app: App): { start: (at: NavLoc | null) => Promise<void> } {
   app.on('zoom', updateToolbar);
 
   const left = h('div', { class: 'left' }, levels.root);
-  const center = h('div', { class: 'center' }, view.root, status);
+  const center = h('div', { class: 'center with-rail' }, modes, h('div', { class: 'center-main' }, view.root, status));
   const right = h('div', { class: 'right' }, picker.root, props.root);
   const logBar = new LogBar();
   const busy = busyIndicator(app);

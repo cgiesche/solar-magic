@@ -526,7 +526,7 @@ export function putImage(canvas: HTMLCanvasElement, img: Uint32Array, W = 512, b
 
 // the state of tabs and segmented controls for assistive technology (#480): a tab bar's buttons are tabs, the active
 // one selected; a segmented control's active button is pressed – kept from the class 'active' the views set
-const GROUP = '.tabbar, .seg, .btn-group, .tabs.seg';
+const GROUP = '.tabbar, .seg, .btn-group, .tabs.seg, .rail';
 function ariaOf(b: Element): void {
   const bar = b.parentElement;
   if (!(b instanceof HTMLButtonElement) || !bar?.matches(GROUP)) return;

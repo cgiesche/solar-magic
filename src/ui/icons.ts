@@ -5,6 +5,7 @@ import {
   createElement, ArrowLeft, ArrowRight, ArrowRightLeft, Check, ChevronDown, ChevronLeft, ChevronRight, CircleX, Copy,
   Eraser, FlipHorizontal2, FlipVertical2, Info, Music, PaintBucket, Pencil, Pipette, Play, Redo2, RotateCw, Save, Search,
   SlidersHorizontal, SquareDashed, Trash2, TriangleAlert, Undo2, X,
+  DoorOpen, Ghost, Grid2x2, Image, Layers, Mountain, Paintbrush, Route, Type,
 } from 'lucide';
 import { h } from './dom.ts';
 
@@ -15,6 +16,9 @@ const ICONS = {
   warning: TriangleAlert, error: CircleX, info: Info,
   select: SquareDashed, pen: Pencil, eraser: Eraser, fill: PaintBucket, eyedropper: Pipette,
   rotate: RotateCw, save: Save, search: Search, 'flip-h': FlipHorizontal2, 'flip-v': FlipVertical2,
+  // edit modes and tools of the rails (#477)
+  'layer-1': Grid2x2, 'layer-2': Layers, sprites: Ghost, exits: DoorOpen, bg: Image, 'layer-3': Type,
+  terrain: Mountain, brush: Paintbrush, route: Route,
 };
 export type IconName = keyof typeof ICONS;
 

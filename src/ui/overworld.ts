@@ -80,6 +80,7 @@ import { OwAnimPlayer } from './owanim.ts';
 import { animateTiles } from './pickeranim.ts';
 import { MARK, onTokensChanged, rgba, uiToken } from './marks.ts';
 import { icon, iconLabel } from './icons.ts';
+import { fillRail, toolRail } from './rail.ts';
 
 // a w×h block of L1 tiles (16x16) or L2 tilemap entries (8x8), row-major; a L1 brush has no level tiles (NO_TILE
 // where one was picked: they are objects on layer 1, placed with a look from the picker's "Levels", ADR 0012)
@@ -135,6 +136,7 @@ export class OverworldView {
   // the side panel's tabs "Paint | Properties" (ADR 0015, owselection.ts): the tab chosen (a selection chooses Properties)
   private sideTab: SideTab = 'paint';
   private tabBar = h('div', { class: 'tabbar ow-side-tabs', role: 'tablist' });
+  private rail = toolRail('Edit mode and tools');
   private evList = h('div', { class: 'level-list ow-event-list' }); // the event list (buildLeft)
   private unrunOpen = false; // the event list's "Run by no level exit" group open (for the session)
   private scrolledTo: number | null = null; // the edited event the list was last scrolled to
@@ -270,7 +272,7 @@ export class OverworldView {
     this.bar = h('div', { class: 'ctxbar' });
     this.left = h('div', { class: 'left' }, h('div', { class: 'panel levels ow-events' },
       h('div', { class: 'panel-title' }, 'Events'), this.evList));
-    this.root = h('div', { class: 'center' }, h('div', { class: 'level-view' }, this.scroller, this.eventsBadge), this.timeline, this.status);
+    this.root = h('div', { class: 'center with-rail' }, this.rail, h('div', { class: 'center-main' }, h('div', { class: 'level-view' }, this.scroller, this.eventsBadge), this.timeline, this.status));
     this.scroller.addEventListener('scroll', () => { this.cellHistory.close(); this.paint(); });
     // next frame: layout() resizes the canvas inside the observed scroller (no ResizeObserver loop error); the zoom
     // follows a screen of another scale (the browser's zoom changed: the scroller has other CSS pixels)
@@ -1174,7 +1176,7 @@ export class OverworldView {
     const exit = this.mode === 'l1' ? this.exits.status() : '';
     if (exit) { this.statusText.textContent = exit; return; }
     if (look >= 0 && !c) {
-      this.statusText.textContent = `Level tile ${l1Hex(look)}: Right click/Shift+click on a cell places a level there (Place level here…) · Click/drag picks up tiles (the tile brush again) · P: the route brush`;
+      this.statusText.textContent = `Level tile ${l1Hex(look)}: Right click/Shift+click on a cell places a level there (Place level here…) · Click/drag picks up tiles (the tile brush again) · R: the route brush`;
       return;
     }
     const linking = this.links.status();
@@ -1468,7 +1470,7 @@ export class OverworldView {
       const why = this.pickRefusals()?.[i - this.region * 0x400];
       if (why) { refusalToast(rom, why); return; }
       this.eventPick = { kind: 'reveal', at: i };
-      if (this.mode !== 'l1') this.bar.querySelector<HTMLButtonElement>('.btn-group button.ow-l1')?.click(); else this.buildSide();
+      if (this.mode !== 'l1') this.setMode('l1'); else this.buildSide();
       this.buildTimeline();
       this.updateStatus();
       this.paint();
@@ -1637,6 +1639,7 @@ export class OverworldView {
     if (this.mode !== 'l1' || (!this.pathTool.on && this.levelTiles.look < 0)) return;
     this.pathTool.on = false;
     this.levelTiles.look = -1;
+    this.buildRail();
     this.updateStatus();
   }
   // the layer 1 mode's route brush chosen, or the last tile brush again (P, the "Path (auto)" row)
@@ -1644,6 +1647,7 @@ export class OverworldView {
     this.pathTool.cancel();
     this.pathTool.on = on;
     this.levelTiles.look = -1;
+    this.buildRail();
     this.buildSide();
     this.updateStatus();
     this.paint();
@@ -1657,19 +1661,33 @@ export class OverworldView {
     this.updateStatus();
     this.paint();
   }
+  // the tool rail (#477): the three modes, then layer 1's brushes – tiles (B) and the route brush (R)
+  private buildRail(): void {
+    const l1 = this.mode === 'l1';
+    fillRail(this.rail, [
+      { label: 'Layer 1: paths, levels & links', key: '1', icon: 'layer-1', className: 'ow-l1', active: l1, data: { mode: 'l1' },
+        title: 'paths painted as tiles, the level tiles objects on top (hatched) – click selects one, drag moves it, right click: its menu, Delete removes it; placed with a look from "Levels" in the Paint tab; the overworld links\' tiles objects too (marked, right click: Link to…, Remove link), a star or pipe without a link selected by a click (Link to… in its properties) · the path tiles marked; layer 2 dimmed (View → Layers), hold Q to hide it',
+        onClick: () => this.setMode('l1') },
+      { label: 'Layer 2: terrain', key: '2', icon: 'terrain', className: 'ow-l2', active: this.mode === 'l2', data: { mode: 'l2' },
+        title: 'layer 1 with its path marks dimmed or hidden (View → Layers), hold Q for the other', onClick: () => this.setMode('l2') },
+      { label: 'Sprites', key: '3', icon: 'sprites', active: this.mode === 'sprites', data: { mode: 'sprites' },
+        title: 'the overworld\'s sprites as the game shows them at the event progress, the start positions and the Koopa Kids\' places; drag to move', onClick: () => this.setMode('sprites') },
+      'sep',
+      { label: 'Tile brush', key: 'B', icon: 'brush', active: l1 && !this.pathTool.on, disabled: !l1,
+        title: 'paint the picked tiles (click/drag picks them, right click paints)', onClick: () => this.setRouteBrush(false) },
+      { label: 'Route brush: Path (auto)', key: 'R', icon: 'route', active: this.routeBrush, disabled: !l1,
+        title: 'right click/Shift+drag draws Mario\'s route, the editor chooses the path tiles', onClick: () => this.setRouteBrush(true) },
+    ]);
+  }
   buildBar(): void {
     const view = (label: string, get: () => boolean, set: (v: boolean) => void, title?: string, shortcut?: string) =>
       ({ label, title, shortcut, checked: get, onToggle: (v: boolean) => { set(v); this.redrawMap(); this.updateStatus(); } });
     this.zoomCtl.update();
     this.showEventBadge();
+    this.buildRail();
     this.bar.replaceChildren(
       h('label', { class: 'row' }, 'Map ', select(MAP_NAMES.map((n, i) => [i, n] as [number, string]), this.map, (v) => this.setMap(v))),
       this.mapPop.root,
-      h('span', { class: 'sep' }),
-      h('div', { class: 'btn-group' },
-        h('button', { class: `ow-l1${this.mode === 'l1' ? ' active' : ''}`, title: 'Layer 1 (1): paths painted as tiles, the level tiles objects on top (hatched) – click selects one, drag moves it, right click: its menu, Delete removes it; placed with a look from "Levels" in the Paint tab; the overworld links\' tiles objects too (marked, right click: Link to…, Remove link), a star or pipe without a link selected by a click (Link to… in its properties) · the path tiles marked; layer 2 dimmed (View → Layers), hold Q to hide it', onclick: () => this.setMode('l1') }, 'Layer 1 (paths, levels & links)'),
-        h('button', { class: `ow-l2${this.mode === 'l2' ? ' active' : ''}`, title: 'Layer 2 (2) · layer 1 with its path marks dimmed or hidden (View → Layers), hold Q for the other', onclick: () => this.setMode('l2') }, 'Layer 2 (terrain)'),
-        h('button', { class: this.mode === 'sprites' ? 'active' : '', title: 'Sprites (3): the overworld\'s sprites as the game shows them at the event progress, the start positions and the Koopa Kids\' places; drag to move', onclick: () => this.setMode('sprites') }, 'Sprites')),
       h('span', { class: 'sep' }),
       menuButton({ label: 'View', items: [
         { heading: 'Layers' },
@@ -1731,14 +1749,15 @@ export class OverworldView {
     // (Esc layered: a selection ended first – Paint shown again –, then the event)
     if (k === 'escape' && this.mode !== 'sprites' && this.selected >= 0) { this.selectTile(-1, false); return true; }
     if (k === 'escape' && this.event >= 0) { this.setEvent(-1); return true; }
-    if (k === 'p' && this.mode === 'l1') { this.setRouteBrush(!this.pathTool.on); return true; }
+    if (k === 'r' && this.mode === 'l1') { this.setRouteBrush(true); return true; }
+    if (k === 'b' && this.mode === 'l1') { this.setRouteBrush(false); return true; }
     if (k === 'g') { this.showGrid = !this.showGrid; this.paint(); return true; }
     if (k === 'q' && isLayerMode(this.mode)) { this.setSolo(true); return true; }
     if (k === 'm' && this.selected >= 0 && isLayerMode(this.mode)) { this.editTile(this.selected); return true; }
     if (k === ',' || k === '.') { this.setEvent(stepInList(this.listOrder(), this.event, k === ',' ? -1 : 1)); return true; }
     // (Space on a focused button is the button's)
     if (k === ' ' && this.event >= 0 && !(document.activeElement instanceof HTMLButtonElement)) { this.toggleChecked(this.event); return true; }
-    if (k >= '1' && k <= '3') { (this.bar.querySelectorAll('.btn-group button')[+k - 1] as HTMLButtonElement).click(); return true; }
+    if (k >= '1' && k <= '3') { this.rail.querySelectorAll<HTMLButtonElement>('button[data-mode]')[+k - 1]?.click(); return true; }
     if ((k === 'delete' || k === 'backspace') && this.mode === 'sprites') return this.sprites.remove();
     if ((k === 'delete' || k === 'backspace') && this.mode === 'l1') return this.levelTiles.remove() || this.links.remove();
     return false;
@@ -2361,7 +2380,7 @@ export class OverworldView {
       kinds && p0.firstFree < 0 && p1.firstFree < 0 ? h('div', { class: 'row' }, h('button', { title: 'No layer 1 tile is free for a new look: says why, with a way out where there is one', onclick: () => this.newTile() }, 'New tile…')) : null,
       // the route brush (owpathtool.ts): a row of its own above the sheet, framed while it is the brush
       h('button', { class: `ow-route-brush${route ? ' active' : ''}`, onclick: () => this.setRouteBrush(true),
-        title: 'Path (auto) (P): Click/drag picks up tiles (the tile brush again) · Right click/Shift+drag draws Mario\'s route – the editor chooses the path tiles (a cell none fits in red, why in the status bar); released, they go into the map shown ("Map after": the event\'s layer 1 changes), and a level tile at an end gets the direction of its exit running the event · P: the last tile brush again' },
+        title: 'Path (auto) (R): Click/drag picks up tiles (the tile brush again) · Right click/Shift+drag draws Mario\'s route – the editor chooses the path tiles (a cell none fits in red, why in the status bar); released, they go into the map shown ("Map after": the event\'s layer 1 changes), and a level tile at an end gets the direction of its exit running the event · B: the tile brush again' },
         'Path (auto)', h('span', { class: 'hint' }, 'Right click/Shift+drag draws the route · P')),
       this.levelsSection(),
       ...page(p0),
