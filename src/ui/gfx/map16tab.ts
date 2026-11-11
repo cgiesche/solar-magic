@@ -365,6 +365,15 @@ export class Map16Tab implements WsPanel {
     if (!m.size) { toast('Mark quarters first (click, drag or Ctrl+A in the builder)'); return; }
     this.writeTiles(editMarked(this.grid(), this.selWords(), m, fn), what);
   }
+  // Del: the marked quarters empty – an 8x8 tile transparent in the graphics shown: the level's blank tile's (what
+  // an empty place in a level is drawn with), else the first one there is; acts-like stays
+  private clearMarked(): void {
+    const tc = this.tc(), clear = (w: number) => tc.get(w).every((p) => p === 0);
+    const blank = this.t.where === 'level' ? blankTile(this.app.rom, this.app.render) : [];
+    const word = blank.find(clear) ?? Array.from({ length: 0x400 }, (_, i) => i).find(clear);
+    if (word === undefined) { toast('The graphics have no empty 8x8 tile to clear with', 'error'); return; }
+    this.editQuarters(() => word, 'Clear');
+  }
   // priority toggles: on for every marked quarter, off once all have it
   private togglePrio(): void {
     const state = summary(this.grid(), this.selWords(), this.marked()).prio;
@@ -1649,6 +1658,7 @@ export class Map16Tab implements WsPanel {
     if (k === 'Escape' && this.remapping) { if (this.visualFrom) { this.visualFrom = null; this.drawGfx(); } else this.closeRemap(); return true; }
     if (k === 'Escape') { if (!this.marked().size) return false; this.setMarks(new Set()); return true; }
     if (k === 'Enter' && !this.remapping) { this.fillMarked(); return true; }
+    if ((k === 'Delete' || k === 'Backspace') && !this.remapping && !this.moving) { this.clearMarked(); return true; }
     if (k === 'F2' && !this.remapping && !this.moving && this.t.names) { this.nameInput.focus(); this.nameInput.select(); return true; }
     // flips (#482): Shift+H / Shift+V, as in the pixel editor
     if ((k === 'h' || k === 'H') && e.shiftKey) { this.flip(FLIP_X, 'Flip horizontally'); return true; }

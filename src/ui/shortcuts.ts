@@ -71,9 +71,11 @@ export const SHORTCUTS: Shortcut[] = [
   { scope: 'Graphics', keys: 'Ctrl+C / Ctrl+V', what: 'Copy / paste a palette row, Map16 tiles or pixels' },
   { scope: 'Graphics', keys: 'Palettes: arrow keys · Shift+click', what: 'Another color · mark a range (for “Gradient”)' },
   { scope: 'Map16 tiles', keys: 'Shift+H / Shift+V · 1–8 · Q', what: 'Flip the marked quarters · their palette · next quarter' },
+  { scope: 'Map16 tiles', keys: 'Del', what: 'Clear the marked quarters (an empty 8x8 tile; acts-like stays)' },
   { scope: 'Map16 tiles', keys: 'Double click', what: 'Edit the quarter in Graphics' },
   { scope: 'Pixel editor', keys: 'S / B / E / F / I', what: 'Select / pen / eraser / fill / eyedropper (the tool rail)' },
   { scope: 'Pixel editor', keys: 'Shift+H / Shift+V / Shift+R', what: 'Flip horizontally / vertically / rotate' },
+  { scope: 'Pixel editor', keys: 'Del', what: 'Make the selection (else these tiles) transparent' },
   { scope: 'Pixel editor', keys: '0–9 · X', what: 'Left color · swap the left and right color' },
   { scope: 'Pixel editor', keys: 'Enter / Esc', what: 'Put the floating selection down / cancel it' },
   // test play

@@ -598,7 +598,8 @@ export class GfxTab implements WsPanel {
         h('button', { onclick: () => this.transform('v'), title: 'Flip vertically', 'aria-label': 'Flip vertically' }, icon('flip-v')),
         h('button', { onclick: () => this.transform('r'), title: 'Rotate by 90° (square selection only)', 'aria-label': 'Rotate' }, icon('rotate'))),
       h('button', { onclick: () => this.copySel(), title: 'Copy the selection, else these tiles (Ctrl+C)' }, 'Copy'),
-      h('button', { onclick: () => this.pasteSel(), title: 'Paste at the selection, movable afterwards (Ctrl+V)' }, 'Paste'));
+      h('button', { onclick: () => this.pasteSel(), title: 'Paste at the selection, movable afterwards (Ctrl+V)' }, 'Paste'),
+      h('button', { onclick: () => this.clearSel(), title: 'Make the selection, else these tiles transparent (Del)' }, 'Clear'));
     fillRail(this.paneRail, [
       tool('select', 'Select', 'S', 'Select pixels; dragging inside moves them, Enter puts them down, Esc cancels'),
       tool('pen', 'Pen', 'B', 'Draw: left button with the left color, right button with the right color; Shift+click: line from the last point'),
@@ -1199,6 +1200,20 @@ export class GfxTab implements WsPanel {
     this.clip = { w: r.w, h: r.h, pix };
     toast(`${r.w}×${r.h} pixels copied`);
   }
+  // Del: the selection (else the pixel editor's tiles) transparent; a pasted floating block is dropped (nothing
+  // written), a lifted one leaves where it came from cleared
+  private clearSel(): void {
+    const fl = this.float;
+    if (fl?.label === 'Pasted') { this.cancelFloat(); return; }
+    if (!this.canWrite()) return;
+    if (fl) { this.float = null; this.sel = null; }
+    else {
+      const r = this.sel ?? this.paneRect();
+      for (let y = 0; y < r.h; y++) for (let x = 0; x < r.w; x++) this.set(r.x + x, r.y + y, 0);
+    }
+    this.commit('Erase');
+    this.draw();
+  }
   // pastes as a floating block in the pixel editor (grown to hold it), at the selection or its top left
   private pasteSel(): void {
     const c = this.clip;
@@ -1413,6 +1428,7 @@ export class GfxTab implements WsPanel {
     if (ctrl && k === 'c') { this.copySel(); return true; }
     if (ctrl && k === 'v') { this.pasteSel(); return true; }
     if (ctrl || e.altKey) return false;
+    if (e.key === 'Delete' || e.key === 'Backspace') { this.clearSel(); return true; }
     if (k === 'b') { this.setTool('pen'); return true; }
     if (k === 'e') { this.setTool('erase'); return true; }
     if (k === 'f') { this.setTool('fill'); return true; }
