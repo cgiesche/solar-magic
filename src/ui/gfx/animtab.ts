@@ -88,7 +88,7 @@ export function colorAnimsAt(app: App, color: number): { global: boolean; slot: 
 }
 // links to own animations, for the warnings of the other tabs
 export function animLinks(ws: GfxWorkspace, own: { global: boolean; slot: number }[]): HTMLElement[] {
-  return own.map((a, i) => h('span', null, i ? ', ' : '', h('a', { href: '#', title: 'Open in the Animations tab (Ctrl+click on the tile or color does the same)', onclick: (e: Event) => { e.preventDefault(); ws.showAnim(a.global, a.slot); } }, `Animation ${hex(a.slot, 2)} (${a.global ? 'global' : 'level'})`)));
+  return own.map((a, i) => h('span', null, i ? ', ' : '', h('a', { href: '#', title: 'Open in the Animations tab (F12 on the tile or color does the same)', onclick: (e: Event) => { e.preventDefault(); ws.showAnim(a.global, a.slot); } }, `Animation ${hex(a.slot, 2)} (${a.global ? 'global' : 'level'})`)));
 }
 
 // a slot's frames at the trigger's limit (extrigger.ts maxFrames), said so

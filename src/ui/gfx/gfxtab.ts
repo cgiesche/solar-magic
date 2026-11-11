@@ -10,7 +10,7 @@ import type { App } from '../app.ts';
 import type { Watch } from '../../core/romwatch.ts';
 import type { GfxWorkspace, WsPanel } from '../gfxworkspace.ts';
 import { contextMenu, menuButton, type MenuItem } from '../menu.ts';
-import { h, clear, toast, modal, choose, attachPanZoom, zoomControl, zoomStep, showColorLoupe, hideColorLoupe } from '../dom.ts';
+import { h, clear, toast, modal, choose, attachPanZoom, zoomControl, zoomStep, showColorLoupe, hideColorLoupe, isGoto } from '../dom.ts';
 import { downloadBytes, pickFile, pickFiles } from '../platform.ts';
 
 const ZOOM_MIN = 1, ZOOM_MAX = 32; // of the shared zoom levels (dom.ts)
@@ -910,7 +910,7 @@ export class GfxTab implements WsPanel {
     }
     return out;
   }
-  // Ctrl+click: the own animation that overwrites the tile, in the Animations tab
+  // F12 (go to definition): the own animation that overwrites the tile, in the Animations tab
   private gotoAnim(t: number): void {
     const slot = this.gfxSlots().find((s) => s.file === this.cur && s.map16);
     const own = slot ? animsAt(this.app, slot.first + t) : [];
@@ -973,7 +973,7 @@ export class GfxTab implements WsPanel {
 
   // The sheet follows the rules of the other editors: click/drag picks 8x8 tiles (shown in the pixel
   // editor), right click/Shift+click pastes them at the mouse, dragging pastes on (one undo step),
-  // Ctrl+click opens a tile's animation. A plain click never changes the file.
+  // F12 opens a tile's animation. A plain click never changes the file.
   private attachSheet(): void {
     const c = this.canvas;
     c.addEventListener('contextmenu', (e) => e.preventDefault());
@@ -988,7 +988,7 @@ export class GfxTab implements WsPanel {
       if (!this.file || (e.button !== 0 && e.button !== 2)) return;
       e.preventDefault();
       const a = tileAt(e);
-      if (e.button === 0 && (e.ctrlKey || e.metaKey)) { this.gotoAnim(a.y * 16 + a.x); return; }
+      if (e.button === 0 && isGoto(e)) { this.gotoAnim(a.y * 16 + a.x); return; }
       if (e.button === 2 || e.shiftKey) { this.stamp(a, tileAt); return; }
       this.dropFloat();
       this.sel = null;
@@ -1022,7 +1022,7 @@ export class GfxTab implements WsPanel {
 
   private tileTitle(t: number): string {
     const spr = t < 0x80 ? this.gfxSlots().filter((s) => s.sprite && s.file === this.cur).map((s) => ` · sprite tile ${spriteTile(s.first, t)}`).join('') : '';
-    return `Tile ${hex(t, 2)}${spr}${this.animatedTiles().has(t) ? ' (animated – Ctrl+click: open its animation)' : ''}`;
+    return `Tile ${hex(t, 2)}${spr}${this.animatedTiles().has(t) ? ' (animated – F12: open its animation)' : ''}`;
   }
 
   // right drag on the sheet: pastes the pixel editor's tiles with their top left at each tile under the mouse
@@ -1067,7 +1067,7 @@ export class GfxTab implements WsPanel {
       if (!this.file || (e.button !== 0 && e.button !== 2)) return;
       e.preventDefault();
       const p = pos(e);
-      if (e.button === 0 && (e.ctrlKey || e.metaKey)) { this.gotoAnim((p.y >> 3) * 16 + (p.x >> 3)); return; }
+      if (e.button === 0 && isGoto(e)) { this.gotoAnim((p.y >> 3) * 16 + (p.x >> 3)); return; }
       const tool: Tool = e.altKey ? 'pick' : this.tool;
       const right = e.button === 2;
       if (tool === 'pick') {
@@ -1415,7 +1415,9 @@ export class GfxTab implements WsPanel {
     if (k === 'f') { this.setTool('fill'); return true; }
     if (k === 'i') { this.setTool('pick'); return true; }
     if (k === 's') { this.setTool('select'); return true; }
-    if (k === 'x') { [this.fg, this.bg] = [this.bg, this.fg]; this.buildSide(); return true; }
+    if (k === 'x' && !e.shiftKey) { [this.fg, this.bg] = [this.bg, this.fg]; this.buildSide(); return true; }
+    // flips and rotation (#482): Shift+H / Shift+V / Shift+R, as in the Map16 builder
+    if (e.shiftKey && (k === 'h' || k === 'v' || k === 'r')) { this.transform(k); return true; }
     // Esc cancels a floating selection (nothing written), else deselects; Enter puts it down
     if (e.key === 'Escape' && this.float) { this.cancelFloat(); return true; }
     if (e.key === 'Escape' && this.sel) { this.sel = null; this.present(); return true; }

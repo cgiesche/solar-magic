@@ -323,7 +323,7 @@ export class Picker {
       const p = behavior(hoverTile), name = nameOf(app.rom, 'fg', hoverTile);
       const c = app.probes.collision(hoverTile), o = c && switchedText(c);
       const marks = (c ? collisionMarks([c]).map((m) => ` · ${MARK_TEXT[m]}`).join('') : '') + (o ? ` · ${o}` : '');
-      if (hoverCanvas) hoverCanvas.title = `Tile ${hex3(hoverTile)}${name ? ` “${name}”` : ''}: ${p ? probeText(p) + marks : 'determining behavior …'}\nCtrl+click: edit in the Map16 tab`;
+      if (hoverCanvas) hoverCanvas.title = `Tile ${hex3(hoverTile)}${name ? ` “${name}”` : ''}: ${p ? probeText(p) + marks : 'determining behavior …'}\nF12: edit in the Map16 tab`;
     };
     this.m16Tip = () => { if (hoverTile >= 0 && hoverCanvas?.isConnected) tip(); };
     // a page is drawn once it scrolls into view
@@ -367,7 +367,7 @@ export class Picker {
         const t = base + r.y * 16 + r.x;
         if (r.w * r.h > 1) return [`Block ${r.w}×${r.h} from tile ${hex3(t)}`];
         const pr = behavior(t), name = nameOf(app.rom, 'fg', t);
-        return [`Tile ${hex3(t)}${name ? ` “${name}”` : ''}`, pr ? probeText(pr) : 'determining behavior …', 'Ctrl+click: edit in the Map16 tab'];
+        return [`Tile ${hex3(t)}${name ? ` “${name}”` : ''}`, pr ? probeText(pr) : 'determining behavior …', 'F12: edit in the Map16 tab'];
       }, (r) => {
         const t = base + r.y * 16 + r.x, tiles = Array.from({ length: r.w * r.h }, (_, i) => t + Math.floor(i / r.w) * 16 + (i % r.w));
         tiles.forEach((u) => app.probes.collision(u)); // asked for; shown once known (the next move of the mouse)
@@ -452,7 +452,7 @@ export class Picker {
     const onSheet = t0 >= 0 && t0 < 0x200 && (t0 & 15) + brush.w <= 16 && (t0 >> 4) + brush.h <= 32
       && brush.tiles.every((t, i) => t === brush.tiles[0] + Math.floor(i / brush.w) * 16 + (i % brush.w));
     const k = this.builtPixels = this.sheetPixels(), scale = this.sheetShown();
-    const c = h('canvas', { width: 256 * k, height: 512 * k, class: 'm16-pick sheet-fill', title: 'Click/drag: tile(s) as brush · Ctrl+click: edit in the Map16 tab' });
+    const c = h('canvas', { width: 256 * k, height: 512 * k, class: 'm16-pick sheet-fill', title: 'Click/drag: tile(s) as brush · F12: edit in the Map16 tab' });
     const ctx = c.getContext('2d')!;
     ctx.imageSmoothingEnabled = false;
     const ants = new AntsOverlay(c, () => ({ w: 16, h: 32 }));
@@ -471,7 +471,7 @@ export class Picker {
     }, (x, y) => app.editTile(this.bgBase + y * 16 + x, 'bg'));
     previewSheet(c, () => sheet, 16, 32, 16, scale, (r) => {
       const t = this.bgBase + r.y * 16 + r.x, name = nameOf(app.rom, 'bg', t);
-      return r.w * r.h > 1 ? [`Block ${r.w}×${r.h} from BG tile ${hex3(t)}`] : [`BG tile ${hex3(t)}${name ? ` “${name}”` : ''}`, 'Ctrl+click: edit in the Map16 tab'];
+      return r.w * r.h > 1 ? [`Block ${r.w}×${r.h} from BG tile ${hex3(t)}`] : [`BG tile ${hex3(t)}${name ? ` “${name}”` : ''}`, 'F12: edit in the Map16 tab'];
     });
     const what = brush.tiles.length > 1 ? `Block ${brush.w}×${brush.h}${onSheet ? ` from BG tile ${hex3(brush.tiles[0])}` : ' from the level'}` : `BG tile ${hex3(brush.tiles[0])}`;
     const pages = h('select', null, Array.from({ length: EXT_TILES / 512 }, (_, i) => h('option', { value: String(i * 512), selected: i * 512 === this.bgBase },

@@ -437,7 +437,7 @@ export function attachPanZoom(scroller: HTMLElement, zoom: () => number, setZoom
 
 export type CellRect = { x: number; y: number; w: number; h: number };
 // palette sheets: a click picks a cell, dragging a rectangle of cells; show() previews the rectangle while dragging;
-// Ctrl+click goes to the cell's definition instead, if there is one (jump)
+// Go to definition (F12, isGoto) goes to the cell's definition instead, if there is one (jump)
 export function attachRectPick(c: HTMLElement, cols: number, rows: number, show: (r: CellRect) => void, done: (r: CellRect) => void, jump?: (x: number, y: number) => void): void {
   const cellAt = (e: MouseEvent) => {
     const rc = c.getBoundingClientRect();
@@ -450,7 +450,7 @@ export function attachRectPick(c: HTMLElement, cols: number, rows: number, show:
     if (e.button !== 0) return;
     e.preventDefault();
     const a = cellAt(e);
-    if (jump && (e.ctrlKey || e.metaKey)) { jump(a.x, a.y); return; }
+    if (jump && isGoto(e)) { jump(a.x, a.y); return; }
     let b = a;
     const rect = (): CellRect => ({ x: Math.min(a.x, b.x), y: Math.min(a.y, b.y), w: Math.abs(a.x - b.x) + 1, h: Math.abs(a.y - b.y) + 1 });
     const move = (ev: MouseEvent) => {
@@ -548,4 +548,20 @@ export function keepAriaStates(root: HTMLElement): void {
       }
     }
   }).observe(root, { subtree: true, childList: true, attributes: true, attributeFilter: ['class'] });
+}
+
+// Go to definition (#482): F12 over something with a definition – an animated tile or color, a Map16 tile, a palette
+// button – opens it. Sent as a click marked so (gotoAt) to the element under the mouse; its handler asks isGoto. (A
+// Ctrl+click is no longer one: Ctrl+click adds to the selection wherever there is one.)
+export function isGoto(e: MouseEvent): boolean { return (e as MouseEvent & { gotoDefinition?: boolean }).gotoDefinition === true; }
+export function gotoAt(x: number, y: number): boolean {
+  const el = document.elementFromPoint(x, y);
+  if (!el) return false;
+  for (const type of ['mousedown', 'mouseup', 'click']) {
+    // (ctrlKey too: handlers that leave a Ctrl+click alone leave it alone)
+    const ev = new MouseEvent(type, { bubbles: true, cancelable: true, clientX: x, clientY: y, button: 0, ctrlKey: true });
+    Object.defineProperty(ev, 'gotoDefinition', { value: true });
+    el.dispatchEvent(ev);
+  }
+  return true;
 }

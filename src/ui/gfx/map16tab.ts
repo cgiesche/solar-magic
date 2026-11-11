@@ -15,7 +15,7 @@ import type { App } from '../app.ts';
 import type { Watch } from '../../core/romwatch.ts';
 import type { GfxWorkspace, WsPanel } from '../gfxworkspace.ts';
 import { menuButton } from '../menu.ts';
-import { h, clear, toast, modal, choose, attachPanZoom } from '../dom.ts';
+import { h, clear, toast, modal, choose, attachPanZoom, isGoto } from '../dom.ts';
 import { pickFile, downloadBytes } from '../platform.ts';
 import { TileCache } from '../../core/render.ts';
 import { hex } from '../../core/names.ts';
@@ -715,9 +715,9 @@ export class Map16Tab implements WsPanel {
       for (let k = 0; k < 7; k++) pp[k] = allPal[p * 16 + 1 + k * 2] | 0xff000000;
       cx.putImageData(im, 0, 0);
       const btn = h('button', {
-        class: `mt-pal${s.pals.has(p) ? ' active' : ''}`, title: `Palette ${p} (key ${p + 1}) · hover: preview on the marked quarters${d.palettes ? ' · Ctrl+click: open in the Palettes tab' : ''}`,
+        class: `mt-pal${s.pals.has(p) ? ' active' : ''}`, title: `Palette ${p} (key ${p + 1}) · hover: preview on the marked quarters${d.palettes ? ' · F12: open in the Palettes tab' : ''}`,
         onclick: (e: MouseEvent) => {
-          if ((e.ctrlKey || e.metaKey) && d.palettes) { this.ws.showPalette(p, 1); return; }
+          if (isGoto(e) && d.palettes) { this.ws.showPalette(p, 1); return; }
           this.editQuarters(setPalette(p), `Palette ${p}`);
         },
       }, c, h('span', null, String(p)));
@@ -1650,8 +1650,9 @@ export class Map16Tab implements WsPanel {
     if (k === 'Escape') { if (!this.marked().size) return false; this.setMarks(new Set()); return true; }
     if (k === 'Enter' && !this.remapping) { this.fillMarked(); return true; }
     if (k === 'F2' && !this.remapping && !this.moving && this.t.names) { this.nameInput.focus(); this.nameInput.select(); return true; }
-    if (k === 'x' || k === 'X') { this.flip(FLIP_X, 'Flip horizontally'); return true; }
-    if (k === 'y' || k === 'Y') { this.flip(FLIP_Y, 'Flip vertically'); return true; }
+    // flips (#482): Shift+H / Shift+V, as in the pixel editor
+    if ((k === 'h' || k === 'H') && e.shiftKey) { this.flip(FLIP_X, 'Flip horizontally'); return true; }
+    if ((k === 'v' || k === 'V') && e.shiftKey) { this.flip(FLIP_Y, 'Flip vertically'); return true; }
     if (k >= '1' && k <= '8') { const p = Number(k) - 1; this.editQuarters(setPalette(p), `Palette ${p}`); return true; }
     if (k === 'q' || k === 'Q') {
       // only the next quarter of the followed quarter's tile (in reading order)

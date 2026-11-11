@@ -364,7 +364,7 @@ export class GfxWorkspace {
     this.bar = h('div', { class: 'ctxbar ws-tabs' },
       this.targetSel,
       this.specialLabel,
-      h('div', { class: 'tabbar', role: 'tablist' }, tabBtn('pal', 'Palettes', 'P'), tabBtn('map16', 'Map16 tiles', 'M'), tabBtn('gfx', 'Graphics', 'G'), tabBtn('anim', 'Animations', 'A')),
+      h('div', { class: 'tabbar', role: 'tablist' }, tabBtn('pal', 'Palettes', 'G P'), tabBtn('map16', 'Map16 tiles', 'G M'), tabBtn('gfx', 'Graphics', 'G G'), tabBtn('anim', 'Animations', 'G A')),
       h('span', { class: 'spacer' }),
       h('span', { class: 'hint', title: 'Exception: the palette choice in the header (Palettes tab, below) belongs to the level and is written with “Save level”.' }, 'Changes go straight into the ROM · Ctrl+Z / Ctrl+Y'),
       viewMenu(app, () => this.preview.update(), false));
@@ -476,16 +476,8 @@ export class GfxWorkspace {
     this.onNav(true);
   }
 
+  // (the views are opened by G P / G M / G G / G A, main.ts #482)
   key(e: KeyboardEvent): boolean {
-    const ctrl = e.ctrlKey || e.metaKey;
-    if (this.panel().key?.(e)) return true;
-    if (!ctrl && !e.altKey) {
-      const k = e.key.toLowerCase();
-      if (k === 'p') { this.open('pal'); return true; }
-      if (k === 'm') { this.open('map16'); return true; }
-      if (k === 'g') { this.open('gfx'); return true; }
-      if (k === 'a') { this.open('anim'); return true; }
-    }
-    return false;
+    return !!this.panel().key?.(e);
   }
 }

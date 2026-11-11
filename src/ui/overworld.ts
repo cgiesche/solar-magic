@@ -237,7 +237,7 @@ export class OverworldView {
   });
   selected = -1; // the layer 1 tile shown in the properties (l1Index)
   private palScroll: number | null = null; // the paint sheet's scroll while Paint is hidden (the Properties tab shown)
-  private infoTile = -1; // the tile selected by Alt/Ctrl+click (its info)
+  private infoTile = -1; // the tile selected by Alt+click (its info)
   mapCanvas = document.createElement('canvas'); // the map as shown: its layers at their strengths (composeMap)
   private l1Canvas = document.createElement('canvas'); // layer 1 alone (transparent where it has no pixel)
   get l1Image(): HTMLCanvasElement { return this.l1Canvas; }
@@ -907,7 +907,7 @@ export class OverworldView {
       return;
     }
     if (e.button !== 0) return;
-    if (e.altKey || e.ctrlKey) { this.info(c.x, c.y); return; }
+    if (e.altKey) { this.info(c.x, c.y); return; } // (Alt+click: the tile's info; Ctrl+click no longer, #482)
     // (a pick beside the selection ends it – Delete would remove a level tile unseen –, Paint shown again with the brush
     // picked, ADR 0015)
     if (this.selected >= 0) this.selectTile(-1, false);
@@ -1186,8 +1186,8 @@ export class OverworldView {
       // (the selection's properties shown: Esc or a click on another cell brings Paint back)
       const back = this.selected >= 0 && this.palPanel.hidden ? 'Esc: Paint again · ' : '';
       this.statusText.textContent = back + (this.ev
-        ? `Painting layer ${this.mode === 'l1' ? 1 : 2} as after ${eventTitle(this.ev.runners, this.event)} · Click/drag picks up tiles · Right click/Shift+click paints · Alt/Ctrl+click: tile settings · Esc: end editing${solo}`
-        : `Click/drag picks up tiles · Right click/Shift+click paints · Alt/Ctrl+click: tile settings${this.mode === 'l1' ? ' · Level tiles: click selects, drag moves, right click: menu, Delete removes' : ''}${solo}`);
+        ? `Painting layer ${this.mode === 'l1' ? 1 : 2} as after ${eventTitle(this.ev.runners, this.event)} · Click/drag picks up tiles · Right click/Shift+click paints · Alt+click: tile settings · Esc: end editing${solo}`
+        : `Click/drag picks up tiles · Right click/Shift+click paints · Alt+click: tile settings${this.mode === 'l1' ? ' · Level tiles: click selects, drag moves, right click: menu, Delete removes' : ''}${solo}`);
       return;
     }
     let t = `X ${hex(c.x, 2)}  Y ${hex(c.y, 2)}`;
@@ -1696,7 +1696,7 @@ export class OverworldView {
         { label: 'Layer 1 while painting layer 2', title: 'In the layer 2 mode layer 1 – its tiles, path marks, level numbers and unreached tiles – drawn dimmed, else not at all (Q held: the other way)', checked: () => this.l1InL2,
           onToggle: (v: boolean) => { this.l1InL2 = v; l1InL2Pref.set(v); this.composeMap(); this.paint(); this.updateStatus(); } },
         { heading: 'Guides' },
-        view('Grid', () => this.showGrid, (v) => (this.showGrid = v), undefined, 'G'),
+        view('Grid', () => this.showGrid, (v) => (this.showGrid = v), undefined, "Ctrl+'"),
         view('Unreached tiles', () => this.reach.show, (v) => (this.reach.show = v),
           'Path and level tiles Mario can\'t get to at this event progress dimmed – searched along the paths as the game moves him (what each tile does learned from the game\'s code), with the level flags of a save at the progress; the problems of the paths are in the status bar'),
         view('Exit arrows', () => this.exits.show, (v) => (this.exits.show = v),
@@ -1751,7 +1751,7 @@ export class OverworldView {
     if (k === 'escape' && this.event >= 0) { this.setEvent(-1); return true; }
     if (k === 'r' && this.mode === 'l1') { this.setRouteBrush(true); return true; }
     if (k === 'b' && this.mode === 'l1') { this.setRouteBrush(false); return true; }
-    if (k === 'g') { this.showGrid = !this.showGrid; this.paint(); return true; }
+
     if (k === 'q' && isLayerMode(this.mode)) { this.setSolo(true); return true; }
     if (k === 'm' && this.selected >= 0 && isLayerMode(this.mode)) { this.editTile(this.selected); return true; }
     if (k === ',' || k === '.') { this.setEvent(stepInList(this.listOrder(), this.event, k === ',' ? -1 : 1)); return true; }
@@ -1847,6 +1847,8 @@ export class OverworldView {
   }
 
   // the selection shown in the Properties tab (ADR 0015): a tile clicked or Alt/Ctrl+clicked, a sprite clicked
+  /** Ctrl+' (#482): the grid on/off. */
+  toggleGrid(): void { this.showGrid = !this.showGrid; this.paint(); }
   showProps(): void {
     this.sideTab = 'props';
     this.buildProps();
@@ -1860,8 +1862,8 @@ export class OverworldView {
     const selected = sprites ? this.sprites.hasSelection() : this.selected >= 0;
     if (!selected) this.sideTab = 'paint'; // (the selection ended: Paint again, the next selection shows its properties)
     const tabs = sideTabs(this.mode, this.sideTab, selected, (this.eventPick?.at ?? -1) >= 0);
-    const howToSelect = sprites ? this.sprites.howToSelect() : this.mode === 'l1' ? 'Click a level tile, star, pipe or link end on the map to select it, any tile with Alt/Ctrl+click'
-      : 'Alt/Ctrl+click a tile on the map – a level tile too – to select it';
+    const howToSelect = sprites ? this.sprites.howToSelect() : this.mode === 'l1' ? 'Click a level tile, star, pipe or link end on the map to select it, any tile with Alt+click'
+      : 'Alt+click a tile on the map – a level tile too – to select it';
     const tab = (t: SideTab) => h('button', {
       class: tabs.shown === t ? 'active' : '', disabled: t === 'props' && !tabs.propsEnabled,
       title: t === 'paint' ? (sprites ? 'The sprites to place' : 'The tiles to paint with (right click/Shift+click on the map)') + (selected ? ' – the selection stays' : '')

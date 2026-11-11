@@ -4,7 +4,7 @@ import { createBps, crc32 } from './core/bps.ts';
 import { prepareRom } from './core/editorpatches.ts';
 import { SMW_CLEAN_CRC } from './core/cleangame.ts';
 import { App, type EditMode } from './ui/app.ts';
-import { h, clear, toast, log, modal, choose, zoomControl, fieldTakesKey, installStepFields, keepAriaStates, setDialogUndo } from './ui/dom.ts';
+import { h, clear, toast, log, modal, choose, zoomControl, fieldTakesKey, installStepFields, keepAriaStates, setDialogUndo, gotoAt } from './ui/dom.ts';
 import { downloadBytes, pickFile, saveFile, filePath, fileName, desktop, guardClose } from './ui/platform.ts';
 import { LogBar } from './ui/logbar.ts';
 import { pasteHintBox } from './ui/pastehint.ts';
@@ -38,6 +38,7 @@ import { icon, iconLabel } from './ui/icons.ts';
 import { THEMES, themePref } from './ui/theme.ts';
 import type { IconName } from './ui/icons.ts';
 import { railButton, toolRail } from './ui/rail.ts';
+import { shortcutSections } from './ui/shortcuts.ts';
 
 const root = document.getElementById('app')!;
 
@@ -272,7 +273,7 @@ function buildUi(app: App): { start: (at: NavLoc | null) => Promise<void> } {
     ] },
   ]);
   const wsBtn = (w: typeof workspace, label: string, key: string) => h('button', { 'data-ws': w, title: key ? `${label} (${key})` : label, onclick: () => setWorkspace(w) }, label);
-  const wsSwitch = h('div', { class: 'btn-group ws-switch' }, wsBtn('level', 'Level', 'Esc'), wsBtn('ow', 'Overworld', 'O'), wsBtn('gfx', 'Graphics', 'P / M / G / A'), wsBtn('game', 'Game', ''));
+  const wsSwitch = h('div', { class: 'btn-group ws-switch' }, wsBtn('level', 'Level', 'G 1'), wsBtn('ow', 'Overworld', 'G 2'), wsBtn('gfx', 'Graphics', 'G 3'), wsBtn('game', 'Game', 'G 4'));
   const backBtn = h('button', { onclick: () => history.back(), title: 'Back to the place before (Alt+←, mouse back button)', 'aria-label': 'Back', disabled: true }, icon('back'));
   const fwdBtn = h('button', { onclick: () => history.forward(), title: 'Forward (Alt+→, mouse forward button)', 'aria-label': 'Forward', disabled: true }, icon('forward'));
   const undoBtn = h('button', { onclick: () => app.undo(), title: 'Undo (Ctrl+Z)', 'aria-label': 'Undo' }, icon('undo'));
@@ -295,8 +296,8 @@ function buildUi(app: App): { start: (at: NavLoc | null) => Promise<void> } {
   const followLevel = () => { if (musicPlayer.label === LEVEL_MUSIC && musicOf !== `${app.level.number}:${app.level.header.music}`) playLevelMusic(); };
   app.on('level', followLevel);
   app.on('level-header', followLevel);
-  const searchBtn = h('button', { class: 'appbar-search', onclick: () => search(), title: 'Search everywhere (Ctrl+F, Ctrl+Space)' },
-    iconLabel('search', 'Search …'), h('kbd', null, 'Ctrl F'));
+  const searchBtn = h('button', { class: 'appbar-search', onclick: () => search(), title: 'Search everywhere and run commands (Ctrl+K, Ctrl+F, Ctrl+Space)' },
+    iconLabel('search', 'Search or run …'), h('kbd', null, 'Ctrl K'));
   // where the changes go (#476): the level's wait for Save level, the other workspaces' are in the ROM at once
   const savedPill = h('span', { class: 'pill pill-ok', title: 'The overworld\'s, graphics\' and game\'s changes are ROM edits: written at once (Ctrl+Z undoes)' }, 'Saved to ROM');
   const appbar = h('header', { class: 'appbar' },
@@ -534,18 +535,19 @@ function buildUi(app: App): { start: (at: NavLoc | null) => Promise<void> } {
   installStepFields();
   keepAriaStates(document.body);
   setDialogUndo(() => app.undo(), () => app.redo());
+  const mouseAt = { x: -1, y: -1 }; // (the last mouse position: F12 and the keyboard's context menu act there)
   // the context menu from the keyboard everywhere (#480): Menu key or Shift+F10 opens the one of the focused control,
   // else (the level's canvas has its own: the selection's or the mouse tile's) of what is under the mouse
   {
-    let mx = -1, my = -1;
-    window.addEventListener('mousemove', (e) => { mx = e.clientX; my = e.clientY; }, { passive: true });
+    window.addEventListener('mousemove', (e) => { mouseAt.x = e.clientX; mouseAt.y = e.clientY; }, { passive: true });
+    const mx = () => mouseAt.x, my = () => mouseAt.y;
     window.addEventListener('keydown', (e) => {
       if (e.key !== 'ContextMenu' && !(e.key === 'F10' && e.shiftKey)) return;
       const f = document.activeElement as HTMLElement | null;
       const focused = f && f !== document.body && !f.matches('.level-scroller, canvas') ? f : null;
       if (!focused && workspace === 'level' && !document.querySelector('.modal-back')) return; // (the level view's keyMenu)
       const r = focused?.getBoundingClientRect();
-      const x = r ? r.left + Math.min(r.width / 2, 24) : mx, y = r ? r.top + r.height / 2 : my;
+      const x = r ? r.left + Math.min(r.width / 2, 24) : mx(), y = r ? r.top + r.height / 2 : my();
       const at = focused ?? (x >= 0 ? document.elementFromPoint(x, y) : null);
       if (!at) return;
       e.preventDefault();
@@ -553,33 +555,63 @@ function buildUi(app: App): { start: (at: NavLoc | null) => Promise<void> } {
       at.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: x, clientY: y, button: 2 }));
     }, true);
   }
+  // G then a key within a second goes to a place (#482): G 1 … G 5 the workspaces, G P / G M / G G / G A the Graphics
+  // views; "G …" shown meanwhile
+  let goSince = 0;
+  const goHint = h('div', { class: 'key-pending', hidden: true }, h('kbd', null, 'G'), ' … 1 Level · 2 Overworld · 3 Graphics · 4 Game · P / M / G / A Graphics views');
+  document.body.append(goHint);
+  const goEnd = () => { goSince = 0; goHint.hidden = true; };
+  const GO_WS: Record<string, 'level' | 'ow' | 'gfx' | 'game'> = { 1: 'level', 2: 'ow', 3: 'gfx', 4: 'game' };
+  const GO_TAB: Record<string, WsTab> = { p: 'pal', m: 'map16', g: 'gfx', a: 'anim' };
+  const goKey = (e: KeyboardEvent): boolean => {
+    if (e.ctrlKey || e.metaKey || e.altKey) { goEnd(); return false; }
+    const k = e.key.toLowerCase();
+    if (goSince && performance.now() - goSince < 1000) {
+      goEnd();
+      if (GO_WS[k]) void setWorkspace(GO_WS[k]);
+      else if (GO_TAB[k]) void setWorkspace('gfx', { tab: GO_TAB[k] });
+      else if (k === '5') toast('The Packages workspace follows – until then: ROM → Packages …');
+      return true;
+    }
+    goEnd();
+    if (k !== 'g' || e.shiftKey) return false;
+    goSince = performance.now();
+    goHint.hidden = false;
+    setTimeout(() => { if (goSince && performance.now() - goSince >= 990) goEnd(); }, 1000);
+    return true;
+  };
+  // the grid of the workspace shown (Ctrl+', #482)
+  const toggleGrid = () => {
+    if (workspace === 'level') { app.view.show.grid = !app.view.show.grid; view.paint(); }
+    else if (workspace === 'ow') owShown()?.toggleGrid();
+  };
   window.onkeydown = (e: KeyboardEvent) => {
-    if ((e.ctrlKey || e.metaKey) && (e.key.toLowerCase() === 'f' || e.code === 'Space') && !e.altKey && !document.querySelector('.modal-back')) { e.preventDefault(); search(); return; }
+    if ((e.ctrlKey || e.metaKey) && (e.key.toLowerCase() === 'f' || e.key.toLowerCase() === 'k' || e.code === 'Space') && !e.altKey && !document.querySelector('.modal-back')) { e.preventDefault(); search(); return; }
     if (fieldTakesKey(e)) return;
     if (document.querySelector('.modal-back')) return;
     const k = e.key;
     const ctrl = e.ctrlKey || e.metaKey;
+    // G then a key: a place (#482)
+    if (goKey(e)) { e.preventDefault(); return; }
     if (k === 'F1' || k === '?') { e.preventDefault(); showHelp(); return; }
-    if (k === 'o' || k === 'O') { setWorkspace(workspace === 'ow' ? 'level' : 'ow'); return; }
+    if (k === 'F12') { e.preventDefault(); if (mouseAt.x >= 0) gotoAt(mouseAt.x, mouseAt.y); return; }
+    if (ctrl && (k === "'" || e.code === 'Backslash' && e.shiftKey)) { e.preventDefault(); toggleGrid(); return; }
     if ((k === 'l' || k === 'L') && !ctrl && !e.altKey) { logBar.toggle(); return; }
     // one undo history in every workspace
     if (ctrl && k.toLowerCase() === 's') { e.preventDefault(); app.saveLevel(); return; }
     if (ctrl && k.toLowerCase() === 'z') { e.preventDefault(); if (e.shiftKey) app.redo(); else app.undo(); return; }
     if (ctrl && k.toLowerCase() === 'y') { e.preventDefault(); app.redo(); return; }
     if (workspace === 'gfx' && ws) {
-      if (ws.key(e)) { e.preventDefault(); return; }
-      if (k === 'Escape') setWorkspace('level');
+      if (ws.key(e)) e.preventDefault();
       return;
     }
     if (workspace === 'game') {
-      if (game?.key(e)) { e.preventDefault(); return; }
-      if (k === 'Escape') void setWorkspace('level');
+      if (game?.key(e)) e.preventDefault();
       return;
     }
     if (workspace === 'ow') {
       if (owShown()?.key(e)) e.preventDefault();
       else if ((k === 't' || k === 'T') && !ctrl && !e.altKey && !e.shiftKey && owShown()) testOverworld();
-      else if (k === 'Escape') void setWorkspace('level');
       return;
     }
     if (ctrl && k.toLowerCase() === 'c') { app.model.copy(); return; }
@@ -617,15 +649,12 @@ function buildUi(app: App): { start: (at: NavLoc | null) => Promise<void> } {
     else if (k === '/') app.resizeSelection(0, -1);
     else if (k === 'PageUp') app.model.reorderSelection('front');
     else if (k === 'PageDown') app.model.reorderSelection('back');
-    else if (k === 'g' || k === 'G') { app.view.show.grid = !app.view.show.grid; view.paint(); }
     else if (k === 'c' || k === 'C') { app.view.show.collision = !app.view.show.collision; view.paint(); }
     else if ((k === 'v' || k === 'V') && e.shiftKey) view.placeGameViewByMario();
     else if (k === 'v' || k === 'V') { app.view.show.gameView = !app.view.show.gameView; app.updateGameViewCamera(); view.paint(); }
     else if ((k === 'j' || k === 'J') && e.shiftKey) view.toggleArcPin();
     else if (k === 'j' || k === 'J') { app.view.show.arcs = !app.view.show.arcs; if (!app.view.show.arcs) view.arcPin = null; view.paint(); }
     else if (k === 'm' || k === 'M') setWorkspace('gfx', { tab: 'map16', tile: view.hover ? hoverTile(app, view.hover.tx, view.hover.ty) : undefined });
-    else if (k === 'p' || k === 'P') setWorkspace('gfx', { tab: 'pal' });
-    else if (k === 'a' || k === 'A') setWorkspace('gfx', { tab: 'anim' });
   };
   window.onbeforeunload = (e) => { if (app.dirty) { e.preventDefault(); } };
   guardClose(() => app.dirty);
@@ -698,76 +727,11 @@ async function exportProject(app: App, askWhere = false): Promise<void> {
   log(`Project saved as “${res.path ?? `${base}.smwproj`}” (${Math.round(out.length / 1024)} KB, of which ${Math.round(app.rom.extraSize / 1024)} KB editor data)`);
 }
 
+// the keyboard scheme's table (ui/shortcuts.ts, #482): one source, never stale
 function showHelp(): void {
-  const sections: [string, [string, string][]][] = [
-    ['General', [
-      ['Ctrl+S', 'Save the level'],
-      ['Ctrl+Z / Ctrl+Y', 'Undo / Redo'],
-      ['Alt+← / Alt+→ · mouse back/forward buttons', 'Back / forward through the places opened (workspace, level, overworld map, graphics tab, Ctrl+click jumps)'],
-      ['Esc / O / M · P · A', 'Workspace level / overworld / graphics (Map16, palettes, animations)'],
-      ['Ctrl+mouse wheel · Middle mouse button drag', 'Zoom · Pan view'],
-      ['Ctrl+F · Ctrl+Space', 'Search everywhere: objects, Map16 tiles, prefabs, sprites (Tab: only one group)'],
-      ['? / F1', 'This overview'],
-      ['L', 'Expand/collapse log (all messages with time)'],
-      ['Menus: ↑ ↓ ← → / Enter / Esc', 'Choose entry, neighboring menu / run / close'],
-    ]],
-    ['Level', [
-      ['1 / 2 / 3 / 4 / 5', 'Mode layer 1 / layer 2 / sprites / entrances/exits / BG'],
-      ['Click · Ctrl+click · Alt+click', 'Select · add to selection · element underneath'],
-      ['Drag', 'Move selection / drag a selection box'],
-      ['Drag a handle on an edge or corner', 'Resize objects (all selected; the opposite edges stay)'],
-      ['Right click / Shift+click', 'Place the element chosen in “Insert” (View → Placement preview shows it at the mouse) or a copy of the selection'],
-      ['Right click on the selection or with nothing chosen · Menu key / Shift+F10', 'Context menu'],
-      ['Click into nothing', 'Deselect all and clear the element chosen in “Insert”'],
-      ['BG: click/drag · right click/Shift+click', 'Pick up tile(s) as brush · paint'],
-      ['Ctrl+click on a Map16/BG tile in “Insert”', 'Go to definition: the tile in the Map16 tab of the graphics area'],
-      ['Ins / I', 'Insert object/sprite by number (at the mouse)'],
-      ['Drag M / Z / S marker', 'Move main entrance / midway point / secondary entrance'],
-      ['Entrances/Exits: click · right click', 'Choose entrance or screen (exit), edit on the right · new secondary entrance, create exit, entrance here'],
-      ['Arrow keys · Alt+arrow keys · Alt+Shift+arrow keys', 'Move selection by 1 tile · resize on the right/bottom · on the left/top'],
-      ['+ / - · * / /', 'Change width · change height'],
-      ['Del / Backspace', 'Delete selection'],
-      ['F2 · Del over an object or prefab in “Insert”', 'Rename it · delete the prefab'],
-      ['Ctrl+A · Esc', 'Select all · cancel dragging, deselect, then clear the element chosen in “Insert”'],
-      ['Ctrl+C / Ctrl+V / Ctrl+D', 'Copy / paste at the mouse / duplicate'],
-      ['PgUp / PgDn', 'Bring to front / send to back (drawing order)'],
-      ['H · G · C', 'Level header · grid on/off · collision overlay on/off'],
-      ['V · Shift+V · drag its edge', 'Game view frame on/off · placed by Mario at the mouse (the camera the game puts there) · move it'],
-      ['T · Shift+T', 'Test level · Mario starts at the mouse'],
-      ['J · Shift+J', 'Jump arcs at the mouse on/off · pin them to the tile / unpin'],
-    ]],
-    ['Overworld', [
-      ['1 / 2 / 3 / 4 / 5', 'Layer 1 (paths) / layer 2 (terrain) / Levels / Overworld links / Sprites'],
-      ['Levels: drag · Del · right click', 'Move a level tile (swaps with the tile there) · a stop tile in its place · Place level here…'],
-      ['Click/drag · right click/Shift+click', 'Pick up tile(s) as brush · paint'],
-      ['Alt+click / Ctrl+click', 'Level info of the level tile'],
-      ['G', 'Grid on/off'],
-      ['M', 'Edit the selected tile\'s 8x8 tiles in the Map16 tab (target Overworld)'],
-      [', / .', 'Event list: edit the event one row up / down'],
-      ['Space · Esc', 'Check / uncheck the edited event · end editing (paint the map before events)'],
-      ['Q (held)', 'While layer 1 or 2 is painted: the other layer hidden (else dimmed, View → Layers)'],
-      ['T', 'Test play from the overworld: a new game with the checked events passed, Mario on the selected tile (or at the start position)'],
-    ]],
-    ['Graphics', [
-      ['P / M / G / A', 'Tab palettes / Map16 tiles / graphics / animations; Esc back to the level'],
-      ['Ctrl+C / Ctrl+V', 'Copy / paste palette, Map16 tiles or pixels'],
-      ['Ctrl+click', 'Go to definition: an animated tile or color opens its own animation, a Map16 quarter its 8x8 tile, a palette button its palette'],
-      ['Palettes: arrow keys · Shift+click', 'Other color · mark a range (for “Gradient”)'],
-      ['Map16: X / Y / 1–8 / Q', 'Flip quarter / palette 0–7 / next quarter; arrows: other tile'],
-      ['Map16: F2', 'Name the selected tiles (to find them by later)'],
-      ['Map16: double click · Ctrl+click on palette', 'Edit quarter in “Graphics” · open palette in “Palettes”'],
-      ['Graphics sheet: click/drag · right click/Shift+click', 'Pick 8x8 tiles for the pixel editor · paste them at the mouse'],
-      ['Pixel editor: S / B / E / F / I', 'Selection / pencil / eraser / fill / eyedropper'],
-      ['Pixel editor: left · right button', 'Paint with the left color · the right color'],
-      ['Pixel editor: Alt+click · Shift+click', 'Pick the color for that button · line from the last point'],
-      ['Pixel editor: 0–9 · X', 'Left color · swap left and right color'],
-      ['Pixel editor: Enter / Esc', 'Put the floating selection down / cancel it (or deselect)'],
-      ['Animations: Del / Esc', 'Delete animation / cancel selection'],
-    ]],
-  ];
-  modal('Keyboard shortcuts', h('div', { class: 'help-cols' }, sections.map(([title, rows]) => h('section', null,
+  modal('Keyboard shortcuts', h('div', { class: 'help-cols' }, shortcutSections().map(([title, rows]) => h('section', null,
     h('h3', null, title),
-    h('table', { class: 'help' }, rows.map(([a, b]) => h('tr', null, h('td', null, h('kbd', null, a)), h('td', null, b))))))),
+    h('table', { class: 'help' }, rows.map((r) => h('tr', null, h('td', null, h('kbd', null, r.keys)), h('td', null, r.what))))))),
   [{ label: 'Close', primary: true }]);
 }
 
