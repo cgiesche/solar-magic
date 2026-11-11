@@ -5,6 +5,7 @@
 
 import { h } from './dom.ts';
 import { closeMenus, onCloseMenus } from './menu.ts';
+import { dismissable, focusInto } from './layer.ts';
 
 export type Popover = {
   root: HTMLElement; // the button in its wrapper: put where the button goes
@@ -22,16 +23,6 @@ export function popover(label: string | Node, title: string, content: () => HTML
   const box = h('div', { class: 'popover', role: 'dialog', 'aria-label': title });
   // (its workspace left by a key or the address: closed, not in the way there)
   const shown = () => wrap.isConnected && wrap.checkVisibility();
-  const outside = (ev: MouseEvent) => { if (!wrap.contains(ev.target as Node)) self.close(); };
-  // (capture: before the editor's own Esc – the selection stays)
-  const keys = (ev: KeyboardEvent) => {
-    if (ev.key !== 'Escape') return;
-    if (!shown()) { self.close(); return; }
-    ev.preventDefault();
-    ev.stopPropagation();
-    self.close();
-    btn.focus();
-  };
   const fill = () => {
     // (the control with the focus keeps it: a song just chosen)
     const fields = () => [...box.querySelectorAll<HTMLElement>('button, select, input')];
@@ -43,6 +34,7 @@ export function popover(label: string | Node, title: string, content: () => HTML
     box.style.right = 'auto';
     if (box.getBoundingClientRect().right > window.innerWidth - 4) { box.style.left = 'auto'; box.style.right = '0'; }
   };
+  let stop: (() => void) | null = null;
   const self: Popover = {
     root: wrap,
     close: () => {
@@ -51,8 +43,8 @@ export function popover(label: string | Node, title: string, content: () => HTML
       box.remove();
       btn.classList.remove('open');
       btn.setAttribute('aria-expanded', 'false');
-      window.removeEventListener('mousedown', outside, true);
-      window.removeEventListener('keydown', keys, true);
+      stop?.();
+      stop = null;
     },
     refresh: () => {
       if (current !== self) return;
@@ -66,8 +58,14 @@ export function popover(label: string | Node, title: string, content: () => HTML
     fill();
     btn.classList.add('open');
     btn.setAttribute('aria-expanded', 'true');
-    window.addEventListener('mousedown', outside, true);
-    window.addEventListener('keydown', keys, true);
+    stop = dismissable({
+      contains: (n) => wrap.contains(n),
+      close: () => self.close(),
+      returnFocus: () => btn,
+      // (its workspace left meanwhile: closed, the Esc left to the editor)
+      onKey: (ev) => { if (ev.key !== 'Escape' || shown()) return false; self.close(); return 'pass'; },
+    });
+    focusInto(box); // (keyboard users reach its controls, #465)
   };
   btn.addEventListener('click', () => (current === self ? self.close() : open()));
   return self;

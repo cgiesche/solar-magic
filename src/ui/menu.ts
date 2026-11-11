@@ -3,6 +3,7 @@
 
 import { h } from './dom.ts';
 import { icon } from './icons.ts';
+import { dismissable } from './layer.ts';
 
 export type MenuItem =
   | { label: string; shortcut?: string; title?: string; onClick: () => void; disabled?: () => boolean }
@@ -74,34 +75,32 @@ function dropdown(menu: Menu, bar?: HTMLElement): HTMLElement {
     if (r.bottom > window.innerHeight - 4 && b.top - r.height - 3 >= 4) { list.style.top = 'auto'; list.style.bottom = 'calc(100% + 3px)'; }
     btn.classList.add('open');
     btn.setAttribute('aria-expanded', 'true');
-    const outside = (ev: MouseEvent) => { if (!wrap.contains(ev.target as Node)) closeMenus(); };
-    const keys = (ev: KeyboardEvent) => {
-      const enabled = entries.filter((x) => !x.disabled);
-      const i = enabled.indexOf(document.activeElement as HTMLButtonElement);
-      if (ev.key === 'Escape') { closeMenus(); btn.focus(); }
-      else if (ev.key === 'ArrowDown') enabled[(i + 1) % enabled.length]?.focus();
-      else if (ev.key === 'ArrowUp') enabled[(i - 1 + enabled.length) % enabled.length]?.focus();
-      else if ((ev.key === 'ArrowRight' || ev.key === 'ArrowLeft') && bar) {
-        const btns = [...bar.querySelectorAll<HTMLButtonElement>(':scope > .menu-wrap > .menu-btn:not(:disabled)')];
-        const j = btns.indexOf(btn);
-        const next = btns[(j + (ev.key === 'ArrowRight' ? 1 : btns.length - 1)) % btns.length];
-        if (next && next !== btn) { next.click(); next.parentElement?.querySelector<HTMLButtonElement>('.menu-item:not(:disabled)')?.focus(); }
-      } else if (ev.key === 'Enter' || ev.key === ' ') { if (i >= 0) enabled[i].click(); }
-      else if (ev.key !== 'Tab') return; // let other keys through
-      ev.preventDefault();
-      ev.stopPropagation();
-    };
-    // capture: runs before the editor's global shortcuts
-    window.addEventListener('keydown', keys, true);
-    window.addEventListener('mousedown', outside, true);
+    const stop = dismissable({
+      contains: (n) => wrap.contains(n),
+      close: closeMenus,
+      returnFocus: () => btn,
+      onKey: (ev) => {
+        const enabled = entries.filter((x) => !x.disabled);
+        const i = enabled.indexOf(document.activeElement as HTMLButtonElement);
+        if (ev.key === 'ArrowDown') enabled[(i + 1) % enabled.length]?.focus();
+        else if (ev.key === 'ArrowUp') enabled[(i - 1 + enabled.length) % enabled.length]?.focus();
+        else if ((ev.key === 'ArrowRight' || ev.key === 'ArrowLeft') && bar) {
+          const btns = [...bar.querySelectorAll<HTMLButtonElement>(':scope > .menu-wrap > .menu-btn:not(:disabled)')];
+          const j = btns.indexOf(btn);
+          const next = btns[(j + (ev.key === 'ArrowRight' ? 1 : btns.length - 1)) % btns.length];
+          if (next && next !== btn) { next.click(); next.parentElement?.querySelector<HTMLButtonElement>('.menu-item:not(:disabled)')?.focus(); }
+        } else if (ev.key === 'Enter' || ev.key === ' ') { if (i >= 0) enabled[i].click(); }
+        else return ev.key === 'Tab'; // (Tab stays in the menu; other keys go on)
+        return true;
+      },
+    });
     current = {
       owner: wrap,
       close: () => {
         list.remove();
         btn.classList.remove('open');
         btn.setAttribute('aria-expanded', 'false');
-        window.removeEventListener('keydown', keys, true);
-        window.removeEventListener('mousedown', outside, true);
+        stop();
         current = null;
       },
     };
@@ -157,28 +156,26 @@ export function contextMenu(x: number, y: number, items: MenuItem[], focusFirst 
   const r = list.getBoundingClientRect();
   if (r.right > window.innerWidth - 4) list.style.left = `${Math.max(4, x - r.width)}px`;
   if (r.bottom > window.innerHeight - 4) list.style.top = `${Math.max(4, y - r.height)}px`;
-  const outside = (ev: MouseEvent) => { if (!list.contains(ev.target as Node)) closeMenus(); };
-  const keys = (ev: KeyboardEvent) => {
-    const enabled = entries.filter((b) => !b.disabled);
-    const i = enabled.indexOf(document.activeElement as HTMLButtonElement);
-    if (ev.key === 'Escape') closeMenus();
-    else if (ev.key === 'ArrowDown') enabled[(i + 1) % enabled.length]?.focus();
-    else if (ev.key === 'ArrowUp') enabled[(i - 1 + enabled.length) % enabled.length]?.focus();
-    else if (ev.key === 'Enter' || ev.key === ' ') { if (i >= 0) enabled[i].click(); }
-    else if (ev.key !== 'Tab') return;
-    ev.preventDefault();
-    ev.stopPropagation();
-  };
-  window.addEventListener('keydown', keys, true);
+  const stop = dismissable({
+    contains: (n) => list.contains(n),
+    close: closeMenus,
+    deferOutside: true, // (the right click that opened the menu)
+    onKey: (ev) => {
+      const enabled = entries.filter((b) => !b.disabled);
+      const i = enabled.indexOf(document.activeElement as HTMLButtonElement);
+      if (ev.key === 'ArrowDown') enabled[(i + 1) % enabled.length]?.focus();
+      else if (ev.key === 'ArrowUp') enabled[(i - 1 + enabled.length) % enabled.length]?.focus();
+      else if (ev.key === 'Enter' || ev.key === ' ') { if (i >= 0) enabled[i].click(); }
+      else return ev.key === 'Tab';
+      return true;
+    },
+  });
   if (focusFirst) entries.find((b) => !b.disabled)?.focus();
-  // the right click that opened the menu must not close it
-  setTimeout(() => window.addEventListener('mousedown', outside, true), 0);
   current = {
     owner: list,
     close: () => {
       list.remove();
-      window.removeEventListener('keydown', keys, true);
-      window.removeEventListener('mousedown', outside, true);
+      stop();
       current = null;
     },
   };
