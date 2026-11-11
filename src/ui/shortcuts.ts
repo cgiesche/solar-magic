@@ -4,13 +4,29 @@
 // place (G 1 … G 5 the workspaces, G P / G M / G G / G A the Graphics views), Esc only cancels (never leaves a
 // workspace), Ctrl+click adds to the selection, Alt+click takes the element underneath, F12 goes to a definition.
 
+export type WorkspaceId = 'level' | 'ow' | 'gfx' | 'game' | 'pkg';
+export type GfxViewId = 'pal' | 'map16' | 'gfx' | 'anim';
+/** The places of G then a key (#482): the one table the key handler, its hint, the command palette and the help read. */
+export const GO_PLACES: { key: string; label: string; workspace: WorkspaceId; view?: GfxViewId }[] = [
+  { key: '1', label: 'Level', workspace: 'level' },
+  { key: '2', label: 'Overworld', workspace: 'ow' },
+  { key: '3', label: 'Graphics', workspace: 'gfx' },
+  { key: '4', label: 'Game', workspace: 'game' },
+  { key: '5', label: 'Packages', workspace: 'pkg' },
+  { key: 'P', label: 'Palettes', workspace: 'gfx', view: 'pal' },
+  { key: 'M', label: 'Map16 tiles', workspace: 'gfx', view: 'map16' },
+  { key: 'G', label: 'Graphics', workspace: 'gfx', view: 'gfx' },
+  { key: 'A', label: 'Animations', workspace: 'gfx', view: 'anim' },
+];
+const goKeys = (views: boolean) => GO_PLACES.filter((g) => !!g.view === views);
+
 export type ShortcutScope = 'General' | 'Level' | 'Overworld' | 'Graphics' | 'Pixel editor' | 'Map16 tiles' | 'Test play' | 'Mouse';
 export type Shortcut = { scope: ShortcutScope; keys: string; what: string; id?: string };
 
 export const SHORTCUTS: Shortcut[] = [
   // general
-  { scope: 'General', keys: 'G 1 / G 2 / G 3 / G 4 / G 5', what: 'Workspace Level / Overworld / Graphics / Game / Packages' },
-  { scope: 'General', keys: 'G P / G M / G G / G A', what: 'Graphics: Palettes / Map16 tiles / Graphics / Animations' },
+  { scope: 'General', keys: goKeys(false).map((g) => `G ${g.key}`).join(' / '), what: `Workspace ${goKeys(false).map((g) => g.label).join(' / ')}` },
+  { scope: 'General', keys: goKeys(true).map((g) => `G ${g.key}`).join(' / '), what: `Graphics: ${goKeys(true).map((g) => g.label).join(' / ')}` },
   { scope: 'General', keys: 'Ctrl+K · Ctrl+F · Ctrl+Space', what: 'Search everywhere and run commands', id: 'search' },
   { scope: 'General', keys: 'Ctrl+Z / Ctrl+Y (Ctrl+Shift+Z)', what: 'Undo / Redo – also in dialogs that apply at once', id: 'undo' },
   { scope: 'General', keys: 'Ctrl+S', what: 'Save the level', id: 'save' },
@@ -61,14 +77,11 @@ export const SHORTCUTS: Shortcut[] = [
   { scope: 'Pixel editor', keys: '0–9 · X', what: 'Left color · swap the left and right color' },
   { scope: 'Pixel editor', keys: 'Enter / Esc', what: 'Put the floating selection down / cancel it' },
   // test play
-  { scope: 'Test play', keys: 'Arrows · X / Z · Y · S / A', what: 'Move · jump / spin · run' },
+  { scope: 'Test play', keys: 'Arrows · X · Z / Y · S · A', what: 'Move · jump (B) · run, fire (Y) · spin jump (A) · the X button' },
   { scope: 'Test play', keys: 'Enter · Shift · Q / W', what: 'Start · Select · L / R' },
   { scope: 'Test play', keys: 'P · M · Backspace (held)', what: 'Pause · sound · rewind' },
   { scope: 'Test play', keys: 'F5 / F8', what: 'Save state / restart from the savestate' },
 ];
-
-/** The keys of a command (its id in the table), for a tooltip or a menu; '' when it has none. */
-export function keysOf(id: string): string { return SHORTCUTS.find((s) => s.id === id)?.keys ?? ''; }
 
 /** The table grouped by scope, in its order. */
 export function shortcutSections(): [ShortcutScope, Shortcut[]][] {

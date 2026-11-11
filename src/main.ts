@@ -24,7 +24,7 @@ import { openEntrancesDialog, openRomInfo, openInsertDialog, openExpandDialog, o
 import { menuBar, closeMenus, type Menu } from './ui/menu.ts';
 import { viewMenu } from './ui/viewmenu.ts';
 import { LEVEL_FILE_EXT } from './core/levelfile.ts';
-import { PackagesWorkspace, setResourcesHost, type ResourceTab, type ResourceOptions } from './ui/resources.ts';
+import { PackagesWorkspace, setPackagesHost, type PackagesKind, type PackagesOptions } from './ui/pkgworkspace.ts';
 import { OverworldView } from './ui/overworld.ts';
 import { GameView } from './ui/gameview.ts';
 import { overworldReplacement } from './core/overworld.ts';
@@ -38,7 +38,7 @@ import { icon, iconLabel } from './ui/icons.ts';
 import { THEMES, themePref } from './ui/theme.ts';
 import type { IconName } from './ui/icons.ts';
 import { railButton, toolRail } from './ui/rail.ts';
-import { shortcutSections } from './ui/shortcuts.ts';
+import { shortcutSections, GO_PLACES, type WorkspaceId } from './ui/shortcuts.ts';
 
 const root = document.getElementById('app')!;
 
@@ -147,7 +147,7 @@ function buildUi(app: App): { start: (at: NavLoc | null) => Promise<void> } {
     props.root.querySelector<HTMLElement>('input, select, textarea, button')?.focus();
   });
 
-  let workspace: 'level' | 'ow' | 'gfx' | 'game' | 'pkg' = 'level';
+  let workspace: WorkspaceId = 'level';
   // the picker is shown in the level editor unless the message panel takes its place (it prefetches only then)
   // the level's side panel (ADR 0015, #478): tabs Picker | Properties – a selection shows its properties, picking
   // something to place the picker; the message panel is the Properties tab's content while it is open
@@ -235,9 +235,13 @@ function buildUi(app: App): { start: (at: NavLoc | null) => Promise<void> } {
           else add(where, `${it.label}${it.checked() ? ' (on)' : ''}`, it.shortcut, () => void it.onToggle(!it.checked()), it.title);
         }
       }
-      for (const [k, w, name] of [['G 1', 'level', 'Level'], ['G 2', 'ow', 'Overworld'], ['G 3', 'gfx', 'Graphics'], ['G 4', 'game', 'Game'], ['G 5', 'pkg', 'Packages']] as const) add('Go to', `${name} workspace`, k, () => void setWorkspace(w));
-      for (const [k, t, name] of [['G P', 'pal', 'Palettes'], ['G M', 'map16', 'Map16 tiles'], ['G G', 'gfx', 'Graphics'], ['G A', 'anim', 'Animations']] as const) add('Go to', `Graphics: ${name}`, k, () => void setWorkspace('gfx', { tab: t }));
+      for (const g of GO_PLACES) add('Go to', g.view ? `Graphics: ${g.label}` : `${g.label} workspace`, `G ${g.key}`, () => void setWorkspace(g.workspace, g.view ? { tab: g.view } : undefined));
       add('View', 'Grid on/off', "Ctrl+'", toggleGrid);
+      // (a level by its number or name: opened in the level workspace)
+      if (terms.length) for (const n of app.usedLevels()) {
+        const name = app.entrances.graph().name(n);
+        if (matchesAll(`${hex(n, 3)} ${name}`.toLowerCase(), terms)) add('Open level', `${hex(n, 3)} ${name}`, undefined, () => void setWorkspace('level').then((ok) => { if (ok) app.openLevel(n); }));
+      }
       add('View', 'Problems', 'L', () => logBar.showProblems());
       return out;
     },
@@ -396,7 +400,7 @@ function buildUi(app: App): { start: (at: NavLoc | null) => Promise<void> } {
   // switches between the level editor, the overworld editor and the graphics workspace (palettes, Map16, GFX);
   // gfx: tab to open (default: the last one), Map16 tile to show
   // at: the workspace's target (a submap and the event progress it is shown at)
-  const setWorkspace = async (w: typeof workspace, gfx?: { tab?: WsTab; tile?: number; target?: Map16Target; at?: WsTarget }, pkgAt?: { tab: ResourceTab; opts: ResourceOptions }): Promise<boolean> => {
+  const setWorkspace = async (w: typeof workspace, gfx?: { tab?: WsTab; tile?: number; target?: Map16Target; at?: WsTarget }, pkgAt?: { tab: PackagesKind; opts: PackagesOptions }): Promise<boolean> => {
     closeMenus();
     if (w === 'pkg' && workspace === 'pkg') { if (pkgAt) await pkg!.enter(pkgAt.tab, pkgAt.opts); return true; }
     if (gfx?.at && ws) ws.setTarget(gfx.at);
@@ -432,6 +436,8 @@ function buildUi(app: App): { start: (at: NavLoc | null) => Promise<void> } {
       if (gameBorder !== null) game.select('border', gameBorder); else game.show();
       gameBorder = null;
     } else if (w === 'pkg') {
+      // (a package's install or removal rewrites the ROM the level is saved into: the open level saved first, as
+      // for the overworld and game workspaces)
       if (app.dirty) app.saveLevel(true);
       if (!pkg) {
         pkg = new PackagesWorkspace(app);
@@ -585,7 +591,7 @@ function buildUi(app: App): { start: (at: NavLoc | null) => Promise<void> } {
   installStepFields();
   keepAriaStates(document.body);
   setDialogUndo(() => app.undo(), () => app.redo());
-  setResourcesHost((tab, opts) => void setWorkspace('pkg', undefined, { tab, opts }));
+  setPackagesHost((tab, opts) => void setWorkspace('pkg', undefined, { tab, opts }));
   const mouseAt = { x: -1, y: -1 }; // (the last mouse position: F12 and the keyboard's context menu act there)
   // the context menu from the keyboard everywhere (#480): Menu key or Shift+F10 opens the one of the focused control,
   // else (the level's canvas has its own: the selection's or the mouse tile's) of what is under the mouse
@@ -609,18 +615,16 @@ function buildUi(app: App): { start: (at: NavLoc | null) => Promise<void> } {
   // G then a key within a second goes to a place (#482): G 1 … G 5 the workspaces, G P / G M / G G / G A the Graphics
   // views; "G …" shown meanwhile
   let goSince = 0;
-  const goHint = h('div', { class: 'key-pending', hidden: true }, h('kbd', null, 'G'), ' … 1 Level · 2 Overworld · 3 Graphics · 4 Game · 5 Packages · P / M / G / A Graphics views');
+  const goHint = h('div', { class: 'key-pending', hidden: true }, h('kbd', null, 'G'), ` … ${GO_PLACES.map((g) => `${g.key} ${g.label}`).join(' · ')}`);
   document.body.append(goHint);
   const goEnd = () => { goSince = 0; goHint.hidden = true; };
-  const GO_WS: Record<string, 'level' | 'ow' | 'gfx' | 'game' | 'pkg'> = { 1: 'level', 2: 'ow', 3: 'gfx', 4: 'game', 5: 'pkg' };
-  const GO_TAB: Record<string, WsTab> = { p: 'pal', m: 'map16', g: 'gfx', a: 'anim' };
   const goKey = (e: KeyboardEvent): boolean => {
     if (e.ctrlKey || e.metaKey || e.altKey) { goEnd(); return false; }
     const k = e.key.toLowerCase();
     if (goSince && performance.now() - goSince < 1000) {
       goEnd();
-      if (GO_WS[k]) void setWorkspace(GO_WS[k]);
-      else if (GO_TAB[k]) void setWorkspace('gfx', { tab: GO_TAB[k] });
+      const to = GO_PLACES.find((g) => g.key.toLowerCase() === k);
+      if (to) void setWorkspace(to.workspace, to.view ? { tab: to.view } : undefined);
       else if (k === '5') void setWorkspace('pkg');
       return true;
     }
@@ -645,7 +649,7 @@ function buildUi(app: App): { start: (at: NavLoc | null) => Promise<void> } {
     // G then a key: a place (#482)
     if (goKey(e)) { e.preventDefault(); return; }
     if (k === 'F1' || k === '?') { e.preventDefault(); showHelp(); return; }
-    if (k === 'F12') { e.preventDefault(); if (mouseAt.x >= 0) gotoAt(mouseAt.x, mouseAt.y); return; }
+    if (k === 'F12') { e.preventDefault(); if (mouseAt.x < 0 || !gotoAt(mouseAt.x, mouseAt.y)) toast('F12 goes to the definition of an animated tile or color, a Map16 tile or a palette – under the mouse'); return; }
     if (ctrl && (k === "'" || e.code === 'Backslash' && e.shiftKey)) { e.preventDefault(); toggleGrid(); return; }
     if ((k === 'l' || k === 'L') && !ctrl && !e.altKey) { logBar.toggle(); return; }
     // one undo history in every workspace

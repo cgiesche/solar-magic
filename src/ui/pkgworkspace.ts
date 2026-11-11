@@ -5,7 +5,7 @@
 // (ADR 0001).
 
 import type { App } from './app.ts';
-import { h, clear, toast, choose } from './dom.ts';
+import { h, clear, toast, choose, IMMEDIATE_NOTE } from './dom.ts';
 import { pickFile } from './platform.ts';
 import { hex } from '../core/names.ts';
 import { openLevelImportDialog } from './levelimport.ts';
@@ -22,20 +22,20 @@ import { musicPane } from './musicdialog.ts';
 import { musicPlayer } from './musicplayer.ts';
 import { errorText } from './projectpane.ts';
 
-export type ResourceTab = PackagesTab;
-export interface ResourceOptions {
+export type PackagesKind = PackagesTab; // (the navigator's kinds: Packages, UberASM, Blocks, …)
+export interface PackagesOptions {
   tile?: number; // Map16 tile preselected in the blocks tab
   onChange?: () => void; // after the ROM was changed from the dialog
 }
 
-const TAB_LABEL: Record<ResourceTab, string> = { packages: 'Packages', uberasm: 'UberASM', block: 'Blocks', sprite: 'Sprites', owsprite: 'Overworld sprites', music: 'Music' };
+const KIND_LABEL: Record<PackagesKind, string> = { packages: 'Packages', uberasm: 'UberASM', block: 'Blocks', sprite: 'Sprites', owsprite: 'Overworld sprites', music: 'Music' };
 
-// the workspace shown by openResources (set by main.ts: it switches to the Packages workspace)
-let host: ((tab: ResourceTab, opts: ResourceOptions) => void) | null = null;
-export function setResourcesHost(fn: (tab: ResourceTab, opts: ResourceOptions) => void): void { host = fn; }
+// the workspace shown by openPackages (set by main.ts: it switches to the Packages workspace)
+let host: ((tab: PackagesKind, opts: PackagesOptions) => void) | null = null;
+export function setPackagesHost(fn: (tab: PackagesKind, opts: PackagesOptions) => void): void { host = fn; }
 
 /** The Packages workspace at a tab (ROM → Packages, G 5, Map16's "Custom blocks …"). */
-export async function openResources(_app: App, tab: ResourceTab = 'packages', opts: ResourceOptions = {}): Promise<void> {
+export async function openPackages(tab: PackagesKind = 'packages', opts: PackagesOptions = {}): Promise<void> {
   host?.(tab, opts);
 }
 
@@ -49,10 +49,10 @@ export class PackagesWorkspace {
   readonly root = h('div', { class: 'center pkg-main' });
   readonly side = h('div', { class: 'right pkg-side' });
   onLeave: (then: () => void) => void = (then) => then();
-  private tab: ResourceTab = 'packages';
-  private opts: ResourceOptions = {};
+  private tab: PackagesKind = 'packages';
+  private opts: PackagesOptions = {};
   private ready: Promise<void> | null = null;
-  private show: (k: ResourceTab) => void = () => {};
+  private show: (k: PackagesKind) => void = () => {};
   private setTile: (t: number) => void = () => {};
   /** The panes drawn again after an undo or redo. */
   afterUndo: () => void = () => {};
@@ -60,7 +60,7 @@ export class PackagesWorkspace {
   constructor(private app: App) {}
 
   /** Shown at tab; opts: the Blocks tab's tile, what to call after a change. */
-  async enter(tab: ResourceTab, opts: ResourceOptions = {}): Promise<void> {
+  async enter(tab: PackagesKind, opts: PackagesOptions = {}): Promise<void> {
     this.tab = tab;
     this.opts = opts;
     this.ready ??= this.build();
@@ -78,13 +78,14 @@ export class PackagesWorkspace {
     body.replaceChildren(h('p', { class: 'hint' }, 'Loading Asar …'));
     try { await loadAsar(); } catch (e) {
       clear(body).appendChild(h('p', { class: 'hint error' }, `Asar could not be loaded: ${errorText(e)}`));
+      this.ready = null; // (tried again the next time the workspace is shown)
       return;
     }
     const nav = h('div', { class: 'tabbar pkg-kinds', role: 'tablist', 'aria-orientation': 'vertical' });
     const content = h('div', { class: 'res-content' });
     const changed = () => { patches.reload(); this.opts.onChange?.(); };
-    const renderTabs = () => clear(nav).append(...(Object.keys(TAB_LABEL) as ResourceTab[]).map((k) =>
-      h('button', { class: k === this.tab ? 'active' : '', onclick: () => show(k) }, TAB_LABEL[k])));
+    const renderTabs = () => clear(nav).append(...(Object.keys(KIND_LABEL) as PackagesKind[]).map((k) =>
+      h('button', { class: k === this.tab ? 'active' : '', onclick: () => show(k) }, KIND_LABEL[k])));
     const p = { uberasm: uberPane(app, changed), block: blockPane(app, changed), sprite: pixiPane(app, changed), owsprite: bowsiePane(app, changed) };
     const music = musicPane(app, changed);
     this.afterUndo = () => {
@@ -99,7 +100,7 @@ export class PackagesWorkspace {
       leave: (then) => this.onLeave(then),
     });
     this.setTile = (t) => p.block.setTile(t);
-    const show = (k: ResourceTab): void => {
+    const show = (k: PackagesKind): void => {
       this.tab = k;
       renderTabs();
       if (k === 'music') music.render();
@@ -151,8 +152,8 @@ export class PackagesWorkspace {
       h('span', { class: 'hint', title: '.asm, .zip (e.g. from SMWCentral, or a whole UberASM Tool, GPS or PIXI folder), an AddmusicK song or sound effects (in folders 1DF9/1DFC) – everything it contains is installed as one package' },
         'or drop a file anywhere here'),
       h('span', { class: 'spacer' }),
-      h('span', { class: 'hint' }, 'Changes apply immediately · Ctrl+Z undoes'));
+      h('span', { class: 'hint' }, IMMEDIATE_NOTE));
     this.left.replaceChildren(h('div', { class: 'panel' }, h('div', { class: 'panel-title' }, 'Packages'), nav));
-    clear(body).append(h('div', { class: 'resources' }, content));
+    clear(body).append(h('div', { class: 'pkg-area' }, content));
   }
 }

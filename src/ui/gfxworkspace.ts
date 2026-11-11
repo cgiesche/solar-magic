@@ -4,7 +4,7 @@
 // the preview then shows the submap's map as the game loads it (emulated, App.overworldMap).
 
 import type { App } from './app.ts';
-import { h, toast, attachPanZoom, zoomControl, showColorLoupe, hideColorLoupe } from './dom.ts';
+import { h, toast, attachPanZoom, zoomControl, showColorLoupe, hideColorLoupe, IMMEDIATE_NOTE } from './dom.ts';
 import { viewMenu } from './viewmenu.ts';
 import { hex } from '../core/names.ts';
 import { PaletteTab } from './gfx/palettetab.ts';
@@ -376,7 +376,7 @@ export class GfxWorkspace {
       h('span', { class: 'sep' }),
       this.tools,
       h('span', { class: 'spacer' }),
-      h('span', { class: 'hint', title: 'Exception: the palette choice in the header (Palettes, in the properties) belongs to the level and is written with “Save level”.' }, 'Changes apply immediately · Ctrl+Z undoes'),
+      h('span', { class: 'hint', title: 'Exception: the palette choice in the header (Palettes, in the properties) belongs to the level and is written with “Save level”.' }, IMMEDIATE_NOTE),
       viewMenu(app, () => this.preview.update(), false));
     this.root = h('div', { class: 'ws' }, this.body);
     // the navigator: whose graphics – the open level's or a submap's (#486, the target select before)
@@ -384,7 +384,8 @@ export class GfxWorkspace {
     // the side panel: the preview pinned on top (its height by the handle, kept), the open view's properties below
     const split = h('div', { class: 'ws-prev-split', title: 'Drag: the preview\'s height', role: 'separator', 'aria-orientation': 'horizontal' });
     this.side = h('div', { class: 'right ws-side' }, this.preview.root, split, this.props);
-    const setH = (px: number) => this.preview.root.style.setProperty('flex', `0 0 ${Math.max(120, Math.min(px, window.innerHeight - 260))}px`);
+    const clampH = (px: number) => Math.round(Math.max(120, Math.min(px, window.innerHeight - 260)));
+    const setH = (px: number) => this.preview.root.style.setProperty('flex', `0 0 ${clampH(px)}px`);
     setH(previewHeight.get());
     split.addEventListener('pointerdown', (e) => {
       e.preventDefault();
@@ -392,7 +393,7 @@ export class GfxWorkspace {
       const move = (ev: PointerEvent) => setH(h0 + ev.clientY - y0);
       const up = (ev: PointerEvent) => {
         window.removeEventListener('pointermove', move); window.removeEventListener('pointerup', up);
-        previewHeight.set(Math.round(h0 + ev.clientY - y0));
+        previewHeight.set(clampH(h0 + ev.clientY - y0)); // (as shown: within what the preference takes)
       };
       window.addEventListener('pointermove', move);
       window.addEventListener('pointerup', up);

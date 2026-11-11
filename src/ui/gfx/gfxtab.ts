@@ -985,6 +985,7 @@ export class GfxTab implements WsPanel {
         y: Math.max(0, Math.min(rows - 1, Math.floor(((e.clientY - rc.top) / rc.height) * rows))),
       };
     };
+    c.dataset.goto = ''; // (F12: an animated tile's animation)
     c.addEventListener('mousedown', (e) => {
       if (!this.file || (e.button !== 0 && e.button !== 2)) return;
       e.preventDefault();
@@ -1064,6 +1065,7 @@ export class GfxTab implements WsPanel {
       const rc = c.getBoundingClientRect(), r = this.paneRect();
       return { x: r.x + Math.floor(((e.clientX - rc.left) / rc.width) * r.w), y: r.y + Math.floor(((e.clientY - rc.top) / rc.height) * r.h) };
     };
+    c.dataset.goto = ''; // (F12: an animated tile's animation)
     c.addEventListener('mousedown', (e) => {
       if (!this.file || (e.button !== 0 && e.button !== 2)) return;
       e.preventDefault();

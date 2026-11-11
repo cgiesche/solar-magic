@@ -270,6 +270,9 @@ export function dialogUndoKeys(body: HTMLElement, undo: () => void, redo: () => 
   return () => window.removeEventListener('keydown', keys);
 }
 
+// what an immediate dialog or workspace says about its changes (#481)
+export const IMMEDIATE_NOTE = 'Changes apply immediately · Ctrl+Z undoes';
+
 // the editor's undo and redo for dialogs whose changes apply at once (main.ts sets them)
 let editorUndo: { undo: () => void; redo: () => void } | null = null;
 export function setDialogUndo(undo: () => void, redo: () => void): void { editorUndo = { undo, redo }; }
@@ -317,7 +320,7 @@ export function modal(title: string, body: HTMLElement, buttons: { label: string
   const box = h('div', { class: `modal${opts.className ? ` ${opts.className}` : ''}`, role: 'dialog', 'aria-label': title },
     h('div', { class: 'modal-title' }, h('span', { class: 'modal-title-text' }, title, count), h('button', { class: 'icon-btn', onclick: () => close(), title: 'Close (Esc)', 'aria-label': 'Close' }, icon('close'))),
     h('div', { class: 'modal-body' }, body),
-    order.length || imm ? h('div', { class: 'modal-buttons' }, imm ? h('span', { class: 'hint modal-note' }, 'Changes apply immediately · Ctrl+Z undoes') : null, order) : null,
+    order.length || imm ? h('div', { class: 'modal-buttons' }, imm ? h('span', { class: 'hint modal-note' }, IMMEDIATE_NOTE) : null, order) : null,
   );
   box.addEventListener('keydown', (e) => {
     if (e.key !== 'Enter' || e.defaultPrevented || e.ctrlKey || e.altKey || e.metaKey || e.shiftKey || !primary || primary.disabled) return;
@@ -446,6 +449,7 @@ export function attachRectPick(c: HTMLElement, cols: number, rows: number, show:
       y: Math.max(0, Math.min(rows - 1, Math.floor((e.clientY - rc.top) / (rc.height / rows)))),
     };
   };
+  if (jump) c.dataset.goto = ''; // (F12 goes to a cell's definition, gotoAt)
   c.addEventListener('mousedown', (e) => {
     if (e.button !== 0) return;
     e.preventDefault();
@@ -555,8 +559,9 @@ export function keepAriaStates(root: HTMLElement): void {
 // Ctrl+click is no longer one: Ctrl+click adds to the selection wherever there is one.)
 export function isGoto(e: MouseEvent): boolean { return (e as MouseEvent & { gotoDefinition?: boolean }).gotoDefinition === true; }
 export function gotoAt(x: number, y: number): boolean {
+  // (only where a definition can be gone to – marked data-goto –: elsewhere the click would be a real one)
   const el = document.elementFromPoint(x, y);
-  if (!el) return false;
+  if (!el?.closest('[data-goto]')) return false;
   for (const type of ['mousedown', 'mouseup', 'click']) {
     // (ctrlKey too: handlers that leave a Ctrl+click alone leave it alone)
     const ev = new MouseEvent(type, { bubbles: true, cancelable: true, clientX: x, clientY: y, button: 0, ctrlKey: true });

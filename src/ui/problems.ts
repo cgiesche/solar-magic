@@ -63,7 +63,7 @@ export function problemsButton(app: App, reveal: (uids: number[]) => void): Retu
     else { app.reveal = { x: p.tx * 16 + 8, y: p.ty * 16 + 8 }; app.emit('reveal'); }
   };
   return problemListButton<Problem>({
-    title: 'Problems found in this level', heading: 'Problems in this level', collect: () => collectProblems(app, reveal),
+    title: 'Problems found in this level', heading: 'Problems in this level', collect: () => collectProblems(app, reveal), scope: () => app.level?.number,
     canOpen: (p) => !!p.where || !!p.message,
     open: (p) => { if (p.where) show(p.where); if (p.message) app.openMessages(p.message.translevel, p.message.msg); },
   });
@@ -75,9 +75,11 @@ export interface ListedProblem { key: string; severity: Severity; text: string; 
 // them (an entry `open`s where the problem is, Fix runs its fix). A new error opens the panel. update() recounts
 export function problemListButton<P extends ListedProblem>(o: {
   title: string; heading: string; collect: () => P[]; canOpen: (p: P) => boolean; open: (p: P) => void;
+  scope?: () => unknown; // what the problems are of (the level): another one's errors are not new
 }): HTMLButtonElement & { update: () => void; list: HTMLElement; count: () => ProblemCount } {
   let found: P[] = [];
-  let errorsBefore = -1;
+  // the errors listed before (by key) and what they were of: an error not among them is new
+  let errorsBefore: { scope: unknown; keys: Set<string> } | null = null;
   const list = h('div', { class: 'problem-list', role: 'list', 'aria-label': o.heading });
   const btn = h('button', { class: 'status-warn', hidden: true, title: `${o.title} – shown in the Problems panel` }) as HTMLButtonElement & { update: () => void; list: HTMLElement; count: () => ProblemCount };
   const fill = () => {
@@ -102,10 +104,11 @@ export function problemListButton<P extends ListedProblem>(o: {
     btn.classList.toggle('status-info', !worst);
     btn.replaceChildren(...(shown ? iconLabel('warning', `${shown} problem${shown > 1 ? 's' : ''}`) : iconLabel('info', `${found.length} note${found.length > 1 ? 's' : ''}`)));
     fill();
-    // (a new error – not the first check – opens the panel, #479's decision; warnings only count)
-    const errors = btn.count().errors;
-    if (errorsBefore >= 0 && errors > errorsBefore && list.isConnected) bottomPanel()?.showProblems();
-    errorsBefore = errors;
+    // (a new error – not one listed before, nor another level's – opens the panel, #479's decision; warnings only count)
+    const scope = o.scope?.(), keys = new Set(found.filter((p) => p.severity === 'error').map((p) => p.key));
+    const fresh = errorsBefore !== null && errorsBefore.scope === scope && [...keys].some((k) => !errorsBefore!.keys.has(k));
+    if (fresh && list.isConnected) bottomPanel()?.showProblems();
+    errorsBefore = { scope, keys };
     if (list.isConnected) bottomPanel()?.refreshProblems();
   };
   return btn;

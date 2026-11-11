@@ -66,7 +66,7 @@ _Avoid_: structure (old name), custom object, stamp, collection
 **Picker**: the panel something to place or paint is chosen from. Keeps pixels at whole-number scale.
 _Avoid_: palette, Insert panel, tile selector
 
-**Side panel**: right panel holding only the tool and the selection ("Paint | Properties"); settings go to popovers/dialogs, reference to popovers or the status bar (ADR 0015).
+**Side panel**: right panel holding only the tool and the selection ("Picker | Properties" in every editor); settings go to popovers/dialogs, reference to popovers or the status bar (ADR 0015).
 _Avoid_: sidebar, inspector
 
 **Picked item**: what a right click places (object, Map16 block, prefab, sprite – or none). Without one the right click opens the context menu.

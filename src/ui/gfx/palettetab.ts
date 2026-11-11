@@ -312,7 +312,7 @@ export class PaletteTab implements WsPanel {
       const cells = h('div', { class: 'pt-cells' });
       for (let c = 0; c < 16; c++) {
         const i = row * 16 + c;
-        const sw = h('div', { class: 'pt-sw' });
+        const sw = h('div', { class: 'pt-sw', 'data-goto': '' }); // (F12: its animation)
         sw.addEventListener('mousedown', (e) => {
           e.preventDefault();
           if (e.button === 0 && isGoto(e)) { this.gotoAnim(i); return; }

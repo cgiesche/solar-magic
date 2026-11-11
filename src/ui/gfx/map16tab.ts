@@ -21,7 +21,7 @@ import { TileCache } from '../../core/render.ts';
 import { hex } from '../../core/names.ts';
 import { EXT_TILES, actsLike, setActsLike } from '../../core/map16ext.ts';
 import { blockFileOf } from '../blockdialog.ts';
-import { openResources } from '../resources.ts';
+import { openPackages } from '../pkgworkspace.ts';
 import { parseMap16File, map16Targets, writeMap16File, type Map16File } from '../../core/map16file.ts';
 import { renderMap16Sheet } from '../panels.ts';
 import { probeText } from '../../core/blockprobe.ts';
@@ -716,7 +716,7 @@ export class Map16Tab implements WsPanel {
       for (let k = 0; k < 7; k++) pp[k] = allPal[p * 16 + 1 + k * 2] | 0xff000000;
       cx.putImageData(im, 0, 0);
       const btn = h('button', {
-        class: `mt-pal${s.pals.has(p) ? ' active' : ''}`, title: `Palette ${p} (key ${p + 1}) · hover: preview on the marked quarters${d.palettes ? ' · F12: open in the Palettes tab' : ''}`,
+        class: `mt-pal${s.pals.has(p) ? ' active' : ''}`, 'data-goto': '', title: `Palette ${p} (key ${p + 1}) · hover: preview on the marked quarters${d.palettes ? ' · F12: open in the Palettes tab' : ''}`,
         onclick: (e: MouseEvent) => {
           if (isGoto(e) && d.palettes) { this.ws.showPalette(p, 1); return; }
           this.editQuarters(setPalette(p), `Palette ${p}`);
@@ -1019,7 +1019,7 @@ export class Map16Tab implements WsPanel {
           : h('div', { class: 'grow' }, tiles.length === 1 && a === t ? 'like itself' : `like tile ${hex(a, 3)}`, of, h('div', { class: 'hint' }, info ? probeText(info) : 'determining …')),
         h('button', { onclick: () => this.pickActs(tiles), title: `Act like another tile${tiles.length > 1 ? ' (all marked tiles)' : ''}` }, 'Change …')),
       tiles.length === 1 ? h('div', { class: 'row' }, h('span', { class: 'hint grow' }, file ? `Custom Block: ${file}` : 'No custom block'),
-        h('button', { onclick: () => void openResources(app, 'block', { tile: t, onChange: () => this.redraw() }) }, 'Custom Blocks …')) : '',
+        h('button', { onclick: () => void openPackages('block', { tile: t, onChange: () => this.redraw() }) }, 'Custom Blocks …')) : '',
     );
   }
 

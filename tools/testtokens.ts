@@ -23,16 +23,20 @@ const defined = new Set([...css.matchAll(/(--[a-z0-9-]+)\s*:/g)].map((m) => m[1]
 for (const m of code.matchAll(/setProperty\('(--[a-z0-9-]+)'/g)) defined.add(m[1]);
 const used = new Set([
   ...[...css.matchAll(/var\((--[a-z0-9-]+)/g)].map((m) => m[1]),
-  ...[...code.matchAll(/'(--[a-z0-9-]+)'/g)].map((m) => m[1]),
+  ...[...code.matchAll(/'(--[a-z][a-z0-9-]*)'/g)].map((m) => m[1]),
 ]);
 const missing = [...used].filter((v) => !defined.has(v));
 check(missing.length === 0, `every token used is defined (${missing.join(', ') || 'all'})`);
 
 // the stylesheet without its token blocks (:root, the start page's own) has no color literals but black ones
-const rules = css.replace(/:root[^{]*\{[^}]*\}/g, '');
+const rules = css.replace(/\/\*[\s\S]*?\*\//g, '').replace(/:root[^{]*\{[^}]*\}/g, '');
 const literals = [...rules.matchAll(/#[0-9a-fA-F]{3,8}\b|rgba?\([^)]*\)/g)].map((m) => m[0])
   .filter((c) => !/^rgba?\(\s*0\s*,\s*0\s*,\s*0\s*[,)]/.test(c) && !/^#000[0-9a-fA-F]?$/.test(c));
 check(literals.length === 0, `no color literals outside the tokens (${literals.join(', ') || 'none'})`);
+
+// no token defined by itself (var(--x) in --x's own value: invalid, the property falls back to nothing)
+const selfRef = [...css.matchAll(/(--[a-z0-9-]+)\s*:([^;]*);/g)].filter((m) => m[2].includes(`var(${m[1]})`) || m[2].includes(`var(${m[1]},`)).map((m) => m[1]);
+check(selfRef.length === 0, `no token refers to itself (${selfRef.join(', ') || 'none'})`);
 
 // the light theme (#474): the same values for System (the media query) and for View → Theme → Light, and only tokens
 // the dark theme has
