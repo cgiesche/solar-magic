@@ -5,7 +5,7 @@
 //   found and what is missing;
 // - installPackage: applies every part of a previewed upload and records what it brought as one package
 //   (observed like pkgreg.ts does: the ROM's projects before and after); all or nothing;
-// - reapplyPackagePatch: a package's patch with other settings;
+// - reapplyPackagePatch: a package's patch with other settings; editPackagePatchFile: with a file of it edited;
 // - importForPackage: a graphics file of an installed package imported, its number recorded with it.
 // Detecting, planning and applying each part kind is its part adapter's (pkgparts.ts); recording what a
 // package brought and removing it again is the registry's (pkgreg.ts uninstallPackage). The recorder is
@@ -15,7 +15,7 @@ import { zipSync, unzipSync } from 'fflate';
 import { Rom } from './rom.ts';
 import { reapplyPatch, type ApplyResult } from './patchapply.ts';
 import { PART_KINDS, type PartKind, type ToolKind } from './parts.ts';
-import { uploadFiles, uploadFromFiles, withDefines, type UploadCode } from './patchpkg.ts';
+import { uploadFiles, uploadFromFiles, withDefines, type UploadCode, type StoredUpload } from './patchpkg.ts';
 import { suggestMapping, placed, suggestCalls, packageDocs, type PkgSuggestion } from './pkgmap.ts';
 import { detectGraphics, includedFiles, applyLevelSetup } from './pkgplan.ts';
 import { setCustomPalette } from './patches.ts';
@@ -30,7 +30,7 @@ import { NO_FREE_ENTRANCE } from './entrances.ts';
 import { saveLevel } from './save.ts';
 import { sampleSlots, placeSampleMessages } from './pkgsamples.ts';
 import { assignSlot } from './gfxslots.ts';
-import { recordPackageChange, recordPackageChangeAsync, listPackages, packageArchive, type Package } from './pkgreg.ts';
+import { recordPackageChange, recordPackageChangeAsync, listPackages, packageArchive, setPackageFile, type Package } from './pkgreg.ts';
 import { uploadObjectText, objectTextNotes, isObjectTextFile } from './objtext.ts';
 import { allOrNothing } from './romedit.ts';
 import { callistoProject, includesCallistoHeader, sharedCode, type CallistoProject } from './callisto.ts';
@@ -357,6 +357,19 @@ export async function installPackage(rom: Rom, preview: ReadyPreview | ManualPre
 // patch's new id goes into the package's record (`rec`; null: none). Run it in an edit session.
 export function reapplyPackagePatch(rom: Rom, entryId: string, upload: UploadCode, fileName: string, main: string, values: Record<string, string>, rec: Package | null): ApplyResult {
   return recordedIn(rom, rec, () => reapplyPatch(rom, entryId, patchSource(upload, fileName, main, values)));
+}
+
+// a file of an installed package's patch edited: the patch applied anew from its stored sources (`stored`), the
+// file `path` replaced by `data`, the settings `values` on top; the patch's sources and the package's files keep the edit (one
+// version of each file). Run it in an edit session: when Asar fails (ok false) it puts the ROM back.
+export function editPackagePatchFile(rom: Rom, entryId: string, stored: StoredUpload, path: string, data: Uint8Array, values: Record<string, string>, rec: Package | null): ApplyResult {
+  const files = new Map(stored.files);
+  if (!files.has(path)) throw new Error(`${path} is not a file of the patch`);
+  files.set(path, data);
+  const upload = { ...uploadFromFiles(stored.fileName, files), main: stored.main };
+  const r = reapplyPackagePatch(rom, entryId, upload, stored.fileName, stored.main, values, rec);
+  if (r.ok && rec) setPackageFile(rom, rec.id, path, data);
+  return r;
 }
 
 // writes a file imported for an installed package (`into`; null: for none; the graphics tab's import):

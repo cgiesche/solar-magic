@@ -10,7 +10,7 @@ import type { PatchEntry } from '../core/patchreg.ts';
 import type { ApplyResult } from '../core/patchapply.ts';
 import { listPackages, packageSummary, packageRemoval, uninstallPackage, packagePatches, type Package } from '../core/pkgreg.ts';
 import { toolContent, looseFiles, type ToolProjects } from '../core/pkgsections.ts';
-import { reapplyPackagePatch, packageFiles } from '../core/packages.ts';
+import { reapplyPackagePatch, editPackagePatchFile, packageFiles } from '../core/packages.ts';
 import { loadMusicProject, songHex, sfxKey } from '../core/music.ts';
 import { playButton, playSong, currentSongs } from './musicdialog.ts';
 import { isGfxData } from '../core/gfxfiles.ts';
@@ -23,7 +23,7 @@ import type { BlockProject } from '../core/blocks.ts';
 import { blankTile } from '../core/render.ts';
 import { storedUpload, toUpload, settingsForm, patchDone, type PackagesTab } from './patchmanager.ts';
 import { errorText, type Pane } from './projectpane.ts';
-import { definesButton, editButton } from './defineedit.ts';
+import { definesButton, editButton, isTextFile } from './defineedit.ts';
 import { openDocs, packageDocs } from './docview.ts';
 import { gfxName } from './gfx/map16tab.ts';
 import { TOOL_KINDS, type ToolKind } from '../core/parts.ts';
@@ -143,16 +143,31 @@ export function packagesPane(app: App, host: PackagesHost): { el: HTMLElement; r
     const m = upload.manifest;
     if (m?.description) box.appendChild(h('p', null, m.description));
     const form = settingsForm(upload, s.main, p.defines);
-    const again = () => {
-      // one undoable ROM edit with the package's record; the ROM changed when ok
+    // one undoable ROM edit with the package's record (the ROM changed when ok); false when it failed (logged)
+    const run = (label: string, change: () => ApplyResult): boolean => {
       let r: ApplyResult;
-      try { r = app.romEdit(`Patch “${upload.name}” reapplied`, () => reapplyPackagePatch(app.rom, p.id, upload, s.fileName, s.main, form.read(), rec)); }
+      try { r = app.romEdit(`Patch “${upload.name}” ${label}`, change); }
       catch (e) { r = { ok: false, errors: [errorText(e)], warnings: [], prints: [] }; }
-      if (!r.ok) { logTool(`Patch “${upload.name}”`, r); return; }
+      if (!r.ok) { logTool(`Patch “${upload.name}”`, r); return false; }
       patchDone(upload.name, true, r);
       host.changed();
+      return true;
     };
+    const again = () => run('reapplied', () => reapplyPackagePatch(app.rom, p.id, upload, s.fileName, s.main, form.read(), rec));
     box.append(form.el, h('div', { class: 'row' }, h('button', { onclick: again, title: 'Reapply the patch with these settings' }, 'Reapply')));
+    // its text files (the main one first, then e.g. a tables file it includes) edited as the tool parts' are: OK
+    // reapplies the patch with the file (the settings above on top); when Asar fails, nothing changes
+    const files = new Map(s.files);
+    const texts = [...files.keys()].filter(isTextFile).sort((a, b) => Number(b === s.main) - Number(a === s.main) || a.localeCompare(b));
+    const edited = (f: string) => () => {
+      if (!run(`– ${base(f)} edited`, () => editPackagePatchFile(app.rom, p.id, s, f, files.get(f)!, form.read(), rec))) files.set(f, upload.files.get(f)!);
+    };
+    // (the main file's defines are the settings above)
+    const rows = texts.map((f) => h('tr', null, h('td', { class: 'mono', title: f }, f, f === s.main ? h('span', { class: 'hint' }, ' (main file)') : ''),
+      h('td', { class: 'actions' }, f === s.main ? null : definesButton(files, f, edited(f)), editButton(files, f, edited(f)))));
+    if (rows.length) box.append(rows.length > 6
+      ? h('details', { class: 'pkg-files' }, h('summary', null, `Files (${rows.length})`), h('table', { class: 'uber-table' }, rows))
+      : h('table', { class: 'uber-table' }, rows));
     return box;
   }
 

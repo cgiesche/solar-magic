@@ -5,7 +5,7 @@
 // registry: a RATS block holding "SMWK", a version byte and deflated JSON; the package's own files (zip)
 // in RATS blocks of their own when small enough.
 
-import { deflateSync, inflateSync } from 'fflate';
+import { deflateSync, inflateSync, unzipSync, zipSync } from 'fflate';
 import { Rom, pcToSnes } from './rom.ts';
 import type { UberContext, Other } from './uberasm.ts';
 import type { SpriteFolder } from './pixirt.ts';
@@ -99,6 +99,20 @@ export function removePackageRecord(rom: Rom, id: string): void {
 // the package's files, null if they are not kept
 export function packageArchive(rom: Rom, r: Package): Uint8Array | null {
   return r.srcId ? rom.getBlob(r.srcId) : null;
+}
+
+// a file of the package's kept files replaced (an edited file of its patch): the package keeps one version of
+// each file; nothing when its files are not kept, throws when they lack the file. Blobs are never changed in place:
+// the files go into a new one
+export function setPackageFile(rom: Rom, id: string, path: string, data: Uint8Array): void {
+  const rec = listPackages(rom).find((r) => r.id === id);
+  const a = rec && packageArchive(rom, rec);
+  if (!rec || !a) return;
+  const files = unzipSync(a);
+  if (!(path in files)) throw new Error(`${path} is not among the package's files`);
+  files[path] = data.slice();
+  rom.dropBlob(rec.srcId!);
+  savePackage(rom, { ...rec, srcId: rom.putBlob(zipSync(files, { level: 9 })) });
 }
 
 
