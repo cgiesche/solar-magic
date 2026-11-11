@@ -1,4 +1,4 @@
-// "Packages" tab of the patches dialog: the installed packages on the left, the chosen one on the right
+// The "Packages" kind of the Packages workspace: the installed packages on the left, the chosen one on the right
 // with everything it brought – its patch with the settings, where its UberASM code runs, its blocks and
 // sprites with their files' settings, its ExGFX files – the graphics and other files in the package to
 // take later (import a graphic, add a part), and removing it with all of that.

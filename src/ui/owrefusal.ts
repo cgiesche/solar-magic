@@ -86,7 +86,7 @@ export function refusalWords(rom: Rom, r: OwRefusalData): RefusalWords {
     case 'exitPathsFull': return w('This path between submaps can\'t be linked',
       `the game has room for ${r.max} paths between submaps, and all are taken`, 'Remove a path between submaps you don\'t need first.');
     case 'noFreeL1Tile': return w('No new layer 1 tile can be made', 'every tile of the overworld already has a look of its own, is on a map or does something where Mario walks',
-      'Change a tile no map uses in the Map16 tab instead.');
+      'Change a tile no map uses in Map16 tiles instead.');
     case 'eventStorageFull': return w('The event\'s changes to the map can\'t be written',
       'the game keeps the tiles all events change in one store, and it is full',
       'Let this or other events change fewer tiles of layer 2.');

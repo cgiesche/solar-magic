@@ -67,7 +67,7 @@ When a level is displayed, it runs the ROM's **original loading routines** (~15 
   (picked from the level or layer 3's 2bpp tiles), palette, priority, flips and erase; saved into the level's
   layer 3 tilemap file (LT3, a new one when it has none).
 * Objects: select (also by rectangle, Ctrl+click), move (mouse/arrow keys), resize via handle/keys,
-  insert (right-click/Shift+click with a palette entry; after selecting in the level, a copy of the selection),
+  insert (right-click/Shift+click with the picked item; after selecting in the level, a copy of the selection),
   delete, copy/paste/duplicate,
   drawing order (PgUp/PgDn), undo/redo.
 * Palette: standard objects 01–3F, extended objects, **direct Map16 placement** (any tile, see patch),
@@ -129,7 +129,7 @@ When a level is displayed, it runs the ROM's **original loading routines** (~15 
   empty message and messages no box opens. The clean game's messages move to the levels that showed them. When an
   installed package draws the message boxes itself (a VWF dialog patch – the editor finds out by opening a box in the
   emulator), the panel, the preview and the checks say which package draws them instead; its install says so too.
-* **Test level (T):** play the level in the built-in emulator (a changed level is saved first, so entering it again after dying plays the same), with keyboard or gamepad, with music and sound effects (M mutes the sound). It is played in a game in progress, entered from its overworld tile (a sub-level through its main level), so the midway tape counts: dying returns to the overworld, entering the level again starts at the midway point once touched.
+* **Test play (T):** play the level in the built-in emulator (a changed level is saved first, so entering it again after dying plays the same), with keyboard or gamepad, with music and sound effects (M mutes the sound). It is played in a game in progress, entered from its overworld tile (a sub-level through its main level), so the midway tape counts: dying returns to the overworld, entering the level again starts at the midway point once touched.
 
 ### Music
 * **Import songs** (*ROM → Packages … → Upload package …*): songs in AddmusicK format (`.zip` from SMWCentral

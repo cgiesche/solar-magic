@@ -444,8 +444,8 @@ export class GfxTab implements WsPanel {
     const pick = await choose('Remap Map16 tiles?', h('div', { style: 'max-width:480px' },
       h('p', null, !m.levels ? `${gfxName(file)} moved from ${span(from)} to ${span(to)}.` : `${gfxName(file)} is in ${span(from)} in ${m.levels} other level${m.levels > 1 ? 's' : ''}, here in ${span(to)}.`,
         ` Map16 tiles made for it still point at ${from.name}.`),
-      h('p', { class: 'hint' }, `The Map16 tab's remap opens with ${line} for the tiles 200–FFF that use these 8x8 tiles; the preview shows them before anything changes. Map16 tiles are shared by all levels: one that keeps ${gfxName(file)} in ${from.name} then shows them wrong.`)),
-      [{ label: 'Remap …', primary: true }, { label: 'Not now' }]);
+      h('p', { class: 'hint' }, `Map16 tiles' Remap tiles … opens with ${line} for the tiles 200–FFF that use these 8x8 tiles; the preview shows them before anything changes. Map16 tiles are shared by all levels: one that keeps ${gfxName(file)} in ${from.name} then shows them wrong.`)),
+      [{ label: 'Remap tiles …', primary: true }, { label: 'Not now' }]);
     if (pick === 0) this.ws.showRemap({ line, scope: 'uses', target: 'fg' });
   }
 

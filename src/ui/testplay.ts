@@ -1,4 +1,4 @@
-// "Test level": runs the edited level in the built-in emulator (video, sound, input) – or the game from the
+// Test play: runs the edited level in the built-in emulator (video, sound, input) – or the game from the
 // overworld (core/playsession.ts fromOverworld). The sound unit is emulated too (apu.ts): the game uploads and
 // plays its music and sound effects itself.
 
@@ -154,9 +154,9 @@ function start(app: App, o: Origin, audio: AudioOut, fromSave: boolean): void {
 
 // what the title says the test starts from
 function originText(app: App, o: Origin): string {
-  if (o.kind === 'level') return `Test level – ${hex(app.level.number, 3)}${o.at ? ` from ${hex(o.at.tx, 2)}/${hex(o.at.ty, 2)}` : ''}`;
+  if (o.kind === 'level') return `Level ${hex(app.level.number, 3)}${o.at ? ` from ${hex(o.at.tx, 2)}/${hex(o.at.ty, 2)}` : ''}`;
   const { x, y } = l1XY(o.tile);
-  return `Test play – overworld, ${o.tile < 0 ? 'start position' : `tile ${hex(x, 2)},${hex(y, 2)} (${o.tile >= 0x400 ? 'submaps' : 'main map'})`}, the map ${progressWords(o.progress)}`;
+  return `Overworld, ${o.tile < 0 ? 'start position' : `tile ${hex(x, 2)},${hex(y, 2)} (${o.tile >= 0x400 ? 'submaps' : 'main map'})`}, the map ${progressWords(o.progress)}`;
 }
 
 function play(app: App, o: Origin, audio: AudioOut, p: PlaySession, ppu: PPU, ok: boolean, fromSave: boolean): void {

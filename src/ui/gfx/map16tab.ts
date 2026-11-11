@@ -425,7 +425,7 @@ export class Map16Tab implements WsPanel {
       h('button', { onclick: () => this.copy(), title: 'Copy the selected tiles, with acts-like (Ctrl+C)' }, 'Copy'),
       h('button', { onclick: () => this.paste(), title: 'Paste starting at the selected tile (Ctrl+V)' }, 'Paste'),
       h('button', { class: this.remapping ? 'active' : '', onclick: () => (this.remapping ? this.closeRemap() : this.openRemap()),
-        title: 'Change the 8x8 tile numbers, palettes or acts-like of tiles in bulk (Lunar Magic\'s Remap)' }, 'Remap …'),
+        title: 'Change the 8x8 tile numbers, palettes or acts-like of tiles in bulk (Lunar Magic\'s Remap)' }, 'Remap tiles …'),
       !t.move ? '' : h('button', { class: this.moving ? 'active' : '', onclick: () => (this.moving ? this.closeMove() : this.openMove()),
         title: 'Move the selected tiles to other numbers, with every level, prefab and block using them' }, 'Move …'),
       !t.acts ? '' : h('label', { class: 'toggle', title: 'Mark all tiles that act like the selected one' },

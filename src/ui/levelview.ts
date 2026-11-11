@@ -726,7 +726,7 @@ export class LevelView {
     this.pos.textContent = '';
     this.status.textContent = isBrushMode(m) ? 'Click/drag picks up tiles as brush · Right click/Shift+click paints'
       : m === 'exit' ? 'Click an entrance (M, Z, S) or screen to select it – edit it on the right under “Properties” · Drag moves entrances · Right click: new entrance, create exit …'
-        : 'Click selects, drag moves, click into nothing deselects all · Right click/Shift+click places the item chosen in “Insert”, else opens the menu · Alt+click: item underneath';
+        : 'Click selects, drag moves, click into nothing deselects all · Right click/Shift+click places the picked item, else opens the menu · Alt+click: item underneath';
   }
 
   updateStatus(tx: number, ty: number): void {
