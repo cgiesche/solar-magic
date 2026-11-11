@@ -121,8 +121,9 @@ export class GfxTab implements WsPanel {
   private paneView = h('div', { class: 'gt-pane-view' }, this.pane);
   private paneHead = h('div', { class: 'ws-bar gt-pane-head' });
   private paneRail = toolRail('Pixel tools'); // (#477)
-  private side = h('div', { class: 'gt-side' });
+  readonly side = h('div', { class: 'gt-side' }); // (under the preview, #486)
   private tools = h('div', { class: 'ws-bar' });
+  get bar(): HTMLElement { return this.tools; } // (in the workspace's context bar, #486)
 
   constructor(app: App, ws: GfxWorkspace) {
     this.app = app;

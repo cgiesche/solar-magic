@@ -74,7 +74,8 @@ export class PaletteTab implements WsPanel {
   private rows = h('div', { class: 'pt-rows' });
   private detail = h('div', { class: 'pt-detail' });
   private headerBox = h('div', { class: 'pt-header' });
-  private bar = h('div', { class: 'ws-bar' });
+  readonly bar = h('div', { class: 'ws-bar' }); // (in the workspace's context bar, #486)
+  get side(): HTMLElement { return this.detail; } // (under the preview, #486)
   private swatches: HTMLElement[] = [];
   private rowLabels: HTMLElement[] = [];
   private visible = false;

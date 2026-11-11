@@ -371,6 +371,7 @@ function buildUi(app: App): { start: (at: NavLoc | null) => Promise<void> } {
   app.on('zoom', updateToolbar);
 
   const left = h('div', { class: 'left' }, levels.root);
+  const gfxLeft = h('div', { class: 'left gfx-left' });
   const center = h('div', { class: 'center with-rail' }, modes, h('div', { class: 'center-main' }, view.root, status));
   const right = h('div', { class: 'right' }, levelTabs, picker.root, propsHost);
   renderLevelSide();
@@ -442,13 +443,16 @@ function buildUi(app: App): { start: (at: NavLoc | null) => Promise<void> } {
     } else if (w === 'gfx') {
       if (!ws) { ws = new GfxWorkspace(app); ws.onNav = (jump) => nav?.mark(jump); }
       if (gfx?.at) ws.setTarget(gfx.at);
-      showLayout(ws.bar, left, ws.root, ws.side);
+      // (the navigator: the target, then the level list – another level's graphics, #486)
+      gfxLeft.replaceChildren(ws.nav, levels.root);
+      showLayout(ws.bar, gfxLeft, ws.root, ws.side);
       layout.classList.add('gfx-mode');
       // the level view is only up to date when coming from it
       const hv = from === 'level' ? view.hover : null;
       ws.enter(gfx?.tab ?? ws.tab, hv ? { tx: hv.tx, ty: hv.ty } : view.centerTile());
       if (gfx?.tab === 'map16' && gfx.tile !== undefined) ws.showMap16(gfx.tile, gfx.target, gfx.at);
     } else {
+      left.replaceChildren(levels.root);
       showLayout(levelBar, left, center, right);
       view.layout();
     }

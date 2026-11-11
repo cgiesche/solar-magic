@@ -125,10 +125,10 @@ export class AnimTab implements WsPanel {
   private triggers = false; // the side shows the trigger panel
   // the colors of the selected rotation the game keeps setting itself, from the emulated level (null: not known yet)
   private held: { key: string; render: LevelRender | null; colors: number[] | null; timer: number } = { key: '', render: null, colors: null, timer: 0 };
-  private bar = h('div', { class: 'ws-bar' });
+  readonly bar = h('div', { class: 'ws-bar' }); // (in the workspace's context bar, #486)
   private slotsBox = h('div', { class: 'at-slots' });
   private detail = h('div', { class: 'at-detail' });
-  private side = h('div', { class: 'at-side' });
+  readonly side = h('div', { class: 'at-side' }); // (under the preview, #486)
   private previews: { c: HTMLCanvasElement; slot: number }[] = [];
   // what the ROM holds, read once per build (drawing reads it many times)
   private view: ExList = emptyList();

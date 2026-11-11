@@ -645,7 +645,19 @@ canvas.sheet-fill { width: 100%; height: auto; image-rendering: auto; }
 .badge { font-size: 11px; padding: 2px 7px; border-radius: 10px; background: var(--accent-strong); color: var(--on-accent); }
 .badge.muted { background: var(--surface-2); color: var(--text); }
 .ws-placeholder { display: flex; align-items: center; justify-content: center; }
-.ws-side { padding: 6px; }
+.ws-side { padding: 6px; display: flex; flex-direction: column; gap: 0; }
+/* the Graphics workspace (#486): the open view's actions in the one context bar, the preview pinned on top of the side
+   panel with the view's properties under it, the target in the navigator */
+.ctxbar .ws-tools, .ctxbar .ws-tools > .ws-bar { display: contents; }
+.ws-side > .ws-prev { flex: 0 0 320px; min-height: 120px; }
+.ws-prev-split { flex: none; height: 7px; margin: 2px 0; cursor: row-resize; border-radius: 3px; }
+.ws-prev-split:hover { background: var(--border); }
+.ws-props { flex: 1; min-height: 0; overflow: auto; display: flex; flex-direction: column; }
+.ws-props > * { flex: none; max-width: 100%; }
+.gfx-left { display: flex; flex-direction: column; }
+.gfx-left > .levels { flex: 1; min-height: 0; }
+.ws-targets { flex: none; border-bottom: 1px solid var(--border); }
+.ws-target-list { flex: none; max-height: 240px; font-family: var(--font-ui); }
 .ws-prev { display: flex; flex-direction: column; gap: 4px; min-height: 0; flex: 1; }
 .ws-prev-scroll { flex: 1; overflow: auto; border: 1px solid var(--border); background: var(--canvas-bg); min-height: 120px; }
 .ws-prev-box { position: relative; cursor: crosshair; }

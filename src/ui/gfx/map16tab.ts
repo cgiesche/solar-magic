@@ -120,7 +120,8 @@ export class Map16Tab implements WsPanel {
   private unusedHint = h('span', { class: 'hint' }); // why the unused tiles are not marked (unusedTiles)
   private usesBox = h('div', { class: 'mt-uses' });
   private visible = false;
-  private bar = h('div', { class: 'ws-bar' });
+  readonly bar = h('div', { class: 'ws-bar' }); // (in the workspace's context bar, #486)
+  get side(): HTMLElement { return this.builderCol; } // (the builder under the preview, #486)
   // all pages of 256 tiles in one list, each drawn once it scrolls into view
   private scroll = h('div', { class: 'mt-scroll' });
   private pages: HTMLCanvasElement[] = [];
