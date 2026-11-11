@@ -13,7 +13,7 @@ import { LevelView } from './ui/levelview.ts';
 import { exportLevelPng, openLevelImages } from './ui/levelimages.ts';
 import { LevelList, Picker, Properties } from './ui/panels.ts';
 import { sideSplitter } from './ui/pickerview.ts';
-import { openSearch } from './ui/search.ts';
+import { openSearch, matchesAll, type SearchProvider, type SearchResult } from './ui/search.ts';
 import { onBehaviorProgress } from './ui/tilebehaviors.ts';
 import { openHeaderDialog } from './ui/headerdialog.ts';
 import { hex } from './core/names.ts';
@@ -21,7 +21,7 @@ import { GfxWorkspace, type WsTab, type WsTarget } from './ui/gfxworkspace.ts';
 import type { Map16Target } from './ui/gfx/target.ts';
 import { openRemapUses } from './ui/tileuses.ts';
 import { openEntrancesDialog, openRomInfo, openInsertDialog, openExpandDialog, openSaveAsDialog, exportLevel, importLevel, importOverworldFrom, openScreenDialog, clearLevelConfirm } from './ui/tools.ts';
-import { menuBar, closeMenus } from './ui/menu.ts';
+import { menuBar, closeMenus, type Menu } from './ui/menu.ts';
 import { viewMenu } from './ui/viewmenu.ts';
 import { LEVEL_FILE_EXT } from './core/levelfile.ts';
 import { openResources } from './ui/resources.ts';
@@ -210,11 +210,39 @@ function buildUi(app: App): { start: (at: NavLoc | null) => Promise<void> } {
   // ---- app bar: menus, workspace switcher, main actions
   const testHere = () => { const hv = view.hover; openTestPlay(app, hv ? { tx: hv.tx, ty: hv.ty } : undefined); };
   // central search (Ctrl+F or Ctrl+Space): a result is shown in the level workspace
-  const search = () => openSearch(picker.searchProviders().map((p) => ({
-    ...p, search: (terms) => p.search(terms).map((r) => ({ ...r, pick: () => void setWorkspace('level').then((ok) => { if (ok) r.pick(); }) })),
-  })), { refresh: (again) => onBehaviorProgress(app, again) }); // (tiles' behavior determined)
+  // the command palette (#483): commands – every menu entry with its key, the places of G … – and the picker's
+  // groups; a picker result is shown in the level workspace
+  const commands = (): SearchProvider => ({
+    id: 'commands', label: 'Commands',
+    search: (terms) => {
+      const out: SearchResult[] = [];
+      const add = (where: string, name: string, keys: string | undefined, run: () => void, title?: string) => {
+        if (matchesAll(`${where} ${name} ${keys ?? ''}`.toLowerCase(), terms)) out.push({ label: keys ?? '', name, detail: where, title, pick: run });
+      };
+      for (const m of menuDefs) {
+        if (m.disabled?.()) continue;
+        let heading = '';
+        for (const it of typeof m.items === 'function' ? m.items() : m.items) {
+          if (it === 'sep') continue;
+          if ('heading' in it) { heading = it.heading; continue; }
+          if (it.disabled?.()) continue;
+          const where = heading ? `${m.label} → ${heading}` : m.label;
+          if ('onClick' in it) add(where, it.label.replace(/ …$/, ''), it.shortcut, it.onClick, it.title);
+          else add(where, `${it.label}${it.checked() ? ' (on)' : ''}`, it.shortcut, () => void it.onToggle(!it.checked()), it.title);
+        }
+      }
+      for (const [k, w, name] of [['G 1', 'level', 'Level'], ['G 2', 'ow', 'Overworld'], ['G 3', 'gfx', 'Graphics'], ['G 4', 'game', 'Game']] as const) add('Go to', `${name} workspace`, k, () => void setWorkspace(w));
+      for (const [k, t, name] of [['G P', 'pal', 'Palettes'], ['G M', 'map16', 'Map16 tiles'], ['G G', 'gfx', 'Graphics'], ['G A', 'anim', 'Animations']] as const) add('Go to', `Graphics: ${name}`, k, () => void setWorkspace('gfx', { tab: t }));
+      add('View', 'Grid on/off', "Ctrl+'", toggleGrid);
+      add('View', 'Problems', 'L', () => logBar.showProblems());
+      return out;
+    },
+  });
+  const search = () => openSearch([commands(), ...picker.searchProviders().map((p) => ({
+    ...p, search: (terms: string[]) => p.search(terms).map((r) => ({ ...r, pick: () => void setWorkspace('level').then((ok) => { if (ok) r.pick(); }) })),
+  }))], { refresh: (again) => onBehaviorProgress(app, again) }); // (tiles' behavior determined)
   const insertHere = () => { const hv = view.hover, c = view.centerTile(); openInsertDialog(app, hv ? hv.tx : c.tx, hv ? hv.ty : c.ty); };
-  const menus = menuBar([
+  const menuDefs: Menu[] = [
     { label: 'File', items: [
       { label: 'Open project …', title: 'A project file (.smwproj) saved with “Save project”', onClick: openProjectFile },
       { label: 'Save project', title: 'The ROM with the editor data: sources of patches, packages, UberASM, blocks, sprites and music – to keep editing it later or elsewhere', onClick: () => exportProject(app) },
@@ -271,7 +299,8 @@ function buildUi(app: App): { start: (at: NavLoc | null) => Promise<void> } {
       { label: 'Keyboard shortcuts …', shortcut: '?', onClick: () => showHelp() },
       { label: 'Problems and log', shortcut: 'L', title: 'Open or close the bottom panel', onClick: () => logBar.toggle() },
     ] },
-  ]);
+  ];
+  const menus = menuBar(menuDefs);
   const wsBtn = (w: typeof workspace, label: string, key: string) => h('button', { 'data-ws': w, title: key ? `${label} (${key})` : label, onclick: () => setWorkspace(w) }, label);
   const wsSwitch = h('div', { class: 'btn-group ws-switch' }, wsBtn('level', 'Level', 'G 1'), wsBtn('ow', 'Overworld', 'G 2'), wsBtn('gfx', 'Graphics', 'G 3'), wsBtn('game', 'Game', 'G 4'));
   const backBtn = h('button', { onclick: () => history.back(), title: 'Back to the place before (Alt+←, mouse back button)', 'aria-label': 'Back', disabled: true }, icon('back'));
