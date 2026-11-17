@@ -38,15 +38,15 @@ export function spriteJobs(lv: Level, nums: number[], input: SpriteInput): { all
   const hd = lv.header, set = `${hd.spriteGfx}-${hd.spritePalette}`;
   // (the level as sprite images are captured in it)
   const level: SpriteLevel = { number: lv.number, header: { ...hd }, spriteHeader: lv.spriteHeader, bgPointer: lv.layer2Pointer >> 16 === 0xff ? lv.layer2Pointer : 0xffd900 };
-  // i6: with the input; sprites from $C9 on (shells, groups), failed batches retried one by one, sprites
+  // i7: placed by where the game draws them, not by the sprite's position; with the input; sprites from $C9 on (shells, groups), failed batches retried one by one, sprites
   // that draw nothing shown by what they spawn, sprites erasing themselves at once by what they drew
   // (each test level load is kept on its own, with what spriteInput gives but the custom sprites: a custom sprite
   // added or changed captures only its load again)
   const { custom: _, ...loadInput } = input;
   return {
-    all: { key: `i6${set}`, job: { kind: 'sprites', level, nums, input: inputHash(loadInput), first: levelSprites(lv) }, input },
-    bytes: (id, b) => ({ key: `b3${set}:${id}:${b.join(',')}`, job: { kind: 'spriteBytes', level, id, bytes: b }, input }),
-    at: (id, x, y) => ({ key: `v5${set}:${id}:${x}:${y}`, job: { kind: 'spriteAt', level, id, x, y }, input }),
+    all: { key: `i7${set}`, job: { kind: 'sprites', level, nums, input: inputHash(loadInput), first: levelSprites(lv) }, input },
+    bytes: (id, b) => ({ key: `b4${set}:${id}:${b.join(',')}`, job: { kind: 'spriteBytes', level, id, bytes: b }, input }),
+    at: (id, x, y) => ({ key: `v6${set}:${id}:${x}:${y}`, job: { kind: 'spriteAt', level, id, x, y }, input }),
   };
 }
 

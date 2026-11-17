@@ -103,6 +103,7 @@ const TESTS: readonly string[] = [
   'tools/testloadreuse.ts',
   'tools/testanimtiles.ts',
   'tools/testspritemem.ts',
+  'tools/testspriteplace.ts',
   'tools/testpixi.ts',
   'tools/testpkgmap.ts',
   'tools/testpkgreg.ts',

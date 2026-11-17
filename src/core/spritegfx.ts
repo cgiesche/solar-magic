@@ -7,7 +7,7 @@ import { encodePrimaryHeader, spriteBytes, spriteSizes, SPRITE_MEMORY, type Prim
 import { decodeTile, cgramToRGBA } from './gfx.ts';
 import { inputHash } from './inputs.ts';
 import type { Part } from './jobrunner.ts';
-import { GM, RAM, SPR, SPRITE_SLOTS, spriteX, spriteY, cameraX, cameraY, setCameraX, setCameraY, setMarioPos } from './ram.ts';
+import { GM, RAM, SPR, SPRITE_SLOTS, cameraX, cameraY, setCameraX, setCameraY, setMarioPos } from './ram.ts';
 
 export interface SpriteImage {
   w: number;
@@ -103,12 +103,20 @@ export function captureSprites(
       const r = rootSlot(spawner, i);
       return drawn.has(r) ? i : r;
     };
+    // (x, y: where the sprite was placed, gone on by its speed – what its image is placed by)
     const live = new Map<number, { n: number; x: number; y: number }>();
     for (let i = 0; i < SPRITE_SLOTS; i++) {
       const k = shownBy(i);
       const from = order[w[SPR.loadIndex + k]];
       if (w[SPR.status + i] === 0 || !(solo || from) || live.has(k)) continue;
-      live.set(k, { n: solo ? batch[0] : from.id >= 0x200 ? from.id : w[SPR.num + k], x: spriteX(w, k), y: spriteY(w, k) });
+      const at = from ?? placed[0];
+      live.set(k, { n: solo ? batch[0] : from.id >= 0x200 ? from.id : w[SPR.num + k], x: at.tx * 16 + rec.travelX[k], y: at.ty * 16 + rec.travelY[k] });
+    }
+    // the sprites with a tile below the screen: Y $E0-$EF (the game hides a tile with Y = $F0), not among the tiles read
+    const below = new Set<number>();
+    for (let e = 0; e < 128; e++) {
+      const y = snapOam[e * 4 + 1];
+      if (snapOwner[e] >= 0 && y >= 0xe0 && y < 0xf0) below.add(shownBy(snapOwner[e]));
     }
     const groups = new Map<number, OamTile[]>();
     for (const t of tiles) {
@@ -136,10 +144,10 @@ export function captureSprites(
       const l = live.get(i)!;
       if (result.has(l.n)) return;
       // partly off screen or sharing OAM entries with another sprite: retry alone in the first slot
-      if (batch.length > 1 && ([...snapConflicts].some((c) => shownBy(c) === i) || w[SPR.offScreenH + i] || w[SPR.offScreenV + i]
+      if (batch.length > 1 && ([...snapConflicts].some((c) => shownBy(c) === i) || w[SPR.offScreenH + i] || w[SPR.offScreenV + i] || below.has(i)
         || g.some(t => t.x < 0 || t.x + (t.big ? 16 : 8) > 256 || t.y + (t.big ? 16 : 8) > 224))) return;
       const img = drawTiles(emu.snes, g);
-      // offset relative to the spawn tile, compensating for movement since spawn
+      // offset relative to the spawn tile, without the way the sprite went by its speed since
       if (img) result.set(l.n, { ...img, ox: img.ox + cx - l.x, oy: img.oy + cy - l.y });
     });
     // loaded alone and gone without an image (erased itself): the tiles it drew in its last frame alive
@@ -148,7 +156,7 @@ export function captureSprites(
       const k = [...rec.lastDrawn.keys()].find((i) => rec.spawner[i] < 0 && !w[SPR.status + i]);
       const f = k === undefined ? null : rec.lastDrawn.get(k)!;
       const img = f ? drawTiles(emu.snes, readOamBuffer(f.oam).filter((t) => f.owner[t.i] === k)) : null;
-      if (img) result.set(p.id, { ...img, ox: img.ox + f!.cx - spriteX(w, k!), oy: img.oy + f!.cy - spriteY(w, k!) });
+      if (img) result.set(p.id, { ...img, ox: img.ox + f!.cx - p.tx * 16 - rec.travelX[k!], oy: img.oy + f!.cy - p.ty * 16 - rec.travelY[k!] });
     }
     done += batch.length;
     onProgress?.(Math.min(nums.length, done));
@@ -194,6 +202,7 @@ export function testSpriteData(spriteHeader: number, order: PlacedSprite[], size
 // end the attribution (score/extended sprite loops in bank 2 reuse $15E9, hence the bank check).
 // Records which slot writes each OAM buffer entry ($0200-$03FF), per frame, and which slot's code
 // brought each slot to life ($14C8 from 0; spawner, -1 for the loader's, see rootSlot).
+// And how far each slot's sprite went by its speed (travelX/Y, see below).
 // Pass start to load() as fadeHook to see the spawns of the sprites' first frames during the fade-in.
 export class SlotTracker {
   readonly spawner = new Int8Array(SPRITE_SLOTS).fill(-1);
@@ -209,6 +218,15 @@ export class SlotTracker {
   // per slot the last frame it drew a visible tile in (that frame's OAM buffer, owners and camera): a sprite
   // that erases itself in its first frames (the donut lift turning into a block) is shown as it drew itself
   readonly lastDrawn = new Map<number, { oam: Uint8Array; owner: Int8Array; cx: number; cy: number }>();
+  // Pixels each slot's sprite went by its speed since it came to life: the steps of its position's low bytes its own
+  // code made that are its speed's ($B6/$AA, sixteenths of a pixel a frame: speed >> 4, or one more with the subpixels'
+  // carry). A sprite's image is placed by where it was put plus this way – what else changes the
+  // position is where the game has the sprite: an INIT's offset (a Piranha Plant between two tiles), or a position
+  // the sprite's code works out and writes each frame (the brown chained platform's; a Ball 'n' Chain's ball where a
+  // patch stores it there), which its tiles are not drawn by.
+  readonly travelX = new Int16Array(SPRITE_SLOTS);
+  readonly travelY = new Int16Array(SPRITE_SLOTS);
+  private lows = new Uint8Array(SPRITE_SLOTS * 2); // the positions' low bytes (X, then Y) as before the write
   private hook: MemHook;
   private status = new Uint8Array(SPRITE_SLOTS); // as before the write the hook sees
   // each OAM entry's Y as before the write the hook sees (the hook comes after the write, and a sprite
@@ -218,7 +236,7 @@ export class SlotTracker {
   constructor(s: Snes) {
     this.s = s;
     this.snapOam = s.wram.slice(RAM.oam, RAM.oamEnd);
-    const status = this.status, ys = this.ys;
+    const status = this.status, ys = this.ys, lows = this.lows;
     let cur = -1, s0 = 0;
     this.hook = {
       onWramWrite: (a: number, v: number) => {
@@ -241,8 +259,15 @@ export class SlotTracker {
         }
         if (a >= SPR.status && a < SPR.status + SPRITE_SLOTS) {
           const i = a - SPR.status;
-          if (v && !status[i]) this.spawner[i] = cur;
+          if (v && !status[i]) { this.spawner[i] = cur; this.travelX[i] = this.travelY[i] = 0; }
           status[i] = v;
+        }
+        const x = a >= SPR.xLo && a < SPR.xLo + SPRITE_SLOTS;
+        if (x || (a >= SPR.yLo && a < SPR.yLo + SPRITE_SLOTS)) {
+          const i = a - (x ? SPR.xLo : SPR.yLo), k = x ? i : SPRITE_SLOTS + i;
+          const step = ((v - lows[k]) << 24) >> 24, speed = (s.wram[(x ? SPR.speedX : SPR.speedY) + i] << 24) >> 24;
+          lows[k] = v;
+          if (cur === i && speed && (step === speed >> 4 || step === (speed >> 4) + 1)) (x ? this.travelX : this.travelY)[i] += step;
         }
         if (a >= RAM.oam && a < RAM.oam + 0x200) {
           const e = (a - RAM.oam) >> 2, prev = this.owner[e];
@@ -269,6 +294,8 @@ export class SlotTracker {
     this.snapConflicts = this.conflicts = new Set();
     this.snapLost = this.lost = new Set();
     this.status.set(this.s.wram.subarray(SPR.status, SPR.status + SPRITE_SLOTS));
+    this.lows.set(this.s.wram.subarray(SPR.xLo, SPR.xLo + SPRITE_SLOTS));
+    this.lows.set(this.s.wram.subarray(SPR.yLo, SPR.yLo + SPRITE_SLOTS), SPRITE_SLOTS);
     for (let e = 0; e < 128; e++) this.ys[e] = this.s.wram[RAM.oam + 1 + e * 4];
     return this.hook;
   };
@@ -358,10 +385,9 @@ export function captureSpriteAt(emu: LevelEmulator, lv: SpriteLevel, num: number
   const g = readOamBuffer(rec.snapOam).filter((t) => rec.snapOwner[t.i] === slot);
   const img = g.length ? drawTiles(emu.snes, g) : null;
   if (!img) return null;
-  // offset relative to the sprite's position (it may have moved), the camera may have scrolled
-  const sx = spriteX(w, slot), sy = spriteY(w, slot);
+  // offset relative to where the sprite was put, gone on by its speed; the camera may have scrolled
   const ncx = cameraX(w), ncy = cameraY(w);
-  return { ...img, ox: img.ox + ncx - sx, oy: img.oy + ncy - sy };
+  return { ...img, ox: img.ox + ncx - px - rec.travelX[slot], oy: img.oy + ncy - py - rec.travelY[slot] };
 }
 
 // The test level load a sprite is captured in: as many sprites as the test level has slots for (six), grouped by
