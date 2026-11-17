@@ -21,7 +21,8 @@ import { GfxWorkspace, type WsTab, type WsTarget } from './ui/gfxworkspace.ts';
 import type { Map16Target } from './ui/gfx/target.ts';
 import { openRemapUses } from './ui/tileuses.ts';
 import { openEntrancesDialog, openRomInfo, openInsertDialog, openExpandDialog, openSaveAsDialog, exportLevel, importLevel, importOverworldFrom, openScreenDialog, clearLevelConfirm } from './ui/tools.ts';
-import { menuBar, closeMenus, type Menu } from './ui/menu.ts';
+import { menuBar, menuButton, closeMenus, type Menu } from './ui/menu.ts';
+import { fitBar } from './ui/fitbar.ts';
 import { viewMenu } from './ui/viewmenu.ts';
 import { LEVEL_FILE_EXT } from './core/levelfile.ts';
 import { PackagesWorkspace, setPackagesHost, type PackagesKind, type PackagesOptions } from './ui/pkgworkspace.ts';
@@ -313,9 +314,6 @@ function buildUi(app: App): { start: (at: NavLoc | null) => Promise<void> } {
       'sep',
       { label: 'Packages', shortcut: 'G 5', title: 'Third-party content: upload packages (patches, UberASM, blocks, sprites, music) and configure what they brought', onClick: () => void setWorkspace('pkg') },
     ] },
-    { label: 'Search', items: [
-      { label: 'Search everywhere …', shortcut: 'Ctrl+F / Ctrl+Space', title: 'Objects, extended objects, Map16 tiles, prefabs and sprites by number, name or behavior', onClick: search },
-    ] },
     { label: 'Help', items: [
       { label: 'Keyboard shortcuts …', shortcut: '?', onClick: () => showHelp() },
       { label: 'Problems and log', shortcut: 'L', title: 'Open or close the bottom panel', onClick: () => logBar.toggle() },
@@ -323,7 +321,12 @@ function buildUi(app: App): { start: (at: NavLoc | null) => Promise<void> } {
   ];
   const menus = menuBar(menuDefs);
   const wsBtn = (w: typeof workspace, label: string, key: string) => h('button', { 'data-ws': w, title: key ? `${label} (${key})` : label, onclick: () => setWorkspace(w) }, label);
-  const wsSwitch = h('div', { class: 'btn-group ws-switch' }, wsBtn('level', 'Level', 'G 1'), wsBtn('ow', 'Overworld', 'G 2'), wsBtn('gfx', 'Graphics', 'G 3'), wsBtn('game', 'Game', 'G 4'), wsBtn('pkg', 'Packages', 'G 5'));
+  const WORKSPACES: [WorkspaceId, string, string][] = [['level', 'Level', 'G 1'], ['ow', 'Overworld', 'G 2'], ['gfx', 'Graphics', 'G 3'], ['game', 'Game', 'G 4'], ['pkg', 'Packages', 'G 5']];
+  // the workspace switcher; where the app bar has no room for it, a menu named by the open workspace (fitBar below)
+  const wsMenu = menuButton({ label: '', title: 'Workspace', items: WORKSPACES.map(([w, label, key]) => ({ label, shortcut: key, checked: () => workspace === w, onToggle: () => { closeMenus(); void setWorkspace(w); } })) });
+  const wsMenuLabel = document.createTextNode('');
+  wsMenu.querySelector('.menu-btn')!.prepend(wsMenuLabel);
+  const wsSwitch = h('div', { class: 'ws-switch' }, h('div', { class: 'btn-group' }, ...WORKSPACES.map(([w, label, key]) => wsBtn(w, label, key))), wsMenu);
   const backBtn = h('button', { onclick: () => history.back(), title: 'Back to the place before (Alt+←, mouse back button)', 'aria-label': 'Back', disabled: true }, icon('back'));
   const fwdBtn = h('button', { onclick: () => history.forward(), title: 'Forward (Alt+→, mouse forward button)', 'aria-label': 'Forward', disabled: true }, icon('forward'));
   const undoBtn = h('button', { onclick: () => undo(), title: 'Undo (Ctrl+Z)', 'aria-label': 'Undo' }, icon('undo'));
@@ -365,11 +368,16 @@ function buildUi(app: App): { start: (at: NavLoc | null) => Promise<void> } {
   app.on('change', updateProject); // (the level's unsaved changes: in the title)
   app.on('level', updateProject);
   const appbar = h('header', { class: 'appbar' },
-    // three columns, so nothing moves when the buttons on the right change their labels with the workspace
+    // three columns, so nothing moves when the buttons on the right change their labels with the workspace – as
+    // long as there is room: then the middle leaves the center, then the bar gives up room in steps (fitBar)
     h('div', { class: 'appbar-l' }, h('span', { class: 'brand' }, 'Solar Magic'), menus, h('div', { class: 'appbar-nav' }, backBtn, fwdBtn), projectName, projectPill),
     wsSwitch,
     h('div', { class: 'appbar-r' }, searchBtn, h('div', { class: 'appbar-nav' }, undoBtn, redoBtn), musicBtn, testBtn, saveBtn, savedPill),
   );
+  // the levels (style.css .appbar.fit-N): 1 the search as an icon; 2 no brand, the state pills as dots, a narrower
+  // workspace switcher; 3 the menus behind one button; 4 Test and Save as icons; 5 the workspace switcher as a
+  // menu, no project name
+  fitBar(appbar, 5, (level) => menus.setCompact(level >= 3), () => { menus.collapse(); closeMenus(); });
 
   const updateToolbar = () => {
     for (const b of modes.querySelectorAll('button')) b.classList.toggle('active', b.dataset.mode === app.model.mode);
@@ -379,7 +387,8 @@ function buildUi(app: App): { start: (at: NavLoc | null) => Promise<void> } {
     if (app.level) levelTitle.textContent = `Level ${hex(app.level.number, 3)}`;
     unsavedPill.hidden = !app.dirty;
     zoomCtl.update();
-    for (const b of wsSwitch.querySelectorAll('button')) b.classList.toggle('active', b.dataset.ws === workspace);
+    for (const b of wsSwitch.querySelectorAll<HTMLElement>('button[data-ws]')) b.classList.toggle('active', b.dataset.ws === workspace);
+    wsMenuLabel.data = WORKSPACES.find(([w]) => w === workspace)![1];
     saveBtn.replaceChildren(...iconLabel('save', 'Save level'));
     saveBtn.disabled = !app.dirty && !romOnly();
     // (the overworld's and game's changes are ROM edits: nothing to save)

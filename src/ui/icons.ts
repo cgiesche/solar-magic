@@ -3,14 +3,14 @@
 
 import {
   createElement, ArrowLeft, ArrowRight, ArrowRightLeft, Check, ChevronDown, ChevronLeft, ChevronRight, CircleX, Copy,
-  Eraser, FlipHorizontal2, FlipVertical2, Info, Music, PaintBucket, Pencil, Pipette, Play, Redo2, RotateCw, Save, Search,
+  Eraser, FlipHorizontal2, FlipVertical2, Info, Menu, Music, PaintBucket, Pencil, Pipette, Play, Redo2, RotateCw, Save, Search,
   SlidersHorizontal, SquareDashed, Trash2, TriangleAlert, Undo2, X,
   DoorOpen, Ghost, Grid2x2, Image, Layers, Mountain, Paintbrush, Route, Type,
 } from 'lucide';
 import { h } from './dom.ts';
 
 const ICONS = {
-  back: ArrowLeft, forward: ArrowRight, undo: Undo2, redo: Redo2, play: Play, music: Music, close: X,
+  back: ArrowLeft, forward: ArrowRight, undo: Undo2, redo: Redo2, play: Play, music: Music, menu: Menu, close: X,
   'chevron-down': ChevronDown, 'chevron-right': ChevronRight, 'chevron-left': ChevronLeft, check: Check,
   settings: SlidersHorizontal, reverse: ArrowRightLeft, duplicate: Copy, delete: Trash2,
   warning: TriangleAlert, error: CircleX, info: Info,
