@@ -35,7 +35,9 @@ import { isGlobalAnimBps, globalAnimList } from './globalanim.ts';
 import { cleanGameBytes } from './cleangame.ts';
 import { globalGfxNum, globalGfxName, cleanGlobalGfx, fromBin, isCleanGlobalGfx, setGlobalGfx, same } from './globalgfx.ts';
 import { listPackages } from './pkgreg.ts';
-import { sharedPalConflicts, globalGfxConflicts } from './pkgsections.ts';
+import { sharedPalConflicts, globalGfxConflicts, owTileConflicts } from './pkgsections.ts';
+import { isOwTileBps, changedOwTiles, cleanOwTiles, owTileNames } from './owtilebps.ts';
+import { installOwMap16Patch, owTileWords, setOwTileWords } from './overworld.ts';
 
 const dec = new TextDecoder();
 const base = (f: string) => f.slice(f.lastIndexOf('/') + 1);
@@ -92,8 +94,9 @@ export function detectBlocks(files: Map<string, Uint8Array>, gps?: ToolFolder | 
 // the graphics parts of an upload, and its Lunar Magic level files (sample levels when the upload has
 // code, else a level import)
 // (sharedpal: Lunar Magic's shared palettes, sharedpal.ts; globalanim: its global ExAnimation as a BPS,
-// globalanim.ts; globalgfx: the game's GFX00–33 as Lunar Magic's GFX##.bin, globalgfx.ts)
-export interface DetectedGraphics { map16: string[]; exgfx: string[]; pal: string[]; palmask: string[]; sharedpal: string[]; globalanim: string[]; globalgfx: string[]; mwls: string[] }
+// globalanim.ts; globalgfx: the game's GFX00–33 as Lunar Magic's GFX##.bin, globalgfx.ts; owtiles: its overworld's
+// layer 1 tiles as a BPS, owtilebps.ts)
+export interface DetectedGraphics { map16: string[]; exgfx: string[]; pal: string[]; palmask: string[]; sharedpal: string[]; globalanim: string[]; globalgfx: string[]; owtiles: string[]; mwls: string[] }
 
 // `included`: files some .asm file includes (incbin data is code's, not graphics)
 export function detectGraphics(files: Map<string, Uint8Array>, included: Set<string>): DetectedGraphics {
@@ -111,11 +114,12 @@ export function detectGraphics(files: Map<string, Uint8Array>, included: Set<str
     sharedpal: keys.filter((f) => /\.pal$/i.test(f) && isSharedPalettes(files.get(f)!)),
     globalanim: keys.filter((f) => /\.bps$/i.test(f) && isGlobalAnimBps(files.get(f)!)),
     globalgfx: keys.filter((f) => !included.has(f) && globalGfxNum(f) !== null),
+    owtiles: keys.filter((f) => /\.bps$/i.test(f) && isOwTileBps(files.get(f)!)),
     mwls: keys.filter((f) => /\.mwl$/i.test(f)),
   };
 }
 
-export const graphicsFiles = (g: DetectedGraphics) => [...g.map16, ...g.exgfx, ...g.pal, ...g.palmask, ...g.sharedpal, ...g.globalanim, ...g.globalgfx];
+export const graphicsFiles = (g: DetectedGraphics) => [...g.map16, ...g.exgfx, ...g.pal, ...g.palmask, ...g.sharedpal, ...g.globalanim, ...g.globalgfx, ...g.owtiles];
 
 // files the .asm files of an upload include (incsrc/incbin)
 export function includedFiles(files: Map<string, Uint8Array>): Set<string> {
@@ -147,6 +151,8 @@ export interface PlannedSharedPal { file: string; colors: Map<number, number> }
 export interface PlannedGlobalAnim { file: string; slots: ExSlot[]; frames: FrameSources; frameFile: string | null }
 // a global GFX file differing from the clean game's: its number and data (unpacked, in the clean game's format)
 export interface PlannedGlobalGfx { file: string; num: number; data: Uint8Array }
+// the package's overworld layer 1 tiles differing from the clean game's (tile → its four words)
+export interface PlannedOwTiles { file: string; tiles: Map<number, number[]> }
 export interface PackagePlan {
   blocks: PlannedBlock[];
   map16: PlannedMap16 | null;
@@ -156,6 +162,7 @@ export interface PackagePlan {
   sharedPal: PlannedSharedPal | null;
   globalAnim: PlannedGlobalAnim | null;
   globalGfx: PlannedGlobalGfx[];
+  owTiles: PlannedOwTiles | null;
   samples: PlannedSample[]; // the sample levels: offered as which level, or why not (pkgsamples.ts)
   sample: MwlLevel | null; // the first offered, parsed (the level setup's back area color)
   exanim: ExSlot[]; // the sample level's ExAnimation slots that write tiles the package's Map16 tiles draw from
@@ -310,9 +317,11 @@ export function planPackage(rom: Rom, input: PlanInput, blank: number[]): Packag
 
   const palettes = packPalettes(files, graphics.pal, graphics.palmask, notes);
   const sharedPal = planSharedPal(rom, files, graphics.sharedpal, notes), globalGfx = planGlobalGfx(rom, files, graphics.globalgfx, notes);
-  const installed = sharedPal || globalGfx.length ? listPackages(rom) : [];
-  const conflicts = [...(sharedPal ? sharedPalConflicts(installed, [...sharedPal.colors.keys()]) : []), ...globalGfxConflicts(installed, globalGfx.map((g) => g.num))];
-  return { blocks, map16, romMap16, gfx, palettes, sharedPal, globalAnim, globalGfx, samples, sample, exanim, frames, notes, conflicts };
+  const owTiles = planOwTiles(rom, files, graphics.owtiles, notes);
+  const installed = sharedPal || globalGfx.length || owTiles ? listPackages(rom) : [];
+  const conflicts = [...(sharedPal ? sharedPalConflicts(installed, [...sharedPal.colors.keys()]) : []), ...globalGfxConflicts(installed, globalGfx.map((g) => g.num)),
+    ...(owTiles ? owTileConflicts(installed, [...owTiles.tiles.keys()]) : [])];
+  return { blocks, map16, romMap16, gfx, palettes, sharedPal, globalAnim, globalGfx, owTiles, samples, sample, exanim, frames, notes, conflicts };
 }
 
 // the FG Map16 tiles a plan's .map16 (or whole-ROM .map16) draws
@@ -329,6 +338,18 @@ function planSharedPal(rom: Rom, files: Map<string, Uint8Array>, found: string[]
   if (!colors) { notes.push(`${base(file)}: the clean game's shared palettes are not known in this ROM – not taken over`); return null; }
   if (!colors.size) { notes.push(`${base(file)}: the clean game's shared palettes – nothing to take over`); return null; }
   return { file, colors };
+}
+
+// the overworld's layer 1 tiles (the first file; more are not used): only the tiles differing from the clean
+// game's are the package's
+function planOwTiles(rom: Rom, files: Map<string, Uint8Array>, found: string[], notes: string[]): PlannedOwTiles | null {
+  if (!found.length) return null;
+  const file = found[0];
+  for (const f of found.slice(1)) notes.push(`${base(f)}: not used – ${base(file)} has the package's overworld tiles`);
+  const tiles = changedOwTiles(files.get(file)!, cleanGameBytes(rom));
+  if (tiles === 'not known') { notes.push(`${base(file)}: needs bytes of the clean game this ROM no longer has – the overworld's layer 1 tiles are not taken over`); return null; }
+  if (!tiles?.size) { notes.push(`${base(file)}: the clean game's overworld layer 1 tiles – nothing to take over`); return null; }
+  return { file, tiles };
 }
 
 // the global GFX files (the first file of each number; more are not used): only those differing from the
@@ -444,7 +465,7 @@ export function applyBlocks(rom: Rom, upload: UploadCode, blocks: PlannedBlock[]
 }
 
 // the shared palettes' colors, the Map16 tiles (with their acts like where no block on them gives one), the
-// global GFX files, the ExGFX files and the global animation slots
+// global GFX files, the overworld's layer 1 tiles, the ExGFX files and the global animation slots
 export function applyGraphics(rom: Rom, files: Map<string, Uint8Array>, plan: PackagePlan, blank: number[]): ApplyResult {
   const prints: string[] = [], warnings: string[] = [];
   // (a conflict with an installed package: nothing goes in)
@@ -473,6 +494,15 @@ export function applyGraphics(rom: Rom, files: Map<string, Uint8Array>, plan: Pa
       setGlobalGfx(rom, g.num, g.data);
     }
     prints.push(`${plan.globalGfx.length} global GFX file(s): ${plan.globalGfx.map((g) => globalGfxName(g.num)).join(', ')}`);
+  }
+  if (plan.owTiles) {
+    const { file, tiles } = plan.owTiles, game = cleanOwTiles(cleanGameBytes(rom));
+    installOwMap16Patch(rom);
+    // (a tile neither the clean game's nor the package's already: edited in this ROM)
+    const own = [...tiles].filter(([t, w]) => { const now = owTileWords(rom, t).join(); return now !== w.join() && now !== game?.[t].join(); }).map(([t]) => t);
+    if (own.length) warnings.push(`Overworld layer 1 ${owTileNames(own)}: this ROM's own changes are replaced by ${base(file)} (removing the package sets them back)`);
+    for (const [t, w] of tiles) setOwTileWords(rom, t, w);
+    prints.push(`${tiles.size} overworld layer 1 tile(s) from ${base(file)}: ${owTileNames([...tiles.keys()])}`);
   }
   prints.push(...storeGfx(rom, files, plan.gfx));
   if (plan.globalAnim) {

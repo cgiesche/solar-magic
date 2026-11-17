@@ -7,8 +7,8 @@
 //   "callisto.asm", with the defines Callisto passes to patches;
 // - the folders and list files of its UberASM Tool, GPS and PIXI;
 // - what is not part of the package: Callisto's initial patch (FastROM/SA-1) and its BPS of the overworld,
-//   title screen and credits (Lunar Magic data) – of the overworld's only the sample levels' messages are
-//   taken (pkgsamples.ts).
+//   title screen and credits (Lunar Magic data) – of the overworld's only its layer 1 tiles' graphics (a
+//   graphics part, owtilebps.ts) and the sample levels' messages (pkgsamples.ts) are taken.
 
 import { isUberList } from './uberproject.ts';
 import { isGpsListText } from './blocks.ts';
@@ -21,7 +21,7 @@ export interface CallistoProject {
   header: string | null; // the project's callisto_header (upload path)
   tools: Record<CallistoTool, ToolFolder | null>;
   left: { file: string; what: string }[]; // files of the project that are not part of the package
-  overworld: string | null; // its BPS of the overworld (upload path, when the upload has it): the sample levels' messages
+  overworld: string | null; // its BPS of the overworld (upload path, when the upload has it): the sample levels' messages (its layer 1 tiles: a graphics part)
   graphics: string | null; // the folder of its global GFX files: Graphics/ next to the output ROM (upload path)
 }
 export type CallistoTool = 'uberasm' | 'gps' | 'pixi';
@@ -142,7 +142,7 @@ const LIST_OF: Record<CallistoTool, (text: string) => boolean> = {
 // Lunar Magic data Callisto applies as BPS: not part of the package
 const LEFT_OUT: [string, string][] = [
   ['initial_patch', 'Callisto’s initial patch (FastROM/SA-1 ROM base)'],
-  ['overworld', 'the overworld (Lunar Magic data; the sample levels take their messages from it)'],
+  ['overworld', 'the overworld (Lunar Magic data; only its layer 1 tiles\' graphics and the sample levels\' messages are taken from it)'],
   ['titlescreen', 'the title screen (Lunar Magic data)'],
   ['credits', 'the credits (Lunar Magic data)'],
 ];

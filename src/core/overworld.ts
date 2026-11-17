@@ -112,8 +112,9 @@ export function writeL1(rom: Rom, d: ArrayLike<number>): void {
 // load's drawing of layer 1 ($04DCBC low word, $04DCC1 bank) and the bank of the rows the game draws as it scrolls
 // ($058B22, LDY #$05 where the tileset is the overworld's). The editor's patch moves them so, the new tiles C1–1FF
 // starting as tile 00 (empty).
-const OW_MAP16_PTRS = 0x04dc3b, OW_MAP16_LO = 0x04dcbc, OW_MAP16_BANK = 0x04dcc1, OW_MAP16_ROW_BANK = 0x058b22;
-const GAME_OW_MAP16 = 0x05d000, GAME_OW_TILES = 0xc1;
+const OW_MAP16_PTRS = 0x04dc3b, OW_MAP16_ROW_BANK = 0x058b22;
+export const OW_MAP16_LO = 0x04dcbc, OW_MAP16_BANK = 0x04dcc1;
+export const GAME_OW_MAP16 = 0x05d000, GAME_OW_TILES = 0xc1;
 // the operands the patch changes, Lunar Magic's hijack: a third-party patch may not change them (patchapply.ts)
 export const OW_MAP16_HOOKS: [number, number][] = [[OW_MAP16_PTRS, 2], [OW_MAP16_LO, 2], [OW_MAP16_BANK, 1], [OW_MAP16_ROW_BANK, 1]];
 export const OW_L1_TILES = 0x200;

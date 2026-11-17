@@ -1,6 +1,6 @@
 // The sections of a package record (pkgreg.ts), one adapter each: patches, UberASM, blocks, sprites,
 // ExGFX files, songs, sound effects, FG and BG Map16 tiles, shared palette colors, global animation slots,
-// global GFX files – the fields of PackageParts, as stored in the ROM (the tool
+// global GFX files, overworld layer 1 tiles – the fields of PackageParts, as stored in the ROM (the tool
 // projects under their part kind: uberasm, block, sprite). An adapter knows what of the ROM its section
 // observes (read), what came in between two reads (added), how that goes into a record (merge), when
 // there is nothing (empty), how to take it out of the ROM again (remove) and how to say so (summary,
@@ -27,6 +27,8 @@ import type { SpriteFolder } from './pixirt.ts';
 import type { PackageParts, GlobalAnimPart, Package } from './pkgreg.ts';
 import { PART_KINDS, type PartKind, type ToolKind } from './parts.ts';
 import { sharedColors, setSharedColor, sharedColorNames } from './sharedpal.ts';
+import { OW_L1_TILES, GAME_OW_TILES, hasOwMap16Ext, owTileWords, setOwTileWords } from './overworld.ts';
+import { owTileNames } from './owtilebps.ts';
 import { readGlobalList, writeGlobalList, readAltFile, writeAltFile, altFileExtent, altFileName, slotsUsed, SLOTS } from './exanim.ts';
 
 
@@ -372,13 +374,36 @@ const globalGfx: PartSection<number[], [number, number][]> = {
   },
 };
 
+// overworld layer 1 tiles it changed (their Map16 words), with the words each had before and those it set: set back
+// to those before – unless changed since, which is reported and left as it is (two packages never change the same
+// tile, see owTileConflicts). read: each tile's words (the tiles past the game's are tile 00's while the editor's
+// 0x200 tiles are not installed)
+const owTiles: PartSection<string[], number[][]> = {
+  none: () => [],
+  read: (rom) => { const ext = hasOwMap16Ext(rom); return Array.from({ length: OW_L1_TILES }, (_, t) => owTileWords(rom, ext || t < GAME_OW_TILES ? t : 0).join()); },
+  added: (a, b) => b.flatMap((w, t) => (w !== a[t] ? [[t, ...a[t].split(',').map(Number), ...w.split(',').map(Number)]] : [])),
+  // (a tile changed again: the words before the first change, those set last)
+  merge: (r, p) => [...r.map((x) => { const again = p.find(([t]) => t === x[0]); return again ? [...x.slice(0, 5), ...again.slice(5)] : x; }), ...p.filter(([t]) => !r.some((x) => x[0] === t))],
+  empty: (p) => !p.length,
+  summary: (p) => (p.length ? `Overworld tiles (${p.length})` : null),
+  removal: (p) => (p.length ? `${p.length} overworld layer 1 tile(s), set back` : null),
+  remove(rom, mine) {
+    const changed: number[] = [];
+    for (const [t, ...words] of mine) {
+      if (owTileWords(rom, t).join() === words.slice(4).join()) setOwTileWords(rom, t, words.slice(0, 4));
+      else changed.push(t);
+    }
+    return changed.length ? [`Overworld layer 1 ${owTileNames(changed)}: changed since the package was installed – left as ${changed.length > 1 ? 'they are' : 'it is'}`] : [];
+  },
+};
+
 // ---------- conflicts with installed packages ----------
-// (two packages never change the same shared palette color or global GFX file: removing one sets back
+// (two packages never change the same shared palette color, global GFX file or overworld layer 1 tile: removing one sets back
 // what it found, which would undo or keep the other's)
 
-// installing a package changing these (shared palette colors, global GFX files) in a section: a conflict
+// installing a package changing these (shared palette colors, global GFX files, overworld tiles) in a section: a conflict
 // with each package changing one of them too; say: the sentence naming those both change
-function conflicts(installed: Package[], mine: number[], theirs: (p: Package) => [number, number][] | undefined, say: (both: number[]) => string): string[] {
+function conflicts(installed: Package[], mine: number[], theirs: (p: Package) => number[][] | undefined, say: (both: number[]) => string): string[] {
   return installed.flatMap((p) => {
     const both = (theirs(p) ?? []).map(([n]) => n).filter((n) => mine.includes(n));
     return both.length ? [`Conflict with package “${p.name}”: both change ${say(both)}.`] : [];
@@ -388,6 +413,8 @@ export const sharedPalConflicts = (installed: Package[], colors: number[]) =>
   conflicts(installed, colors, (p) => p.sharedPal, (both) => `the shared palettes' ${sharedColorNames(both).join('; ')}`);
 export const globalGfxConflicts = (installed: Package[], nums: number[]) =>
   conflicts(installed, nums, (p) => p.globalGfx, (both) => both.map(globalGfxName).join(', '));
+export const owTileConflicts = (installed: Package[], tiles: number[]) =>
+  conflicts(installed, tiles, (p) => p.owTiles, (both) => `the overworld's layer 1 ${owTileNames(both)}`);
 
 // ---------- what of the tool projects is a package's ----------
 
@@ -412,12 +439,12 @@ export function looseFiles<K extends ToolKind>(recs: Package[], k: K, project: T
 
 // every field of PackageParts has its adapter (the compiler checks it)
 type Sections = { [K in keyof PackageParts]-?: PartSection<any, NonNullable<PackageParts[K]>> };
-export const SECTIONS = { patches, uberasm, sprite, block, owsprite, music, sfx, map16, bgMap16, gfx, globalGfx, sharedPal, globalAnim } satisfies Sections;
+export const SECTIONS = { patches, uberasm, sprite, block, owsprite, music, sfx, map16, bgMap16, gfx, globalGfx, sharedPal, globalAnim, owTiles } satisfies Sections;
 export type SectionKey = keyof typeof SECTIONS;
 // the part kind each section records
 const SECTION_KIND: Record<SectionKey, PartKind> = {
   patches: 'patch', uberasm: 'uberasm', sprite: 'sprite', block: 'block', owsprite: 'owsprite', music: 'music', sfx: 'sfx',
-  map16: 'graphics', bgMap16: 'graphics', gfx: 'graphics', globalGfx: 'graphics', sharedPal: 'graphics', globalAnim: 'graphics',
+  map16: 'graphics', bgMap16: 'graphics', gfx: 'graphics', globalGfx: 'graphics', sharedPal: 'graphics', globalAnim: 'graphics', owTiles: 'graphics',
 };
 const kindRank = (k: SectionKey) => PART_KINDS.indexOf(SECTION_KIND[k]);
 // the sections in the order of their part kinds (parts.ts PART_KINDS): what a package brought is said so

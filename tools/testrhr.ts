@@ -72,9 +72,9 @@ else {
   const parts = {
     'UberASM calls': k.uberasm.calls.length, 'GPS block tiles': k.block.tiles.length, 'PIXI sprite files': k.sprite.files.length, ExGFX: k.gfx.length,
     'FG Map16 tiles': k.map16?.length ?? 0, 'BG Map16 tiles': k.bgMap16?.length ?? 0, 'shared palette colors': k.sharedPal?.length ?? 0,
-    'global animation slots': k.globalAnim?.slots.length ?? 0, 'global GFX files': k.globalGfx?.length ?? 0, 'sound effects': k.sfx?.length ?? 0,
+    'global animation slots': k.globalAnim?.slots.length ?? 0, 'global GFX files': k.globalGfx?.length ?? 0, 'overworld tiles': k.owTiles?.length ?? 0, 'sound effects': k.sfx?.length ?? 0,
   };
-  check(Object.values(parts).every((n) => n > 0) && parts['global animation slots'] === 7 && parts['global GFX files'] === 20 && parts['sound effects'] === 1,
+  check(Object.values(parts).every((n) => n > 0) && parts['global animation slots'] === 7 && parts['global GFX files'] === 20 && parts['overworld tiles'] === 21 && parts['sound effects'] === 1,
     `one package with all its parts: ${Object.entries(parts).map(([a, n]) => `${n} ${a}`).join(', ')}`);
 }
 
