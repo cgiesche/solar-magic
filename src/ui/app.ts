@@ -261,7 +261,7 @@ export class App {
     }, changed);
     this.romWatch = new RomWatch(rom);
     // made now, outside any ROM edit (undo never takes it away), and stored with the ROM soon
-    if (makeProjectId(rom)) this.store.soon();
+    if (makeProjectId(rom)) { this.store.touch(); this.store.soon(); } // (in no project file yet)
     this.view.show.anim = animationPref.get();
     this.view.show = keptShown(this.view.show); // (the View options kept, #488)
     this.emu = new LevelEmulator(rom);
@@ -2175,6 +2175,7 @@ export class App {
     this.romTimer = 0;
     this.store.close();
     window.removeEventListener('pagehide', this.onPageHide);
+    this.stopAnimation();
   }
 
   // the ROM into the browser now (nothing once closed)

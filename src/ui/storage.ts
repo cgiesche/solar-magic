@@ -17,7 +17,8 @@ export async function kvSet(key: string, value: unknown): Promise<void> {
     const tx = db.transaction('kv', 'readwrite');
     tx.objectStore('kv').put(value, key);
     tx.oncomplete = () => res();
-    tx.onerror = () => rej(tx.error);
+    // (a store that doesn't fit fails when the transaction commits: an abort, not an error)
+    tx.onerror = tx.onabort = () => rej(tx.error ?? new Error('the browser refused to store it'));
   });
 }
 export async function kvGet<T>(key: string): Promise<T | undefined> {
@@ -87,7 +88,7 @@ export async function kvKeys(prefix: string): Promise<string[]> {
 
 // the working ROM as stored under 'rom': image, SMC header and the editor data (sources); changed: it has changes
 // that are in no project file (since the last “Save project”)
-export interface RomRecord { name: string; data: Uint8Array; header: Uint8Array | null; extra?: [string, Uint8Array][]; changed?: boolean }
+export interface RomRecord { name: string; data: Uint8Array; header: Uint8Array | null; extra?: [string, Uint8Array][]; changed: boolean }
 
 export function romRecord(name: string, rom: Rom, changed: boolean): RomRecord {
   return { name, data: rom.output(false), header: rom.smcHeader, extra: [...rom.extra], changed };

@@ -101,7 +101,8 @@ export class WorldCheck {
     if (ps) this.tell(ps); // (may open the list)
     const open = this.open;
     if (!checkShownChanged(this.shown, ps, open)) return;
-    this.shown = { problems: ps, open };
+    // (out of the page the Problems tab isn't told: nothing counts as shown then)
+    this.shown = this.root.isConnected ? { problems: ps, open } : null;
     const b = this.button;
     b.classList.toggle('status-info', !errors);
     b.classList.toggle('status-error', errors > 0);

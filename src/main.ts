@@ -165,6 +165,11 @@ function buildUi(app: App): { start: (at: NavLoc | null) => Promise<void> } {
   clear(root);
   const status = h('div', { class: 'statusbar' });
   const view = new LevelView(app, status);
+  // Save level (the key, the menu, the button): only a level with unsaved changes is written (#501)
+  const saveLevel = () => {
+    if (app.dirty) app.saveLevel();
+    else toast(app.projectChanged ? `Nothing to save: all changes are in the ROM (${shortcutKeys('save-project')} saves the project to a file)` : 'Nothing to save: all changes are in the ROM');
+  };
   const levels = new LevelList(app);
   const picker = new Picker(app);
   const props = new Properties(app);
@@ -302,7 +307,7 @@ function buildUi(app: App): { start: (at: NavLoc | null) => Promise<void> } {
       ...THEMES.map((t) => ({ label: t.label, title: t.title, checked: () => themePref.get() === t.id, onToggle: () => { themePref.set(t.id); closeMenus(); } })),
     ] },
     { label: 'Level', disabled: () => !inLevel(), items: [
-      { label: 'Save', shortcut: shortcutKeys('save'), onClick: () => app.saveLevel() },
+      { label: 'Save', shortcut: shortcutKeys('save'), onClick: () => saveLevel() },
       { label: 'Save as …', onClick: () => openSaveAsDialog(app) },
       { label: 'Header …', shortcut: 'H', onClick: () => openHeaderDialog(app) },
       { label: 'Test play', shortcut: 'T', onClick: () => openTestPlay(app) },
@@ -344,7 +349,7 @@ function buildUi(app: App): { start: (at: NavLoc | null) => Promise<void> } {
   const fwdBtn = h('button', { onclick: () => history.forward(), title: 'Forward (Alt+→, mouse forward button)', 'aria-label': 'Forward', disabled: true }, icon('forward'));
   const undoBtn = h('button', { onclick: () => undo(), title: 'Undo (Ctrl+Z)', 'aria-label': 'Undo' }, icon('undo'));
   const redoBtn = h('button', { onclick: () => redo(), title: 'Redo (Ctrl+Y)', 'aria-label': 'Redo' }, icon('redo'));
-  const saveBtn = h('button', { class: 'primary', onclick: () => app.saveLevel(), title: `Write level to ROM (${shortcutKeys('save')})` });
+  const saveBtn = h('button', { class: 'primary', onclick: () => saveLevel(), title: `Write level to ROM (${shortcutKeys('save')})` });
   const testLevelTitle = 'Test the level in the built-in emulator (T, Shift+T: from the mouse position)';
   const testBtn = h('button', { onclick: () => (workspace === 'ow' ? testOverworld() : openTestPlay(app)), title: testLevelTitle }, iconLabel('play', 'Test'));
   // loops the open level's music while editing; anything else that plays (test play, a song in a dialog) ends it
@@ -696,8 +701,7 @@ function buildUi(app: App): { start: (at: NavLoc | null) => Promise<void> } {
     const f = document.activeElement;
     if (f instanceof HTMLInputElement || f instanceof HTMLTextAreaElement) { f.blur(); if (f.isConnected) f.focus(); }
     if (what === 'project') void exportProject(app);
-    else if (app.dirty) app.saveLevel();
-    else toast(app.projectChanged ? `Nothing to save: all changes are in the ROM (${shortcutKeys('save-project')} saves the project to a file)` : 'Nothing to save: all changes are in the ROM');
+    else saveLevel();
   }, true);
   window.onkeydown = (e: KeyboardEvent) => {
     if ((e.ctrlKey || e.metaKey) && (e.key.toLowerCase() === 'f' || e.key.toLowerCase() === 'k' || e.code === 'Space') && !e.altKey && !document.querySelector('.modal-back')) { e.preventDefault(); search(); return; }
@@ -874,7 +878,7 @@ window.addEventListener('drop', (e) => {
     const saved = await kvGet<RomRecord>('rom');
     if (saved?.data) {
       if (desktop) projectPath = (await kvGet<string>('projectPath')) ?? null;
-      if (await startWith(romFromRecord(saved), saved.name, { changed: !!saved.changed })) return;
+      if (await startWith(romFromRecord(saved), saved.name, { changed: saved.changed })) return;
     }
   } catch (e) {
     // (no storage in this browser, or what it holds can't be read: nothing opened here would be kept either)
