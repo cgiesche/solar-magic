@@ -33,6 +33,7 @@ import { SessionSuggestions } from '../core/suggestsession.ts';
 import { deletePrefab, storePrefab, prefabObjectCount, replaceWithPrefab, type LevelPlaces, type LevelGroups, type PrefabGroup } from '../core/prefabplaces.ts';
 import type { Package } from '../core/pkgreg.ts';
 import { kvEntries, kvKeys, kvWrite, saveRom } from './storage.ts';
+import { ProjectStore } from './projectstore.ts';
 import { ResultCache, RomFingerprint, oldStoreKeys, type CacheEntry } from '../core/romdeps.ts';
 import { bgFromWram, bgIndex, encodeBg } from '../core/bg.ts';
 import { lt3Override, lt3Target, lt3Covers, layer3Map, layer3Word, layer3Index, blankLayer3Tile } from '../core/layer3map.ts';
@@ -195,7 +196,11 @@ export class App {
   // one is held (a stroke being drawn) the debounced re-emulation waits (it would stall the stroke)
   private readonly romWatch: RomWatch;
   private quietUntil = 0; // and after a stroke until then (the next one often follows quickly)
-  private persistTimer = 0;
+  // when the ROM is stored in the browser (projectstore.ts); closed with the project
+  private readonly store = new ProjectStore({
+    store: () => saveRom(this.romName, this.rom),
+    setTimer: (fn, ms) => window.setTimeout(fn, ms), clearTimer: (id) => clearTimeout(id),
+  });
   // the arrangements of Direct Map16 objects pasted in the session (pastehint.ts); the hint to save the last
   // paste (its objects as placed in level/layer) as prefab, until it is dismissed or another level is opened
   private pastes = new PasteCounter();
@@ -244,7 +249,7 @@ export class App {
     this.romName = name;
     this.romWatch = new RomWatch(rom);
     // made now, outside any ROM edit (undo never takes it away), and stored with the ROM soon
-    if (makeProjectId(rom)) this.persistTimer = window.setTimeout(() => { this.persistTimer = 0; this.persist(); }, 1000);
+    if (makeProjectId(rom)) this.store.soon();
     this.view.show.anim = animationPref.get();
     this.view.show = keptShown(this.view.show); // (the View options kept, #488)
     this.emu = new LevelEmulator(rom);
@@ -323,12 +328,13 @@ export class App {
     this.results.onChange = () => {
       if (!this.cacheTimer && !this.closed) this.cacheTimer = window.setTimeout(() => this.storeResults(), 3000);
     };
-    window.addEventListener('pagehide', () => {
-      if (this.cacheTimer && !this.closed) { clearTimeout(this.cacheTimer); this.storeResults(); }
-      if (this.persistTimer) { clearTimeout(this.persistTimer); this.persistTimer = 0; this.persist(); } // a ROM edit not stored yet
-    });
+    window.addEventListener('pagehide', this.onPageHide);
   }
 
+  private readonly onPageHide = (): void => {
+    if (this.cacheTimer && !this.closed) { clearTimeout(this.cacheTimer); this.storeResults(); }
+    this.store.flush(); // a ROM edit not stored yet
+  };
   private storeResults(): void {
     this.cacheTimer = 0;
     const { put, order, del } = this.results.flush();
@@ -2076,8 +2082,6 @@ export class App {
   // browser is stored at once
   private romWritten(): void {
     this.romNotice();
-    clearTimeout(this.persistTimer);
-    this.persistTimer = 0;
     this.persist();
   }
   // a ROM edit or undo/redo: editors show it at once, the level render and storing follow debounced
@@ -2092,8 +2096,7 @@ export class App {
       this.refresh();
     };
     this.romTimer = window.setTimeout(run, 150);
-    clearTimeout(this.persistTimer);
-    this.persistTimer = window.setTimeout(() => { this.persistTimer = 0; this.persist(); }, 1000);
+    this.store.soon();
   }
   private romNotice(): void {
     this.savedSprites = null;
@@ -2142,16 +2145,21 @@ export class App {
     this.emit('open-map16');
   }
 
-  // stops all writes to the browser storage (before it is cleared)
+  // stops all writes to the browser storage (before it is cleared, or before another project takes its place) and
+  // the re-emulation still pending
   close(): void {
     this.closed = true;
     clearTimeout(this.cacheTimer);
     this.cacheTimer = 0;
+    clearTimeout(this.romTimer);
+    this.romTimer = 0;
+    this.store.close();
+    window.removeEventListener('pagehide', this.onPageHide);
   }
 
+  // the ROM into the browser now (nothing once closed)
   persist(): void {
-    if (this.closed) return;
-    saveRom(this.romName, this.rom).catch(() => {});
+    this.store.now();
   }
 
   // vanilla levels plus anything relocated into expanded ROM space

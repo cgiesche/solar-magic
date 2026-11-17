@@ -72,10 +72,27 @@ async function openFile(f: File): Promise<void> {
   const data = new Uint8Array(await f.arrayBuffer());
   let rom: Rom;
   try { rom = Rom.fromFile(data); } catch (e) { toast(`Could not open “${f.name}”: ${e instanceof Error ? e.message : e}`, 'error'); return; }
+  if (current && !(await mayReplace(current, f.name))) return;
   if (!(await startWith(rom, f.name))) return;
   saveRom(f.name, rom).catch(() => {});
   const path = filePath(f);
   setProjectPath(path && /\.smwproj$/i.test(path) ? path : null);
+}
+
+// the open project's App (null on the start page)
+let current: App | null = null;
+// Another ROM or project while one is open (#499): the browser keeps one project, so it is asked first. False: the
+// open one stays (cancelled, also the save dialog of “Save project first”).
+let asking = false;
+async function mayReplace(app: App, name: string): Promise<boolean> {
+  if (asking) return false; // (a second file dropped meanwhile)
+  asking = true;
+  try {
+    const r = await choose(`Open “${name}”`, `It replaces “${app.romName}” in the browser: its changes not saved with “Save project” or “Export ROM” are lost.`,
+      [{ label: 'Cancel' }, { label: 'Save project first', primary: true }, { label: 'Replace', danger: true }]);
+    if (r === 1) return await exportProject(app);
+    return r === 2;
+  } finally { asking = false; }
 }
 
 // desktop app: the .smwproj the project was opened from or last saved to – “Save project” writes there
@@ -105,6 +122,9 @@ async function startWith(rom: Rom, name: string): Promise<boolean> {
     toast(`Emulator start failed: ${e}`, 'error');
     return false;
   }
+  // the project open so far stores nothing any more: its pending store would put it back over this one (#499)
+  current?.close();
+  current = app;
   (window as unknown as { app: App }).app = app;
   const ui = buildUi(app);
   // a reload stays where it was: the entry of the browser history, else the place in the URL
@@ -768,12 +788,13 @@ async function closeProject(app: App): Promise<void> {
   clearPrefs();
   location.replace(location.pathname);
 }
-async function exportProject(app: App, askWhere = false): Promise<void> {
+// false: not saved (the save dialog cancelled, writing failed)
+async function exportProject(app: App, askWhere = false): Promise<boolean> {
   if (app.dirty) app.saveLevel(true);
   const out = app.rom.outputProject(app.rom.smcHeader !== null);
   const base = app.romName.replace(/\.(smc|sfc|bin|smwproj)$/i, '');
   const res = await saveFile(`${base}.smwproj`, out, { path: askWhere ? undefined : projectPath ?? undefined });
-  if (!res) return;
+  if (!res) return false;
   if (res.path) {
     setProjectPath(res.path);
     // saved under another name: the project is called so from now on
@@ -781,6 +802,7 @@ async function exportProject(app: App, askWhere = false): Promise<void> {
     if (name !== app.romName) { app.romName = name; saveRom(name, app.rom).catch(() => {}); }
   }
   log(`Project saved as “${res.path ?? `${base}.smwproj`}” (${Math.round(out.length / 1024)} KB, of which ${Math.round(app.rom.extraSize / 1024)} KB editor data)`);
+  return true;
 }
 
 // the keyboard scheme's table (ui/shortcuts.ts, #482): one source, never stale
