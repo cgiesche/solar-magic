@@ -132,6 +132,7 @@ export type AppEvent =
   | 'bgtile' // the BG or layer 3 brush changed (picked from the level)
   | 'reveal' // the level view scrolls to App.reveal
   | 'zoom' // the level view's zoom changed
+  | 'project' // the project's name or whether it changed since “Save project” (App.projectChanged) changed
   | 'busy' // background work (setBusy), a modal or the music player changed
   | 'open-gfx' // the graphics workspace opens on App.wsGfx
   | 'open-map16' // the graphics workspace opens on the Map16 tab
@@ -196,11 +197,11 @@ export class App {
   // one is held (a stroke being drawn) the debounced re-emulation waits (it would stall the stroke)
   private readonly romWatch: RomWatch;
   private quietUntil = 0; // and after a stroke until then (the next one often follows quickly)
-  // when the ROM is stored in the browser (projectstore.ts); closed with the project
-  private readonly store = new ProjectStore({
-    store: () => saveRom(this.romName, this.rom),
-    setTimer: (fn, ms) => window.setTimeout(fn, ms), clearTimer: (id) => clearTimeout(id),
-  });
+  // when the ROM is stored in the browser, and whether it changed since “Save project” (projectstore.ts); closed with
+  // the project
+  private readonly store: ProjectStore;
+  // a store in the browser failed (told once per streak of failures): the work is not kept across a reload
+  onStoreFailed: ((e: unknown) => void) | null = null;
   // the arrangements of Direct Map16 objects pasted in the session (pastehint.ts); the hint to save the last
   // paste (its objects as placed in level/layer) as prefab, until it is dismissed or another level is opened
   private pastes = new PasteCounter();
@@ -244,9 +245,16 @@ export class App {
   anim = { gen: 0, steps: null as LevelAnimSteps | null, base: null as Uint32Array | null,
     frames: [] as PixelChanges[], phase: -1, timer: 0, ready: false, heldStep: null as (() => void) | null };
 
-  constructor(rom: Rom, name: string) {
+  // changed: the project as opened has changes that are in no project file
+  constructor(rom: Rom, name: string, changed = false) {
     this.rom = rom;
     this.romName = name;
+    this.store = new ProjectStore({
+      store: () => saveRom(this.romName, this.rom, this.store.changed),
+      setTimer: (fn, ms) => window.setTimeout(fn, ms), clearTimer: (id) => clearTimeout(id),
+      failed: (e) => this.onStoreFailed?.(e),
+      changed: () => this.emit('project'),
+    }, changed);
     this.romWatch = new RomWatch(rom);
     // made now, outside any ROM edit (undo never takes it away), and stored with the ROM soon
     if (makeProjectId(rom)) this.store.soon();
@@ -2082,6 +2090,7 @@ export class App {
   // browser is stored at once
   private romWritten(): void {
     this.romNotice();
+    this.store.touch();
     this.persist();
   }
   // a ROM edit or undo/redo: editors show it at once, the level render and storing follow debounced
@@ -2096,6 +2105,7 @@ export class App {
       this.refresh();
     };
     this.romTimer = window.setTimeout(run, 150);
+    this.store.touch();
     this.store.soon();
   }
   private romNotice(): void {
@@ -2160,6 +2170,16 @@ export class App {
   // the ROM into the browser now (nothing once closed)
   persist(): void {
     this.store.now();
+  }
+
+  // whether the ROM changed since the last “Save project”: such changes are in the browser only
+  get projectChanged(): boolean { return this.store.changed; }
+  // counts the ROM changes; “Save project” tells with it which ROM its file holds
+  get romVersion(): number { return this.store.version; }
+  // “Save project” wrote the ROM of that version to a project file (the project may have got its name)
+  projectSaved(version: number): void {
+    this.store.saved(version);
+    this.emit('project');
   }
 
   // vanilla levels plus anything relocated into expanded ROM space

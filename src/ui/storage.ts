@@ -85,14 +85,16 @@ export async function kvKeys(prefix: string): Promise<string[]> {
   });
 }
 
-// the working ROM as stored under 'rom': image, SMC header and the editor data (sources)
-export interface RomRecord { name: string; data: Uint8Array; header: Uint8Array | null; extra?: [string, Uint8Array][] }
+// the working ROM as stored under 'rom': image, SMC header and the editor data (sources); changed: it has changes
+// that are in no project file (since the last “Save project”)
+export interface RomRecord { name: string; data: Uint8Array; header: Uint8Array | null; extra?: [string, Uint8Array][]; changed?: boolean }
 
-export function romRecord(name: string, rom: Rom): RomRecord {
-  return { name, data: rom.output(false), header: rom.smcHeader, extra: [...rom.extra] };
+export function romRecord(name: string, rom: Rom, changed: boolean): RomRecord {
+  return { name, data: rom.output(false), header: rom.smcHeader, extra: [...rom.extra], changed };
 }
-export function saveRom(name: string, rom: Rom): Promise<void> {
-  return kvSet('rom', romRecord(name, rom));
+// rejects when the browser can't store it (no storage, quota), also when making the record throws
+export async function saveRom(name: string, rom: Rom, changed: boolean): Promise<void> {
+  await kvSet('rom', romRecord(name, rom, changed));
 }
 export function romFromRecord(r: RomRecord): Rom {
   let full = r.data;

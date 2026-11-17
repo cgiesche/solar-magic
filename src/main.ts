@@ -8,7 +8,7 @@ import { h, clear, toast, log, modal, choose, zoomControl, fieldTakesKey, instal
 import { downloadBytes, pickFile, saveFile, filePath, fileName, desktop, guardClose } from './ui/platform.ts';
 import { LogBar } from './ui/logbar.ts';
 import { pasteHintBox } from './ui/pastehint.ts';
-import { kvGet, kvSet, kvDel, kvClear, saveRom, romFromRecord, type RomRecord } from './ui/storage.ts';
+import { kvGet, kvSet, kvDel, kvClear, romFromRecord, type RomRecord } from './ui/storage.ts';
 import { LevelView } from './ui/levelview.ts';
 import { exportLevelPng, openLevelImages } from './ui/levelimages.ts';
 import { LevelList, Picker, Properties } from './ui/panels.ts';
@@ -38,6 +38,7 @@ import { icon, iconLabel } from './ui/icons.ts';
 import { THEMES, themePref } from './ui/theme.ts';
 import type { IconName } from './ui/icons.ts';
 import { railButton, toolRail } from './ui/rail.ts';
+import { closeWarning } from './ui/projectstore.ts';
 import { shortcutSections, GO_PLACES, type WorkspaceId } from './ui/shortcuts.ts';
 
 const root = document.getElementById('app')!;
@@ -74,7 +75,6 @@ async function openFile(f: File): Promise<void> {
   try { rom = Rom.fromFile(data); } catch (e) { toast(`Could not open “${f.name}”: ${e instanceof Error ? e.message : e}`, 'error'); return; }
   if (current && !(await mayReplace(current, f.name))) return;
   if (!(await startWith(rom, f.name))) return;
-  saveRom(f.name, rom).catch(() => {});
   const path = filePath(f);
   setProjectPath(path && /\.smwproj$/i.test(path) ? path : null);
 }
@@ -103,21 +103,24 @@ function setProjectPath(path: string | null): void {
 }
 
 // false if the ROM cannot be opened
-async function startWith(rom: Rom, name: string): Promise<boolean> {
+// stored: the ROM comes from the browser's storage, with whether it had changes that are in no project file; else it
+// is stored there now, and only a project file is a project without such changes
+async function startWith(rom: Rom, name: string, stored?: { changed: boolean }): Promise<boolean> {
+  let changed = stored ? stored.changed : !/\.smwproj$/i.test(name), store = !stored;
   log(`ROM “${name}” loaded (${Math.round(rom.size / 1024)} KB${rom.smcHeader ? ', with header' : ''}${rom.extra.size ? `, editor data ${Math.round(rom.extraSize / 1024)} KB` : ''})`);
   // a clean ROM gets the editor's patches, an editor ROM's older VRAM patch is updated; anything but the clean game
   // and the editor's own ROMs is refused
   try {
     const done = await prepareRom(rom);
     if (done?.failed) toast(done.note, 'error');
-    else if (done) { saveRom(name, rom).catch(() => {}); log(done.note); }
+    else if (done) { changed = store = true; log(done.note); }
   } catch (e) {
     toast(`Could not open “${name}”: ${e instanceof Error ? e.message : e}`, 'error');
     return false;
   }
   let app: App;
   try {
-    app = new App(rom, name);
+    app = new App(rom, name, changed);
   } catch (e) {
     toast(`Emulator start failed: ${e}`, 'error');
     return false;
@@ -126,6 +129,12 @@ async function startWith(rom: Rom, name: string): Promise<boolean> {
   current?.close();
   current = app;
   (window as unknown as { app: App }).app = app;
+  // the project lives in the browser's storage until “Save project” (#500): a store that fails is told with the way
+  // out, and the browser is asked not to clear the storage when space runs low
+  app.onStoreFailed = (e) => toast(`Could not store the project in the browser (${e instanceof Error ? e.message : e}): your changes are not kept across a reload. Save the project to a file.`,
+    'error', { label: 'Save project', run: () => void exportProject(app) });
+  if (store) app.persist();
+  navigator.storage?.persist?.().catch(() => {});
   const ui = buildUi(app);
   // a reload stays where it was: the entry of the browser history, else the place in the URL
   const st: unknown = history.state;
@@ -357,9 +366,23 @@ function buildUi(app: App): { start: (at: NavLoc | null) => Promise<void> } {
     iconLabel('search', 'Search or run …'), h('kbd', null, 'Ctrl K'));
   // where the changes go (#476): the level's wait for Save level, the other workspaces' are in the ROM at once
   const savedPill = h('span', { class: 'pill pill-ok', title: 'The overworld\'s, graphics\' and game\'s changes are ROM edits: written at once (Ctrl+Z undoes)' }, 'Saved to ROM');
+  // the project and whether it has changes that are in no project file (#500): in the app bar and the tab's title
+  const projectName = h('span', { class: 'project-name' });
+  const projectPill = h('span', { class: 'pill pill-warn', hidden: true }, 'Not in a project file');
+  const updateProject = () => {
+    const changed = app.projectChanged;
+    projectName.textContent = app.romName;
+    projectName.title = `Project “${app.romName}” – kept in this browser${desktop ? '' : ' only'} until “Save project” writes it to a project file`;
+    projectPill.hidden = !changed;
+    projectPill.title = 'The project has changes since the last “Save project”: they are in this browser only (File → Save project)';
+    document.title = `${changed || app.dirty ? '● ' : ''}${app.romName} – Solar Magic`;
+  };
+  app.on('project', updateProject);
+  app.on('change', updateProject); // (the level's unsaved changes: in the title)
+  app.on('level', updateProject);
   const appbar = h('header', { class: 'appbar' },
     // three columns, so nothing moves when the buttons on the right change their labels with the workspace
-    h('div', { class: 'appbar-l' }, h('span', { class: 'brand' }, 'Solar Magic'), menus, h('div', { class: 'appbar-nav' }, backBtn, fwdBtn)),
+    h('div', { class: 'appbar-l' }, h('span', { class: 'brand' }, 'Solar Magic'), menus, h('div', { class: 'appbar-nav' }, backBtn, fwdBtn), projectName, projectPill),
     wsSwitch,
     h('div', { class: 'appbar-r' }, searchBtn, h('div', { class: 'appbar-nav' }, undoBtn, redoBtn), musicBtn, testBtn, saveBtn, savedPill),
   );
@@ -733,7 +756,8 @@ function buildUi(app: App): { start: (at: NavLoc | null) => Promise<void> } {
     else if (k === 'm' || k === 'M') setWorkspace('gfx', { tab: 'map16', tile: view.hover ? hoverTile(app, view.hover.tx, view.hover.ty) : undefined });
   };
   window.onbeforeunload = (e) => { if (app.dirty) { e.preventDefault(); } };
-  guardClose(() => app.dirty);
+  guardClose(() => closeWarning(app.dirty, app.projectChanged));
+  updateProject();
   updateToolbar();
   levels.build();
   return {
@@ -783,7 +807,7 @@ async function closeProject(app: App): Promise<void> {
   if (r !== 1) return;
   app.close();
   window.onbeforeunload = null;
-  guardClose(() => false);
+  guardClose(() => null);
   try { await kvClear(); } catch (e) { toast(`Could not clear the browser storage: ${e instanceof Error ? e.message : e}`, 'error'); return; }
   clearPrefs();
   location.replace(location.pathname);
@@ -791,6 +815,7 @@ async function closeProject(app: App): Promise<void> {
 // false: not saved (the save dialog cancelled, writing failed)
 async function exportProject(app: App, askWhere = false): Promise<boolean> {
   if (app.dirty) app.saveLevel(true);
+  const version = app.romVersion; // (a change made while the file is written is not in it)
   const out = app.rom.outputProject(app.rom.smcHeader !== null);
   const base = app.romName.replace(/\.(smc|sfc|bin|smwproj)$/i, '');
   const res = await saveFile(`${base}.smwproj`, out, { path: askWhere ? undefined : projectPath ?? undefined });
@@ -798,9 +823,9 @@ async function exportProject(app: App, askWhere = false): Promise<boolean> {
   if (res.path) {
     setProjectPath(res.path);
     // saved under another name: the project is called so from now on
-    const name = fileName(res.path);
-    if (name !== app.romName) { app.romName = name; saveRom(name, app.rom).catch(() => {}); }
+    app.romName = fileName(res.path);
   }
+  app.projectSaved(version);
   log(`Project saved as “${res.path ?? `${base}.smwproj`}” (${Math.round(out.length / 1024)} KB, of which ${Math.round(app.rom.extraSize / 1024)} KB editor data)`);
   return true;
 }
@@ -834,10 +859,11 @@ window.addEventListener('drop', (e) => {
     const saved = await kvGet<RomRecord>('rom');
     if (saved?.data) {
       if (desktop) projectPath = (await kvGet<string>('projectPath')) ?? null;
-      if (await startWith(romFromRecord(saved), saved.name)) return;
+      if (await startWith(romFromRecord(saved), saved.name, { changed: !!saved.changed })) return;
     }
   } catch (e) {
-    console.warn(e);
+    // (no storage in this browser, or what it holds can't be read: nothing opened here would be kept either)
+    toast(`Could not read the project stored in the browser: ${e instanceof Error ? e.message : e}. A project opened now may not be kept across a reload – save it with “Save project”.`, 'error');
   }
   welcome();
 })();

@@ -199,6 +199,8 @@ input.invalid, input.invalid:focus { outline: 1px solid var(--danger); border-co
 .appbar-r { justify-content: flex-end; }
 .appbar .brand { font-weight: 700; color: var(--accent); margin-right: 8px; white-space: nowrap; }
 .appbar-nav { display: flex; gap: 2px; }
+.appbar .project-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-muted); }
+.appbar-l > .pill { flex: none; }
 .appbar-nav button, .appbar-r > button[aria-label] { padding: 4px 6px; }
 .appbar-search { min-width: 200px; display: flex; align-items: center; gap: 6px; color: var(--text-muted); background: var(--field-bg); text-align: left; }
 .appbar-search .icon-label { flex: 1; }

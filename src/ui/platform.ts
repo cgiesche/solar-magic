@@ -86,17 +86,19 @@ export async function saveFile(name: string, data: Uint8Array, opts: { mime?: st
 
 export function fileName(path: string): string { return baseName(path); }
 
-// Desktop app: closing the window asks first while `unsaved` says so (in the browser onbeforeunload does).
-let unsaved: () => boolean = () => false;
+// Desktop app: closing the window asks first while `unsaved` tells what would be lost (null: nothing; in the browser
+// onbeforeunload asks).
+let unsaved: () => string | null = () => null;
 let guarded = false;
-export function guardClose(isUnsaved: () => boolean): void {
-  unsaved = isUnsaved;
+export function guardClose(lost: () => string | null): void {
+  unsaved = lost;
   if (!desktop || guarded) return;
   guarded = true;
   import('@tauri-apps/api/window').then(({ getCurrentWindow }) => getCurrentWindow().onCloseRequested(async (e) => {
-    if (!unsaved()) return;
+    const lost = unsaved();
+    if (!lost) return;
     e.preventDefault();
-    const r = await choose('Quit', 'There are unsaved changes in the level. Quit anyway?', [{ label: 'Cancel' }, { label: 'Quit', danger: true }]);
+    const r = await choose('Quit', `${lost} Quit anyway?`, [{ label: 'Cancel' }, { label: 'Quit', danger: true }]);
     if (r === 1) await getCurrentWindow().destroy();
   }));
 }
