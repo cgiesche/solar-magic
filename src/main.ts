@@ -39,7 +39,7 @@ import { THEMES, themePref } from './ui/theme.ts';
 import type { IconName } from './ui/icons.ts';
 import { railButton, toolRail } from './ui/rail.ts';
 import { closeWarning } from './ui/projectstore.ts';
-import { shortcutSections, GO_PLACES, type WorkspaceId } from './ui/shortcuts.ts';
+import { shortcutSections, shortcutKeys, saveKeyAction, GO_PLACES, type WorkspaceId } from './ui/shortcuts.ts';
 
 const root = document.getElementById('app')!;
 
@@ -226,7 +226,7 @@ function buildUi(app: App): { start: (at: NavLoc | null) => Promise<void> } {
   modes.append(modeBtn('l1', 'Layer 1', '1', 'layer-1'), modeBtn('l2', 'Layer 2', '2', 'layer-2'), modeBtn('spr', 'Sprites', '3', 'sprites'),
     modeBtn('exit', 'Entrances/Exits', '4', 'exits'), modeBtn('bg', 'BG', '5', 'bg'), modeBtn('l3', 'Layer 3', '6', 'layer-3'));
   const levelTitle = h('span', { class: 'level-title' });
-  const unsavedPill = h('span', { class: 'pill pill-info', title: 'The level\'s changes are written to the ROM with Save level (Ctrl+S)', hidden: true }, 'Unsaved changes');
+  const unsavedPill = h('span', { class: 'pill pill-info', title: `The level's changes are written to the ROM with Save level (${shortcutKeys('save')})`, hidden: true }, 'Unsaved changes');
   const zoomCtl = zoomControl(() => app.view.zoom, (z) => view.setZoom(z));
   const levelBar = h('div', { class: 'ctxbar' },
     levelTitle, unsavedPill,
@@ -282,7 +282,7 @@ function buildUi(app: App): { start: (at: NavLoc | null) => Promise<void> } {
   const menuDefs: Menu[] = [
     { label: 'File', items: [
       { label: 'Open project …', title: 'A project file (.smwproj) saved with “Save project”', onClick: openProjectFile },
-      { label: 'Save project', title: 'The ROM with the editor data: sources of patches, packages, UberASM, blocks, sprites and music – to keep editing it later or elsewhere', onClick: () => exportProject(app) },
+      { label: 'Save project', title: 'The ROM with the editor data: sources of patches, packages, UberASM, blocks, sprites and music – to keep editing it later or elsewhere', shortcut: shortcutKeys('save-project'), onClick: () => exportProject(app) },
       ...(desktop ? [{ label: 'Save project as …', title: 'Save the project to another file and keep working on that one', onClick: () => exportProject(app, true) }] : []),
       'sep',
       { label: 'Open ROM …', title: 'Start from a ROM (.smc/.sfc) – clean or already modified', onClick: openRomFile },
@@ -302,7 +302,7 @@ function buildUi(app: App): { start: (at: NavLoc | null) => Promise<void> } {
       ...THEMES.map((t) => ({ label: t.label, title: t.title, checked: () => themePref.get() === t.id, onToggle: () => { themePref.set(t.id); closeMenus(); } })),
     ] },
     { label: 'Level', disabled: () => !inLevel(), items: [
-      { label: 'Save', shortcut: 'Ctrl+S', onClick: () => app.saveLevel() },
+      { label: 'Save', shortcut: shortcutKeys('save'), onClick: () => app.saveLevel() },
       { label: 'Save as …', onClick: () => openSaveAsDialog(app) },
       { label: 'Header …', shortcut: 'H', onClick: () => openHeaderDialog(app) },
       { label: 'Test play', shortcut: 'T', onClick: () => openTestPlay(app) },
@@ -344,7 +344,7 @@ function buildUi(app: App): { start: (at: NavLoc | null) => Promise<void> } {
   const fwdBtn = h('button', { onclick: () => history.forward(), title: 'Forward (Alt+→, mouse forward button)', 'aria-label': 'Forward', disabled: true }, icon('forward'));
   const undoBtn = h('button', { onclick: () => undo(), title: 'Undo (Ctrl+Z)', 'aria-label': 'Undo' }, icon('undo'));
   const redoBtn = h('button', { onclick: () => redo(), title: 'Redo (Ctrl+Y)', 'aria-label': 'Redo' }, icon('redo'));
-  const saveBtn = h('button', { class: 'primary', onclick: () => app.saveLevel(), title: 'Write level to ROM (Ctrl+S)' });
+  const saveBtn = h('button', { class: 'primary', onclick: () => app.saveLevel(), title: `Write level to ROM (${shortcutKeys('save')})` });
   const testLevelTitle = 'Test the level in the built-in emulator (T, Shift+T: from the mouse position)';
   const testBtn = h('button', { onclick: () => (workspace === 'ow' ? testOverworld() : openTestPlay(app)), title: testLevelTitle }, iconLabel('play', 'Test'));
   // loops the open level's music while editing; anything else that plays (test play, a song in a dialog) ends it
@@ -374,7 +374,7 @@ function buildUi(app: App): { start: (at: NavLoc | null) => Promise<void> } {
     projectName.textContent = app.romName;
     projectName.title = `Project “${app.romName}” – kept in this browser${desktop ? '' : ' only'} until “Save project” writes it to a project file`;
     projectPill.hidden = !changed;
-    projectPill.title = 'The project has changes since the last “Save project”: they are in this browser only (File → Save project)';
+    projectPill.title = `The project has changes since the last “Save project”: they are in this browser only (File → Save project, ${shortcutKeys('save-project')})`;
     document.title = `${changed || app.dirty ? '● ' : ''}${app.romName} – Solar Magic`;
   };
   app.on('project', updateProject);
@@ -683,6 +683,22 @@ function buildUi(app: App): { start: (at: NavLoc | null) => Promise<void> } {
     if (workspace === 'level') { app.view.show.grid = !app.view.show.grid; view.paint(); }
     else if (workspace === 'ow') owShown()?.toggleGrid();
   };
+  // Ctrl+S / Ctrl+Shift+S (#501): never the browser's “Save page as”, wherever the focus is – taken before any field
+  // or dialog sees the key (some keep their keys to themselves)
+  window.addEventListener('keydown', (e) => {
+    if (app !== current) return; // (the UI of a project replaced by another)
+    const what = saveKeyAction(e, { dialog: !!document.querySelector('.modal-back'), dirty: app.dirty });
+    if (!what) return;
+    e.preventDefault();
+    e.stopPropagation();
+    if (what === 'none' || e.repeat) return;
+    // a field's input not applied yet (it applies when the field is left) belongs to what is saved
+    const f = document.activeElement;
+    if (f instanceof HTMLInputElement || f instanceof HTMLTextAreaElement) { f.blur(); if (f.isConnected) f.focus(); }
+    if (what === 'project') void exportProject(app);
+    else if (app.dirty) app.saveLevel();
+    else toast(app.projectChanged ? `Nothing to save: all changes are in the ROM (${shortcutKeys('save-project')} saves the project to a file)` : 'Nothing to save: all changes are in the ROM');
+  }, true);
   window.onkeydown = (e: KeyboardEvent) => {
     if ((e.ctrlKey || e.metaKey) && (e.key.toLowerCase() === 'f' || e.key.toLowerCase() === 'k' || e.code === 'Space') && !e.altKey && !document.querySelector('.modal-back')) { e.preventDefault(); search(); return; }
     if (fieldTakesKey(e)) return;
@@ -696,7 +712,6 @@ function buildUi(app: App): { start: (at: NavLoc | null) => Promise<void> } {
     if (ctrl && (k === "'" || e.code === 'Backslash' && e.shiftKey)) { e.preventDefault(); toggleGrid(); return; }
     if ((k === 'l' || k === 'L') && !ctrl && !e.altKey) { logBar.toggle(); return; }
     // one undo history in every workspace
-    if (ctrl && k.toLowerCase() === 's') { e.preventDefault(); app.saveLevel(); return; }
     if (ctrl && k.toLowerCase() === 'z') { e.preventDefault(); if (e.shiftKey) redo(); else undo(); return; }
     if (ctrl && k.toLowerCase() === 'y') { e.preventDefault(); redo(); return; }
     if (workspace === 'pkg') return; // (its own controls take their keys)

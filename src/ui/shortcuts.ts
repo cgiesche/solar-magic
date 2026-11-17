@@ -29,7 +29,8 @@ export const SHORTCUTS: Shortcut[] = [
   { scope: 'General', keys: goKeys(true).map((g) => `G ${g.key}`).join(' / '), what: `Graphics: ${goKeys(true).map((g) => g.label).join(' / ')}` },
   { scope: 'General', keys: 'Ctrl+K · Ctrl+F · Ctrl+Space', what: 'Search everywhere and run commands', id: 'search' },
   { scope: 'General', keys: 'Ctrl+Z / Ctrl+Y (Ctrl+Shift+Z)', what: 'Undo / Redo – also in dialogs that apply at once', id: 'undo' },
-  { scope: 'General', keys: 'Ctrl+S', what: 'Save the level', id: 'save' },
+  { scope: 'General', keys: 'Ctrl+S', what: 'Save the level (in every workspace, also from a text field)', id: 'save' },
+  { scope: 'General', keys: 'Ctrl+Shift+S', what: 'Save project (the project file)', id: 'save-project' },
   { scope: 'General', keys: 'T · Shift+T', what: 'Test play · the level from the mouse position', id: 'test' },
   { scope: 'General', keys: 'Esc', what: 'Cancel: a drag, then the selection, then the picked item – never leaves a workspace' },
   { scope: 'General', keys: 'Menu key · Shift+F10', what: 'Context menu of the focused control or of what is under the mouse' },
@@ -90,4 +91,24 @@ export function shortcutSections(): [ShortcutScope, Shortcut[]][] {
   const out = new Map<ShortcutScope, Shortcut[]>();
   for (const s of SHORTCUTS) out.set(s.scope, [...(out.get(s.scope) ?? []), s]);
   return [...out];
+}
+
+/** The keys of the entry with that id, as menus and tooltips show them. */
+export function shortcutKeys(id: string): string {
+  const s = SHORTCUTS.find((e) => e.id === id);
+  if (!s) throw new Error(`no shortcut “${id}”`);
+  return s.keys;
+}
+
+/**
+ * What a key press means as a save key (#501); null: it is none. Ctrl+S and Ctrl+Shift+S are always taken from the
+ * browser (its “Save page as”), wherever the focus is. 'level': the open level has unsaved changes, in whatever
+ * workspace – they are saved; 'stored': nothing waits for a save (the other workspaces' changes are ROM edits),
+ * which is told; 'project': Save project; 'none': a dialog is open, nothing is saved behind it.
+ */
+export function saveKeyAction(e: { key: string; ctrlKey: boolean; metaKey: boolean; shiftKey: boolean; altKey: boolean }, at: { dialog: boolean; dirty: boolean }): 'level' | 'stored' | 'project' | 'none' | null {
+  if (!(e.ctrlKey || e.metaKey) || e.altKey || e.key.toLowerCase() !== 's') return null;
+  if (at.dialog) return 'none';
+  if (e.shiftKey) return 'project';
+  return at.dirty ? 'level' : 'stored';
 }
