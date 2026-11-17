@@ -32,8 +32,10 @@ export interface PackageParts {
   sharedPal?: [number, number][]; // shared palette colors it changed (index in the block, the color before)
   globalAnim?: GlobalAnimPart; // global animation slots it filled
   globalGfx?: [number, number][]; // global GFX files it replaced (GFX00–33, the hash of its file unpacked)
-  owTiles?: number[][]; // overworld layer 1 tiles it changed (the tile, its four words before, the four it set)
+  owTiles?: OwTilePart[]; // overworld layer 1 tiles it changed
 }
+// an overworld layer 1 tile, its four Map16 words before and the four the package set
+export type OwTilePart = [tile: number, before: number[], set: number[]];
 // slots of the global animation list; graphic: the Anim graphic its frames went into and its size before
 export interface GlobalAnimPart { slots: number[]; graphic?: [number, number] }
 

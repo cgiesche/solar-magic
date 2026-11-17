@@ -125,6 +125,11 @@ export function owTileWords(rom: RomRead, t: number): number[] {
   const at = owTileAddr(rom, t);
   return [0, 1, 2, 3].map((q) => rom.r16(at + q * 2));
 }
+// whether two tiles' words are the same
+export const sameOwTile = (a: readonly number[], b: readonly number[]): boolean => a.every((w, q) => w === b[q]);
+// layer 1 tiles named ("tile 03", "tiles 03, 05")
+export const owTileNames = (tiles: number[]): string =>
+  `tile${tiles.length > 1 ? 's' : ''} ${tiles.map((t) => t.toString(16).toUpperCase().padStart(t > 0xff ? 3 : 2, '0')).join(', ')}`;
 export function setOwTileWords(rom: Rom, t: number, ws: number[]): void {
   if (t < 0 || t >= OW_L1_TILES) throw new Error(`No overworld layer 1 tile ${t.toString(16).toUpperCase()}`);
   if (!hasOwMap16Ext(rom)) missingPatch('Overworld layer 1 Map16 (0x200 tiles)');

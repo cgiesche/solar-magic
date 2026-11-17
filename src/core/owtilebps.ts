@@ -9,7 +9,7 @@
 
 import { snesToPc } from './rom.ts';
 import { cleanGameBps, known } from './cleangame.ts';
-import { GAME_OW_MAP16, GAME_OW_TILES, OW_MAP16_LO, OW_MAP16_BANK, owTileAddr, owTileWords } from './overworld.ts';
+import { GAME_OW_MAP16, GAME_OW_TILES, OW_MAP16_LO, OW_MAP16_BANK, owTileAddr, owTileWords, sameOwTile } from './overworld.ts';
 
 type Source = (o: number) => number | null;
 // the clean game's bytes with its pointer to the tiles' table: the editor's own 0x200 tiles moved that pointer in
@@ -17,14 +17,20 @@ type Source = (o: number) => number | null;
 const POINTER = new Map([[snesToPc(OW_MAP16_LO), GAME_OW_MAP16 & 0xff], [snesToPc(OW_MAP16_LO) + 1, (GAME_OW_MAP16 >> 8) & 0xff], [snesToPc(OW_MAP16_BANK), GAME_OW_MAP16 >> 16]]);
 const withPointer = (clean: Source | null): Source => (o) => POINTER.get(o) ?? clean?.(o) ?? null;
 
-// whether a file is such a patch with layer 1 tiles of its own, told from the patch alone: it brings bytes of the
-// tiles' table
+// whether a file is such a patch with layer 1 tiles of its own, told from the patch alone: a byte of the tiles' table
+// that it brings itself or takes from another place of the clean game (tiles swapped, a tile blanked with bytes the
+// game has elsewhere) – not the clean game's byte at that place
 export function isOwTileBps(data: Uint8Array): boolean {
-  const rom = cleanGameBps(data, withPointer(null)), own = cleanGameBps(data, () => null);
-  if (!rom || !own) return false;
+  const rom = cleanGameBps(data, withPointer(null));
+  if (!rom) return false;
   const at = known(() => owTileAddr(rom, 0));
   if (at === 'not known') return false;
-  for (let i = 0; i < GAME_OW_TILES * 8; i++) if (own.byte(snesToPc(at) + i) !== null) return true;
+  let asked = -1; // the clean game's byte the patch's reader asked for
+  const patch = cleanGameBps(data, (o) => { asked = o; return null; })!;
+  for (let i = 0; i < GAME_OW_TILES * 8; i++) {
+    const pc = snesToPc(at) + i;
+    if (patch.byte(pc) !== null || asked !== pc) return true;
+  }
   return false;
 }
 
@@ -55,9 +61,5 @@ export function changedOwTiles(data: Uint8Array, clean: Source | null): Map<numb
   const tiles = owTilesOfBps(data, clean), game = cleanOwTiles(clean);
   if (!tiles) return null;
   if (tiles === 'not known' || !game) return 'not known';
-  return new Map(tiles.flatMap((w, t): [number, number[]][] => (w.join() !== game[t].join() ? [[t, w]] : [])));
+  return new Map(tiles.flatMap((w, t): [number, number[]][] => (sameOwTile(w, game[t]) ? [] : [[t, w]])));
 }
-
-// the tiles named ("tile 03", "tiles 03, 05")
-export const owTileNames = (tiles: number[]): string =>
-  `tile${tiles.length > 1 ? 's' : ''} ${tiles.map((t) => t.toString(16).toUpperCase().padStart(2, '0')).join(', ')}`;

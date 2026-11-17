@@ -24,11 +24,10 @@ import { EXT_FIRST, EXT_TILES, DEFAULT_ACTS, extTileWords, actsLike, setExtTileW
 import { BG_EXT_FIRST, BG_EXT_TILES, bgExtTileWords, setBgExtTileWords, vanillaBgWords } from './bgmap16.ts';
 import { CONTEXTS, OTHER, type UberContext, type Other } from './uberasm.ts';
 import type { SpriteFolder } from './pixirt.ts';
-import type { PackageParts, GlobalAnimPart, Package } from './pkgreg.ts';
+import type { PackageParts, GlobalAnimPart, OwTilePart, Package } from './pkgreg.ts';
 import { PART_KINDS, type PartKind, type ToolKind } from './parts.ts';
 import { sharedColors, setSharedColor, sharedColorNames } from './sharedpal.ts';
-import { OW_L1_TILES, GAME_OW_TILES, hasOwMap16Ext, owTileWords, setOwTileWords } from './overworld.ts';
-import { owTileNames } from './owtilebps.ts';
+import { OW_L1_TILES, GAME_OW_TILES, hasOwMap16Ext, owTileWords, setOwTileWords, sameOwTile, owTileNames } from './overworld.ts';
 import { readGlobalList, writeGlobalList, readAltFile, writeAltFile, altFileExtent, altFileName, slotsUsed, SLOTS } from './exanim.ts';
 
 
@@ -378,19 +377,19 @@ const globalGfx: PartSection<number[], [number, number][]> = {
 // to those before – unless changed since, which is reported and left as it is (two packages never change the same
 // tile, see owTileConflicts). read: each tile's words (the tiles past the game's are tile 00's while the editor's
 // 0x200 tiles are not installed)
-const owTiles: PartSection<string[], number[][]> = {
+const owTiles: PartSection<number[][], OwTilePart[]> = {
   none: () => [],
-  read: (rom) => { const ext = hasOwMap16Ext(rom); return Array.from({ length: OW_L1_TILES }, (_, t) => owTileWords(rom, ext || t < GAME_OW_TILES ? t : 0).join()); },
-  added: (a, b) => b.flatMap((w, t) => (w !== a[t] ? [[t, ...a[t].split(',').map(Number), ...w.split(',').map(Number)]] : [])),
+  read: (rom) => { const ext = hasOwMap16Ext(rom); return Array.from({ length: OW_L1_TILES }, (_, t) => owTileWords(rom, ext || t < GAME_OW_TILES ? t : 0)); },
+  added: (a, b) => b.flatMap((w, t): OwTilePart[] => (sameOwTile(w, a[t]) ? [] : [[t, a[t], w]])),
   // (a tile changed again: the words before the first change, those set last)
-  merge: (r, p) => [...r.map((x) => { const again = p.find(([t]) => t === x[0]); return again ? [...x.slice(0, 5), ...again.slice(5)] : x; }), ...p.filter(([t]) => !r.some((x) => x[0] === t))],
+  merge: (r, p) => [...r.map((x): OwTilePart => { const again = p.find(([t]) => t === x[0]); return again ? [x[0], x[1], again[2]] : x; }), ...p.filter(([t]) => !r.some((x) => x[0] === t))],
   empty: (p) => !p.length,
-  summary: (p) => (p.length ? `Overworld tiles (${p.length})` : null),
+  summary: (p) => (p.length ? `Overworld layer 1 tiles (${p.length})` : null),
   removal: (p) => (p.length ? `${p.length} overworld layer 1 tile(s), set back` : null),
   remove(rom, mine) {
     const changed: number[] = [];
-    for (const [t, ...words] of mine) {
-      if (owTileWords(rom, t).join() === words.slice(4).join()) setOwTileWords(rom, t, words.slice(0, 4));
+    for (const [t, before, set] of mine) {
+      if (sameOwTile(owTileWords(rom, t), set)) setOwTileWords(rom, t, before);
       else changed.push(t);
     }
     return changed.length ? [`Overworld layer 1 ${owTileNames(changed)}: changed since the package was installed – left as ${changed.length > 1 ? 'they are' : 'it is'}`] : [];
@@ -403,7 +402,7 @@ const owTiles: PartSection<string[], number[][]> = {
 
 // installing a package changing these (shared palette colors, global GFX files, overworld tiles) in a section: a conflict
 // with each package changing one of them too; say: the sentence naming those both change
-function conflicts(installed: Package[], mine: number[], theirs: (p: Package) => number[][] | undefined, say: (both: number[]) => string): string[] {
+function conflicts(installed: Package[], mine: number[], theirs: (p: Package) => [number, ...unknown[]][] | undefined, say: (both: number[]) => string): string[] {
   return installed.flatMap((p) => {
     const both = (theirs(p) ?? []).map(([n]) => n).filter((n) => mine.includes(n));
     return both.length ? [`Conflict with package “${p.name}”: both change ${say(both)}.`] : [];

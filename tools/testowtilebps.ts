@@ -11,7 +11,7 @@ import { loadAsar } from '../src/core/asar.ts';
 import { LevelEmulator } from '../src/core/levelemu.ts';
 import { map16Source } from '../src/core/render.ts';
 import { applyBps, createBps } from '../src/core/bps.ts';
-import { OW_L1_TILES, GAME_OW_TILES, owTileWords, setOwTileWords } from '../src/core/overworld.ts';
+import { OW_L1_TILES, GAME_OW_TILES, GAME_OW_MAP16, owTileWords, setOwTileWords } from '../src/core/overworld.ts';
 import { isOwTileBps } from '../src/core/owtilebps.ts';
 import { inspectUpload, installPackage, planUpload, type UploadPreview, type ReadyPreview, type InstallOptions } from '../src/core/packages.ts';
 import { listPackages, packageRemoval, packageSummary, uninstallPackage } from '../src/core/pkgreg.ts';
@@ -86,13 +86,13 @@ const upload = (name: string, files: Record<string, Uint8Array>) => ready(inspec
   const drawing = Array.from({ length: GAME_OW_TILES }, (_, t) => t).filter((t) => owTileWords(rom, t).some((w) => GONE.has(w & 0x3ff)));
   check(drawing.join() === String(0xbd), `no tile but BD draws an 8x8 tile the baserom's graphics changed (${drawing.map(hx).join(' ')})`);
   const pkg = listPackages(rom)[0];
-  check(packageSummary(pkg).some((s) => /Overworld tiles/.test(s)), `the package names them: ${packageSummary(pkg).join(', ')}`);
+  check(packageSummary(pkg).some((s) => /Overworld layer 1 tiles/.test(s)), `the package names them: ${packageSummary(pkg).join(', ')}`);
   check(packageRemoval(pkg).some((s) => /21 overworld layer 1 tile/.test(s)), `removal says so: ${packageRemoval(pkg).join('; ')}`);
 
   // a second package changing one of them (and one other)
   const o = new Rom(cleanData());
-  o.w16(0x05d000 + CHANGED[1] * 8, 0x1d6);
-  o.w16(0x05d000 + 0x50 * 8, 0x1d6);
+  o.w16(GAME_OW_MAP16 + CHANGED[1] * 8, 0x1d6);
+  o.w16(GAME_OW_MAP16 + 0x50 * 8, 0x1d6);
   const p2 = upload('other-overworld', { 'overworld.bps': createBps(cleanData(), o.data) });
   const conflicts = planUpload(rom, p2, opt.blank).conflicts;
   check(conflicts.length === 1 && conflicts[0].includes('baserom-overworld') && conflicts[0].includes(`tile ${hx(CHANGED[1])}`) && !conflicts[0].includes('50'), `the preview's plan shows the conflict (${conflicts.join(' ')})`);
@@ -120,10 +120,19 @@ const upload = (name: string, files: Record<string, Uint8Array>) => ready(inspec
 {
   // (a patch bringing bytes of the tiles that are the clean game's)
   const a = new Rom(cleanData());
-  a.w16(0x05d000 + 8, a.r16(0x05d000 + 8) ^ 1);
+  a.w16(GAME_OW_MAP16 + 8, a.r16(GAME_OW_MAP16 + 8) ^ 1);
   const one = createBps(cleanData(), a.data);
   check(isOwTileBps(one), 'a patch changing one tile is one');
   check(!isOwTileBps(createBps(cleanData(), cleanData())), 'a patch changing nothing is none');
+  // two tiles swapped: the patch brings no byte of its own (it copies the clean game's from the other tile)
+  const s = new Rom(cleanData());
+  const t3 = s.bytes(GAME_OW_MAP16 + 0x03 * 8, 8), t60 = s.bytes(GAME_OW_MAP16 + 0x60 * 8, 8);
+  s.writeBytes(GAME_OW_MAP16 + 0x03 * 8, t60);
+  s.writeBytes(GAME_OW_MAP16 + 0x60 * 8, t3);
+  const swap = createBps(cleanData(), s.data);
+  const { rom, opt } = await target();
+  const plan = planUpload(rom, upload('swapped', { 'overworld.bps': swap }), opt.blank);
+  check(isOwTileBps(swap) && [...plan.owTiles?.tiles.keys() ?? []].join() === '3,96', `a patch swapping two tiles is one: tiles ${[...plan.owTiles?.tiles.keys() ?? []].map(hx).join(' ')}`);
 }
 
 console.log(bad ? `${bad} failures` : 'all ok');

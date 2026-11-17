@@ -36,8 +36,8 @@ import { cleanGameBytes } from './cleangame.ts';
 import { globalGfxNum, globalGfxName, cleanGlobalGfx, fromBin, isCleanGlobalGfx, setGlobalGfx, same } from './globalgfx.ts';
 import { listPackages } from './pkgreg.ts';
 import { sharedPalConflicts, globalGfxConflicts, owTileConflicts } from './pkgsections.ts';
-import { isOwTileBps, changedOwTiles, cleanOwTiles, owTileNames } from './owtilebps.ts';
-import { installOwMap16Patch, owTileWords, setOwTileWords } from './overworld.ts';
+import { isOwTileBps, changedOwTiles, cleanOwTiles } from './owtilebps.ts';
+import { installOwMap16Patch, owTileWords, setOwTileWords, sameOwTile, owTileNames } from './overworld.ts';
 
 const dec = new TextDecoder();
 const base = (f: string) => f.slice(f.lastIndexOf('/') + 1);
@@ -499,8 +499,8 @@ export function applyGraphics(rom: Rom, files: Map<string, Uint8Array>, plan: Pa
     const { file, tiles } = plan.owTiles, game = cleanOwTiles(cleanGameBytes(rom));
     installOwMap16Patch(rom);
     // (a tile neither the clean game's nor the package's already: edited in this ROM)
-    const own = [...tiles].filter(([t, w]) => { const now = owTileWords(rom, t).join(); return now !== w.join() && now !== game?.[t].join(); }).map(([t]) => t);
-    if (own.length) warnings.push(`Overworld layer 1 ${owTileNames(own)}: this ROM's own changes are replaced by ${base(file)} (removing the package sets them back)`);
+    const edited = [...tiles].filter(([t, w]) => { const now = owTileWords(rom, t); return !sameOwTile(now, w) && !(game && sameOwTile(now, game[t])); }).map(([t]) => t);
+    if (edited.length) warnings.push(`Overworld layer 1 ${owTileNames(edited)}: this ROM's own changes are replaced by ${base(file)} (removing the package sets them back)`);
     for (const [t, w] of tiles) setOwTileWords(rom, t, w);
     prints.push(`${tiles.size} overworld layer 1 tile(s) from ${base(file)}: ${owTileNames([...tiles.keys()])}`);
   }
