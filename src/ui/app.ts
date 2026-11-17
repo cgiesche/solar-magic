@@ -18,7 +18,7 @@ import { objectTableKey, objectName, objectNameKey, setObjectName, namedPerTable
 import { layerBoxes, boxAt } from '../core/objboxes.ts';
 import { objectUserNames } from '../core/usernames.ts';
 import { loadPixiProject, customSpriteList, type CustomSprite } from '../core/pixi.ts';
-import { renderLevel, type LevelImages, composite, composeCells, patchLevel, patchFrame, animatedPixels, type PixelChanges, TileAnimation, ANIM_STEPS_PER_SECOND, MAX_ANIM_STEPS, type AnimStep } from '../core/render.ts';
+import { renderLevel, type LevelImages, composite, composeCells, patchLevel, patchFrame, animatedPixels, changedRects, mergeRects, type PixelChanges, type PixelRect, TileAnimation, ANIM_STEPS_PER_SECOND, MAX_ANIM_STEPS, type AnimStep } from '../core/render.ts';
 import type { SpriteImage } from '../core/spritegfx.ts';
 import { usedSpriteMemory, spriteMemSpec, lostSprites, missingSprites, type SpriteMemResult } from '../core/spritemem.ts';
 import { DM16_EXT, levelGfx, levelExtGfx, customPalette, levelMusic } from '../core/patches.ts';
@@ -235,6 +235,9 @@ export class App {
   private learner: ResultLearner;
   private cacheTimer = 0;
   private closed = false; // project closed: nothing is written to the browser any more
+  // with 'anim-frame': the rectangles of compositeImg whose pixels the step changed (the last step's put back, the
+  // new one's), null: all of it may have (the animation's first frame after a render, its stop)
+  animChanged: PixelRect[] | null = null;
   reveal = { x: 0, y: 0 }; // pixel the level view scrolls to on 'reveal'
   // tile/palette animation: frames stored as pixel diffs against the static composite (base), one per step
   // steps: the steps of the render (null: no animation), emulated in the background, carried over to a new render
@@ -242,8 +245,9 @@ export class App {
   // are; ready: the frames are those of the composite shown
   // heldStep: the next slice of building the frames, held while a level edit is open (dragging, #452: each drag step
   // would emulate steps that don't carry over to the next one); it goes on once the edit ended
+  // rects: per frame the rectangles around its pixels (changedRects)
   anim = { gen: 0, steps: null as LevelAnimSteps | null, base: null as Uint32Array | null,
-    frames: [] as PixelChanges[], phase: -1, timer: 0, ready: false, heldStep: null as (() => void) | null };
+    frames: [] as PixelChanges[], rects: [] as PixelRect[][], phase: -1, timer: 0, ready: false, heldStep: null as (() => void) | null };
 
   // changed: the project as opened has changes that are in no project file
   constructor(rom: Rom, name: string, changed = false) {
@@ -523,6 +527,7 @@ export class App {
     const before = cells ? a.frames : [];
     a.heldStep = null;
     a.frames = [];
+    a.rects = [];
     a.ready = false;
     a.base = this.compositeImg;
     if (!steps?.count) { a.phase = -1; this.stopAnimation(); this.setBusy('anim', null); return; }
@@ -557,10 +562,12 @@ export class App {
           f = { idx: ix, val: ix.map((k) => img[k]) };
         }
         a.frames[n] = f;
+        a.rects[n] = changedRects(f.idx, this.images.width);
         if (n === a.phase) {
           const img = base.slice();
           for (let j = 0; j < f.idx.length; j++) img[f.idx[j]] = f.val[j];
           this.compositeImg = img;
+          this.animChanged = null;
           this.emit('anim-frame');
         }
         i++;
@@ -588,6 +595,7 @@ export class App {
     if (!a.timer) return;
     clearInterval(a.timer);
     a.timer = 0;
+    this.animChanged = null;
     this.emit('anim-frame');
   }
 
@@ -610,12 +618,14 @@ export class App {
     if (!this.view.show.anim) { this.stopAnimation(); return; }
     if (this.scheduler.held()) return;
     const img = this.compositeImg === a.base ? a.base.slice() : this.compositeImg;
-    const prev = a.frames[a.phase];
+    const prev = a.frames[a.phase], was = prev ? a.rects[a.phase] : [];
     if (prev) for (const k of prev.idx) img[k] = a.base[k];
     a.phase = (a.phase + 1) % a.frames.length;
     const f = a.frames[a.phase];
     for (let j = 0; j < f.idx.length; j++) img[f.idx[j]] = f.val[j];
     this.compositeImg = img;
+    // (the picture is otherwise the one before: the base's, or the last step's)
+    this.animChanged = mergeRects(was, a.rects[a.phase]);
     this.emit('anim-frame');
   }
 

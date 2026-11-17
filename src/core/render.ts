@@ -638,6 +638,50 @@ function cellPainter(rom: Rom, r: Pick<LevelRender, 'ppuRegs'>, li: LevelImages,
 // pixels of a level composite that a frame of the animation shows otherwise: where (indices, ascending) and as what
 export interface PixelChanges { idx: Uint32Array; val: Uint32Array }
 
+// a rectangle of pixels of an image
+export interface PixelRect { x: number; y: number; w: number; h: number }
+// (half a screen's width: animated tiles spread over a level give a rectangle each half screen, not the whole level)
+export const CHANGE_BLOCK = 128;
+
+// The rectangles around the pixels idx (ascending, PixelChanges') of an image `width` pixels wide: the image cut into
+// blocks of CHANGE_BLOCK pixels square, one tight rectangle per block with any of the pixels. What a canvas showing
+// the image has to be given anew when those pixels change (the level view, per animation step, #504).
+export function changedRects(idx: Uint32Array, width: number): PixelRect[] {
+  const n = idx.length;
+  if (!n) return [];
+  const B = CHANGE_BLOCK, bcols = Math.ceil(width / B), brows = Math.floor(Math.floor(idx[n - 1] / width) / B) + 1;
+  // per block: x0, y0, x1, y1 (inclusive; x0 < 0: none of the pixels)
+  const box = new Int32Array(bcols * brows * 4).fill(-1);
+  let y = 0, row = 0, end = 0; // the row of the last pixel: its first pixel's index, the next row's
+  for (let i = 0; i < n; i++) {
+    const k = idx[i];
+    if (k >= end) { y = Math.floor(k / width); row = y * width; end = row + width; }
+    const x = k - row, b = (Math.floor(y / B) * bcols + Math.floor(x / B)) * 4;
+    if (box[b] < 0) { box[b] = box[b + 2] = x; box[b + 1] = box[b + 3] = y; continue; }
+    if (x < box[b]) box[b] = x; else if (x > box[b + 2]) box[b + 2] = x;
+    box[b + 3] = y; // (ascending: never above the block's first)
+  }
+  const out: PixelRect[] = [];
+  for (let b = 0; b < box.length; b += 4) if (box[b] >= 0) out.push({ x: box[b], y: box[b + 1], w: box[b + 2] - box[b] + 1, h: box[b + 3] - box[b + 1] + 1 });
+  return out;
+}
+
+// The rectangles of two lists of changedRects (of the same image) as one list: those of the same block as the one
+// around both (the step shown last put back and the next one shown: each block given to the canvas once).
+export function mergeRects(a: PixelRect[], b: PixelRect[]): PixelRect[] {
+  if (!a.length || !b.length) return a.length ? a : b;
+  const B = CHANGE_BLOCK, key = (r: PixelRect) => Math.floor(r.y / B) * 0x10000 + Math.floor(r.x / B);
+  const at = new Map<number, PixelRect>();
+  for (const r of a) at.set(key(r), r);
+  for (const r of b) {
+    const k = key(r), o = at.get(k);
+    if (!o) { at.set(k, r); continue; }
+    const x = Math.min(o.x, r.x), y = Math.min(o.y, r.y);
+    at.set(k, { x, y, w: Math.max(o.x + o.w, r.x + r.w) - x, h: Math.max(o.y + o.h, r.y + r.h) - y });
+  }
+  return [...at.values()];
+}
+
 // An animation step (other VRAM and CGRAM than the render r) as the pixels of the composed level image `base`
 // that change: only the 16x16 cells drawing an 8x8 tile whose graphics or colors differ are drawn anew, each
 // composed by look as the whole image was (only the cells in `within` when given). null when the step may change what

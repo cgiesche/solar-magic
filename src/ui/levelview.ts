@@ -5,6 +5,7 @@ import { h, attachPanZoom, toast } from './dom.ts';
 import { BrushDrag, drawBrushFrame } from './brushsurface.ts';
 import { paintOverlays, openOverlay, boxLayers, deathsAt, gameViewLabelBox, gameViewIn, BAND_STYLE, type SpriteDraw, MARKER_STYLE, type GameViewFrame, ARC_STYLE, type ArcsDraw } from './leveloverlays.ts';
 import { hex2, hex3 } from '../core/names.ts';
+import type { PixelRect } from '../core/render.ts';
 import { type Grab } from '../core/objresize.ts';
 import type { MoveDrag, ResizeDrag } from '../core/levelmodel.ts';
 import { probeAt, spriteProbeAt, enterText, collisionText, collisionIn, switchText, SWITCH_STATES, SWITCH_NAME } from '../core/blockprobe.ts';
@@ -60,6 +61,9 @@ export class LevelView {
   problems: ReturnType<typeof problemsButton>;
   pos: HTMLSpanElement;
   pendingFrame = 0;
+  // the level image on levelCanvas is not the one to show: it changed while the view was out of the page (another
+  // workspace shown, #504); given to the canvas whole with the next paint in the page
+  private imageStale = false;
   arcPin: { tx: number; ty: number } | null = null; // jump arcs stay at this tile instead of following the mouse
 
   constructor(app: App, statusBar: HTMLDivElement) {
@@ -94,7 +98,7 @@ export class LevelView {
       app.openMessages(t.translevel, t.msg);
     });
     app.on('render', () => { this.updateLevelImage(); this.updateStats(); });
-    app.on('anim-frame', () => { this.updateLevelImage(false); });
+    app.on('anim-frame', () => this.showAnimFrame());
     // (painted once per display frame: a drag step renders and changes, the mouse moves, #452)
     app.on('change', () => { this.requestPaint(); this.updateStats(); });
     app.on('reveal', () => this.scrollToTile(app.reveal.x >> 4, app.reveal.y >> 4));
@@ -136,18 +140,38 @@ export class LevelView {
     this.app.emit('zoom');
   }
 
+  // the level image (App.compositeImg) is another one: given to levelCanvas whole – once the view is in the page
+  // again when it is not (another workspace shown: no upload for a picture nobody sees)
   updateLevelImage(relayout = true): void {
+    if (this.root.isConnected) this.putLevelImage(null); else this.imageStale = true;
+    if (relayout) this.layout(); else this.requestPaint();
+  }
+
+  // the animation's next step (or its stop): only the rectangles it changed given to levelCanvas (App.animChanged),
+  // nothing while the view is out of the page – the picture as it is then is shown whole once it is back
+  private showAnimFrame(): void {
+    if (!this.root.isConnected) { this.imageStale = true; return; }
+    const rects = this.imageStale ? null : this.app.animChanged;
+    if (rects && !rects.length) return;
+    this.putLevelImage(rects);
+    this.requestPaint();
+  }
+
+  // App.compositeImg on levelCanvas: whole, or only its rectangles `rects` (the rest is on it already)
+  private putLevelImage(rects: PixelRect[] | null): void {
     const im = this.app.images;
     if (this.levelCanvas.width !== im.width || this.levelCanvas.height !== im.height) {
       this.levelCanvas.width = im.width;
       this.levelCanvas.height = im.height;
+      rects = null;
     }
     const lctx = this.levelCanvas.getContext('2d')!;
     // putImageData copies the pixels: the image is only viewed, not copied first
     const c = this.app.compositeImg;
     const id = new ImageData(new Uint8ClampedArray(c.buffer as ArrayBuffer, c.byteOffset, c.byteLength), im.width, im.height);
-    lctx.putImageData(id, 0, 0);
-    if (relayout) this.layout(); else this.requestPaint();
+    if (rects) for (const r of rects) lctx.putImageData(id, 0, 0, r.x, r.y, r.w, r.h);
+    else lctx.putImageData(id, 0, 0);
+    if (!rects) this.imageStale = false;
   }
 
   // the scroll area sized to the level, the canvas to the view: painted at once when that cleared it (its size
@@ -230,6 +254,8 @@ export class LevelView {
     const app = this.app;
     if (!app.images) return;
     if (this.pendingFrame) { cancelAnimationFrame(this.pendingFrame); this.pendingFrame = 0; }
+    // (back in the page: the level image as it is now, changed meanwhile)
+    if (this.imageStale && this.root.isConnected) this.putLevelImage(null);
     const ctx = this.ctx;
     const dpr = window.devicePixelRatio || 1;
     const z = app.view.zoom * dpr;
