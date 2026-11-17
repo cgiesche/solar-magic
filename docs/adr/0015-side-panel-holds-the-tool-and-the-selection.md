@@ -24,3 +24,7 @@ Why: a panel that always shows everything shows nothing well – the user has to
 ## Amendment (#478, #482): the same tabs in every editor
 
 The UI concept (#472) applies the rule to the level editor and names the tabs the same everywhere: **"Picker | Properties"** (the overworld's "Paint | Properties" and "Sprites | Sprite" renamed). In the Graphics workspace the side panel keeps the preview pinned on top with the open view's properties below it (#478's decision). One difference in the level editor: its Properties tab is never disabled – with nothing selected it holds the level's entrances and exits (the Entrances/Exits mode) and, while open, the message panel, both the level's and not a selection's. Ctrl+click no longer shows a tile's info (#482: Ctrl+click adds to the selection everywhere); Alt+click does.
+
+## Amendment: the level editor stacks the picker and the properties
+
+On the user's request the level editor's side panel shows both again, without tabs: the picker on top, the properties of what is selected below it (at most 40 % of the panel's height, scrolling beyond that). Placing and adjusting alternate with every click there, and switching tabs hid the one just needed. The message panel takes the place of both while it is open. To keep the properties short, the reference part in them – "Used in levels" – is folded: its title says how many levels, a click opens the list, and it stays open or closed as left (an exception to "no collapsible sub-sections", in line with "reference stays out of the way until asked"). The overworld keeps its tabs.

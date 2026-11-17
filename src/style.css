@@ -287,11 +287,11 @@ input.invalid, input.invalid:focus { outline: 1px solid var(--danger); border-co
 .filter { width: 100%; }
 .picker { flex: 1 1 60%; }
 .props { flex: 0 0 auto; max-height: 40%; border-top: 1px solid var(--border); overflow-y: auto; }
-/* the level's side panel as tabs (#478): the picker or the properties (or the message panel) fill it */
-.side-tabs { flex: none; padding: 4px 6px 0; }
-.side-props { flex: 1; min-height: 0; display: flex; flex-direction: column; }
-.side-props[hidden], .right > .picker[hidden] { display: none; }
-.side-props > .props { flex: 1 1 auto; max-height: none; border-top: none; }
+/* the level's side panel: the picker, the properties below it; the message panel fills it while open (.fill) */
+.side-props { flex: 0 0 auto; max-height: 40%; min-height: 0; display: flex; flex-direction: column; }
+.side-props > .props { flex: 0 1 auto; max-height: none; }
+.side-props.fill { flex: 1; max-height: none; }
+.right > .picker[hidden] { display: none; }
 .tabs { display: flex; gap: 3px; }
 .tabs button { flex: 1; padding: 3px; }
 .picker-body { overflow-y: auto; flex: 1; min-height: 0; scrollbar-gutter: stable; }
@@ -819,6 +819,10 @@ body.mt-dragging .mt-big { outline: 2px dashed var(--accent); outline-offset: -2
 .gt-users { display: flex; flex-wrap: wrap; gap: 6px; }
 .gt-users a { color: var(--accent); }
 .used-in { border-top: 1px solid var(--border); padding-top: 6px; margin-top: 6px; display: flex; flex-direction: column; gap: 4px; }
+details.used-in { display: block; }
+.used-in > summary { display: list-item; cursor: pointer; }
+.used-in > summary .hint { margin-left: 6px; }
+details.used-in > :not(summary) { margin-top: 4px; }
 .used-in-list { display: flex; flex-direction: column; max-height: 220px; overflow-y: auto; }
 .used-in-item { display: flex; gap: 6px; align-items: baseline; padding: 2px 4px; border-radius: 3px; color: var(--text); text-decoration: none; }
 .used-in-item:hover { background: var(--surface-2); }

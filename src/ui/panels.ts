@@ -105,7 +105,7 @@ export function entryLegend(app: App, e: { items?: number[]; enter?: string; mar
 
 // the levels with sprite id, each opening at its first one
 function spriteUses(app: App, id: number, title: string): HTMLElement {
-  return usedInList(app, title, app.spriteUsers(id).map((u) => ({ level: u.level, at: { x: u.x, y: u.y }, text: `${u.count}×` })), 0, 'In no level.');
+  return usedInList(app, title, app.spriteUsers(id).map((u) => ({ level: u.level, at: { x: u.x, y: u.y }, text: `${u.count}×` })), 0, 'In no level.', undefined, true);
 }
 
 // ---------------- level list ----------------
