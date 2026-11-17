@@ -518,15 +518,22 @@ export function emptyState(text: string): HTMLElement {
 }
 
 // an image W pixels wide (RGBA words) drawn into a canvas of its size, its transparent pixels black (back: the word
-// they get instead, 0 keeps them transparent)
+// they get instead, 0 keeps them transparent). A canvas put again at the same size keeps its bitmap and its ImageData
+// (#503: the overworld's layers, put with every redraw and animation step) – every pixel is written, so nothing of
+// the image before is left
 export function putImage(canvas: HTMLCanvasElement, img: Uint32Array, W = 512, back = 0xff000000): void {
-  canvas.width = W; canvas.height = img.length / W;
+  const H = img.length / W;
+  if (canvas.width !== W) canvas.width = W;
+  if (canvas.height !== H) canvas.height = H;
   const ctx = canvas.getContext('2d')!;
-  const id = ctx.createImageData(W, img.length / W);
+  let id = putImages.get(canvas);
+  if (!id || id.width !== W || id.height !== H) putImages.set(canvas, id = ctx.createImageData(W, H));
   const px = new Uint32Array(id.data.buffer);
-  for (let i = 0; i < px.length; i++) px[i] = img[i] || back;
+  if (back) for (let i = 0; i < px.length; i++) px[i] = img[i] || back;
+  else px.set(img);
   ctx.putImageData(id, 0, 0);
 }
+const putImages = new WeakMap<HTMLCanvasElement, ImageData>(); // the ImageData putImage last put on a canvas
 
 // the state of tabs and segmented controls for assistive technology (#480): a tab bar's buttons are tabs, the active
 // one selected; a segmented control's active button is pressed – kept from the class 'active' the views set

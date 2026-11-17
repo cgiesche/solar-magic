@@ -1,8 +1,9 @@
 // The brush convention's geometry (ADR 0011, ui/brushsurface.ts): a pick's rectangle from its corners in any order,
 // a stroke's stamps on the brush's grid from its first cell; the buttons that paint; a drag (BrushDrag) picking,
-// painting on the grid, ending, cancelled by Esc, and the frame it shows.
+// painting on the grid, ending, cancelled by Esc, and the frame it shows; what a stroke's stamps ask to be drawn, drawn
+// once per display frame (OncePerFrame), at once when the stroke ends.
 // node tools/testbrushsurface.ts
-import { pickRect, brushGridCell, paintButton, BrushDrag } from '../src/ui/brushsurface.ts';
+import { pickRect, brushGridCell, paintButton, BrushDrag, OncePerFrame } from '../src/ui/brushsurface.ts';
 
 let bad = 0;
 const check = (ok: boolean, what: string) => { console.log((ok ? 'ok   ' : 'FAIL ') + what); if (!ok) bad++; };
@@ -50,6 +51,39 @@ check(btn(2) && btn(0, true) && !btn(0) && !btn(0, true, true) && !btn(1), 'righ
   check(d.cancel() && !log.includes('pick 1,1 1x1'), 'Esc mid-pick: nothing picked');
   check(d.pickFrame() === null && same(d.hoverFrame({ x: 30, y: 5 }, { w: 32, h: 32 }), { x: 30, y: 5, w: 2, h: 2 }), 'idle: no pick rectangle, the hover frame is the brush at the mouse');
   check(same(d.hoverFrame({ x: 31, y: 31 }, { w: 32, h: 32 }), { x: 31, y: 31, w: 1, h: 1 }), 'clipped to the picture\'s cells');
+}
+
+// drawing asked for by every stamp: once per display frame (#503)
+{
+  const frames = new Map<number, () => void>();
+  let id = 0, drawn = 0;
+  const frame = () => { const due = [...frames.values()]; frames.clear(); for (const f of due) f(); };
+  const o = new OncePerFrame(() => drawn++, (f) => { frames.set(++id, f); return id; }, (n) => frames.delete(n));
+  check(!o.due && !o.flush() && drawn === 0, 'nothing asked: nothing due, nothing drawn');
+  o.request(); o.request(); o.request();
+  check(o.due && drawn === 0 && frames.size === 1, 'asked three times before the frame: one frame asked for, nothing drawn yet');
+  frame();
+  check(drawn === 1 && !o.due, 'the frame draws once');
+  frame();
+  check(drawn === 1, 'no frame more without being asked');
+  o.request();
+  check(o.flush() && drawn === 2 && !o.due && frames.size === 0, 'the stroke ended before the frame: drawn at once, the frame given back');
+  frame();
+  check(drawn === 2, 'the frame after it draws nothing');
+  o.request();
+  o.drop();
+  frame();
+  check(drawn === 2 && !o.due, 'dropped (drawn otherwise meanwhile): not drawn again');
+  o.request();
+  frame();
+  check(drawn === 3, 'asked again after a drop: drawn with the next frame');
+  // (asked again while drawing: the next frame's)
+  const again = new OncePerFrame(() => { drawn++; if (drawn === 4) again.request(); }, (f) => { frames.set(++id, f); return id; }, (n) => frames.delete(n));
+  again.request();
+  frame();
+  check(drawn === 4 && again.due, 'asked while drawing: due with the next frame');
+  frame();
+  check(drawn === 5 && !again.due, 'and drawn then');
 }
 
 if (bad) { console.log(`\n${bad} FAILED`); process.exit(1); }

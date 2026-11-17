@@ -22,7 +22,7 @@ import { ExitGraph } from '../src/core/exitgraph.ts';
 import type { Job } from '../src/core/jobrunner.ts';
 import { readStart } from '../src/core/owsprites.ts';
 import { RAM } from '../src/core/ram.ts';
-import { worldProblems, worldChecks, worldCheckJob, stuckAtEveryProgress, applyFix, errorCount, stopTile, diffProblems, diffText, checkAgainst, budgetProblems, budgetPlace, type CheckedAt, type WorldProblem, type WorldFix } from '../src/core/worldcheck.ts';
+import { worldProblems, worldChecks, worldCheckJob, stuckAtEveryProgress, applyFix, errorCount, stopTile, diffProblems, diffText, checkAgainst, checkShownChanged, budgetProblems, budgetPlace, type CheckedAt, type WorldProblem, type WorldFix } from '../src/core/worldcheck.ts';
 import { owBudgets, fullestSubmap } from '../src/core/owbudget.ts';
 import { eventReveal } from '../src/core/oweventtiles.ts';
 import { readEvents, writeEvents, submapViews, submapOf } from '../src/core/owevents.ts';
@@ -75,6 +75,13 @@ console.log(list(clean.problems));
   const again = checkRom(new Rom(rom.data.slice())).problems;
   check(keys(again) === keys(ps), 'searched again: the same keys');
   check(diffText(diffProblems(ps, again)) === null, 'nothing changed: nothing said');
+  // the list drawn again (#503): not for the same problems (the same array) with the list open or closed as before
+  check(checkShownChanged(null, ps, false) && checkShownChanged(null, null, false), 'the World check\'s list: drawn the first time');
+  check(!checkShownChanged({ problems: ps, open: false }, ps, false) && !checkShownChanged({ problems: ps, open: true }, ps, true) && !checkShownChanged({ problems: null, open: false }, null, false),
+    'the same problems, open or closed as before: not drawn again');
+  check(checkShownChanged({ problems: ps, open: false }, ps, true) && checkShownChanged({ problems: ps, open: true }, ps, false), 'opened or closed: drawn again');
+  check(checkShownChanged({ problems: ps, open: true }, again, true) && checkShownChanged({ problems: ps, open: true }, ps.slice(), true) && checkShownChanged({ problems: null, open: true }, ps, true)
+    && checkShownChanged({ problems: ps, open: true }, null, true), 'searched again (another array), found or being searched: drawn again');
   const warn = (n: number): WorldProblem => ({ ...events[0], key: `w${n}` });
   check(diffText({ added: [warn(1), warn(2)], gone: [warn(3)] })?.text === '+2 warnings · −1 warning', 'warnings counted, not named');
   // up to three named in all, the rest of each list counted with it

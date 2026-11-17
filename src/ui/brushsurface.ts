@@ -98,6 +98,39 @@ export class BrushDrag {
   }
 }
 
+// What is asked to be drawn again and again within a display frame – every stamp of a stroke, every mouse move or
+// scroll event – drawn once with the next frame (#503); `flush` draws it at once where what it draws is read right
+// after (a stroke ended or cancelled), `drop` when it was drawn otherwise meanwhile. `frame`/`cancel`: the browser's
+// requestAnimationFrame / cancelAnimationFrame (others in tests)
+export class OncePerFrame {
+  private pending: number | null = null;
+  private draw: () => void;
+  private frame: (f: () => void) => number;
+  private cancel: (id: number) => void;
+  constructor(draw: () => void, frame: (f: () => void) => number = (f) => requestAnimationFrame(f), cancel: (id: number) => void = (id) => cancelAnimationFrame(id)) {
+    this.draw = draw; this.frame = frame; this.cancel = cancel;
+  }
+  get due(): boolean { return this.pending !== null; }
+  // drawn with the next display frame, however often asked before it
+  request(): void {
+    if (this.pending !== null) return;
+    this.pending = this.frame(() => { this.pending = null; this.draw(); });
+  }
+  // drawn now when asked for; whether it was
+  flush(): boolean {
+    if (this.pending === null) return false;
+    this.drop();
+    this.draw();
+    return true;
+  }
+  // no longer to be drawn (until asked again)
+  drop(): void {
+    if (this.pending === null) return;
+    this.cancel(this.pending);
+    this.pending = null;
+  }
+}
+
 // a frame drawn: the box [x, y, w, h] in the context's units, lw: one screen pixel in them
 export function drawBrushFrame(ctx: CanvasRenderingContext2D, kind: 'pick' | 'hover' | 'selection', box: [number, number, number, number], lw: number): void {
   ctx.lineWidth = lw;

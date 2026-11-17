@@ -17,7 +17,7 @@ import { l1XY, OW_EVENTS } from '../core/overworld.ts';
 import { tileText } from '../core/owteleport.ts';
 import { hex2 } from '../core/names.ts';
 import { progressWords } from '../core/eventset.ts';
-import { worldProblems, applyFix, errorCount, checkAgainst, diffText, budgetPlace, problemShow, budgetShow, isFoundAtEveryProgress, CHECK_GROUPS, type CheckBaseline, type WorldProblem, type CheckSeverity, type WorldCheckLearned } from '../core/worldcheck.ts';
+import { worldProblems, applyFix, errorCount, checkAgainst, diffText, budgetPlace, problemShow, budgetShow, isFoundAtEveryProgress, checkShownChanged, CHECK_GROUPS, type CheckBaseline, type CheckShown, type WorldProblem, type CheckSeverity, type WorldCheckLearned } from '../core/worldcheck.ts';
 import type { Budget } from '../core/owbudget.ts';
 import { budgetGauge } from './budgetgauge.ts';
 import { icon, iconLabel, type IconName } from './icons.ts';
@@ -41,6 +41,8 @@ export class WorldCheck {
   // compared at any event progress shown)
   private baseline: CheckBaseline | null = null;
   private everyBaseline: CheckBaseline | null = null;
+  // what the button and the list were last drawn from: not drawn again while it is the same (checkShownChanged)
+  private shown: CheckShown | null = null;
 
   constructor(view: OverworldView) {
     this.view = view;
@@ -92,10 +94,14 @@ export class WorldCheck {
     return learned;
   }
 
-  // the button and (when open) the panel checked again
+  // the button and the panel checked again; drawn again when the problems are others (searched again: another array) or
+  // the list was opened or closed since (#503: asked for with every redraw of the map)
   update(): void {
     const ps = this.problems(), errors = ps ? errorCount(ps) : 0, warnings = ps ? ps.length - errors : 0;
-    if (ps) this.tell(ps);
+    if (ps) this.tell(ps); // (may open the list)
+    const open = this.open;
+    if (!checkShownChanged(this.shown, ps, open)) return;
+    this.shown = { problems: ps, open };
     const b = this.button;
     b.classList.toggle('status-info', !errors);
     b.classList.toggle('status-error', errors > 0);

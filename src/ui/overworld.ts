@@ -4,7 +4,7 @@ import type { App } from './app.ts';
 import type { Watch } from '../core/romwatch.ts';
 import { StateMemo } from '../core/romdeps.ts';
 import { h, toast, choose, select, checkbox, attachPanZoom, zoomControl, pixelZoomSteps, snapZoom, attachRectPick, emptyState, putImage, type CellRect } from './dom.ts';
-import { BrushDrag, drawBrushFrame, paintButton } from './brushsurface.ts';
+import { BrushDrag, OncePerFrame, drawBrushFrame, paintButton } from './brushsurface.ts';
 import {
   type OwRender, gameL1, gameL2, readL1, readL2, l1Index, l1XY, l2Index, readTranslevels, writeTranslevels, readMaps,
   sharedTranslevels, translevelToLevel, MAP_NAMES,
@@ -225,16 +225,34 @@ export class OverworldView {
   private brushDrag = new BrushDrag({
     brush: () => this.brush,
     stamp: (x, y) => this.paintAt(x, y),
-    changed: () => { this.redrawMap(); if (this.mode === 'l1') this.buildLeft(); },
-    end: () => this.endStroke(),
+    // (every stamp: the map drawn with the next display frame, #503 – what follows it once the stroke ends)
+    changed: () => { this.strokePainted = true; this.mapFrame.request(); },
+    end: () => { this.strokeShown(); this.endStroke(); },
     cancel: () => {
       this.stroke?.cancel();
       this.stroke = null;
-      this.redrawMap();
-      if (this.mode === 'l1') this.buildLeft();
+      this.strokePainted = true; // (what it painted put back: drawn)
+      this.strokeShown();
     },
     pick: (r) => this.pick(this.clampRect(r)),
   });
+  // the map drawn again and the view painted once per display frame, however many stamps, mouse moves or scroll events
+  // a frame brings (#503); what reads the map drawn (shown) right after takes the redraw due at once (mapFrame.flush)
+  private mapFrame = new OncePerFrame(() => { if (this.root.isConnected) this.redrawMap(); });
+  private paintFrame = new OncePerFrame(() => { if (this.root.isConnected && !this.mapFrame.due) this.paint(); }); // (a redraw due paints)
+  private strokePainted = false; // the stroke being painted changed a cell not followed yet by the event list (strokeShown)
+  // painted with the next display frame (once, however often asked before)
+  requestPaint(): void {
+    this.paintFrame.request();
+  }
+  // a stroke ended or cancelled: what it painted on the map at once (not with the next frame) with the World check,
+  // and in the layer 1 mode the event list – once per stroke, not per stamp (#503)
+  private strokeShown(): void {
+    if (!this.strokePainted) return;
+    this.strokePainted = false;
+    this.redrawMap();
+    if (this.mode === 'l1') this.buildLeft();
+  }
   selected = -1; // the layer 1 tile shown in the properties (l1Index)
   private palScroll: number | null = null; // the paint sheet's scroll while Paint is hidden (the Properties tab shown)
   private infoTile = -1; // the tile selected by Alt+click (its info)
@@ -273,7 +291,7 @@ export class OverworldView {
     this.left = h('div', { class: 'left' }, h('div', { class: 'panel levels ow-events' },
       h('div', { class: 'panel-title' }, 'Events'), this.evList));
     this.root = h('div', { class: 'center with-rail' }, this.rail, h('div', { class: 'center-main' }, h('div', { class: 'level-view' }, this.scroller, this.eventsBadge), this.timeline, this.status));
-    this.scroller.addEventListener('scroll', () => { this.cellHistory.close(); this.paint(); });
+    this.scroller.addEventListener('scroll', () => { this.cellHistory.close(); this.requestPaint(); });
     // next frame: layout() resizes the canvas inside the observed scroller (no ResizeObserver loop error); the zoom
     // follows a screen of another scale (the browser's zoom changed: the scroller has other CSS pixels)
     new ResizeObserver(() => requestAnimationFrame(() => {
@@ -309,6 +327,7 @@ export class OverworldView {
     this.watch = app.watchRom(() => {
       if (!this.root.isConnected) return;
       if (this.brushDrag.painting) { this.brushDrag.drop(); this.stroke = null; }
+      this.strokePainted = false;
       this.sync();
     });
     // any ROM edit: the map's load asked for again if it no longer holds (drawn when it comes); the World check checks
@@ -412,6 +431,7 @@ export class OverworldView {
     this.watch.add(() => this.redrawMapNow());
   }
   private redrawMapNow(): void {
+    this.mapFrame.drop(); // (drawn now: not again with the next frame)
     const exact = this.load(), last = exact ? null : this.last?.map === this.map ? this.last : null;
     if (!exact && !last) { this.paint(); return; }
     const r = exact ?? last!.r, ev = this.ev;
@@ -493,6 +513,7 @@ export class OverworldView {
   }
 
   paint(): void {
+    this.paintFrame.drop(); // (painted now: not again with the next frame)
     const ctx = this.canvas.getContext('2d')!;
     const dpr = window.devicePixelRatio || 1;
     // whole screen pixels per SNES pixel (half one zoomed out the most), on whole screen pixels
@@ -843,6 +864,7 @@ export class OverworldView {
     if (e.target !== this.scroller && e.target !== this.canvas) return;
     const rc = this.scroller.getBoundingClientRect();
     if (e.clientX - rc.left > this.scroller.clientWidth || e.clientY - rc.top > this.scroller.clientHeight) return;
+    this.mapFrame.flush(); // (the map as painted so far: read below)
     // a link symbol of a label under a tile: where its link leads shown
     const jump = e.button === 0 ? this.nameLabel.jumpAt(e.clientX, e.clientY) : null;
     if (jump) { this.links.jump(jump); return; }
@@ -949,7 +971,7 @@ export class OverworldView {
     if (this.levelTiles.moving) { this.paint(); return; }
     if (this.pathTool.drawing) { this.pathTool.move(c.x, c.y); return; }
     this.brushDrag.move(c);
-    this.paint();
+    this.requestPaint(); // (the hover frame, a pick's rectangle; a stamp's redraw paints)
   }
 
   // a stroke, a pick, a link or a level tile or a route being dragged (followed off the map too)
@@ -1730,6 +1752,7 @@ export class OverworldView {
   // keys while the overworld is shown; false: not handled
   key(e: KeyboardEvent): boolean {
     const k = e.key.toLowerCase();
+    this.mapFrame.flush(); // (the map as painted so far: read below)
     if ((e.ctrlKey || e.metaKey) && !e.altKey && this.mode === 'sprites') {
       if (k === 'c') return this.sprites.copy();
       if (k === 'v') return this.sprites.paste();
@@ -2685,8 +2708,10 @@ const dimL2Pref = boolPref('ow-dim-l2', true), l1InL2Pref = boolPref('ow-l1-in-l
 
 // the map from its layers: black, layer 2, layer 1 over it, each at its strength (0: left out)
 function composeLayers(out: HTMLCanvasElement, l1c: HTMLCanvasElement, l2c: HTMLCanvasElement, s: { l1: number; l2: number }): void {
-  out.width = 512; out.height = 512;
+  // (a canvas of the size keeps its bitmap, #503: it is filled whole, drawn with nothing but these calls)
+  if (out.width !== 512 || out.height !== 512) { out.width = 512; out.height = 512; }
   const ctx = out.getContext('2d')!;
+  ctx.globalAlpha = 1;
   ctx.fillStyle = '#000';
   ctx.fillRect(0, 0, 512, 512);
   for (const [c, a] of [[l2c, s.l2], [l1c, s.l1]] as const) {

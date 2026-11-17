@@ -334,6 +334,15 @@ export function checkAgainst(last: CheckBaseline | null, gen: number, progress: 
   return { baseline, change };
 }
 
+// what the World check's button and list were last drawn from: the problems (null: being searched) and whether the
+// list was open
+export interface CheckShown { problems: WorldProblem[] | null; open: boolean }
+// Whether the button and the list are to be drawn again (#503): not while the search hands out the same problems – the
+// same array, as it does while nothing it searches changed – and the list is open or closed as before
+export function checkShownChanged(last: CheckShown | null, problems: WorldProblem[] | null, open: boolean): boolean {
+  return !last || last.problems !== problems || last.open !== open;
+}
+
 // What an edit changed, said in one sentence (a toast): the errors new and gone named – up to `max` in all, each list
 // then "and N more" – the warnings counted ("New: dead end at Main map 0C,09 · Fixed: level 105 not reached and 2
 // more · +2 warnings"); `show` the first new error; null when nothing changed
