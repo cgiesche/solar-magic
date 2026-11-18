@@ -1274,7 +1274,7 @@ export class OverworldView {
     this.badgeSaid = said;
     b.replaceChildren(...[
       h('span', null, painting ? `${layer} · Editing: ${what}` : `Editing: ${what}`),
-      h('span', { class: 'hint' }, ` · ${shown} of ${hex(OW_EVENTS, 2)} events shown${above ? ' (some after it: drawn over it)' : ''}`),
+      h('span', { class: 'hint' }, ` · ${shown} of ${OW_EVENTS} events shown${above ? ' (some after it: drawn over it)' : ''}`),
       missing.length ? h('button', {
         class: 'ow-badge-fix',
         title: `The event's steps are found against the map before it in number order: events ${missing.map((x) => hex(x, 2)).join(', ')} come before it but are not checked, so the map shown differs from the one it is stored against (what you paint still goes into the event) – click to check them`,
