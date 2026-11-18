@@ -270,6 +270,9 @@ if (flags.includes('--list')) {
 if (!chosen.length) { console.error(`no test's name contains ${filters.join(' or ')}`); process.exit(1); }
 
 const t0 = performance.now();
+// fixtures that are downloaded instead of kept in the repository (fetchfixtures.ts); the tests needing one that
+// could not be fetched fail on reading it
+for (const f of await (await import('./fetchfixtures.ts')).fetchFixtures()) console.log(`warning: test fixture ${f}`);
 // The patched image the tests start from (fixture.ts editorImage), built once and kept before they all ask for it
 // at the same time. Failing here (a source that doesn't load) is left to the tests to tell
 if (!process.env.SMW_NO_IMAGE_CACHE) {
