@@ -119,6 +119,11 @@ Four 16×16 OBJ at Y `$70`, X from `NintendoPos` (`$60,$70,$80,$90`), tiles from
 the brightness `$0093CB`, the graphics file's number `$00A9CD`, and the colours `$00B280` (12 bytes: palette 8's
 colours 2–5; the last four bytes, colours 6–7, are there only for the logo).
 
+*Emulated since (#526, `src/core/presents.ts`):* the logo's pixels use colour 1 of sprite palette 0 only (CGRAM `$81`),
+and that is not one of these bytes: it is the white `LoadPalette` gives colour 1 of every sprite palette (an operand
+in its code). So the clean game's logo has no colour of its own; the 12 bytes at `$00B280` are in CGRAM `$82`–`$87`
+while the logo shows, and no pixel of it uses them.
+
 ### 2.2 Title screen movement
 
 `TitleScreenInputSeq` `$009C1F`–`$009C63`: 34 pairs of (buttons, frames) and `$FF`. PAL has its own table. The

@@ -26,6 +26,7 @@ export interface MemHook {
   onCgramWrite?(addr: number): void; // a CGRAM byte written
   onVideoRead?(): void; // VRAM, CGRAM or OAM read through its port
   onVramRead?(addr: number): void; // a VRAM byte read into the port's latch as its address is set
+  onOamWrite?(addr: number): void; // a byte of OAM written through its port (a low table's byte lands with its pair's second)
 }
 
 // several hooks as one, each called in turn
@@ -35,7 +36,7 @@ export function joinHooks(...hooks: MemHook[]): MemHook {
     return fs.length ? (...a: number[]) => { for (const f of fs) f(...a); } : undefined;
   };
   return { onRomRead: all('onRomRead'), onWramWrite: all('onWramWrite'), onWramRead: all('onWramRead'), onOverlayRead: all('onOverlayRead'),
-    onVramWrite: all('onVramWrite'), onCgramWrite: all('onCgramWrite'), onVideoRead: all('onVideoRead'), onVramRead: all('onVramRead') };
+    onVramWrite: all('onVramWrite'), onCgramWrite: all('onCgramWrite'), onVideoRead: all('onVideoRead'), onVramRead: all('onVramRead'), onOamWrite: all('onOamWrite') };
 }
 
 export interface SnesState {
@@ -361,6 +362,7 @@ export class Snes implements Bus {
       case 0x2103: this.oamaddr = (this.ppuRegs[2] | ((v & 1) << 8)) << 1; return;
       case 0x2104: {
         const a = this.oamaddr % 0x220;
+        this.hook?.onOamWrite?.(a);
         if (a >= 0x200) this.oam[a] = v;
         else if ((a & 1) === 0) this.oamLatch = v;
         else { this.oam[a - 1] = this.oamLatch; this.oam[a] = v; }

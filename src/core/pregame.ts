@@ -218,8 +218,11 @@ export function reachScreens(emu: LevelEmulator): ReachedScreen[] {
 
 // Runs the game to a screen again as it got there, `hook` watching: what it reads and writes on the way (the bytes
 // a menu's text comes from). The machine is left showing the screen. `sram`: the save files the game finds on the
-// way instead of its own; `sources`: with every byte's source tracked (Snes.trackSources, writeSource for the hook).
-export function replayScreen(emu: LevelEmulator, screen: ReachedScreen, hook: MemHook | null = null, o: { sram?: Uint8Array; sources?: boolean } = {}): void {
+// way instead of its own; `sources`: with every byte's source tracked (Snes.trackSources, writeSource for the hook);
+// `frames`: this many frames run instead of the way's (past its end: no button held); `each`: called after every
+// frame with its number, false ends the run.
+export interface ReplayOptions { sram?: Uint8Array; sources?: boolean; frames?: number; each?: (frame: number) => boolean | void }
+export function replayScreen(emu: LevelEmulator, screen: ReachedScreen, hook: MemHook | null = null, o: ReplayOptions = {}): void {
   const s = emu.snes, outer = s.hook;
   if (!screen.path) { s.loadState(screen.state); return; }
   start(s, screen.path);
@@ -227,7 +230,12 @@ export function replayScreen(emu: LevelEmulator, screen: ReachedScreen, hook: Me
   s.hook = hook;
   if (o.sources) s.trackSources(true);
   try {
-    for (const joy of screen.path.pad) { s.joy1 = joy; s.runFrame(); }
+    const pad = screen.path.pad, n = o.frames ?? pad.length;
+    for (let f = 0; f < n; f++) {
+      s.joy1 = pad[f] ?? 0;
+      s.runFrame();
+      if (o.each?.(f) === false) break;
+    }
   } finally {
     if (o.sources) s.trackSources(false);
     s.hook = outer;

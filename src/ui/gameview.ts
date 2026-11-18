@@ -5,16 +5,19 @@
 // (owborder.ts: each map's layer 3 fixed on the screen) and the menus' texts (menutext.ts: the cells of a menu's
 // stripe image, in place; the cursor's cells and the cells the game writes over are marked) – painted with layer 3's
 // 8x8 tiles as every brush editor paints (brushsurface.ts, ADR 0011); a stroke is one ROM edit when the mouse is
-// released. The other screens are pictures; an editor for one of them replaces its picture in `showScreen`.
+// released. Nintendo Presents has fields beside its picture (presents.ts: what the game reads the logo from). The
+// other screens are pictures; an editor for one of them replaces its picture in `showScreen`.
 
 import type { App } from './app.ts';
-import { h, toast, attachPanZoom, zoomControl } from './dom.ts';
+import { h, toast, attachPanZoom, zoomControl, hexInput } from './dom.ts';
 import { LevelEmulator } from '../core/levelemu.ts';
 import { TileCache } from '../core/render.ts';
 import { TITLE_COLS, TITLE_ROWS, TITLE_SHOWN_ROWS, titleTilemap, titlePicture, writeTitleScreen, type TitlePicture } from '../core/titlescreen.ts';
 import { GAME_SCREENS, gameScreenKind, gameScreens, screenPicture, type GameScreenId, type ReachedScreen, type ScreenPicture } from '../core/pregame.ts';
 import { MENU_COLS, MENU_ROWS, menuText, paintMenuCell, paintedOverwritten, writeMenuText, type MenuText } from '../core/menutext.ts';
 import { pcToSnes } from '../core/rom.ts';
+import { presentsLogo, sharedFields, writePresentsValue, type PresentsValue, type LogoObj } from '../core/presents.ts';
+import { htmlOf } from './gfx/palettetab.ts';
 import { layer3WordText } from '../core/layer3map.ts';
 import { layer3Picker } from './l3picker.ts';
 import { fillPixels, hidePickerPreview } from './pickerview.ts';
@@ -197,6 +200,7 @@ export class GameView {
   private showScreen(id: GameScreenId): void {
     const kind = gameScreenKind(id), ctx = this.screenCanvas.getContext('2d')!;
     let why = '', note = 'The picture is the game\'s own: the editor runs the game to this screen as a player gets there. It can\'t be edited here yet.';
+    let fields: HTMLElement[] = [];
     this.menu = null;
     try {
       const emu = this.emulator(), screens = gameScreens(emu), screen = screens.find((s) => s.id === id);
@@ -215,6 +219,8 @@ export class GameView {
         const img = ctx.createImageData(W, 224);
         new Uint32Array(img.data.buffer).set(screenPicture(emu, screen.state).frame);
         ctx.putImageData(img, 0, 0);
+        if (id === 'presents') fields = this.presentsFields(emu, screen);
+        if (fields.length) note = 'The picture is the game\'s own, at the logo\'s brightest. The fields are what the game was seen to read the logo from on the way here; a field changed is a byte of the ROM.';
         if (kind.menu) note = 'The picture is the game\'s own. The game draws this menu without a stripe image (a patch draws it another way, as Sprite Title Screen Menus does): its text can\'t be edited here.';
       } else why = `The game does not get to its ${kind.name.toLowerCase()}.`;
     } catch (e) {
@@ -226,7 +232,66 @@ export class GameView {
     this.status.textContent = why || `${kind.name}, as the game shows it`;
     this.screenInfo.replaceChildren(h('div', { class: 'panel-title' }, kind.name),
       h('p', { class: 'hint game-screen-about' }, `${kind.about}.`),
-      h('p', { class: 'hint game-screen-about' }, why || note));
+      h('p', { class: 'hint game-screen-about' }, why || note), ...fields);
+  }
+
+  // Nintendo Presents' fields (presents.ts): each OBJ's position, tile and properties, the time, the colours, the
+  // graphics file – what the game reads from the ROM a field, what it computes a value
+  private presentsFields(emu: LevelEmulator, screen: ReachedScreen): HTMLElement[] {
+    const logo = presentsLogo(emu, screen), out: HTMLElement[] = [];
+    const hex = (n: number, d = 2) => n.toString(16).toUpperCase().padStart(d, '0');
+    const set = (what: string, f: PresentsValue, v: number, bytes: 1 | 2 = 1) => {
+      if (v === f.value) return;
+      try { this.app.romEdit(`Nintendo Presents: ${what}`, () => writePresentsValue(this.app.rom, f, v, bytes)); } catch (e) { toast(String(e instanceof Error ? e.message : e), 'error'); }
+    };
+    const row = (label: string, title: string, ...body: (HTMLElement | string)[]) => h('div', { class: 'prop game-field', title }, h('label', null, label), ...body);
+    const computed = (text: string) => h('span', { class: 'hint', title: 'The game computes this, or a patch draws it: not read from the ROM as a byte, no field' }, text);
+    const dec = (what: string, f: PresentsValue, min: number, max: number): HTMLElement => {
+      if (f.at < 0) return computed(String(f.value));
+      const inp = h('input', { type: 'number', min, max, value: String(f.value), class: 'game-num' });
+      inp.addEventListener('change', () => { const v = Math.round(Number(inp.value)); if (inp.value.trim() === '' || !(v >= min && v <= max)) inp.value = String(f.value); else set(what, f, v); });
+      return inp;
+    };
+    const hexField = (what: string, f: PresentsValue): HTMLElement => (f.at < 0 ? computed(`$${hex(f.value)}`) : hexInput(f.value, 2, (v) => set(what, f, v)));
+    // (a field several tiles read from one byte: once, named for them)
+    const of = (n: number[]) => (n.length === logo.objs.length && n.length > 1 ? 'all tiles' : `tile${n.length > 1 ? 's' : ''} ${n.join(', ')}`);
+    const group = (title: string, pick: (o: LogoObj) => PresentsValue, make: (what: string, f: PresentsValue) => HTMLElement, name: string, tip: string) => {
+      const fs = sharedFields(logo.objs, pick);
+      if (!fs.length) return;
+      out.push(h('div', { class: 'panel-title' }, title));
+      for (const g of fs) out.push(row(of(g.objs).replace(/^./, (c) => c.toUpperCase()), tip, make(`${name} of ${of(g.objs)}`, g.field)));
+    };
+    if (!logo.objs.length) out.push(h('p', { class: 'hint game-screen-about' }, 'The game shows no OBJ here: the logo is drawn another way (a patch\'s), and has no fields of its tiles.'));
+    else out.push(h('p', { class: 'hint game-screen-about' }, `The logo is ${logo.objs.length} OBJ ("tiles" below, numbered in the game's order), each ${logo.objs.every((o) => o.big) ? '16×16' : logo.objs.some((o) => o.big) ? '8×8 or 16×16' : '8×8'} pixels.`));
+    group('X position', (o) => o.x, (w, f) => dec(w, f, 0, 255), 'X', 'The tile\'s left edge on the screen, in pixels (0–255)');
+    group('Y position', (o) => o.y, (w, f) => dec(w, f, 0, 255), 'Y', 'The tile\'s top edge on the screen, in pixels (the screen shows 0–223)');
+    group('Tile', (o) => o.tile, hexField, 'tile number', 'The tile\'s number in the sprite graphics (hex): its top left 8×8 tile');
+    group('Properties', (o) => o.props, hexField, 'properties', 'YXPPCCCT (hex): Y flip, X flip, priority (2 bits), sprite palette (3 bits), the tile\'s page');
+    out.push(h('div', { class: 'panel-title' }, 'Time'));
+    if (logo.time) {
+      const t = logo.time;
+      out.push(row('Frames', 'The frames the game counts while the logo shows, before it goes on to the title screen (1–255; 60 frames are a second)',
+        dec('time', t, 1, 255), h('span', { class: 'hint' }, `≈ ${(t.value / 60).toFixed(1)} s`)));
+    } else out.push(h('p', { class: 'hint game-screen-about' }, 'No time found: the game does not count a byte of the ROM down while the logo shows.'));
+    if (logo.colours.length) {
+      out.push(h('div', { class: 'panel-title' }, 'Colours'));
+      for (const c of logo.colours) {
+        const own = c.at >= 0 && !c.shared;
+        const sw = h('input', { type: 'color', value: htmlOf(c.value), disabled: !own, class: 'game-colour' });
+        // (the 15-bit colour of the picker's 24 bits; written as a word)
+        sw.addEventListener('change', () => { const n = parseInt(sw.value.slice(1), 16); set(`colour $${hex(c.index)}`, c, ((n >> 19) & 31) | (((n >> 11) & 31) << 5) | (((n >> 3) & 31) << 10), 2); });
+        const why = c.at < 0 ? 'computed by the game'
+          : c.shared ? `not the logo's own: the game loads ${c.shared} other colours from the same word of the ROM (the white of its palettes' colour 1)` : '';
+        out.push(row(`Colour $${hex(c.index)}`, 'A colour the logo\'s pixels use (its entry in the sprite palettes)', sw, h('span', { class: 'hint game-field-note' }, why)));
+      }
+    }
+    if (logo.gfx) {
+      const g = logo.gfx, name = `GFX${hex(g.file)}`;
+      out.push(h('div', { class: 'panel-title' }, 'Graphics'),
+        row('File', 'The graphics file the game read on the way here whose tiles are the logo\'s', h('button', { onclick: () => this.app.showGfxFile(g.file) }, `${name} in the graphics workspace`)),
+        h('p', { class: 'hint game-screen-about' }, `The first tile is ${name}'s tile ${hex(g.tile)}.`));
+    }
+    return out;
   }
 
   // ---- a menu's text ----

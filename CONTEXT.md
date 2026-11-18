@@ -224,7 +224,7 @@ _Avoid_: game settings, title screen editor
 **Pre-game**: everything the game shows from reset to the first overworld: Nintendo Presents, the title screen, file select, file erase, player select and, on a new save file, the intro.
 _Avoid_: boot screens, front end, main menu
 
-**Nintendo Presents**: the logo at power-on.
+**Nintendo Presents**: the logo at power-on: a few OBJ (the logo's **tiles**), shown for a **time** the game counts in frames. Its page has as fields what the emulated game was seen to read from the ROM – each tile's position, tile number and properties, the time – and names the graphics file the tiles are from; what the game computes (a patch's larger logo) is shown without a field.
 _Avoid_: intro logo, presents screen
 
 **Title screen**: what the game shows until a button is pressed: the **title screen level** (C7 in the clean game) with the title screen movement, the **title screen picture** on layer 3 over it (the logo, the frame and the copyright line: a 32x29 tilemap in Lunar Magic's layout, stripe image entry 03, $0084D3) and the **title screen colours**.

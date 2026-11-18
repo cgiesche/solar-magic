@@ -363,6 +363,10 @@ input.invalid, input.invalid:focus { outline: 1px solid var(--danger); border-co
 .game-canvas.game-screen { cursor: default; }
 .game-screen-about { margin: 0; padding: 4px 8px; }
 label.game-screen-about { display: flex; align-items: center; gap: 4px; }
+.game-field { padding: 2px 8px; }
+.game-num { width: 5em; }
+.game-colour { width: 3em; padding: 0; flex-shrink: 0; }
+.game-field-note { min-width: 0; }
 .game-mark { display: inline-block; width: 0.8em; height: 0.8em; border: 2px solid; margin-right: 6px; vertical-align: -0.1em; }
 .panning, .panning * { cursor: grabbing !important; }
 .brush-surface { position: relative; width: max-content; }
