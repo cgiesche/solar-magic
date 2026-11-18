@@ -12,7 +12,7 @@ the start position; that commit left "the title screen demo" for its own ticket.
   `bank_05.asm`, `rammap.asm`, `constants.asm`, `SMW_U.sym` (US addresses). Cited as file and label.
 - **Lunar Magic 3.71 help** (FuSoYa), `~/tools/lunarmagic/Lunar Magic.chm`, cited as `html/x.htm`.
 - **SMW Central hijack map**, local export `resources_local/hijack-list.csv`, cited as "hijack map `$addr`". It names
-  each resource and its author; it is the only SMW Central source that could be read (see "Not reached").
+  each resource and its author.
 - **UberASM Tool 2.1 readme** (Vitor Vilela, Fernap): https://fernap.github.io/UberASMTool/readme_2_1.html
 - **Retry System docs** (Kevin): https://kkevinm.github.io/retry-system/
 - **Romhack Races baserom**, branch RHRv5: https://github.com/romhackraces/baserom (`resources/patches/tweaks.asm`,
@@ -21,10 +21,12 @@ the start position; that commit left "the title screen demo" for its own ticket.
 - **Emulation**: `node tools/boot.ts 2600` on the clean game (`test/fixtures/smw.smc`) for the mode sequence.
 - Repo files as `path:line`.
 
-**Not reached:** smwcentral.net itself. Its pages answer automated requests with a human-verification question, which
-was not answered. So the resource pages (descriptions, download counts, featured marks), the ROM/RAM map pages and
-the hack submission guidelines are not sources of this note. Everything that would need them is marked *unverified*.
-Read by the disassembly, the data and code facts below don't depend on them.
+- **SMW Central** (https://www.smwcentral.net), read in a browser on 2026-11-18: the patches, UberASM and tools
+  sections filtered by name (list view, with download counts), the page of "SRAM and BW-RAM Plus"
+  (`?p=section&a=details&id=34813`), the ROM map (`?p=memorymap&game=smw`, cited as "ROM map `$addr`") and the hack
+  submission guidelines (`?p=guidelines&page=1633980-all-hacks`). Resources are cited by id
+  (`?p=section&a=details&id=N`). Of the other resources only the list entry was read (name, authors, downloads), not
+  the page: what they change comes from the hijack map.
 
 ## Result
 
@@ -52,7 +54,7 @@ avoid "title screen level" – that needs widening once this is decided.
 
 | Piece | Data (US) | Lunar Magic | The editor today |
 |---|---|---|---|
-| Nintendo Presents | 4 OBJ: `NintendoPos` `$009389`, `NintendoTile` `$00938D`; timer 64 frames; coin sound | – | – |
+| Nintendo Presents | 4 OBJ: `NintendoPos` `$009389`, `NintendoTile` `$00938D`; timer 64 frames `$0093C6`; graphics file `$00A9CD`; colours `$00B280`; coin sound | – | – |
 | Title screen level | level C7, loaded through `$0109` = `$24+$C7` | level editor | level editor; found by emulation (`titleScreenLevel`, `levelemu.ts:625`) |
 | Title screen picture | stripe image 03 `TitleScreenStripe` `$05B375`, 905 bytes | "Load/Save Title Screen" | Game workspace (#92) |
 | Title screen colours | `TitleScreenColors` `$00B62C` → palettes 0–1, colours 8–F | palette editor | *not checked* |
@@ -113,19 +115,20 @@ So the intro shows exactly when a file is new, and the intro level is whatever `
 ### 2.1 Nintendo Presents
 
 Four 16×16 OBJ at Y `$70`, X from `NintendoPos` (`$60,$70,$80,$90`), tiles from `NintendoTile`
-(`$02,$04,$06,$08`), attribute `%00110000`. The timer's operand is at `$0093C6` (hijack map). *Not checked:* which
-graphics file the four tiles come from, and the logo's colours.
+(`$02,$04,$06,$08`), attribute `%00110000`. The ROM map adds: Y `$0093A5`, properties `$0093B0`, the sound's code `$0093C0` (5 bytes), the timer `$0093C6`,
+the brightness `$0093CB`, the graphics file's number `$00A9CD`, and the colours `$00B280` (12 bytes: palette 8's
+colours 2–5; the last four bytes, colours 6–7, are there only for the logo).
 
 ### 2.2 Title screen movement
 
 `TitleScreenInputSeq` `$009C1F`–`$009C63`: 34 pairs of (buttons, frames) and `$FF`. PAL has its own table. The
 button byte is the joypad's `byetUDLR` (B, Y, Select, Start, Up, Down, Left, Right); Select is not passed on as held
-but marks "Y newly pressed this frame". At `$FF`, `FadeOutBackToTitle` (`$009C89`) sets mode 02. Index `$1DF4`.
+but marks "Y newly pressed this frame" (the ROM map `$009C1F` says the same). At `$FF`, `FadeOutBackToTitle` (`$009C89`) sets mode 02. Index `$1DF4`.
 
 69 bytes in place; a longer recording needs other code. Lunar Magic replaces the playback (`$009C6F`, 17 bytes,
 hijack map) and installs a recording hijack (`$00A1DA`, 10 bytes) that writes WRAM "starting with the overworld
 event tiles" (`html/ov_file_install_recording.htm`). *Unknown:* where and in which format Lunar Magic stores its
-playback data and how long it may be. The help says nothing; it would have to be learned from a ROM Lunar Magic
+playback data and how long it may be. The help, the hijack map and the ROM map say nothing; it would have to be learned from a ROM Lunar Magic
 saved (`tools/_lmdis.ts`, `tools/lmctl.c`).
 
 ### 2.3 The menus
@@ -154,6 +157,11 @@ What the game draws on top, which an editor of these texts has to respect:
   options from `CursorOptCount` (2, 4, 2, 2, 4).
 
 So text and layout can move freely only together with the cursor's place and the exit count's place.
+
+Two differences to the ROM map, both to be settled by emulation: it gives the title screen's stripe at `$05B375`
+as 488 bytes (905 is the distance to the next label in `SMW_U.sym`), and it calls the cursor entries `$51CB` and
+`$51C4` unused, where SMWDisX has them as the continue/end and the save prompt. It has the background colour of the
+menus at `$009B1D` and `$009CD4`, the cursor's tile at `$009EC1` and the blank tile at `$009EBA`.
 
 ### 2.4 Save files
 
@@ -184,31 +192,51 @@ Doesn't edit: Nintendo Presents, the three menus' text, the cursor, the lives, w
 From the hijack map unless noted. "Detect" means the editor must notice it and leave its bytes alone; "host" means
 it installs as a package and the editor's pre-game pages must still show the truth.
 
-| Resource | Author | What it changes | For the editor |
-|---|---|---|---|
-| Retry System | Kevin | save `$009BCB`, load and new file `$009CF5`, lives `$009E25` (`!initial_lives`), own SRAM table and size `$00FFD8`; death on the title screen (`!title_death_behavior`) (docs) | detect: lives and what is saved belong to Retry's settings then. In the RHR baserom |
-| BW-RAM Plus, SRAM Plus | *unverified* | save `$009BD2`, new files `$009CF5` (BW-RAM Plus); exclude Retry's saving (Retry docs) | detect |
-| UberASM Tool game mode code | Vitor Vilela, Fernap | hook `$009322`; `init`/`main`/`end`/`nmi` per `$0100`; level NMI also in modes 05–07 since 2.1 (readme) | hosted already (`uberasm.ts`); the pre-game modes need names in the UI |
-| One File, One Player | Kevin | 9 places from `$009CB8`, rewrites `PlayerSelectStripe` | host; file and player select then don't exist |
-| "No Title, No Intro, No Problems" | Kevin | 6 places from `$009391` | host; most of the pre-game doesn't exist then |
-| Sprite Title Screen Menus | Kevin | `$009AC2`, `$009D22`, `$009D3C`, `$009EDB`: menus as sprites, stripes cleared | host; menu text is not a stripe then |
-| File Select Sprite Cursor | MarioFanGamer | 10 places, replaces `$009E6A` (118 bytes, incl. `CursorCoords`) | host; cursor table gone |
-| Playable Title Screen | Kevin | `$00942B`, `$0096BE`, `$009C67` | host; no title screen movement then |
-| Multiple Title Screen Demos | Arinsu | 14 places incl. `$009C6C`, `$009CB1` | host; several levels and recordings |
-| Exit Percentage on File Select | KevinM | `$009D6C`–`$009D9B` | host; conflicts with 100 Exits |
-| 100 Exits | Alcaro | same places: exit count threshold and digit positions | host |
-| 128x128 Nintendo Presents Logo | Kevin | `$00939A`, `$0093C6`, `$0093D4` | host |
-| Nintendo Presents Logo Expansion | Roy, ghettoyouth | `$00939A`, `$0093B4` | host |
-| Intro Logo Patch; Nintendo Presents Custom Palette | Roy | `$009394`, `$00940F`; `$0093D7` | host |
-| Mode 3/8bpp Nintendo Presents Screen | Arinsu | 6 places from `$0081CE` | host |
-| Random Intro Level | Arinsu | `$009CB0` | host; intro level is not one number then |
-| Automatic Intro Message Dismiss | KevinM | `$05B16E` | host |
-| Restore and Customize Overworld Intro March | Kevin | `$009F1D` | host |
-| Return to Title | MarioFanGamer | `$048284` | host |
-| Title Window Cleaner | Alcaro | garbage tiles on the title screen from overworld sprites (RHR docs) | in the RHR baserom |
-| VWF Dialogues | RPG Hacker | can replace message boxes; SRAM to 128 KB without SA-1 (manual) | the intro message is then not the game's |
-| Individual Dragon Coin Save | worldpeace, JackTheSpades, lx5 | `$0096B4` and others | in the RHR baserom; adds saved data |
-| Overworld Indicators | *not named* | save, load, erase (`$009BCC`, `$009CFB`, `$009B43`), SRAM size | detect |
+| Resource (SMW Central id) | Authors | Downloads | What it changes | For the editor |
+|---|---|---|---|---|
+| Retry System | Kevin | – | save `$009BCB`, load and new file `$009CF5`, lives `$009E25` (`!initial_lives`), own SRAM table and size `$00FFD8`; death on the title screen (`!title_death_behavior`) (docs) | detect: lives and what is saved belong to Retry's settings then. In the RHR baserom |
+| SRAM and BW-RAM Plus 1.4 (34813) | MarioE, Tattletale, lx5 | 2507 | rewrites saving and loading (DMA), frees `$7E1F49` (141 bytes); save `$009BD2`, new files and load `$009CF5`; tables `sram_table` (`dl addr : dw size`, first line `$7E1EA2`, `$008D`) and `sram_defaults`; excludes Retry's saving (Retry docs) | detect. Its page: apply it after Lunar Magic changed level flags on the overworld; use Lunar Magic's "Save Luigi's map position"; lives and coins can't be saved by it, as the game sets them after loading |
+| UberASM Tool game mode code | Vitor Vilela, Fernap | – | hook `$009322`; `init`/`main`/`end`/`nmi` per `$0100`; level NMI also in modes 05–07 since 2.1 (readme) | hosted already (`uberasm.ts`); the pre-game modes need names in the UI |
+| No Title Screen Movement (14901) | Arinsu, DiscoTheBat | 2236 | *page not read*; the ROM map has the edit `$009C82` = `EA A9 00` | host; no title screen movement then |
+| Overworld Indicators 1.4.1 (19605) | Arinsu, Disk Poppy, wye | 1396 | save, load, erase (`$009BCC`, `$009CFB`, `$009B43`), SRAM size `$00FFD8` | detect |
+| Nintendo Presents Logo Expansion, 64x64 (19373) | Roy, ghettoyouth | 1099 | `$00939A`, `$0093B4` | host |
+| 128x128 Nintendo Presents Logo (40162) | Kevin | 1013 | `$00939A`, `$0093C6`, `$0093D4` | host |
+| Playable Title Screen (40142) | Kevin | 1013 | `$00942B`, `$0096BE`, `$009C67` | host; no title screen movement then |
+| No Title, No Intro, No Problems (27938) | Kevin | 980 | 6 places from `$009391` | host; most of the pre-game doesn't exist then |
+| One File, One Player (40641) | Kevin | 977 | 9 places from `$009CB8`, rewrites `PlayerSelectStripe` | host; file and player select then don't exist |
+| Title Window Cleaner (8975) | Alcaro | 951 | garbage tiles on the title screen from overworld sprites (RHR docs) | in the RHR baserom |
+| Nintendo Presents Fadeout (16510) | Arinsu | 878 | *page not read* | host |
+| NSMBWii-Style Random Title Screen and Movement (40282) | Arinsu, TheBiob | 772 | *page not read* | host; several title screen levels and recordings |
+| Nintendo Presents Custom Palette (14754) | Roy | 758 | `$0093D7` | host |
+| Exit Percentage on File Select (24677) | Kevin (hijack map: KevinM) | 686 | `$009D6C`–`$009D9B` | host; same places as 100 Exits |
+| Intro Logo (21279) | Roy | 671 | `$009394`, `$00940F` | host |
+| 100 Exits (19464) | Alcaro | 630 | `$009D6C`–`$009D9B`: exit count threshold and digit positions | host |
+| File Select Sprite Cursor (40138) | MarioFanGamer | 508 | 10 places, replaces `$009E6A` (118 bytes, incl. `CursorCoords`) | host; cursor table gone |
+| Title Screen Solution (12386) | wiiqwertyuiop | 486 | "Mario can die on the title screen"; *page not read* | host |
+| Return to Title (40706) | MarioFanGamer | 416 | `$048284` | host |
+| Random Intro Level (40609) | Arinsu | 386 | `$009CB0` | host; intro level is not one number then |
+| Automatic Intro Message Dismiss (40230) | Kevin | 385 | `$05B16E` | host |
+| Sprite Title Screen Menus (33904) | Kevin | 318 | `$009AC2`, `$009D22`, `$009D3C`, `$009EDB`: menus as sprites, stripes cleared | host; menu text is not a stripe then |
+| No Title SFX (20849) | Alcaro | 242 | `$00818F` | host |
+| Mode 3/8bpp Nintendo Presents Screen (41841) | Arinsu | 145 | 6 places from `$0081CE` | host |
+| Restore and Customize Overworld Intro March (35758) | Kevin | 133 | `$009F1D` | host |
+| Multiple Title Screen Demos (40309) | Arinsu | 95 | 14 places incl. `$009C6C`, `$009CB1` | host; several levels and recordings |
+| VWF Dialogues | RPG Hacker | – | can replace message boxes; SRAM to 128 KB without SA-1 (manual) | the intro message is then not the game's |
+| Individual Dragon Coin Save | worldpeace, JackTheSpades, lx5 | 1485 | `$0096B4` and others | in the RHR baserom; adds saved data |
+
+UberASM resources for the pre-game (type "Game Mode"; the mode numbers are not in the list): Lives Select Menu on
+Title Screen (Arinsu, 38974, 112 downloads), Fade from Credits to Title Screen (Arinsu, 39959, 108), Fade from Title
+Screen to File Select Menu (Arinsu, 41705, 41), Nintendo Presents Secret Code (yoshifanatic, 42887, 27). Few and
+little used: the pre-game is changed by patches, not by UberASM.
+
+Tools: none for the pre-game. The tools section has no "Terra Stripe" and nothing named for the title screen; under
+"stripe" it has STIM2BIN (edit1754, 4598, 12881 downloads: layer 3 stripe images to `.bin`) and Racing Stripe
+(edit1754, 4623: tilemaps in ZSNES savestates). No recorder or converter for title screen movement besides Lunar
+Magic's.
+
+The hack submission guidelines ask nothing of the title screen, its movement, the intro or the file select. Their
+one mention: a hack's length "must be the number of exits as displayed on the title screen after 100% completion" –
+so the exit count on the file select is what a hack is measured by.
 
 The Romhack Races baserom leaves the pre-game's flow as the game has it. Its `tweaks.asm` holds three small edits
 of it: `$00A09C = $04` (shorter wait before the intro message can be closed), `$009D30` five NOPs (no dark palette on
@@ -217,15 +245,16 @@ mode and names 01 "Nintendo Presents", 07 title screen, 08 file select.
 
 Three things follow:
 
-- **Kevin's patches and Retry dominate** this area. Retry is the one a normal hack has.
+- **By downloads the wishes are, in this order:** more saved data (SRAM and BW-RAM Plus), no title screen movement
+  or a playable title screen, another Nintendo Presents logo, no title or intro at all, one file and one player.
+  Kevin's and Arinsu's patches are most of the list. Retry, not in these lists, is the one a normal hack has.
 - **Almost every byte of `$009389`–`$009F20` is somebody's hijack.** An editor that writes these addresses from
   tables would collide. Reading by emulation and writing only data the game was seen to read is what keeps it safe.
 - **Several patches remove a screen altogether.** The pages must come from what the game does, not from a fixed
   list.
 
-*Unverified, not found at any reachable source:* a stripe image editor "Terra Stripe" and its author; the authors of
-SRAM Plus and BW-RAM Plus; UberASM resources written for the pre-game modes; what SMW Central's hack submission
-guidelines ask of a title screen.
+*Not read:* the pages of the patches other than 34813 (their options and stated incompatibilities), the documents
+section, the guidelines for Kaizo, tool-assisted and puzzle hacks.
 
 ## 5. Making it editable
 
@@ -272,16 +301,16 @@ help warns of, a passed Special World or Yoshi's greeting, can't differ between 
 ### 5.4 Nintendo Presents
 
 The picture by emulation; the four tiles' positions and numbers and the time as fields, found by watching what the
-mode reads. Anything bigger is what the community's patches are for (section 4); the editor hosts them and shows the
+mode reads, with the graphics file and the colours the ROM map names (2.1). Anything bigger is what the community's patches are for (section 4); the editor hosts them and shows the
 result.
 
 ### 5.5 Start of game
 
 One page: the intro (on or off, its level, its message with a link to the message editor, whether the game saves
 after it), lives, start position, initial flags. The intro level is found as the title screen level is: by which
-level a new file loads. *Inferred from the code, not tried:* `$009CB1 = $00` leaves `$0109` zero and so skips the
-intro; to be tried by emulation before it becomes the editor's "no intro". Lives are a field only while the operand
-at `$009E25` is what the game reads; with Retry installed the page names Retry's `!initial_lives` instead.
+level a new file loads. `$009CB1 = $00` skips the intro (ROM map: "Change to [00] to skip the intro level and warp to the overworld
+immediately"; it leaves `$0109` zero) – the edit the community knows, so the editor's "no intro" is this byte. Lives are a field (the byte is the
+lives minus 1, ROM map) only while the operand at `$009E25` is what the game reads; with Retry installed the page names Retry's `!initial_lives` instead.
 
 ### 5.6 Play from power-on
 
@@ -298,11 +327,11 @@ save writes), not by patch names.
 
 1. Lunar Magic's Title Moves playback: where is the data, which format, which limit? Needed for 5.3.
 2. Can the menu stripes move to free space without a hijack (5.2)?
-3. Which graphics file and palette draw the Nintendo Presents logo (2.1)?
+3. The title screen stripe's length (905 or 488 bytes) and the two cursor entries the ROM map calls unused (2.3).
 4. Is the status bar hidden on the title screen by the mode or by the level, and what does death do there in the
    clean game (Lunar Magic's help describes it only for its own playback)?
 5. Do the save prompts ("CONTINUE AND SAVE", "CONTINUE / END") belong to the same pages? Same stripes and cursor
    table, but they are not pre-game.
-6. The SMW Central items marked unverified in section 4, to be read by a person.
+6. The patches' own pages (options, stated incompatibilities) were not read, only their list entries (section 4).
 7. Japanese and PAL ROMs differ here (own demo table, `DrawFileSelect` differs in J). Out of scope while only the
    US game and hacks of it are supported?
