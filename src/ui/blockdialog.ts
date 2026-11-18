@@ -1,4 +1,4 @@
-// Blocks tab of the Packages workspace (GPS format), a configuration view: assigns the blocks packages brought
+// Blocks view of the Packages workspace (GPS format), a configuration view: assigns the blocks packages brought
 // to Map16 tiles (with optional acts like); the project's files with their settings, export as a GPS
 // folder (.zip).
 
@@ -7,8 +7,8 @@ import { h, hexInput, select, type Child } from './dom.ts';
 import { loadBlockProject, saveBlockProject, projectToZip, blockFiles, blocksEntry, assignBlock, type BlockProject } from '../core/blocks.ts';
 import { EXT_FIRST, EXT_TILES } from '../core/map16ext.ts';
 import { hex } from '../core/names.ts';
-import { definesButton } from './defineedit.ts';
-import { projectPane, type Pane } from './projectpane.ts';
+import { projectPane, type Pane, type PartRow } from './projectpane.ts';
+import type { PartContext } from './pkginspect.ts';
 import type { Rom } from '../core/rom.ts';
 import { icon } from './icons.ts';
 
@@ -30,13 +30,13 @@ export function blockFileOf(rom: Rom, tile: number): string | null {
 
 export type BlockPane = Pane & { tile(): number; setTile(t: number): void };
 
-export function blockPane(app: App, changed: () => void): BlockPane {
+export function blockPane(app: App, changed: () => void, part?: PartContext, openTile?: (tile: number) => void): BlockPane {
   let tile = EXT_FIRST;
   let ownActs = false;
   let acts = 0x130;
   let pane: Pane;
 
-  function content(proj: BlockProject, change: () => void, origin: (file: string) => HTMLElement): Child[] {
+  function content(proj: BlockProject, change: () => void, origin: (file: string) => HTMLElement, row: PartRow): Child[] {
     const files = blockFiles(proj.files);
     let file = files[0] ?? '';
     const actsIn = hexInput(acts, 3, (v) => (acts = v), 0x1ff);
@@ -46,12 +46,17 @@ export function blockPane(app: App, changed: () => void): BlockPane {
       assignBlock(proj, { tile, file, acts: ownActs ? acts : undefined });
       change();
     };
-    const rows = [...proj.list].sort((a, b) => a.tile - b.tile).map((b) => h('tr', { class: b.tile === tile ? 'selected' : '' },
+    const rows = [...proj.list].sort((a, b) => a.tile - b.tile).map((b) => h('tr', row(String(b.tile), () => ({
+      kind: 'Block', title: [h('span', { class: 'mono' }, hex(b.tile, 3)), ' ', b.file.replace(/^blocks\//, '')], file: b.file,
+      facts: [['Tile', hex(b.tile, 3)], ['Acts like', b.acts !== undefined ? hex(b.acts, 3) : 'the tile’s own']],
+      links: openTile ? [{ label: 'Open in the Map16 editor', run: () => openTile(b.tile) }] : [],
+      hint: 'To place: Picker → Map16, or a Direct Map16 object with the tile.',
+    }), b.tile === tile ? 'selected' : ''),
       h('td', { class: 'mono' }, hex(b.tile, 3)),
       h('td', { class: proj.files.has(b.file) ? '' : 'err', title: proj.files.has(b.file) ? b.file : `${b.file} is missing from the project` }, b.file.replace(/^blocks\//, '')),
       h('td', { class: 'mono' }, b.acts !== undefined ? hex(b.acts, 3) : '–'),
       h('td', null, origin(b.file)),
-      h('td', { class: 'actions' }, definesButton(proj.files, b.file, change), h('button', { class: 'icon-btn', title: 'Remove assignment (the block stays)', onclick: () => { proj.list = proj.list.filter((x) => x !== b); change(); } }, icon('close')))));
+      h('td', { class: 'actions' }, h('button', { class: 'icon-btn', title: 'Remove assignment (the block stays)', onclick: () => { proj.list = proj.list.filter((x) => x !== b); change(); } }, icon('close')))));
     return [
       rows.length ? h('table', { class: 'uber-table' }, h('tr', null, h('th', null, 'Tile'), h('th', null, 'Block'), h('th', null, 'acts like'), h('th', null, 'Package'), h('th')), rows)
         : h('p', { class: 'hint' }, 'No blocks yet – “Upload package …” above installs a block package; its blocks go on free Map16 tiles.'),
@@ -60,7 +65,6 @@ export function blockPane(app: App, changed: () => void): BlockPane {
         select(files.map((f, i) => [i, f.slice(7)] as [number, string]), 0, (i) => (file = files[i])),
         h('label', { class: 'row small', title: 'Behavior without custom code; unchecked keeps the tile\'s own' }, actsBox, 'acts like'), actsIn,
         h('button', { onclick: add }, 'Assign')) : '',
-      h('p', { class: 'hint' }, 'To place: Picker → Map16, or a Direct Map16 object with that tile.'),
     ];
   }
 
@@ -76,6 +80,6 @@ export function blockPane(app: App, changed: () => void): BlockPane {
     zipName: 'blocks.zip',
     content,
     applied: (p) => `Custom blocks applied (${p.list.length} tile(s))`,
-  }, changed);
+  }, changed, part);
   return { ...pane, tile: () => tile, setTile: (t) => { tile = t; pane.render(); } };
 }

@@ -1,21 +1,21 @@
-// Overworld sprites (BOWSIE): the Overworld sprites tab of the Packages workspace, a configuration view – assigns the
+// Overworld sprites (BOWSIE): the Overworld sprites view of the Packages workspace, a configuration view – assigns the
 // overworld sprites packages brought to numbers (list.txt entries, 01–7E); the project's files with their settings,
 // export as a BOWSIE folder (.zip).
 
 import type { App } from './app.ts';
 import { h, toast, hexInput, select, type Child } from './dom.ts';
-import { projectPane, type Pane } from './projectpane.ts';
+import { projectPane, type Pane, type PartRow } from './projectpane.ts';
+import type { PartContext } from './pkginspect.ts';
 import { hex } from '../core/names.ts';
-import { definesButton } from './defineedit.ts';
 import {
   loadBowsieProject, saveBowsieProject, bowsieToZip, bowsieSpriteInfo, assignOwSprite, bowsieSpriteFiles, BOWSIE_FIRST, BOWSIE_LAST, type BowsieProject,
 } from '../core/bowsie.ts';
 import { icon } from './icons.ts';
 
-export function bowsiePane(app: App, changed: () => void): Pane {
+export function bowsiePane(app: App, changed: () => void, part?: PartContext): Pane {
   let num = BOWSIE_FIRST;
 
-  function content(proj: BowsieProject, change: () => void, origin: (file: string) => HTMLElement): Child[] {
+  function content(proj: BowsieProject, change: () => void, origin: (file: string) => HTMLElement, row: PartRow): Child[] {
     const sprites = bowsieSpriteFiles(proj.files);
     let file = sprites[0] ?? '';
     const numIn = hexInput(num, 2, (v) => (num = v));
@@ -28,13 +28,17 @@ export function bowsiePane(app: App, changed: () => void): Pane {
     };
     const rows = [...proj.list].sort((a, b) => a.num - b.num).map((e) => {
       const info = bowsieSpriteInfo(proj, e);
-      return h('tr', null,
+      return h('tr', row(String(e.num), () => ({
+        kind: 'Overworld sprite', title: [h('span', { class: 'mono' }, hex(e.num, 2)), ' ', info.name], file: e.file,
+        facts: [['Number', hex(e.num, 2)], ['Extra bytes', String(info.extra)], ...(info.description ? [['Tooltip', info.description] as [string, string]] : [])],
+        hint: 'To place: overworld editor, Sprites mode.',
+      })),
         h('td', { class: 'mono' }, hex(e.num, 2)),
         h('td', { class: proj.files.has(e.file) ? '' : 'err', title: proj.files.has(e.file) ? e.file : `${e.file} is missing from the project` }, e.file.replace(/^sprites\//, '')),
         h('td', { title: info.description }, info.name),
         h('td', { class: 'mono' }, String(info.extra)),
         h('td', null, origin(e.file)),
-        h('td', { class: 'actions' }, definesButton(proj.files, e.file, change), h('button', { class: 'icon-btn', title: 'Remove entry (the sprite stays)', onclick: () => { proj.list = proj.list.filter((x) => x !== e); change(); } }, icon('close'))));
+        h('td', { class: 'actions' }, h('button', { class: 'icon-btn', title: 'Remove entry (the sprite stays)', onclick: () => { proj.list = proj.list.filter((x) => x !== e); change(); } }, icon('close'))));
     });
     return [
       rows.length ? h('table', { class: 'uber-table' }, h('tr', null, h('th', null, 'No.'), h('th', null, 'File'), h('th', null, 'Name'), h('th', null, 'Extra bytes'), h('th', null, 'Package'), h('th')), rows)
@@ -58,5 +62,5 @@ export function bowsiePane(app: App, changed: () => void): Pane {
     zipName: 'bowsie.zip',
     content,
     applied: (p) => `Overworld sprites applied (${p.list.length})`,
-  }, changed);
+  }, changed, part);
 }

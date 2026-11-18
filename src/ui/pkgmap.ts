@@ -127,7 +127,7 @@ export function assignmentEditor(app: App, p: ManualPreview): { el: HTMLElement;
       summary,
       h('h3', null, 'list.txt'),
       callBox,
-      h('p', { class: 'hint' }, 'Assignments, settings and files can be changed afterwards in the UberASM tab.')),
+      h('p', { class: 'hint' }, 'Assignments, settings and files can be changed afterwards under UberASM in the Packages workspace.')),
     read,
   };
 }

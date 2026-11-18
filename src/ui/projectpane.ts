@@ -12,11 +12,16 @@ import type { ApplyResult } from '../core/patchapply.ts';
 import { definesButton, editButton } from './defineedit.ts';
 import { manualsRow } from './docview.ts';
 import type { ToolKind } from '../core/parts.ts';
+import type { Inspected, PartContext } from './pkginspect.ts';
+
+// the attributes of an entry's row (chosen: shown in the inspector); make: what the inspector shows of it – its
+// project, the applying of a change and its package are filled in by the pane
+export type PartRow = (key: string, make: () => Inspected, cls?: string) => Record<string, unknown>;
 
 export interface Project { files: Map<string, Uint8Array> }
 
 export interface PaneSpec<P extends Project> {
-  title: string; // tab label, also in messages
+  title: string; // the view's name, also in messages
   intro: string; // one line at the top
   format: string; // the file format, collapsed
   tool: ToolKind; // the part kind of the project's content (its field in a package record)
@@ -25,26 +30,26 @@ export interface PaneSpec<P extends Project> {
   save(p: P): ApplyResult;
   toZip(p: P): Uint8Array;
   zipName: string;
-  // the assignments and the row to assign; origin: the name of the package that brought a file
-  content(p: P, change: () => void, origin: (file: string) => HTMLElement): Child[];
+  // the assignments and the row to assign; origin: the name of the package that brought a file; row: an entry's row
+  content(p: P, change: () => void, origin: (file: string) => HTMLElement, row: PartRow): Child[];
   applied(p: P): string; // toast after a change was applied
 }
 
 export interface Pane {
   title: string;
   el: HTMLElement;
-  reload(): void; // the ROM's project again, after it was changed outside the tab
+  reload(): void; // the ROM's project again, after it was changed outside the view
   render(): void;
   project(): Project; // the project as in the ROM
-  touch(): void; // the project was changed from outside the tab: applied to the ROM at once
+  touch(): void; // the project was changed from outside the view: applied to the ROM at once
 }
 
 export function errorText(e: unknown): string {
   return e instanceof Error ? e.message : String(e);
 }
 
-// changed: after this tab changed the ROM
-export function projectPane<P extends Project>(app: App, spec: PaneSpec<P>, changed: () => void): Pane & { project(): P } {
+// changed: after this view changed the ROM; ctx: the workspace's inspector, when the pane is shown in it
+export function projectPane<P extends Project>(app: App, spec: PaneSpec<P>, changed: () => void, ctx?: PartContext): Pane & { project(): P } {
   const el = h('div', { class: 'project-pane' });
   let proj: P;
   let installed = false;
@@ -56,6 +61,16 @@ export function projectPane<P extends Project>(app: App, spec: PaneSpec<P>, chan
   const origin = (file: string): HTMLElement => {
     const r = packages.filter((x) => x[spec.tool].files.includes(file)).pop();
     return h('span', { class: r ? 'hint' : 'hint pkg-none', title: r ? `from the package “${r.name}”` : 'not from a package (added before packages were tracked)' }, r?.name ?? '–');
+  };
+  // (only the pane on screen takes part in the selection: a hidden one is drawn again when it is shown)
+  const live = () => !!ctx && el.isConnected;
+  const row: PartRow = (key, make, cls = '') => {
+    if (!live()) return { class: cls };
+    return ctx!.sel.row(`${spec.tool}:${key}`, () => {
+      const x = make();
+      const r = x.file ? packages.filter((p) => p[spec.tool].files.includes(x.file!)).pop() : undefined;
+      return { files: proj.files, onChange: change, from: r ? { name: r.name, go: () => ctx!.showPackage(r.id) } : undefined, ...x };
+    }, cls);
   };
 
   const reload = () => {
@@ -74,7 +89,7 @@ export function projectPane<P extends Project>(app: App, spec: PaneSpec<P>, chan
   };
 
   // the changed project into the ROM, one undo step with the editor data; a failed one leaves the ROM
-  // as it was and the tab shows the ROM's project again
+  // as it was and the view shows the ROM's project again
   const change = () => {
     let r: ApplyResult;
     const text = spec.applied(proj);
@@ -92,8 +107,10 @@ export function projectPane<P extends Project>(app: App, spec: PaneSpec<P>, chan
   };
 
   function render(): void {
+    if (live()) ctx!.sel.begin();
     if (loadError) {
       clear(el).append(h('p', { class: 'hint error' }, loadError));
+      if (live()) ctx!.sel.end();
       return;
     }
     const files = [...proj.files.keys()].filter((f) => f !== 'list.txt').sort();
@@ -114,10 +131,11 @@ export function projectPane<P extends Project>(app: App, spec: PaneSpec<P>, chan
     );
     clear(el).append(
       h('p', { class: 'hint' }, spec.intro, ' ', h('details', { class: 'inline-details' }, h('summary', null, 'Format'), h('div', null, spec.format))),
-      h('div', { class: 'pane-content' }, spec.content(proj, change, origin)),
+      h('div', { class: 'pane-content' }, spec.content(proj, change, origin, row)),
       manualsRow(app.rom, spec.tool),
       adv,
     );
+    if (live()) ctx!.sel.end();
   }
 
   reload();

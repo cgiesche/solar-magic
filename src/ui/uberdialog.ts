@@ -1,4 +1,4 @@
-// UberASM tab of the Packages workspace, a configuration view: assigns the UberASM code packages brought to
+// UberASM view of the Packages workspace, a configuration view: assigns the UberASM code packages brought to
 // levels, overworld maps and game modes, the global and status bar code; the project's files with their
 // settings, export as an UberASM Tool folder (.zip).
 
@@ -7,11 +7,12 @@ import { h, toast, hexInput, select } from './dom.ts';
 import { loadProject, saveProject, emptyProject, projectToZip, addCall, type UberProject } from '../core/uberproject.ts';
 import { resourceFiles, ALL, CONTEXT_SIZE, type UberContext } from '../core/uberasm.ts';
 import { hex } from '../core/names.ts';
-import { definesButton } from './defineedit.ts';
-import { projectPane, type Pane } from './projectpane.ts';
+import { projectPane, type Pane, type PartRow } from './projectpane.ts';
+import type { PartContext } from './pkginspect.ts';
 import { icon } from './icons.ts';
 
 const CTX_LABEL: Record<UberContext, string> = { level: 'Level', overworld: 'Overworld maps', gamemode: 'Game modes' };
+const CTX_ONE: Record<UberContext, string> = { level: 'Level', overworld: 'Overworld map', gamemode: 'Game mode' };
 
 function bytesText(b: number[]): string {
   return b.map((v) => v.toString(16).toUpperCase().padStart(2, '0')).join(' ');
@@ -28,21 +29,24 @@ function parseBytes(s: string): number[] {
 
 export type UberPane = Pane & { context(): UberContext };
 
-export function uberPane(app: App, changed: () => void): UberPane {
+export function uberPane(app: App, changed: () => void, part?: PartContext): UberPane {
   let ctx: UberContext = 'level';
   let otherOpen = false;
   let pane: Pane;
 
-  function assignments(proj: UberProject, change: () => void, origin: (file: string) => HTMLElement): HTMLElement {
+  function assignments(proj: UberProject, change: () => void, origin: (file: string) => HTMLElement, row: PartRow): HTMLElement {
     const files = proj.files;
     const map = proj.list[ctx];
     const digits = ctx === 'level' ? 3 : 2;
-    const rows = [...map.entries()].sort((a, b) => a[0] - b[0]).flatMap(([num, calls]) => calls.map((c, i) => h('tr', null,
+    const rows = [...map.entries()].sort((a, b) => a[0] - b[0]).flatMap(([num, calls]) => calls.map((c, i) => h('tr', row(`${ctx}/${num}/${i}/${c.file}`, () => ({
+      kind: 'UberASM code', title: c.file, file: c.file,
+      facts: [['Runs in', num === ALL ? `all ${CTX_LABEL[ctx].toLowerCase()}` : `${CTX_ONE[ctx]} ${hex(num, digits)}`], ...(c.bytes.length ? [['Extra bytes', bytesText(c.bytes)] as [string, string]] : [])],
+    })),
       h('td', { class: 'mono' }, i === 0 ? (num === ALL ? '*' : hex(num, digits)) : ''),
       h('td', { class: files.has(c.file) ? '' : 'err', title: files.has(c.file) ? c.file : `${c.file} is missing from the project` }, c.file.replace(/^(level|overworld|gamemode)\//, '')),
       h('td', { class: 'mono' }, bytesText(c.bytes)),
       h('td', null, origin(c.file)),
-      h('td', { class: 'actions' }, definesButton(files, c.file, change), h('button', { class: 'icon-btn', title: 'Remove assignment (the file stays)', onclick: () => { calls.splice(i, 1); if (!calls.length) map.delete(num); change(); } }, icon('close'))),
+      h('td', { class: 'actions' }, h('button', { class: 'icon-btn', title: 'Remove assignment (the file stays)', onclick: () => { calls.splice(i, 1); if (!calls.length) map.delete(num); change(); } }, icon('close'))),
     )));
     // new assignment of a file already in the project
     let num = ctx === 'level' ? app.level.number : 0;
@@ -97,13 +101,13 @@ export function uberPane(app: App, changed: () => void): UberPane {
     save: (p) => saveProject(app.rom, p),
     toZip: projectToZip,
     zipName: 'uberasm.zip',
-    content: (proj, change, origin) => [
+    content: (proj, change, origin, row) => [
       h('div', { class: 'tabbar sub-tabs', role: 'tablist' }, (['level', 'overworld', 'gamemode'] as UberContext[]).map((c) =>
         h('button', { class: c === ctx ? 'mode active' : 'mode', onclick: () => { ctx = c; pane.render(); } }, CTX_LABEL[c]))),
-      assignments(proj, change, origin),
+      assignments(proj, change, origin, row),
       other(proj, change),
     ],
     applied: () => 'UberASM applied',
-  }, changed);
+  }, changed, part);
   return { ...pane, context: () => ctx };
 }

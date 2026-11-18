@@ -49,7 +49,7 @@ export function openUploadPreview(app: App, p: ReadyPreview | ManualPreview, don
     p.notes.map((n) => h('p', { class: 'hint' }, n)),
     textFiles.length ? h('p', { class: 'hint' }, `Object names and tooltips (Lunar Magic's): ${textFiles.join(', ')}.`) : '',
     p.unclaimed.length ? h('p', { class: 'hint' }, `Not installed: ${p.unclaimed.map((f) => f + (p.docs.includes(f) ? ' (manual)' : '')).join(', ')}.`) : '',
-    defaults.length ? h('p', { class: 'hint' }, `Installing applies the whole package: ${defaults.join(', ')}. Assignments can be changed afterwards in the tabs.`) : '',
+    defaults.length ? h('p', { class: 'hint' }, `Installing applies the whole package: ${defaults.join(', ')}. Assignments can be changed afterwards in the Packages workspace.`) : '',
     patch && patch.candidates.length > 1 ? h('div', { class: 'prop' }, h('label', null, 'Main file'),
       h('select', { onchange: (e: Event) => { main = (e.target as HTMLSelectElement).value; form = settingsForm(p.code!, main, {}); clear(settingsBox).appendChild(form.el); } },
         patch.candidates.map((f) => h('option', { value: f, selected: f === main }, f))),

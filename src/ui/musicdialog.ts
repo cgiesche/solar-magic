@@ -1,4 +1,4 @@
-// Music: the Music tab of the Packages workspace, a configuration view over the songs packages brought
+// Music: the Music view of the Packages workspace, a configuration view over the songs packages brought
 // (AddmusicK songs: MML .txt with BRR samples). Every song can be listened to in the current level as the
 // emulated game plays it and set as the music of the current level (music per level, like Lunar Magic's
 // music bypass); custom songs have their volume and settings. Changes insert the whole project with
@@ -190,7 +190,7 @@ export function openSongText(proj: MusicProject, song: MusicSong, save: (text: s
   ]);
 }
 
-// The Music tab: AddmusicK's state, all songs (listen, set for the level, remove), adding songs.
+// The Music view: AddmusicK's state, all songs (listen, set for the level, remove), adding songs.
 // Changes go into the ROM at once (inserting takes AddmusicK about a second), so nothing is staged.
 export function musicPane(app: App, changed: () => void): Pane {
   const el = h('div', { class: 'music-pane' });
