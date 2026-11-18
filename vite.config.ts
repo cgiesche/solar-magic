@@ -6,4 +6,5 @@ import basicSsl from '@vitejs/plugin-basic-ssl';
 // Plain `npm run dev` stays http on localhost, which counts as secure.
 const lan = process.argv.includes('--host') || process.argv.some((a) => a.startsWith('--host='));
 
-export default defineConfig({ plugins: lan ? [basicSsl()] : [] });
+// two pages: the editor with its start page, and the static credits page
+export default defineConfig({ plugins: lan ? [basicSsl()] : [], build: { rollupOptions: { input: ['index.html', 'credits.html'] } } });
