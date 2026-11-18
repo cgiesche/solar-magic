@@ -307,7 +307,7 @@ _Avoid_: queue
 **Open level's work**: what a probe worker does first because the open level needs it (its sprite images, object kinds, object boxes).
 _Avoid_: urgent, priority
 
-**Probe worker**: a worker thread running the probes and the result learner's jobs on its own copy of the ROM. There are at most two; which one a task or lane belongs to is fixed (ADR 0016), told apart as the first and the second worker.
+**Probe worker**: a worker thread running the probes and the result learner's jobs on its own copy of the ROM. There are at most three; which one a task or lane belongs to is fixed (ADR 0016), told apart as the first, the second and the third worker.
 _Avoid_: pool, thread
 
 **Watch**: records the bytes a view's drawing read; the view redraws only when one changed.

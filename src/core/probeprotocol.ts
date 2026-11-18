@@ -283,14 +283,19 @@ export type ProbeMessage =
 
 export type TaskMessage = ProbeMessage & { type: TaskType };
 
-// The probe workers (ADR 0016): at most two, each a probe host of its own. Which one a message goes to is fixed by what
-// it is for (the probes, a task, a lane): the second worker has the object kinds and the sprites' lanes (their images,
-// variants, bytes and the sprite memory check), the first everything else; with one worker everything is its. Jobs that
-// share what a host keeps between them (probehost.ts LearnState: the levels' uses and the block prober with the saves at
-// an event progress, the overworld's loads) are on the same worker; results reach the other's jobs through the editor.
-export const PROBE_WORKERS = 2;
-const SECOND_WORKER: ReadonlySet<ProbeBusyKey> = new Set<ProbeBusyKey>(['kinds', 'sprites', 'variants', 'bytes', 'spritemem']);
-export function probeWorker(key: ProbeBusyKey, workers: number): number { return workers > 1 && SECOND_WORKER.has(key) ? 1 : 0; }
+// The probe workers (ADR 0016): at most three, each a probe host of its own. Which one a message goes to is fixed by
+// what it is for (the probes, a task, a lane): the object kinds have the second worker, the sprites' lanes (their
+// images, variants, bytes and the sprite memory check) the third, everything else the first; with fewer workers the
+// last one has what the missing ones would (two: the kinds and the sprites' lanes on the second; one: everything).
+// Jobs that share what a host keeps between them (probehost.ts LearnState: the levels' uses and the block prober with
+// the saves at an event progress, the overworld's loads) are on the same worker; results reach the other's jobs
+// through the editor.
+export const PROBE_WORKERS = 3;
+const WORKER_OF: Partial<Record<ProbeBusyKey, number>> = { kinds: 1, sprites: 2, variants: 2, bytes: 2, spritemem: 2 };
+export function probeWorker(key: ProbeBusyKey, workers: number): number { return Math.max(0, Math.min(WORKER_OF[key] ?? 0, workers - 1)); }
+// the workers to start on a machine with that many logical cores: one per two of them (the main thread and the browser
+// need theirs), so two from four cores on, three from six
+export function probeWorkersFor(cores: number): number { return Math.max(1, Math.min(PROBE_WORKERS, Math.floor(cores / 2) || 1)); }
 // what a message is for (the ROM and its changes are for every worker)
 export type RoutedMessage = Exclude<ProbeMessage, { type: 'rom' | 'edit' }>;
 export function messageFor(m: RoutedMessage): ProbeBusyKey {

@@ -1,7 +1,7 @@
 // The editor's side of the probes (probehost.ts): asks for block, collision and sprite probes, Mario's
 // run speeds and the game view's scroll bands in the current tileset, prefetches what the panels shown
 // want (last, quietly), and runs the object kinds, the level scan, the camera at a place and the result learner's jobs (CONTEXT.md;
-// probeprotocol.ts LearnJob), all in the probe workers: one, or two with each message going to the worker its lane or
+// probeprotocol.ts LearnJob), all in the probe workers: one, or up to three with each message going to the worker its lane or
 // task belongs to (probeprotocol.ts probeWorker, ADR 0016). It sends each the ROM once, then the ranges each change
 // wrote (the worker keeps its queue and restarts only tasks
 // that read a changed byte; the whole ROM again, with everything still wanted of it, when the ROM's log of changes
@@ -39,7 +39,7 @@ export interface ProbeClientDeps {
   level?(): number; // the open level's number (another one opened while the kinds run: its objects' kinds next)
   // starts a worker (replies go to reply, failed() once it broke down); null or a throw: none. Called once per worker
   connect?(reply: (d: ProbeReply) => void, failed: () => void): Send | null;
-  workers?: number; // the workers wanted: 1 (default) or 2 (PROBE_WORKERS; where the cores are there for them)
+  workers?: number; // the workers wanted: 1 (default) to PROBE_WORKERS (probeWorkersFor: where the cores are there for them)
   later(key: string, step: () => void): void; // a background slice on the main thread (waits while a dialog is open)
   soon?(step: () => void): void; // a slice that runs while a dialog is open too (default: later's)
   setBusy(key: ProbeBusyKey, label: string | null): void;
@@ -76,8 +76,8 @@ export interface PrefetchWant { blocks?: boolean; tiles?: readonly number[]; spr
 export type PrefetchOwner = 'picker' | 'map16tab';
 
 export class ProbeClient {
-  // the hosts by worker (probeWorker; null: not started): one per worker, the same one for both when there is only
-  // one, the main thread's (onMain) for a worker that broke down
+  // the hosts by worker (probeWorker; null: not started): one per worker started, the main thread's (onMain) for a
+  // worker that broke down
   private conns: Conn[] | null = null;
   private onMain: Conn | null = null;
   private gen = -1; // the ROM generation the hosts were last sent
@@ -408,7 +408,8 @@ export class ProbeClient {
     }
   }
 
-  // The hosts by worker: a worker each (ProbeClientDeps.workers); the first one's for all when no other starts.
+  // The hosts by worker: a worker each (ProbeClientDeps.workers), fewer when one doesn't start (the last one started
+  // then has what the missing ones would, probeWorker).
   // Without any (none started) the jobs run here in slices.
   private start(): Conn[] {
     const conns: Conn[] = [], n = Math.min(PROBE_WORKERS, Math.max(1, this.d.workers ?? 1));

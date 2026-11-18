@@ -1,4 +1,4 @@
-// The probe client (probeclient.ts) with two probe workers (ADR 0016, #513), each a probe host in a stand-in worker the
+// The probe client (probeclient.ts) with two and three probe workers (ADR 0016, #513, #516), each a probe host in a stand-in worker the
 // test runs by hand: the ROM and the ranges a change wrote reach both, every other message only the worker its lane or
 // task belongs to (probeprotocol.ts probeWorker), a result from either lands in the same cache; a worker breaking down
 // hands its side to the main thread, the other worker goes on as it is; one worker (the default, or the second one not
@@ -6,7 +6,7 @@
 import { Rom } from '../src/core/rom.ts';
 import { BlockProber } from '../src/core/blockprobe.ts';
 import { ProbeHost } from '../src/core/probehost.ts';
-import { probeWorker, jobKey, type ProbeMessage, type ProbeReply, type LearnJob } from '../src/core/probeprotocol.ts';
+import { probeWorker, probeWorkersFor, jobKey, type ProbeMessage, type ProbeReply, type LearnJob } from '../src/core/probeprotocol.ts';
 import { ProbeClient } from '../src/core/probeclient.ts';
 import { ResultCache, RomFingerprint } from '../src/core/romdeps.ts';
 import { loadLevel, L2_PTRS } from '../src/core/level.ts';
@@ -79,6 +79,9 @@ const sameBlock = (e: ReturnType<typeof editor>, tile: number) => JSON.stringify
 check(['probe', 'scan', 'camera', 'thumbs', 'uses', 'sizes', 'lt', 'owps', 'level-png'].every((k) => probeWorker(k as 'probe', 2) === 0)
   && ['kinds', 'sprites', 'variants', 'bytes', 'spritemem'].every((k) => probeWorker(k as 'kinds', 2) === 1), 'two workers: the object kinds and the sprite lanes on the second, the rest on the first');
 check(['probe', 'kinds', 'sprites', 'thumbs'].every((k) => probeWorker(k as 'probe', 1) === 0), 'one worker: everything on it');
+check(['probe', 'scan', 'thumbs', 'uses', 'owps'].every((k) => probeWorker(k as 'probe', 3) === 0) && probeWorker('kinds', 3) === 1
+  && ['sprites', 'variants', 'bytes', 'spritemem'].every((k) => probeWorker(k as 'sprites', 3) === 2), 'three workers: the object kinds on the second, the sprite lanes on the third');
+check([1, 2, 3, 4, 5, 6, 8, 24].map(probeWorkersFor).join() === '1,1,1,2,2,3,3,3' && probeWorkersFor(NaN) === 1, 'the workers by the cores: two from four on, three from six');
 
 // two workers: the ROM and its changes to both, each lane's and task's messages to its worker only, the results of
 // both in the same cache
@@ -202,6 +205,38 @@ check(['probe', 'kinds', 'sprites', 'thumbs'].every((k) => probeWorker(k as 'pro
   check(b.count('rom') === 1 && b.count('kinds') === 1 && e.busy.has('kinds'), '… the object kinds still the second worker\'s');
   b.run();
   check(e.client.kinds(1) != null && !e.busy.has('kinds'), '… and answered by it');
+}
+
+// three workers: the object kinds and the sprite images each on their own; one of them breaking down hands its side
+// to the main thread, the two others go on as they are
+for (let broken = -1; broken < 3; broken++) {
+  const e = editor(3), what = broken < 0 ? 'three workers' : `three workers, ${['the first', 'the second', 'the third'][broken]} failed`;
+  let done = 0;
+  e.client.block(0x130);
+  e.client.kinds(1);
+  e.client.learn('spr', sprites, { input: 1, lane: 'sprites', label: 'Sprite graphics', done: () => done++ });
+  await settle();
+  if (broken < 0) check(e.workers.map((w) => w.others()).join(' | ') === 'ask | kinds | learn:sprites' && e.workers.every((w) => w.count('rom') === 1), 'three workers: the probes, the object kinds and the sprite images each to its own');
+  else {
+    e.workers[broken].failed();
+    await settle();
+    e.drain();
+    const mine = [() => sameBlock(e, 0x130) && !e.busy.has('probe'), () => e.client.kinds(1) != null && !e.busy.has('kinds'), () => done === 1 && !e.busy.has('sprites')];
+    check(mine[broken]() && e.busy.size === 2, `${what}: its side done on the main thread, the others' still busy`);
+    check(e.workers.every((w) => w.count('rom') === 1 && w.sent.length === 2), '… nothing sent to the others again');
+  }
+  e.workers.forEach((w, i) => { if (i !== broken) w.run(); });
+  check(sameBlock(e, 0x130) && e.client.kinds(1) != null && done === 1 && !e.busy.size, `${what}: all answered, nothing busy`);
+}
+
+// the third worker not starting: its side with the second
+{
+  const e = editor(3, 2);
+  e.client.block(0x130);
+  e.client.kinds(1);
+  e.client.learn('spr', sprites, { input: 1, lane: 'sprites' });
+  await settle();
+  check(e.workers.length === 2 && e.workers.map((w) => w.others()).join(' | ') === 'ask | kinds,learn:sprites', 'the third worker not starting: the sprite images with the second');
 }
 
 // one worker: by default, and when the second doesn't start

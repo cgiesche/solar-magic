@@ -23,5 +23,16 @@ Nothing on the second worker reads what a job on the first keeps, or the other w
 ## Considered options
 
 - **A pool that gives each job to the next free worker**: rejected. Jobs keep state on their host – a lane's emulator with its prepared level, the levels' uses, the overworld's loads, results in the host's store that a later job takes as stored, a cancelled task taken up again where it stood. A job moving between workers would lose it or need it shipped; a fixed side per lane keeps all of that where it is.
-- **A worker per lane or per group of lanes**: rejected. Each worker costs a boot and a copy of the ROM (and its own result store); most lanes are idle most of the time. Two cover the case measured: the second worker's jobs were about 46 s of the 126 s of CPU.
+- **A worker per lane or per group of lanes**: rejected. Each worker costs a boot and a copy of the ROM (and its own result store); most lanes are idle most of the time. Two cover the case measured (see the amendment below for a third): the second worker's jobs were about 46 s of the 126 s of CPU.
 - **Balancing the two by load**: rejected for the same reason as the pool; the fixed table is also what makes "which worker has this" answerable when reading a profile.
+
+## Amendment (#516): a third worker for the sprites' lanes
+
+A profile with the two workers (17.8 s of a level switch) showed both busy the whole time, and on the second the object kinds waiting for the sprite images: they take turns per step, a step of the sprite images (a test level load with its captures) is about five times as long as one of the kinds, so the kinds got 3.8 s of CPU in 17.8 s while the sprite images had 12.2 s. The first worker had its lanes done after 6 s.
+
+We decided on **a third worker, with the same fixed routing**: the object kinds keep the second worker to themselves, the lanes `sprites`, `variants`, `bytes` and `spritemem` move to the third (the sprite groups' results stay with the sprite memory check; nothing there is shared with the kinds). The workers started follow the cores (`probeWorkersFor`: one per two logical cores, so two from four on, three from six); with fewer workers the last one has what the missing ones would, which is the table of two workers above.
+
+This takes back part of "a worker per lane or per group of lanes: rejected": that was measured with the first profile, where the second worker's jobs were 46 s of 126 s. The cost named there stands (a boot and a ROM copy each), and so does the limit: a level switch has three long groups of jobs, a fourth worker would have none.
+
+- **The kinds on the first worker instead**: rejected. Its lanes are idle after 6 s in this profile, but asked probes run before the lanes' turns there, and for a tileset not seen before the object thumbnails are its longest job.
+- **A turn lasting a time slice instead of a step**: not decided here. It would give the kinds half of the second worker instead of a fifth, and still not the whole of one.
