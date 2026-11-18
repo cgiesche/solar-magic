@@ -29,7 +29,8 @@ import { PackagesWorkspace, setPackagesHost, type PackagesKind, type PackagesOpt
 import { OverworldView } from './ui/overworld.ts';
 import { GameView } from './ui/gameview.ts';
 import { overworldReplacement } from './core/overworld.ts';
-import { openTestPlay, openOverworldTestPlay } from './ui/testplay.ts';
+import { progressWords, OW_EVENTS } from './core/eventset.ts';
+import { openTestPlay, openOverworldTestPlay, openPowerOnPlay } from './ui/testplay.ts';
 import { musicPlayer, LEVEL_MUSIC, isSubmapMusic } from './ui/musicplayer.ts';
 import { MessagePanel, levelMessages } from './ui/messagepanel.ts';
 import { NavHistory, fromHash, type NavLoc } from './ui/navhistory.ts';
@@ -333,7 +334,7 @@ function buildUi(app: App): { start: (at: NavLoc | null) => Promise<void> } {
   const redoBtn = h('button', { onclick: () => redo(), title: 'Redo (Ctrl+Y)', 'aria-label': 'Redo' }, icon('redo'));
   const saveBtn = h('button', { class: 'primary', onclick: () => saveLevel(), title: `Write level to ROM (${shortcutKeys('save')})` });
   const testLevelTitle = 'Test the level in the built-in emulator (T, Shift+T: from the mouse position)';
-  const testBtn = h('button', { onclick: () => (workspace === 'ow' ? testOverworld() : openTestPlay(app)), title: testLevelTitle }, iconLabel('play', 'Test'));
+  const testBtn = h('button', { onclick: () => (workspace === 'ow' ? testOverworld() : workspace === 'game' ? game?.playFromPowerOn() : openTestPlay(app)), title: testLevelTitle }, iconLabel('play', 'Test'));
   // loops the open level's music while editing; anything else that plays (test play, a song in a dialog) ends it
   const musicTitle = 'Play the level\'s music in a loop while editing';
   let musicOf = ''; // level and header music playing
@@ -394,8 +395,8 @@ function buildUi(app: App): { start: (at: NavLoc | null) => Promise<void> } {
     // (the overworld's and game's changes are ROM edits: nothing to save)
     saveBtn.hidden = romOnly();
     savedPill.hidden = !romOnly();
-    testBtn.disabled = (workspace === 'ow' && !owShown()) || workspace === 'game';
-    testBtn.title = workspace === 'game' ? 'Test play is available in the level and overworld workspaces'
+    testBtn.disabled = workspace === 'ow' && !owShown();
+    testBtn.title = workspace === 'game' ? 'Play the game from power-on in the built-in emulator (T): the pre-game in sequence, with the save files chosen in the Game workspace\'s bar'
       : workspace !== 'ow' ? testLevelTitle
       : owShown() ? 'Play the game from the overworld in the built-in emulator (T): a new game with the events checked in the event list passed, Mario on the selected tile (without one at the start position)'
         : 'The overworld is replaced by a package';
@@ -470,6 +471,13 @@ function buildUi(app: App): { start: (at: NavLoc | null) => Promise<void> } {
         game = new GameView(app);
         game.onNav = () => nav?.mark();
         game.onOpenLevel = async (n, then) => { if (await setWorkspace('level')) { app.openLevel(n); then?.(); } };
+        // play from power-on: empty save files, or file A a save at the event progress the overworld editor shows
+        // (before events while it was not opened) or with every event passed
+        game.shownProgress = () => progressWords(ow?.checked ?? 0);
+        game.onPlay = (file) => {
+          const progress = file === 'all' ? OW_EVENTS : ow?.checked ?? 0;
+          openPowerOnPlay(app, file ? { progress, save: app.progressSave(progress) } : null, (n, at) => void setWorkspace('level').then((ok) => { if (ok) app.showUse(n, at); }));
+        };
       }
       showLayout(game.bar, game.left, game.root, game.side);
       layout.classList.add('ow-mode');
@@ -716,6 +724,7 @@ function buildUi(app: App): { start: (at: NavLoc | null) => Promise<void> } {
     }
     if (workspace === 'game') {
       if (game?.key(e)) e.preventDefault();
+      else if ((k === 't' || k === 'T') && !ctrl && !e.altKey && !e.shiftKey) game?.playFromPowerOn();
       return;
     }
     if (workspace === 'ow') {

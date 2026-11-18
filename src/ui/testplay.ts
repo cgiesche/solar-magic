@@ -1,5 +1,6 @@
 // Test play: runs the edited level in the built-in emulator (video, sound, input) – or the game from the
-// overworld (core/playsession.ts fromOverworld). The sound unit is emulated too (apu.ts): the game uploads and
+// overworld (core/playsession.ts fromOverworld), or from power-on (powerOn: the pre-game in sequence, with empty save
+// files or the save file of an event progress, core/savefile.ts). The sound unit is emulated too (apu.ts): the game uploads and
 // plays its music and sound effects itself.
 
 import type { App } from './app.ts';
@@ -7,6 +8,7 @@ import { h, modal, toast } from './dom.ts';
 import { LevelEmulator } from '../core/levelemu.ts';
 import type { PPU } from '../core/ppu.ts';
 import { PlaySession } from '../core/playsession.ts';
+import { progressSram } from '../core/savefile.ts';
 import { hex } from '../core/names.ts';
 import type { StartEntrance } from '../core/level.ts';
 import { l1XY } from '../core/overworld.ts';
@@ -87,11 +89,13 @@ const saveSlot = new SaveSlot<SnesState>();
 // runs, messages.ts messageToShow; yoshi: Mario brings Yoshi along), or the overworld (a new game at the event
 // progress with its save – owprogress.ts, none: a new file's –, Mario on layer 1 tile `tile` – < 0: at the start
 // position; PlaySession.fromOverworld; showLevel: shows a tile of a level in the level editor, when a moment of the
-// meters is shown)
+// meters is shown), or power-on (the console switched on: nothing skipped; file: the save file the game finds as its
+// file A – the event progress's, made by the game's own save, savefile.ts – none: empty save files, the intro plays)
 type Start = { tx: number; ty: number; entrance?: StartEntrance };
 type ShowMessage = { message: number; yoshi: boolean };
 type ShowLevel = (level: number, at: { x: number; y: number }) => void;
-type Origin = { kind: 'level'; at?: Start; show?: ShowMessage } | { kind: 'overworld'; tile: number; progress: EventProgress; save?: ProgressSave; showLevel: ShowLevel };
+type Origin = { kind: 'level'; at?: Start; show?: ShowMessage } | { kind: 'overworld'; tile: number; progress: EventProgress; save?: ProgressSave; showLevel: ShowLevel }
+  | { kind: 'powerOn'; file?: { progress: EventProgress; save?: ProgressSave }; showLevel: ShowLevel };
 
 // fromSave: from the savestate instead of the start (when there is a usable one)
 export function openTestPlay(app: App, at?: Start, fromSave = false, show?: ShowMessage): void {
@@ -105,6 +109,17 @@ export function openOverworldTestPlay(app: App, tile: number, progress: EventPro
   const o: Origin = { kind: 'overworld', tile, progress, showLevel };
   if (save instanceof Promise) begin(app, o, fromSave, save.then((v) => { o.save = v ?? undefined; }));
   else begin(app, { ...o, save }, fromSave);
+}
+
+// the game from power-on: Nintendo Presents, the title screen with its movement, file select, player select and – on
+// an empty file – the intro, as a player sees them. file: the save file A the game finds, of the event progress with
+// the save learned for it (as openOverworldTestPlay); null: empty save files
+export function openPowerOnPlay(app: App, file: { progress: EventProgress; save: ProgressSave | Promise<ProgressSave | null | undefined> } | null, showLevel: ShowLevel, fromSave = false): void {
+  if (!file) { begin(app, { kind: 'powerOn', showLevel }, fromSave); return; }
+  const made: { progress: EventProgress; save?: ProgressSave } = { progress: file.progress };
+  const o: Origin = { kind: 'powerOn', file: made, showLevel };
+  if (file.save instanceof Promise) begin(app, o, fromSave, file.save.then((v) => { made.save = v ?? undefined; }));
+  else { made.save = file.save; begin(app, o, fromSave); }
 }
 
 // (ready: what the start waits for besides the sound emulator)
@@ -124,7 +139,7 @@ function begin(app: App, o: Origin, fromSave: boolean, ready?: Promise<void>): v
 }
 
 // the savestate's place: a level's number, a test from the overworld's by its tile and event progress
-const slotOf = (app: App, o: Origin) => (o.kind === 'level' ? app.level.number : `ow:${o.tile}:${progressKey(o.progress)}`);
+const slotOf = (app: App, o: Origin) => (o.kind === 'level' ? app.level.number : o.kind === 'overworld' ? `ow:${o.tile}:${progressKey(o.progress)}` : `power:${o.file ? progressKey(o.file.progress) : 'empty'}`);
 
 function start(app: App, o: Origin, audio: AudioOut, fromSave: boolean): void {
   if (!testEmu || testEmu.rom !== app.rom) {
@@ -143,6 +158,18 @@ function start(app: App, o: Origin, audio: AudioOut, fromSave: boolean): void {
       at: o.at && { ...o.at, level: { secondary: lv.secondary, maxScreen: lv.header.screens - 1, rows: app.entranceRows() } },
     });
     ok = p.render?.ok === true;
+  } else if (o.kind === 'powerOn') {
+    let sram: Uint8Array | null = null;
+    if (o.file) {
+      // (made on an emulator of its own, without the sound unit: the game run to its save prompt and saved there)
+      try {
+        const maker = new LevelEmulator(app.rom);
+        maker.adoptBoot(app.emu);
+        sram = progressSram(maker, o.file.progress, o.file.save);
+      } catch { sram = null; }
+      if (!sram) { ok = false; toast('The game saved nothing at its save prompt, so there is no save file of the event progress: started with empty save files', 'error'); }
+    }
+    p = PlaySession.powerOn(emu, sram ?? undefined);
   } else {
     try { p = PlaySession.fromOverworld(emu, o.tile, o.progress, o.save); } catch (e) { p = PlaySession.resume(emu); ok = false; toast(`The overworld did not load: ${e instanceof Error ? e.message : e}`, 'error'); }
   }
@@ -152,9 +179,16 @@ function start(app: App, o: Origin, audio: AudioOut, fromSave: boolean): void {
   play(app, o, audio, p, ppu, ok, !!saved);
 }
 
+// where a play from power-on is, by the game mode: the pre-game's screens (CONTEXT.md), then the overworld
+function pregameName(mode: number): string {
+  return mode <= GM.presents ? 'Nintendo Presents' : mode <= GM.title ? 'Title screen' : mode === GM.fileSelect ? 'File select' : mode === GM.fileErase ? 'File erase'
+    : mode === GM.playerSelect ? 'Player select' : mode <= GM.overworld ? 'Overworld' : 'Loading';
+}
+
 // what the title says the test starts from
 function originText(app: App, o: Origin): string {
   if (o.kind === 'level') return `Level ${hex(app.level.number, 3)}${o.at ? ` from ${hex(o.at.tx, 2)}/${hex(o.at.ty, 2)}` : ''}`;
+  if (o.kind === 'powerOn') return `From power-on, ${o.file ? `save file A: the map ${progressWords(o.file.progress)}` : 'empty save files'}`;
   const { x, y } = l1XY(o.tile);
   return `Overworld, ${o.tile < 0 ? 'start position' : `tile ${hex(x, 2)},${hex(y, 2)} (${o.tile >= 0x400 ? 'submaps' : 'main map'})`}, the map ${progressWords(o.progress)}`;
 }
@@ -176,7 +210,7 @@ function play(app: App, o: Origin, audio: AudioOut, p: PlaySession, ppu: PPU, ok
   let deathsChanged = false;
   const meter = playMeter(log, (tx, ty, level = lv.number) => {
     m.close();
-    if (o.kind === 'overworld') o.showLevel(level, { x: tx, y: ty });
+    if (o.kind !== 'level') o.showLevel(level, { x: tx, y: ty });
     else app.showUse(level, { x: tx, y: ty });
   }, (id) => app.spriteLabel(id));
   let keys = 0;
@@ -289,7 +323,7 @@ function play(app: App, o: Origin, audio: AudioOut, p: PlaySession, ppu: PPU, ok
     ctx.putImageData(img, 0, 0);
     meter.update();
     // (from the overworld: the level being played, while one is)
-    const where = o.kind === 'level' ? `Level ${hex(lv.number, 3)}` : p.mode === GM.level ? `Level ${hex(levelLoaded(p.wram), 3)}` : 'Overworld';
+    const where = o.kind === 'level' ? `Level ${hex(lv.number, 3)}` : p.mode === GM.level ? `Level ${hex(levelLoaded(p.wram), 3)}` : o.kind === 'powerOn' ? pregameName(p.mode) : 'Overworld';
     const rewind = rewinding ? (rewindEnd ? ' · Rewind: no older state kept' : ' · Rewinding') : '';
     info.textContent = `${where} · Frame ${p.frames}${paused ? ' · Pause' : ''}${rewind} · Game mode ${hex(p.mode, 2)}`
       + (note && t < noteUntil ? ` · ${note}` : '')
@@ -328,7 +362,7 @@ function play(app: App, o: Origin, audio: AudioOut, p: PlaySession, ppu: PPU, ok
     h('span', null, kbd('←→↑↓'), ' move'), h('span', null, kbd('X'), ' jump'), h('span', null, kbd('Z'), ' / ', kbd('Y'), ' run, fire'), h('span', null, kbd('S'), ' spin'),
     h('span', null, kbd('A'), ' X button'), h('span', null, kbd('Enter'), ' Start'), h('span', null, kbd('Shift'), ' Select'), h('span', null, kbd('Q'), ' / ', kbd('W'), ' L / R'));
   const more = h('details', { class: 'hint play-more' }, h('summary', null, 'Gamepad, savestates'),
-    `Gamepad: d-pad/left stick, buttons by position as on the SNES pad (bottom = B, right = A, left = Y, top = X), shoulder buttons/triggers = L/R, Start/Select, Home = pause; a stick pressed rewinds; Select+L / Select+R save / load the state. One savestate slot, kept for this ${o.kind === 'level' ? 'level' : 'test from the overworld'} until it or the ROM changes. ${o.kind === 'level' ? 'The level is saved before the test.' : 'The open level is saved before the test; levels entered on the overworld play as saved.'}`);
+    `Gamepad: d-pad/left stick, buttons by position as on the SNES pad (bottom = B, right = A, left = Y, top = X), shoulder buttons/triggers = L/R, Start/Select, Home = pause; a stick pressed rewinds; Select+L / Select+R save / load the state. One savestate slot, kept for this ${o.kind === 'level' ? 'level' : o.kind === 'powerOn' ? 'play from power-on' : 'test from the overworld'} until it or the ROM changes. ${o.kind === 'level' ? 'The level is saved before the test.' : 'The open level is saved before the test; levels entered on the overworld play as saved.'}`);
   const m = modal(`Test play · ${originText(app, o)}${fromSave ? ' – from the savestate' : ''}${ok ? '' : ' (load error)'}`, h('div', { class: 'play' },
     h('div', { class: 'play-stage' }, canvas, transport, legend, more),
     // (the meters and the level's animation triggers as the side panel, #485)

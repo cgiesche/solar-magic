@@ -263,7 +263,7 @@ _Avoid_: intro cutscene, welcome message
 **Start of game**: the Game workspace's page of what a new save file starts with: the intro, the lives, the start position, the initial level flags – learned by playing a new file in the emulator from the title screen to its first overworld.
 _Avoid_: new game settings, game options
 
-**Save file**: one of the three saved games in SRAM.
+**Save file**: one of the three saved games in SRAM. The editor makes none itself: a save file is the SRAM the emulated game leaves when it saves at its save prompt, with the game's RAM set to what the file is to hold.
 _Avoid_: savegame, slot
 
 **New file data**: what an empty save file starts with: the start position, the initial level flags, the lives. The lives are a field while the game reads them from a byte of its own; a byte a package's patch writes names the package's setting instead (Retry System: `!initial_lives`).
@@ -336,6 +336,9 @@ _Avoid_: Switch mode, P-state
 
 **Play session**: a level played in the emulator from gameplay start until death, exit or stop.
 _Avoid_: run, game loop, harness
+
+**Play from power-on**: the game played from reset, nothing skipped: the pre-game in sequence, then the overworld. With empty save files (the intro plays) or with file A a save at an event progress, made by the game's own save. Started in the Game workspace; level test play and test play from the overworld keep skipping the pre-game.
+_Avoid_: full game test, boot play
 
 **Emulated result**: anything learned by emulation; valid while its input and the ROM bytes it read are unchanged.
 _Avoid_: Cached value, generation

@@ -367,6 +367,7 @@ label.game-screen-about { display: flex; align-items: center; gap: 4px; }
 .game-num { width: 5em; }
 .game-colour { width: 3em; padding: 0; flex-shrink: 0; }
 .game-field-note { min-width: 0; }
+.game-play-saves { display: inline-flex; align-items: center; gap: 4px; }
 .game-start-message { font-family: var(--font-mono, monospace); white-space: pre; overflow-x: auto; }
 .game-mark { display: inline-block; width: 0.8em; height: 0.8em; border: 2px solid; margin-right: 6px; vertical-align: -0.1em; }
 .panning, .panning * { cursor: grabbing !important; }

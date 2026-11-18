@@ -344,6 +344,14 @@ lives minus 1, ROM map) only while the operand at `$009E25` is what the game rea
 `PlaySession.start` gets a start at reset, with the SRAM the user chooses: empty (the intro plays) or the save of an
 event progress (the file shows its exit count). Level test play keeps skipping the intro.
 
+*Done (#528):* `PlaySession.powerOn(emu, sram)` (`src/core/playsession.ts`), started in the Game workspace ("Play from
+power-on", T). The save of an event progress is not written by the editor: `progressSram` (`src/core/savefile.ts`)
+puts the progress's RAM (`$1EA2`–`$1F2E`, and the game's copy of it at `$1F49` that its save writes out) into the
+game at its save prompt and takes the prompt's first choice – the SRAM is what the game's save routine leaves.
+Learned on the way: the game copies the level flags to `$1F49` as the prompt comes (`$049037`), the events and
+places only when an event ends on a tile that saves (`$048F87`), so RAM set at the prompt reaches a save only
+through that copy.
+
 ### 5.7 Save scheme
 
 Before the editor writes a save file for event progress, it should know whose layout it is: the game's 143 bytes, or

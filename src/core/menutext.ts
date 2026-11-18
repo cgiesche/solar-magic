@@ -24,10 +24,10 @@ import { RAM } from './ram.ts';
 import { L3_MAP_VRAM } from './layer3map.ts';
 import { holds, type RomReads } from './romdeps.ts';
 import { replayScreen, PAD, MAX_CHOICES, type ReachedScreen } from './pregame.ts';
+import { saveAtPrompt, SAVE_FILES } from './savefile.ts';
 
 export const MENU_COLS = 32, MENU_ROWS = 32; // the first screen of layer 3's tilemap
 const CELLS = MENU_COLS * MENU_ROWS;
-const SAVE_FRAMES = 240, SAVED = 8; // a save: until the game writes SRAM, and stopped for this many frames
 const BLINK = 40; // the frames a choice is looked at for the cursor's cells
 const MAX_IMAGE = 0x2000; // a stripe image's bytes at most
 const MAX_ENTRY = 0x400; // the words of one of its entries looked back over for its header
@@ -81,21 +81,12 @@ function savedFiles(emu: LevelEmulator, prompt: ReachedScreen | undefined, exits
   if (!prompt) return null;
   const s = emu.snes, w = s.wram;
   let sram = (prompt.state.sram as Uint8Array).slice();
-  for (let file = 0; file < 3; file++) {
+  for (let file = 0; file < SAVE_FILES; file++) {
     s.loadState(prompt.state);
     s.sram.set(sram);
     w[RAM.saveFile] = file;
     w[RAM.eventsTriggered] = exits;
-    const before = s.sramWrites;
-    s.joy1 = PAD.a;
-    s.runFrame();
-    s.joy1 = 0;
-    for (let f = 0, last = before, same = 0; f < SAVE_FRAMES && (s.sramWrites === before || same < SAVED); f++) {
-      s.runFrame();
-      same = s.sramWrites === last ? same + 1 : 0;
-      last = s.sramWrites;
-    }
-    if (s.sramWrites === before) return null;
+    if (!saveAtPrompt(s)) return null;
     sram = s.sram.slice();
   }
   return sram;

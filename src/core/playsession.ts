@@ -1,7 +1,8 @@
 // A play session (CONTEXT.md): a level played in the emulator from gameplay on, frame by frame with the
 // buttons held, until Mario dies, the level is left or the caller stops. It loads the level (on its own, or
 // within a game in progress as a player gets there), waits until it is ready, holds the machine's memory hook
-// for the watchers registered with it, and puts the buttons back when a run of frames is over.
+// for the watchers registered with it, and puts the buttons back when a run of frames is over. A session can also
+// start on the overworld of a new game (fromOverworld) or at power-on (powerOn: the whole pre-game, nothing skipped).
 
 import type { Snes, SnesState, MemHook } from './snes.ts';
 import { joinHooks } from './snes.ts';
@@ -131,6 +132,20 @@ export class PlaySession {
       w[RAM.eventsTriggered] = save.eventsTriggered;
     }
     emu.reloadOverworld(events);
+    return new PlaySession(emu, null, false);
+  }
+
+  // Play from power-on (CONTEXT.md): the console switched on – memory cleared, reset – so that the game shows its
+  // pre-game in sequence: Nintendo Presents, the title screen with its movement, file select, player select and, on
+  // an empty file, the intro. sram: the save files the game finds (savefile.ts progressSram: an event progress's;
+  // none: all empty). Nothing is skipped or pressed: the player's buttons do it.
+  static powerOn(emu: LevelEmulator, sram?: Uint8Array): PlaySession {
+    emu.ensureBoot(); // (the emulator caught up with the ROM)
+    const s = emu.snes;
+    s.hook = null;
+    s.joy1 = 0;
+    s.powerOn();
+    if (sram) s.sram.set(sram.subarray(0, s.sram.length));
     return new PlaySession(emu, null, false);
   }
 

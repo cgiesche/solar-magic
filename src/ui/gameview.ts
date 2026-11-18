@@ -13,6 +13,7 @@
 
 import type { App } from './app.ts';
 import { h, toast, attachPanZoom, zoomControl, hexInput } from './dom.ts';
+import { iconLabel } from './icons.ts';
 import { LevelEmulator } from '../core/levelemu.ts';
 import { TileCache } from '../core/render.ts';
 import { TITLE_COLS, TITLE_ROWS, TITLE_SHOWN_ROWS, titleTilemap, writeTitleScreen, type TitlePicture } from '../core/titlescreen.ts';
@@ -90,6 +91,9 @@ export class GameView {
     this.bar = h('div', { class: 'ctxbar' }, this.title,
       h('span', { class: 'sep' }),
       this.zoomCtl.root,
+      h('span', { class: 'sep' }),
+      h('button', { title: 'Play the game from power-on (T): Nintendo Presents, the title screen with its movement, file select, player select and – on an empty save file – the intro, as a player sees them. Nothing is skipped.', onclick: () => this.playFromPowerOn() }, iconLabel('play', 'Play from power-on')),
+      h('label', { class: 'hint game-play-saves', title: 'The save files the game finds at power-on. Empty: file A is new, the intro plays. A save file: file A holds a game at that event progress (made by the game\'s own save) – the file select shows its exit count, the intro does not play.' }, 'Save files', this.playSaves),
       h('span', { class: 'sep' }));
     this.moves = new MovementView({
       app,
@@ -166,6 +170,7 @@ export class GameView {
     else if (this.tab === 'title') this.sync();
     else this.showOther();
     this.listScreens();
+    this.labelSaves();
   }
   // the tab shown that is neither the title screen nor a border: a screen's picture or menu text, or the start of a game
   private showOther(): void {
@@ -210,6 +215,19 @@ export class GameView {
       ...MAP_NAMES.map((n, m) => item(n, `${n}'s border: layer 3, fixed on the screen while the map is shown`, this.tab === 'border' && this.border.map === m, () => { this.select('border', m); this.onNav(); })));
   }
   onNav: () => void = () => {};
+  // set by the host: plays the game from power-on with the save files chosen (file: file A a save at an event
+  // progress – 'shown': the one the overworld editor shows, 'all': every event passed; null: empty save files)
+  onPlay: (file: 'shown' | 'all' | null) => void = () => {};
+  // set by the host: the overworld editor's event progress in words (the choice's label)
+  shownProgress: () => string = () => 'before events';
+  private playSaves = h('select', { onfocus: () => this.labelSaves() },
+    h('option', { value: '' }, 'Empty'), h('option', { value: 'shown' }, ''), h('option', { value: 'all' }, 'File A: every event passed'));
+  private labelSaves(): void { this.playSaves.options[1].textContent = `File A: the overworld's event progress (${this.shownProgress()})`; }
+  playFromPowerOn(): void {
+    const v = this.playSaves.value;
+    this.moves.leave(); // (a recording or the movement played on the title screen page ends)
+    this.onPlay(v === 'shown' || v === 'all' ? v : null);
+  }
   // set by the host: the level editor on a level (then: what to do there)
   onOpenLevel: (n: number, then?: () => void) => void = () => {};
   // Esc: a stroke or pick in progress cancelled (else the workspace is left); whether it was taken
