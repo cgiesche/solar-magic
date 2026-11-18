@@ -144,6 +144,50 @@ check(['probe', 'kinds', 'sprites', 'thumbs'].every((k) => probeWorker(k as 'pro
   check(b.count('rom') === 1 && b.count('kinds') === 1, '… the broken ones sent nothing more');
 }
 
+// a learn job of the worker that breaks down: learned on the main thread; one that failed on the other worker is not
+// asked again by it
+{
+  const e = editor(2);
+  let done = 0, fails = 0;
+  const bad: LearnJob = { kind: 'levelTiles', state: { id: 'not-sent' } };
+  e.client.learnOrFailed('lt:x', bad, { lane: 'lt', input: 'not-sent', failed: () => fails++ });
+  await settle();
+  const [a, b] = e.workers;
+  const error = console.error;
+  console.error = () => {}; // (the job's error)
+  a.run();
+  console.error = error;
+  e.client.learn('spr', sprites, { input: 1, lane: 'sprites', label: 'Sprite graphics', done: () => done++ });
+  await settle();
+  check(fails === 1 && b.count('learn') === 1, '(a job failed on the first worker, the sprite images asked of the second)');
+  b.failed();
+  await settle();
+  e.drain();
+  check(done === 1 && !e.busy.has('sprites') && e.client.learn('spr', sprites, { input: 1, lane: 'sprites' }) !== undefined, 'second worker failed: its sprite images learned on the main thread');
+  e.client.learnOrFailed('lt:x', bad, { lane: 'lt', input: 'not-sent', failed: () => fails++ });
+  await settle();
+  check(a.count('learn') === 1 && a.count('rom') === 1 && fails === 1, '… the job that failed on the first worker is not asked again');
+}
+
+// a new size: the whole ROM to both, each with what is wanted of it
+{
+  const e = editor(2);
+  e.client.block(0x130);
+  e.client.kinds(1);
+  await settle();
+  const [a, b] = e.workers;
+  const data = new Uint8Array(e.rom.data.length + 0x8000);
+  data.set(e.rom.data);
+  e.rom.data = data;
+  touch(e.rom);
+  e.client.block(0x130);
+  await settle();
+  check(a.count('rom') === 2 && b.count('rom') === 2 && a.count('edit') === 0 && b.count('edit') === 0, 'a new size: the whole ROM to both');
+  check(a.others() === 'ask' && a.count('ask') === 2 && b.others() === 'kinds' && b.count('kinds') === 2, '… each asked again for what is wanted of it only');
+  a.run(); b.run();
+  check(sameBlock(e, 0x130) && e.client.kinds(1) != null && !e.busy.size, '… and answered');
+}
+
 // the first worker breaks down: the probes go to the main thread, the object kinds stay with the second
 {
   const e = editor(2);

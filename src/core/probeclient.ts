@@ -61,11 +61,11 @@ export interface LearnOptions<T> {
   shown?: (items: unknown[] | null) => void; // what the job shows while it runs (null: it started, also over)
 }
 
-// (resent: the ROM generation it was last sent again for, a reply from an older one coming: once per generation)
 // a probe host the client talks to (a worker, or the one on the main thread): the ROM generation and size it probes
 // on, the levels as edited it has whole (the latest EDIT_STATES sent so, post)
 interface Conn { send: Send; gen: number; size: number; states: string[] }
 
+// (resent: the ROM generation it was last sent again for, a reply from an older one coming: once per generation)
 interface LearnWant { msg: LearnMessage; opts: LearnOptions<unknown>; done: ((r: unknown) => void)[]; failed: (() => void)[]; dropped: (() => void)[]; resent: number }
 
 // what a panel shown wants prefetched (ProbeClient.wantPrefetch) in the current tileset: blocks, the block probes of
@@ -81,6 +81,7 @@ export class ProbeClient {
   private conns: Conn[] | null = null;
   private onMain: Conn | null = null;
   private gen = -1; // the ROM generation the hosts were last sent
+  private behind = false; // a host is to get the whole ROM though the ROM didn't change (it took over for a worker)
   private asked = new Map<string, ProbeJob>(); // asked for and not done yet
   private prefetched = new Map<string, ProbeJob>(); // the same, probed when nothing else is pending
   private prefetchWants = new Map<PrefetchOwner, PrefetchWant>(); // by the panel wanting it (only those shown)
@@ -360,12 +361,15 @@ export class ProbeClient {
   private sync(): void {
     const conns = this.conns ??= this.start();
     const rom = this.d.rom();
-    if (this.gen === rom.gen) return;
-    this.gen = rom.gen;
-    this.failed.clear();
-    this.kindsFailed.clear();
-    this.prefetched.clear();
-    this.learnFailed.clear();
+    if (this.gen === rom.gen && !this.behind) return;
+    this.behind = false;
+    if (this.gen !== rom.gen) {
+      this.gen = rom.gen;
+      this.failed.clear();
+      this.kindsFailed.clear();
+      this.prefetched.clear();
+      this.learnFailed.clear();
+    }
     for (const c of new Set(conns)) {
       if (c.gen === rom.gen) continue;
       // (a new size is a new ROM to the worker: it starts anew)
@@ -391,6 +395,7 @@ export class ProbeClient {
   private resend(c: Conn): void {
     if (this.conn('probe') === c) {
       this.prefetchSent = false;
+      this.prefetched.clear(); // (made anew, sync)
       if (this.asked.size) c.send({ type: 'ask', jobs: [...this.asked.values()] });
     }
     if (this.conn('kinds') === c) {
@@ -416,7 +421,7 @@ export class ProbeClient {
   }
 
   // a worker; one that breaks down hands what it was asked to the main thread's host (which starts anew with the whole
-  // ROM and what is wanted of it), the other worker goes on as it is
+  // ROM and what is wanted of it), the other worker goes on as it is, and what failed there stays failed
   private open(): Conn | null {
     try {
       const c: Conn = { gen: -1, size: -1, states: [], send: null as unknown as Send };
@@ -427,7 +432,7 @@ export class ProbeClient {
         main.gen = -1;
         main.states = [];
         this.conns = this.conns.map((x) => (x === c ? main : x));
-        this.gen = -1;
+        this.behind = true;
         this.sync();
       });
       if (send) { c.send = send; return c; }
