@@ -700,12 +700,24 @@ for (const changeRead of [false, true]) {
 
   // object thumbnails (a picture, in the result cache)
   const specs: ObjSpec[] = [{ num: 0x21, ext: 0, size: 0x13 }, { num: 0, ext: 0x10, size: 0 }, { num: 0x0e, ext: 0, size: 0x02 }];
-  const keys = specs.map((q) => objKey(q, null)), thInput = inputHash({ th: 'test' });
-  const th = run({ type: 'learn', lane: 'thumbs', key: 'th-test', input: thInput, job: { kind: 'thumbs', level: lv5, specs, keys }, replace: true });
+  const keys = specs.map((q) => objKey(q, null)), thInput = inputHash({ th: 'test' }), thLoad = inputHash({ th: 'load' });
+  const th = run({ type: 'learn', lane: 'thumbs', key: 'th-test', input: thInput, job: { kind: 'thumbs', level: lv5, specs, keys, input: thLoad }, replace: true });
   const thNow = atOnce<ObjThumb[]>({ key: 'th-test', input: thInput, keep: true, picture: true, start: (emu) => objectThumbsJob(lr, emu, lv5, specs, (q) => keys[specs.indexOf(q)]) });
   check(th.done?.type === 'learned' && !th.done.failed && json(th.done.result) === json(thNow) && thNow.length === 3, `thumbnails: as on the main thread (${thNow.length})`);
   check(same(th.put.get(storeKey('th-test', thInput)), results.entry('th-test', thInput) && { ...results.entry('th-test', thInput)!, input: thInput }),
     'thumbnails: their entry as on the main thread (key, input, bytes read: a picture)');
+  // asked again with another list (an object's types found meanwhile, #511): the loads of the sections left as they
+  // were are taken as stored – only the changed section's batch is learned, the result as learned from scratch
+  {
+    const partPuts = (x: { put: Map<string, unknown> }) => [...x.put.keys()].filter((k) => k.includes('th-test/')).length;
+    const specs2: ObjSpec[] = [{ num: 0x21, ext: 0, size: 0x23 }, specs[1], specs[2]], keys2 = specs2.map((q) => objKey(q, null)), in2 = inputHash({ th: 'test2' });
+    const th2 = run({ type: 'learn', lane: 'thumbs', key: 'th-test', input: in2, job: { kind: 'thumbs', level: lv5, specs: specs2, keys: keys2, input: thLoad }, replace: true });
+    const scratch = atOnce<ObjThumb[]>({ key: 'th-scratch', input: in2, keep: true, picture: true, start: (emu) => objectThumbsJob(lr, emu, lv5, specs2, (q) => keys2[specs2.indexOf(q)]) });
+    check(partPuts(th) >= 2 && partPuts(th2) === 1, `thumbnails: another list of objects learns only the changed section's batch (parts learned: ${partPuts(th)}, then ${partPuts(th2)})`);
+    check(th2.done?.type === 'learned' && !th2.done.failed && json(th2.done.result) === json(scratch) && json(scratch) !== json(thNow), 'thumbnails: the result as learned from scratch');
+    const th3 = run({ type: 'learn', lane: 'thumbs', key: 'th-test', input: in2, job: { kind: 'thumbs', level: lv5, specs: specs2, keys: keys2, input: inputHash({ th: 'load2' }) }, replace: true });
+    check(th3.done?.type === 'learned' && json(th3.done.result) === json(scratch), 'thumbnails: the list as kept');
+  }
 
   // the placement preview: an object placed in level 105 (in memory only); a request replacing it drops it
   // (#232: the level as pvState sent whole once, then named by its id)

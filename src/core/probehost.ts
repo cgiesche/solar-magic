@@ -112,7 +112,7 @@ function learnJob(
     };
     case 'thumbs': {
       const keys = new Map(j.specs.map((s, i) => [s, j.keys[i]]));
-      return (emu) => objectThumbsJob(state.rom, emu, j.level, j.specs, (s) => keys.get(s)!);
+      return (emu, _p, part) => objectThumbsJob(state.rom, emu, j.level, j.specs, (s) => keys.get(s)!, part, j.input);
     }
     case 'preview': return (emu) => {
       const p = withPlaced(state.rom, sent(j.state), j.layer2, j.objects);

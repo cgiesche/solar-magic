@@ -103,7 +103,7 @@ export type LearnJob =
   | { kind: 'animated'; level: number; ov: LevelOverride }
   | { kind: 'layer3'; level: number; ov: LevelOverride }
   | { kind: 'levelTiles'; state: StateRef }
-  | { kind: 'thumbs'; level: Level; specs: ObjSpec[]; keys: string[] }
+  | { kind: 'thumbs'; level: Level; specs: ObjSpec[]; keys: string[]; input: string } // (input: of each of its loads, objectThumbsJob)
   | { kind: 'preview'; state: StateRef; layer2: boolean; objects: LevelObject[] }
   | { kind: 'arcs'; level: string; load: ArcLoad; tx: number; ty: number; runs: RunStates }
   | { kind: 'layer2Motions'; level: number; ov: LevelOverride }

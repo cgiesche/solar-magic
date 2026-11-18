@@ -62,7 +62,7 @@ import { ResultLearner } from '../core/learner.ts';
 import { holds, perRomState, type Recorded } from '../core/romdeps.ts';
 import { RomWatch, type Watch } from '../core/romwatch.ts';
 import { thumbCanvas } from './thumbs.ts';
-import { thumbsKey, thumbsInput, previewInput, objKey, type ObjSpec, type ObjThumb, type PlacementPreview } from '../core/objthumbs.ts';
+import { thumbsKey, thumbsSpecs, thumbsInput, previewInput, objKey, type ObjSpec, type ObjThumb, type PlacementPreview } from '../core/objthumbs.ts';
 import { levelInput, inputHash, editState } from '../core/inputs.ts';
 import { map16Tile, bgTile } from '../core/ram.ts';
 import { exanimTiles, exanimColors, exanimPeriod, readLevelList, readGlobalList } from '../core/exanim.ts';
@@ -1471,8 +1471,10 @@ export class App {
   objectThumbs(specs: ObjSpec[]): ObjThumb[] | undefined {
     const rom = this.rom, lv = this.level, keys = new Map(specs.map((s) => [s, objKey(s, this.kindOf(s))]));
     const keyOf = (s: ObjSpec) => keys.get(s)!, level = { ...lv, header: { ...lv.header } };
-    return this.probes.learn<ObjThumb[]>(thumbsKey(lv, specs, keyOf), { kind: 'thumbs', level, specs, keys: specs.map(keyOf) },
-      { input: thumbsInput(rom, lv), lane: 'thumbs', replace: true, label: 'Object thumbnails', done: this.thumbsLearned });
+    // (each load is kept with the level's input, the whole list with its objects too: objthumbs.ts)
+    const input = thumbsInput(rom, lv);
+    return this.probes.learn<ObjThumb[]>(thumbsKey(lv), { kind: 'thumbs', level, specs, keys: specs.map(keyOf), input: inputHash(input) },
+      { input: { load: input, specs: thumbsSpecs(specs, keyOf) }, lane: 'thumbs', replace: true, label: 'Object thumbnails', done: this.thumbsLearned });
   }
   private thumbsLearned = () => this.emit('thumbs');
 

@@ -89,7 +89,7 @@ const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b)
   const thumbs = (l: Level) => JSON.stringify(renderObjectThumbs(r, e, l, specs, keyOf).map((t) => [t.key, inputHash(t.px)]));
   assignSlot(r, 0x106, 'FG1', 0x17);
   const a = thumbs(lv), b = thumbs(other);
-  check(a !== b && thumbsKey(lv, specs, keyOf) === thumbsKey(other, specs, keyOf), 'thumbnails: another level with the same header looks different (its graphics slots)');
+  check(a !== b && thumbsKey(lv) === thumbsKey(other), 'thumbnails: another level with the same header looks different (its graphics slots)');
   check(inputHash(thumbsInput(r, lv)) !== inputHash(thumbsInput(r, other)), 'thumbnails: the level number is in their input');
   const fg1 = layerSlots(levelSlots(r, lv.number, lv.header))[0].file, before = inputHash(thumbsInput(r, lv));
   const fp = new RomFingerprint(r), deps = fp.deps(e.tracked(() => thumbs(lv)).reads);

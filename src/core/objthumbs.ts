@@ -4,6 +4,7 @@
 
 import type { Rom } from './rom.ts';
 import { readOffset, type LevelEmulator, type LevelRender, type LevelOverride } from './levelemu.ts';
+import type { Recorded } from './romdeps.ts';
 import { type Level, type LevelObject, newUid, levelRows } from './level.ts';
 import { TileCache, map16Source, drawMap16, layerGeom, renderLayerTiles, tileByOffset } from './render.ts';
 import { objectKey } from './objboxes.ts';
@@ -14,7 +15,7 @@ import { gfxFilesHash } from './gfxpages.ts';
 import { levelAnimHash } from './exanim.ts';
 import { inputHash, type EditState } from './inputs.ts';
 import { levelOverride } from './levelusage.ts';
-import { runJob } from './jobrunner.ts';
+import { runJob, type Part } from './jobrunner.ts';
 import { effectLoad, ramEffect } from './objeffects.ts';
 import { snesToPc } from './rom.ts';
 import { EXT_OBJ_TABLE } from './prefabs.ts';
@@ -43,12 +44,19 @@ export interface ObjThumb { key: string; w: number; h: number; px: Uint32Array; 
 export const CUSTOM_EXT = 0x98;
 const isCustomExt = (s: ObjSpec): boolean => s.num === 0 && s.ext >= CUSTOM_EXT;
 
-// their result cache key: the tileset and palettes (kept side by side) and the objects
-export function thumbsKey(level: Level, specs: ObjSpec[], keyOf: (s: ObjSpec) => string): string {
+// their result cache key: the tileset and palettes (kept side by side). Not the objects: the loads of a list are kept
+// on their own under it (objectThumbsJob's parts), so another list takes over those it shares (#511)
+export function thumbsKey(level: Level): string {
   const h = level.header;
-  // (o4: effects as what they change, extended objects' too; o5: with cells; o6: custom extended objects without a handler)
-  return `o6${h.tileset}-${h.fgPalette}-${h.bgPalette}:${inputHash(specs.map((s) => `${s.num}.${s.ext}.${s.size}=${keyOf(s)}`))}`;
+  // (o4: effects as what they change, extended objects' too; o5: with cells; o6: custom extended objects without a
+  // handler; o7: the loads kept as parts, batches per section)
+  return `o7${h.tileset}-${h.fgPalette}-${h.bgPalette}`;
 }
+// the objects asked for, part of the result's input (with thumbsInput): which they are and their keys
+export const thumbsSpecs = (specs: ObjSpec[], keyOf: (s: ObjSpec) => string): string => inputHash(specs.map((s) => specId(s, keyOf)));
+const specId = (s: ObjSpec, keyOf: (s: ObjSpec) => string): string => `${s.num}.${s.ext}.${s.size}.${s.extension?.join('.') ?? ''}=${keyOf(s)}`;
+// the section of the picker an object is listed in: its loads are batched with its section's objects only
+const sectionOf = (s: ObjSpec): number => (s.extension ? 2 : s.num === 0 ? 1 : 0);
 
 // what they depend on outside the ROM bytes they read: the level they are drawn in as edited (its number
 // decides its graphics slots), the content of the graphics files they draw from and what the level's animations
@@ -96,8 +104,14 @@ function animHash(rom: Rom, level: number): number {
 export function renderObjectThumbs(rom: Rom, emu: LevelEmulator, level: Level, specs: ObjSpec[], keyOf: (s: ObjSpec) => string): ObjThumb[] {
   return runJob(objectThumbsJob(rom, emu, level, specs, keyOf));
 }
+// (no parts kept: each load learned)
+const learnEach: Part = (_sub, _input, learn) => ({ result: learn(), learned: true });
+// a single load's outcome as a part (a part without a result isn't kept): the object's entry, null for none
+interface Alone { thumb: ObjThumb | null }
 
-// in batches of 32 test levels, a step each; a batch whose load fails (some objects together break the game,
+// in batches of 32 test levels (each section's objects among themselves: standard, extended, object 2D's custom
+// numbers – so a change of one section's list leaves the others' batches as they were), a step each; a batch whose
+// load fails (some objects together break the game,
 // like two of tileset 7's object 33) is rendered in halves, an object that fails alone gets no thumbnail. An
 // extended object or one of object 2D's custom numbers that drew nothing in its batch is loaded again alone
 // (#104's rule: listed are the objects that draw tiles or do something): it may draw alone what it didn't among
@@ -109,8 +123,15 @@ export function renderObjectThumbs(rom: Rom, emu: LevelEmulator, level: Level, s
 // (#110). It is shown as its object box instead, as Lunar Magic shows a placeholder for unused extended objects;
 // never left out of the list. (Told apart from 47/48 by "reads its data from code" doesn't work: C2–D7 read another
 // routine's table, tools/extcodeprobe.ts)
-export function* objectThumbsJob(rom: Rom, emu: LevelEmulator, level: Level, specs: ObjSpec[], keyOf: (s: ObjSpec) => string): Generator<void, ObjThumb[]> {
+// Each batch and each single load is a part of the result (jobrunner.ts Part, under the hash of its objects and their
+// keys, with input: the hash of thumbsInput), kept with the bytes it read: asked again with another list – the types
+// of an object found meanwhile (the kinds arrive while the thumbnails are learned, #511) – the loads of the same
+// objects are taken as stored, without a step.
+export function* objectThumbsJob(
+  rom: Rom, emu: LevelEmulator, level: Level, specs: ObjSpec[], keyOf: (s: ObjSpec) => string, part: Part = learnEach, input?: string,
+): Generator<void, ObjThumb[]> {
   const out: ObjThumb[] = [];
+  const subOf = (kind: string, of: ObjSpec[]): string => `${kind}:${inputHash(of.map((s) => specId(s, keyOf)))}`;
   const PER = 32;
   const objOf = (s: ObjSpec, i: number): LevelObject => ({ uid: newUid(), num: s.num, ext: s.ext, size: s.size, x: i * 16 + 3, y: 12, ...(s.extension ? { extension: s.extension } : {}) });
   // the routines of the game's own extended numbers, by its pointer table (read once needed), as ROM offsets (FastROM
@@ -119,7 +140,7 @@ export function* objectThumbsJob(rom: Rom, emu: LevelEmulator, level: Level, spe
   const routine = (n: number): number => snesToPc(rom.r24(EXT_OBJ_TABLE + n * 3));
   const ownRoutine = (n: number): boolean => (own ??= new Set(Array.from({ length: CUSTOM_EXT }, (_, k) => routine(k)))).has(routine(n));
   // the thumbnails of a load's objects that wrote tiles
-  const collect = (r: LevelRender, batch: ObjSpec[]): void => {
+  const collect = (r: LevelRender, batch: ObjSpec[], out: ObjThumb[]): void => {
     const unhandled = (s: ObjSpec, i: number): boolean => {
       if (!isCustomExt(s) || !r.trace) return false;
       const entry = snesToPc(EXT_OBJ_TABLE + s.ext * 3);
@@ -154,29 +175,46 @@ export function* objectThumbsJob(rom: Rom, emu: LevelEmulator, level: Level, spe
       out.push({ key: keyOf(s), w, h: hh, px, m16: [...m16].sort((a, b) => a - b), cells });
     });
   };
-  const render = (batch: ObjSpec[]): void => {
+  const render = (batch: ObjSpec[], out: ObjThumb[]): void => {
     // (traced where a custom extended object is among them: whether it has a handler)
     const r = effectLoad(emu, level, batch.map(objOf), true, batch.some(isCustomExt));
     if (!r.ok) {
-      if (batch.length > 1) { render(batch.slice(0, batch.length >> 1)); render(batch.slice(batch.length >> 1)); }
+      if (batch.length > 1) { render(batch.slice(0, batch.length >> 1), out); render(batch.slice(batch.length >> 1), out); }
       return;
     }
-    collect(r, batch);
+    collect(r, batch, out);
   };
-  for (let b = 0; b < specs.length; b += PER) { render(specs.slice(b, b + PER)); yield; }
+  for (let section = 0; section < 3; section++) {
+    const of = specs.filter((s) => sectionOf(s) === section);
+    for (let b = 0; b < of.length; b += PER) {
+      const batch = of.slice(b, b + PER);
+      const p = part<ObjThumb[]>(subOf('b', batch), input, () => { const o: ObjThumb[] = []; render(batch, o); return o; });
+      out.push(...p.result!);
+      if (p.learned) yield;
+    }
+  }
   const drawn = new Set(out.map((t) => t.key));
   const quiet = specs.filter((s) => (s.num === 0 || s.extension) && !drawn.has(keyOf(s)));
-  if (!quiet.length) return out;
-  const base = effectLoad(emu, level, []);
-  yield;
-  if (!base.ok) return out;
+  // the load without objects, once a single load is learned; what it read counts for each of them
+  let base: Recorded<LevelRender> | null = null;
+  const baseLoad = (): LevelRender => {
+    if (base) emu.count(base.reads); else base = emu.tracked(() => effectLoad(emu, level, []));
+    return base.result;
+  };
+  const alone = (s: ObjSpec): Alone | undefined => {
+    const b = baseLoad();
+    if (!b.ok) return undefined;
+    const r = effectLoad(emu, level, [objOf(s, 0)], true, isCustomExt(s)), o: ObjThumb[] = [];
+    if (r.ok) collect(r, [s], o);
+    const effect = r.ok && !o.length ? ramEffect(b.wram, r.wram) : null;
+    if (effect) o.push({ key: keyOf(s), w: 0, h: 0, px: new Uint32Array(0), m16: [], cells: [], effect });
+    return { thumb: o[0] ?? null };
+  };
   for (const s of quiet) {
-    const r = effectLoad(emu, level, [objOf(s, 0)], true, isCustomExt(s));
-    const had = out.length;
-    if (r.ok) collect(r, [s]);
-    const effect = r.ok && out.length === had ? ramEffect(base.wram, r.wram) : null;
-    if (effect) out.push({ key: keyOf(s), w: 0, h: 0, px: new Uint32Array(0), m16: [], cells: [], effect });
-    yield;
+    const p = part<Alone>(subOf('q', [s]), input, () => alone(s));
+    if (!p.result) return out; // (the level without objects doesn't load)
+    if (p.result.thumb) out.push(p.result.thumb);
+    if (p.learned) yield;
   }
   return out;
 }
