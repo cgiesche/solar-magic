@@ -11,7 +11,7 @@
 
 import type { LevelEmulator, LevelRender, ObjectTrace } from './levelemu.ts';
 import { ramEffect } from './objeffects.ts';
-import { OV_L1, readOffset } from './levelemu.ts';
+import { layer1Owners, readOffset } from './levelemu.ts';
 import { layerGeom, tileByOffset, tilePos } from './render.ts';
 import { encodePrimaryHeader, serializeObjects, newUid, type LevelObject, type Level } from './level.ts';
 import { RomReads } from './romdeps.ts';
@@ -233,9 +233,7 @@ export class ObjKindProbe {
     const l1 = new Uint8Array(5 + body.length);
     l1.set(encodePrimaryHeader({ ...this.level.header, screens: 32, mode: 0 }));
     l1.set(body, 5);
-    const byteOwner = new Int32Array(0x10000).fill(-1);
-    owners.forEach((o, i) => (byteOwner[OV_L1 + i] = o));
-    const r = this.emu.load(this.level.number, { layer1: l1, layer2Pointer: this.layer2Pointer, sprites: new Uint8Array([0, 0xff]), byteOwner, trace: true });
+    const r = this.emu.load(this.level.number, { layer1: l1, layer2Pointer: this.layer2Pointer, sprites: new Uint8Array([0, 0xff]), byteOwner: layer1Owners(owners), trace: true });
     return { r, objs };
   }
 

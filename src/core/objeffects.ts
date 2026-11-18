@@ -8,7 +8,7 @@
 import type { LevelEmulator, LevelRender } from './levelemu.ts';
 import { encodePrimaryHeader, serializeObjects, newUid, type Level, type LevelObject } from './level.ts';
 import { levelBgPointer } from './levelheader.ts';
-import { OV_L1 } from './levelemu.ts';
+import { layer1Owners } from './levelemu.ts';
 import { MAP_BASE, MAP_SIZE, MAP_HI, RAM, wramName } from './ram.ts';
 import { hex } from './names.ts';
 
@@ -33,11 +33,7 @@ export function effectLoad(emu: LevelEmulator, level: Level, objs: LevelObject[]
   l1.set(encodePrimaryHeader({ ...level.header, screens: 32, mode: 0 }));
   l1.set(body.subarray(0, -1), 5);
   l1.set([LAST_SCREEN, 0x00, 0x01, 0xff], 5 + body.length - 1);
-  let byteOwner: Int32Array | undefined;
-  if (withOwners) {
-    byteOwner = new Int32Array(0x10000).fill(-1);
-    owners.slice(0, -1).forEach((o, i) => (byteOwner![OV_L1 + i] = o));
-  }
+  const byteOwner = withOwners ? layer1Owners(owners.slice(0, -1)) : undefined;
   return emu.load(level.number, {
     layer1: l1,
     layer2Pointer: levelBgPointer(emu.rom, level),

@@ -5,7 +5,7 @@
 import type { Rom } from './rom.ts';
 import { readOffset, type LevelEmulator, type LevelRender, type LevelOverride } from './levelemu.ts';
 import { type Level, type LevelObject, newUid, levelRows } from './level.ts';
-import { renderLevel, layerGeom, renderLayerTiles, tileByOffset } from './render.ts';
+import { TileCache, map16Source, drawMap16, layerGeom, renderLayerTiles, tileByOffset } from './render.ts';
 import { objectKey } from './objboxes.ts';
 import { MAP_BASE, map16Tile } from './ram.ts';
 import { objectVariant, sizedByte, type ObjKind } from './objkinds.ts';
@@ -126,7 +126,8 @@ export function* objectThumbsJob(rom: Rom, emu: LevelEmulator, level: Level, spe
       for (const v of r.trace.reads.get(i) ?? []) if (readOffset(v) === entry) return ownRoutine(s.ext);
       return false;
     };
-    const im = renderLevel(rom, r, 0, 32);
+    // (only the tiles the objects wrote are drawn, as renderLevel draws layer 1: not the whole test level and its BG)
+    const tc = new TileCache(r.vram, r.cgram, (r.ppuRegs[0x0b] & 0x0f) << 13), src = map16Source(rom, r);
     const g = layerGeom(rom, 0, 0, 32);
     const tileAt = tileByOffset(g);
     batch.forEach((s, i) => {
@@ -144,11 +145,9 @@ export function* objectThumbsJob(rom: Rom, emu: LevelEmulator, level: Level, spe
       const px = new Uint32Array(w * hh), cells: number[] = [];
       for (const t of tiles) {
         const tx = t & 0xffff, ty = t >> 16;
-        cells.push((tx - x0) * 16, (ty - y0) * 16, map16Tile(r.wram, g.addr(tx, ty)));
-        for (let yy = 0; yy < 16; yy++) for (let xx = 0; xx < 16; xx++) {
-          const v = im.layer1[(ty * 16 + yy) * im.width + tx * 16 + xx];
-          px[((ty - y0) * 16 + yy) * w + (tx - x0) * 16 + xx] = v;
-        }
+        const m = map16Tile(r.wram, g.addr(tx, ty));
+        cells.push((tx - x0) * 16, (ty - y0) * 16, m);
+        drawMap16(px, w, hh, tc, src.fg(m), (tx - x0) * 16, (ty - y0) * 16);
       }
       const m16 = new Set<number>();
       for (const off of set!) m16.add(map16Tile(r.wram, MAP_BASE + off));

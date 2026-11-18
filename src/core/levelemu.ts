@@ -17,6 +17,19 @@ import { inputHash, levelInput } from './inputs.ts';
 import { GM, RAM, SPR, MAP_BASE, MAP_SIZE, MAP_HI, CDM16_FLAGS, MUSIC_FADE, getS16, set16, setSpritePos, freezeActors } from './ram.ts';
 
 export const OV_L1 = 0x0000; // overlay offsets
+
+// The owners of a test level's layer 1 data bytes as LevelOverride.byteOwner (owners: per byte of the data, -1 none).
+// One array for all of them, not one per load (256 KB each, a thousand loads at a level switch: #510): it holds until
+// the next call, which is enough for a load – the emulator reads it only while it loads, a recorded frame copies what
+// it read of it (loadframes.ts).
+const testOwners = new Int32Array(0x10000).fill(-1);
+let testOwnersSet = 0;
+export function layer1Owners(owners: readonly number[]): Int32Array {
+  testOwners.fill(-1, OV_L1, OV_L1 + testOwnersSet);
+  for (let i = 0; i < owners.length; i++) testOwners[OV_L1 + i] = owners[i];
+  testOwnersSet = owners.length;
+  return testOwners;
+}
 export const OV_L2 = 0x4000;
 export const OV_SPR = 0x8000;
 export const OV_BG = 0xa000; // edited BG tilemap (editor format, see bg.ts)
