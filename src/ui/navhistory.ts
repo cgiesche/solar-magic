@@ -45,7 +45,7 @@ export function fromHash(hash: string): NavLoc | null {
     const n = num(p[1], 0x1ff);
     return n === null ? null : { w: 'level', level: n };
   }
-  if (p[0] === 'game' && p.length === 2 && GAME_SCREENS.some((k) => k.id === p[1])) return { w: 'game', tab: p[1] as GameTab };
+  if (p[0] === 'game' && p.length === 2 && (p[1] === 'start' || GAME_SCREENS.some((k) => k.id === p[1]))) return { w: 'game', tab: p[1] as GameTab };
   if (p[0] === 'game' && p.length === 3 && p[1] === 'border' && /^[0-6]$/.test(p[2])) return { w: 'game', tab: 'border', map: Number(p[2]) };
   if (p[0] === 'ow' && p.length === 2 && /^[0-6]$/.test(p[1])) return { w: 'ow', map: Number(p[1]) };
   if (p[0] !== 'gfx') return null;

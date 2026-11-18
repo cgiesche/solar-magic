@@ -8,7 +8,8 @@
 // released. Nintendo Presents has fields beside its picture (presents.ts: what the game reads the logo from). The
 // title screen page also has the title screen movement (titlemoves.ts): its timeline under the picture, which is the
 // game's at the playhead, played and recorded there. The other screens are pictures; an editor for one of them
-// replaces its picture in `showScreen`.
+// replaces its picture in `showScreen`. "Start of game" (startpage.ts) is no screen: what a new save file starts with –
+// the intro, the lives, the start position, the initial level flags – beside the intro's picture.
 
 import type { App } from './app.ts';
 import { h, toast, attachPanZoom, zoomControl, hexInput } from './dom.ts';
@@ -17,6 +18,7 @@ import { TileCache } from '../core/render.ts';
 import { TITLE_COLS, TITLE_ROWS, TITLE_SHOWN_ROWS, titleTilemap, writeTitleScreen, type TitlePicture } from '../core/titlescreen.ts';
 import type { SnesState } from '../core/snes.ts';
 import { MovementView } from './titlemoves.ts';
+import { startPage } from './startpage.ts';
 import { GAME_SCREENS, gameScreenKind, gameScreens, screenPicture, type GameScreenId, type ReachedScreen, type ScreenPicture } from '../core/pregame.ts';
 import { MENU_COLS, MENU_ROWS, menuText, paintMenuCell, paintedOverwritten, writeMenuText, type MenuText } from '../core/menutext.ts';
 import { pcToSnes } from '../core/rom.ts';
@@ -32,8 +34,9 @@ import { BrushSurface, PAINT_HINT, PAINT_TITLE } from './brushsurface.ts';
 import { MARK, rgba, onTokensChanged, uiToken } from './marks.ts';
 
 // a screen of the game ('title': the title screen, with its editor), or the border of an overworld map (0 the main
-// map, 1–6 the submaps)
-export type GameTab = GameScreenId | 'border';
+// map, 1–6 the submaps), or the start of a game ('start': what a new save file starts with)
+export type GameTab = GameScreenId | 'border' | 'start';
+export const START_TAB = { name: 'Start of game', about: 'What a new save file starts with: the intro, the lives, the start position, the initial level flags' };
 const GAP = 4; // pixels between the screen and the row below it
 const SCROLLER_PAD = 16; // .game-scroller's padding (style.css)
 const W = 256, H = TITLE_SHOWN_ROWS * 8 + GAP + 8;
@@ -78,7 +81,7 @@ export class GameView {
   private surface: BrushSurface;
 
   constructor(app: App) {
-    onTokensChanged(() => { this.paint(); if (this.tab !== 'border' && this.tab !== 'title' && !this.menu) this.showScreen(this.tab); }); // (the backdrop is a UI token: another theme)
+    onTokensChanged(() => { this.paint(); if (this.tab !== 'border' && this.tab !== 'title' && !this.menu) this.showOther(); }); // (the backdrop is a UI token: another theme)
     this.app = app;
     this.border = new BorderView(app);
     this.border.setStatus = (t) => { this.status.textContent = t; };
@@ -147,7 +150,7 @@ export class GameView {
       if (this.tab === 'border') { this.border.reload(); return; }
       this.surface.drop();
       this.menuSurface.drop();
-      if (this.tab === 'title') this.sync(); else this.showScreen(this.tab);
+      if (this.tab === 'title') this.sync(); else this.showOther();
     });
     // the sheet follows the panel's width, drawn anew when it needs other screen pixels per pixel
     new ResizeObserver(() => requestAnimationFrame(() => { if (this.pickPixels && fillPixels(this.pickPanel.clientWidth, 128) !== this.pickPixels) this.buildPicker(); })).observe(this.pickPanel);
@@ -161,14 +164,19 @@ export class GameView {
   show(): void {
     if (this.tab === 'border') this.border.show(this.border.map);
     else if (this.tab === 'title') this.sync();
-    else this.showScreen(this.tab);
+    else this.showOther();
     this.listScreens();
+  }
+  // the tab shown that is neither the title screen nor a border: a screen's picture or menu text, or the start of a game
+  private showOther(): void {
+    if (this.tab === 'start') this.showStart();
+    else if (this.tab !== 'border') this.showScreen(this.tab);
   }
   // a screen of the game, or the border of map `map`
   select(tab: GameTab, map = this.border.map): void {
     this.tab = tab;
     const border = tab === 'border', edited = tab === 'title';
-    this.title.textContent = border ? `${MAP_NAMES[map]} – overworld border` : gameScreenKind(tab).name;
+    this.title.textContent = border ? `${MAP_NAMES[map]} – overworld border` : tab === 'start' ? START_TAB.name : gameScreenKind(tab).name;
     this.menu = null;
     if (!edited) { this.moves.leave(); this.moves.strip.hidden = true; }
     if (border) {
@@ -180,7 +188,7 @@ export class GameView {
     }
     if (border || edited) this.status.textContent = PAINT_HINT;
     if (border) this.bar.append(this.border.bar); else this.border.bar.remove();
-    if (border) this.border.show(map); else if (edited) this.sync(); else this.showScreen(tab);
+    if (border) this.border.show(map); else if (edited) this.sync(); else this.showOther();
     this.listScreens();
   }
   // the list with the screens the game gets into as of the ROM shown
@@ -196,11 +204,14 @@ export class GameView {
     const prompts = screens.filter((s) => !s.k.pregame);
     this.list.replaceChildren(
       ...screens.filter((s) => s.k.pregame).map((s) => s.el),
+      item(START_TAB.name, START_TAB.about, this.tab === 'start', () => { this.select('start'); this.onNav(); }),
       ...(prompts.length ? [h('div', { class: 'panel-title' }, 'Overworld prompts'), ...prompts.map((s) => s.el)] : []),
       h('div', { class: 'panel-title' }, 'Overworld border'),
       ...MAP_NAMES.map((n, m) => item(n, `${n}'s border: layer 3, fixed on the screen while the map is shown`, this.tab === 'border' && this.border.map === m, () => { this.select('border', m); this.onNav(); })));
   }
   onNav: () => void = () => {};
+  // set by the host: the level editor on a level (then: what to do there)
+  onOpenLevel: (n: number, then?: () => void) => void = () => {};
   // Esc: a stroke or pick in progress cancelled (else the workspace is left); whether it was taken
   key(e: KeyboardEvent): boolean {
     return this.tab === 'border' ? this.border.key(e) : this.tab === 'title' ? this.moves.key(e) || this.surface.key(e) : this.menu ? this.menuSurface.key(e) : false;
@@ -250,6 +261,37 @@ export class GameView {
     this.screenInfo.replaceChildren(h('div', { class: 'panel-title' }, kind.name),
       h('p', { class: 'hint game-screen-about' }, `${kind.about}.`),
       h('p', { class: 'hint game-screen-about' }, why || note), ...fields);
+  }
+
+  // The start of a game (startpage.ts): the intro as the game shows it on a new file – without one, the file's first
+  // overworld – and beside it what a new file starts with.
+  private showStart(): void {
+    const ctx = this.screenCanvas.getContext('2d')!;
+    let status = '', body: HTMLElement[] = [], shown = false;
+    this.menu = null;
+    try {
+      const emu = this.emulator(), page = startPage(this.app, emu, {
+        openLevel: (n) => this.onOpenLevel(n),
+        editMessage: (n, tl, msg) => this.onOpenLevel(n, () => this.app.openMessages(tl, msg)),
+        showTile: (i) => this.app.gotoOverworldTile(i),
+      });
+      status = page.status;
+      body = page.body;
+      if (page.state) {
+        const img = ctx.createImageData(W, 224);
+        new Uint32Array(img.data.buffer).set(screenPicture(emu, page.state).frame);
+        ctx.putImageData(img, 0, 0);
+        shown = true;
+      }
+    } catch (e) {
+      status = `The game does not start a new file: ${e instanceof Error ? e.message : e}`;
+      body = [h('div', { class: 'panel-title' }, START_TAB.name), h('p', { class: 'hint game-screen-about' }, status)];
+    }
+    if (!shown) { ctx.fillStyle = uiToken('--canvas-bg', '#15171b'); ctx.fillRect(0, 0, W, 224); }
+    this.scroller.replaceChildren(this.screenCanvas);
+    this.side.replaceChildren(this.screenInfo);
+    this.status.textContent = status;
+    this.screenInfo.replaceChildren(...body);
   }
 
   // Nintendo Presents' fields (presents.ts): each OBJ's position, tile and properties, the time, the colours, the

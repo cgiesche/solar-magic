@@ -28,6 +28,7 @@ const places: NavLoc[] = [
   { w: 'game', tab: 'presents' },
   { w: 'game', tab: 'fileSelect' },
   { w: 'game', tab: 'gameOverPrompt' },
+  { w: 'game', tab: 'start' },
   { w: 'game', tab: 'border', map: 0 },
   { w: 'game', tab: 'border', map: 6 },
 ];

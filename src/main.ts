@@ -466,7 +466,11 @@ function buildUi(app: App): { start: (at: NavLoc | null) => Promise<void> } {
       showOverworld();
     } else if (w === 'game') {
       if (app.dirty) app.saveLevel(true);
-      if (!game) { game = new GameView(app); game.onNav = () => nav?.mark(); }
+      if (!game) {
+        game = new GameView(app);
+        game.onNav = () => nav?.mark();
+        game.onOpenLevel = async (n, then) => { if (await setWorkspace('level')) { app.openLevel(n); then?.(); } };
+      }
       showLayout(game.bar, game.left, game.root, game.side);
       layout.classList.add('ow-mode');
       if (gameBorder !== null) game.select('border', gameBorder); else game.show();

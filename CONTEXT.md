@@ -257,13 +257,16 @@ _Avoid_: save dialog, save menu
 **Game over prompt**: the overworld's menu after a game over: "CONTINUE" or "END".
 _Avoid_: continue screen, continue/end menu
 
-**Intro**: what a new save file shows before its first overworld: the **intro level** (C5 in the clean game) showing the intro message (level 0's message 1).
+**Intro**: what a new save file shows before its first overworld: the **intro level** (C5 in the clean game) showing the intro message (level 0's message 1). Found by what the emulated game does with a new file: the level it loads, the message box that level opens. The game chooses the level by one byte (0: no intro), a field of the **Start of game** page while the game reads it; an intro level a patch chooses is shown without a field.
 _Avoid_: intro cutscene, welcome message
+
+**Start of game**: the Game workspace's page of what a new save file starts with: the intro, the lives, the start position, the initial level flags – learned by playing a new file in the emulator from the title screen to its first overworld.
+_Avoid_: new game settings, game options
 
 **Save file**: one of the three saved games in SRAM.
 _Avoid_: savegame, slot
 
-**New file data**: what an empty save file starts with: the start position, the initial level flags, the lives.
+**New file data**: what an empty save file starts with: the start position, the initial level flags, the lives. The lives are a field while the game reads them from a byte of its own; a byte a package's patch writes names the package's setting instead (Retry System: `!initial_lives`).
 _Avoid_: defaults, initial save
 
 **Overworld border**: a map's layer 3 (Lunar Magic's "Load Layer 3 of Submap"), saved into its LT3 file. Row 4 (lives, level name) not painted.

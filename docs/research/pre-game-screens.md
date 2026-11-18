@@ -321,6 +321,24 @@ level a new file loads. `$009CB1 = $00` skips the intro (ROM map: "Change to [00
 immediately"; it leaves `$0109` zero) – the edit the community knows, so the editor's "no intro" is this byte. Lives are a field (the byte is the
 lives minus 1, ROM map) only while the operand at `$009E25` is what the game reads; with Retry installed the page names Retry's `!initial_lives` instead.
 
+*Done (#527, `src/core/gamestart.ts`), and learned by emulation on the way:*
+
+- **The byte's rule is not one offset.** Tried in the game: `$E9` loads C5 and `$EA` C6, but `$01` loads level 001 and
+  `$FF` DB – values below `$25` are the level itself, the others the level + `$24` (the game's translevel rule,
+  `CODE_05D8A2`). The editor keeps no rule: for a level asked for it tries the values beside those it saw, in the game.
+- **A level without a message box never ends the intro**: the title screen level C7 as the intro leaves a new file
+  in that level for good. The page says when a new file does not get to the overworld.
+- **The intro moves Mario.** The message sprite sets his submap to 1 (`$01E762`: `STA $1F11`) and the message's end
+  his Y position's low byte to `$8E` (`$05B15B`), from where the overworld walks him up to the clean game's start
+  tile. With another start position he ends up elsewhere (a start on the main map at 03,12: submap 1, tile 03,18).
+  Lunar Magic replaces both (`$01E762` → `JSL $03BCA0`, which loads the submap from `$009EF0` in the intro only, and
+  NOPs at `$05B15D`; seen in ROMs it saved); the editor does not yet – the page warns (#535).
+- **The game never saves after the intro**; a new file is in SRAM once the player first saves. Lunar Magic's "Save
+  game after intro message" is a call of the save routine in that routine at `$03BCA0` (its bytes for "on" are in
+  none of the ROMs at hand); the page shows whether the game was seen to save, the switch is #536.
+- **Retry System** leaves the lives a byte at `$009E25`, written by its `hex_edits.asm` from `!initial_lives`
+  (99 by default): the page finds the define in the UberASM project's sources by the byte's address.
+
 ### 5.6 Play from power-on
 
 `PlaySession.start` gets a start at reset, with the SRAM the user chooses: empty (the intro plays) or the save of an
