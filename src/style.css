@@ -167,6 +167,19 @@ input.invalid, input.invalid:focus { outline: 1px solid var(--danger); border-co
 .landing-faq div { margin-top: 18px; }
 .landing-faq dt { font-weight: 600; }
 .landing-faq dd { margin: 4px 0 0; color: var(--text-muted); }
+/* credits page (static in credits.html): the start page's frame, entries as rows of name, use and authors */
+.credits-head { padding: 64px 0 28px; }
+.credits-head h1 { font-size: clamp(30px, 5vw, 44px); line-height: 1.15; margin: 0 0 16px; letter-spacing: -.02em; }
+.credits-head .landing-intro { margin-bottom: 12px !important; }
+.credits-page .landing-section { padding: 52px 0; }
+.credits-page .landing-intro { margin-bottom: 24px !important; }
+.credits { margin: 0; border-top: 1px solid var(--border); }
+.credits div { display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 9fr) minmax(0, 8fr); gap: 4px 28px; padding: 14px 0; border-bottom: 1px solid var(--border); font-size: 15px; }
+.credits dt { font-weight: 600; }
+.credits dt small { display: block; font-size: 12px; font-weight: 400; color: var(--text-muted); }
+.credits dd { margin: 0; color: var(--text-muted); }
+.credits dd.by { color: var(--text); }
+.landing-footer p { margin-bottom: 8px; }
 .landing-footer-links { display: flex; flex-wrap: wrap; justify-content: center; gap: 6px 24px; font-size: 14px; }
 .landing-footer { padding: 28px 0 36px; border-top: 1px solid var(--border); color: var(--text-muted); font-size: 12px; text-align: center; }
 @media (max-width: 900px) {
@@ -174,6 +187,8 @@ input.invalid, input.invalid:focus { outline: 1px solid var(--danger); border-co
   .landing-topics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 @media (max-width: 760px) {
+  .credits div { grid-template-columns: 1fr; }
+  .credits dt small { display: inline; margin-left: 6px; }
   .landing-nav-links { gap: 14px; font-size: 13px; }
   .landing-nav-links .landing-ext { display: none; }
   .landing-section { padding: 52px 0; }

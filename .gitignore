@@ -4,3 +4,6 @@ dist
 *.sfc
 resources_local
 .idea
+# downloaded by tools/fetchfixtures.ts
+test/fixtures/rhr-baserom-5.15.zip
+test/fixtures/*.part

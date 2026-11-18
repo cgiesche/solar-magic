@@ -1,0 +1,216 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Credits – Solar Magic</title>
+  <meta name="description" content="The tools, libraries, formats, documentation and community resources Solar Magic contains, follows or was tested with, and their authors." />
+  <meta name="robots" content="index, follow" />
+  <link rel="canonical" href="https://smw.traumwald.net/credits.html" />
+  <meta name="theme-color" content="#1e2026" />
+  <link rel="icon" type="image/png" href="/favicon.png" />
+  <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+</head>
+<body>
+  <!-- A static page: its content is all here. The full list with every address and source is docs/credits.md;
+       an entry added there is added here in short. -->
+  <div id="app">
+    <main class="landing credits-page">
+      <nav class="landing-nav" aria-label="Credits">
+        <a class="landing-brand" href="/"><img src="/logo-48.webp" width="24" height="24" alt="" />Solar Magic</a>
+        <span class="landing-nav-links">
+          <a href="/">Start page</a>
+          <a class="landing-ext" href="https://github.com/cgiesche/solar-magic" rel="noopener">GitHub</a>
+          <a class="landing-ext" href="https://discord.gg/jbukYe4vgX" rel="noopener">Discord</a>
+        </span>
+      </nav>
+
+      <header class="credits-head">
+        <p class="landing-kicker">Credits</p>
+        <h1>Whose work Solar Magic builds on</h1>
+        <p class="landing-intro">Solar Magic exists because of two decades of work by the Super Mario World hacking community. This page names the tools and libraries the editor contains, the tools and formats it follows, the documentation it was written from and the resources it was tested with.</p>
+        <p class="landing-intro">Solar Magic is an unofficial fan project and is not affiliated with or endorsed by Nintendo. Super Mario World and Nintendo are trademarks of Nintendo. The editor does not come with the game: it works on a ROM you supply yourself.</p>
+      </header>
+
+      <section class="landing-section" aria-labelledby="included">
+        <h2 id="included">Included in the editor</h2>
+        <p class="landing-intro">Code and fonts that are part of the editor, under their own licenses.</p>
+        <dl class="credits">
+          <div><dt><a href="https://github.com/RPGHacker/asar" rel="noopener">Asar</a> <small>LGPL-3.0</small></dt>
+          <dd>The assembler, built as WebAssembly. Every patch, block, sprite and UberASM file is assembled with it.</dd>
+          <dd class="by">RPGHacker, Alcaro, randomdude999 and others</dd></div>
+
+          <div><dt><a href="https://github.com/KungFuFurby/AddMusicKFF" rel="noopener">AddmusicK</a> <small>1.0.11</small></dt>
+          <dd>Music insertion: the song compiler, the sound driver and its patch, built as WebAssembly together with AddmusicK's own songs, samples and sound effects.</dd>
+          <dd class="by">Kipernal; maintained by Medic, HertzDevil, Vitor Vilela, Lui, KevinM, KungFuFurby and others; based on Addmusic 4.05 by Romi and AddmusicM by Masashi27</dd></div>
+
+          <div><dt><a href="https://github.com/blarggs-audio-libraries/snes_spc" rel="noopener">snes_spc</a> <small>LGPL-2.1</small></dt>
+          <dd>The emulator of the SNES sound chip, built as WebAssembly: sound in test play and music playback.</dd>
+          <dd class="by">Shay Green (blargg)</dd></div>
+
+          <div><dt><a href="https://github.com/denley/kobo" rel="noopener">Kobo</a> <small>MPL-2.0</small></dt>
+          <dd>The ExAnimation engine compatible with Lunar Magic's, included with changes: animated tiles and colors in the game, the editor and test play.</dd>
+          <dd class="by">denley</dd></div>
+
+          <div><dt><a href="https://github.com/arinsuwu/bowsie" rel="noopener">BOWSIE</a> <small>BSD-2-Clause</small></dt>
+          <dd>Custom overworld sprites: BOWSIE's sprite format and insertion steps, and its assembly code.</dd>
+          <dd class="by">Arinsu; contributions by Atari2.0 and yoshifanatic; the system after the VLDC9 overworld sprites by Lui37 and Medic; MaxTile by Vitor Vilela; routines after carol, yoshifanatic and Akaginite</dd></div>
+
+          <div><dt><a href="https://www.smwcentral.net/?p=section&amp;a=details&amp;id=40600" rel="noopener">Sprite Scroll Fix</a></dt>
+          <dd>The editor's sprite scroll fix is written after this patch.</dd>
+          <dd class="by">HammerBrother (GreenHammerBro)</dd></div>
+
+          <div><dt><a href="https://tauri.app" rel="noopener">Tauri</a> <small>MIT / Apache-2.0</small></dt>
+          <dd>The framework of the desktop app.</dd>
+          <dd class="by">The Tauri Programme within The Commons Conservancy and contributors</dd></div>
+
+          <div><dt><a href="https://github.com/101arrowz/fflate" rel="noopener">fflate</a> <small>MIT</small></dt>
+          <dd>Reading and writing zip files: packages, project files and exports.</dd>
+          <dd class="by">Arjun Barrett (101arrowz)</dd></div>
+
+          <div><dt><a href="https://lucide.dev" rel="noopener">Lucide</a> <small>ISC</small></dt>
+          <dd>The icons.</dd>
+          <dd class="by">Lucide contributors; based on Feather by Cole Bemis</dd></div>
+
+          <div><dt><a href="https://rsms.me/inter/" rel="noopener">Inter</a> <small>SIL OFL 1.1</small></dt>
+          <dd>The text font.</dd>
+          <dd class="by">Rasmus Andersson</dd></div>
+
+          <div><dt><a href="https://www.jetbrains.com/lp/mono/" rel="noopener">JetBrains Mono</a> <small>SIL OFL 1.1</small></dt>
+          <dd>The font for numbers, hex values and the log.</dd>
+          <dd class="by">JetBrains, Philipp Nurullin, Konstantin Bulenkov</dd></div>
+        </dl>
+      </section>
+
+      <section class="landing-section" aria-labelledby="followed">
+        <h2 id="followed">Tools and formats the editor follows</h2>
+        <p class="landing-intro">Solar Magic reads and writes what these tools defined, so that the community's resources work in it and its ROMs work in theirs. No code is taken from them unless said.</p>
+        <dl class="credits">
+          <div><dt><a href="https://fusoya.eludevisibility.org/lm/" rel="noopener">Lunar Magic</a></dt>
+          <dd>The editor every Super Mario World hack is built with, and the measure for this one. Solar Magic uses its file formats (<code>.mwl</code>, <code>.map16</code>, ExGFX, palettes, object side files), its layout of levels, the overworld, messages, level names and ExAnimation in the ROM, and its names for objects. A few of its routines are installed in the ROM byte for byte, so that tools and patches written for a Lunar Magic ROM find them.</dd>
+          <dd class="by">FuSoYa</dd></div>
+
+          <div><dt><a href="https://github.com/JackTheSpades/SpriteToolSuperDelux" rel="noopener">PIXI</a></dt>
+          <dd>The format and interface of custom sprites and the names and contracts of their shared routines.</dd>
+          <dd class="by">JackTheSpades, RPGHacker, Tattletale, Atari2.0; contributions by KevinM, tim-burget, dtothefourth, Super Maks 64, randomdude999, akaginite, Lx5, spooonsss, Fernap and others; routines after Akaginite, imamelia, MarioE and GIEPY; cluster sprites by Alcaro, extended sprites by imamelia</dd></div>
+
+          <div><dt><a href="https://www.smwcentral.net/?p=section&amp;a=details&amp;id=31515" rel="noopener">GPS</a> <small>Gopher Popcorn Stew</small></dt>
+          <dd>The format of custom blocks and the names and contracts of their standard routines.</dd>
+          <dd class="by">p4plus2; maintained by TheBiob, GHB and Arinsu; contributions by Majorflare, MarioFanGamer and Vitor Vilela; routines after Akaginite, Tattletale and imamelia</dd></div>
+
+          <div><dt><a href="https://github.com/Fernap/UberASMTool" rel="noopener">UberASM Tool</a></dt>
+          <dd>The format and calling conventions of UberASM code.</dd>
+          <dd class="by">Vitor Vilela, Fernap and others</dd></div>
+
+          <div><dt><a href="https://github.com/Underrout/callisto" rel="noopener">Callisto</a></dt>
+          <dd>Callisto projects as packages: its configuration, its exports and the defines it passes to patches.</dd>
+          <dd class="by">Underrout</dd></div>
+
+          <div><dt>ObjecTool</dt>
+          <dd>Custom objects with extra bytes, and custom extended objects.</dd>
+          <dd class="by">imamelia; the original ObjecTool by 0x400</dd></div>
+
+          <div><dt>UberASM Objects System</dt>
+          <dd>Objects that set a flag when the level loads: their names and tooltips.</dd>
+          <dd class="by">AmperSam, underway, MarioFanGamer</dd></div>
+
+          <div><dt>Dynamic Levels</dt>
+          <dd>The idea of horizontal levels with another height, as built into Lunar Magic 3.00.</dd>
+          <dd class="by">Vitor Vilela</dd></div>
+
+          <div><dt>Patches the editor recognizes</dt>
+          <dd>The line-guide “acts like” fix, the level graphics loading optimization and the VRAM patch optimization: the editor does what they do and tells you when a package brings them.</dd>
+          <dd class="by">imamelia and worldpeace; freeplay; KevinM</dd></div>
+
+          <div><dt><a href="https://www.aseprite.org" rel="noopener">Aseprite</a></dt>
+          <dd>How the pixel editor paints: its buttons, keys and tools. No code.</dd>
+          <dd class="by">Igara Studio, David Capello and contributors</dd></div>
+        </dl>
+      </section>
+
+      <section class="landing-section" aria-labelledby="documentation">
+        <h2 id="documentation">Documentation</h2>
+        <p class="landing-intro">What the editor knows about the game and about Lunar Magic's ROMs beyond what it finds out by emulation, it knows from these.</p>
+        <dl class="credits">
+          <div><dt><a href="https://github.com/IsoFrieze/SMWDisX" rel="noopener">SMWDisX</a></dt>
+          <dd>The commented disassembly of the game.</dd>
+          <dd class="by">IsoFrieze and contributors</dd></div>
+
+          <div><dt><a href="https://www.smwcentral.net/?p=memorymap&amp;game=smw&amp;region=rom" rel="noopener">SMW Central's ROM map and hijack map</a></dt>
+          <dd>Where the game keeps what, and which places Lunar Magic and known patches change.</dd>
+          <dd class="by">SMW Central contributors</dd></div>
+
+          <div><dt><a href="https://github.com/Ankouno/SMW-Data" rel="noopener">SMW-Data</a></dt>
+          <dd>Where Lunar Magic keeps the overworld's tables, and the sections of a <code>.mwl</code> file.</dd>
+          <dd class="by">Ankouno</dd></div>
+
+          <div><dt><a href="https://www.smwspeedruns.com/Level_Data_Format" rel="noopener">Level Data Format</a></dt>
+          <dd>The bit layouts of Lunar Magic's objects, entrances, screen exits and ExAnimation.</dd>
+          <dd class="by">The SMW speedrunning community</dd></div>
+
+          <div><dt><a href="https://sneslab.net/wiki/Lunar_Magic/Custom_Level_Sizes" rel="noopener">Custom Level Sizes</a></dt>
+          <dd>The table of Lunar Magic's 32 level sizes.</dd>
+          <dd class="by">SnesLab contributors</dd></div>
+        </dl>
+      </section>
+
+      <section class="landing-section" aria-labelledby="tested">
+        <h2 id="tested">Developed and tested with</h2>
+        <p class="landing-intro">Community resources that served as test cases while the editor's features were built. They are not part of the editor.</p>
+        <dl class="credits">
+          <div><dt><a href="https://github.com/romhackraces/baserom" rel="noopener">Romhack Races baserom</a></dt>
+          <dd>A whole Callisto project in one upload: patches, UberASM, blocks, sprites, music, graphics and sample levels.</dd>
+          <dd class="by">Romhack Races; the authors of its patches and resources as its <code>Credits.txt</code> names them</dd></div>
+
+          <div><dt><a href="https://kkevinm.github.io/retry-system/" rel="noopener">Retry System</a> <small>Unlicense</small></dt>
+          <dd>Packages made of several parts, with instructions and a custom sound effect.</dd>
+          <dd class="by">Kevin (kkevinm); custom midway bars by worldpeace; contributions by lx5, imamelia, 0x400, Thomas, Lui, AmperSam, MiracleWater and elusive</dd></div>
+
+          <div><dt><a href="https://github.com/RPGHacker/SMW-Workspace/tree/master/patches/vwf_dialogues" rel="noopener">VWF Dialogues Patch</a> <small>MIT</small></dt>
+          <dd>A package that replaces the game's message boxes.</dd>
+          <dd class="by">RPG Hacker (Markus Wall); the fonts' authors as the patch names them</dd></div>
+
+          <div><dt><a href="https://www.smwcentral.net/?p=section&amp;a=details&amp;id=35761" rel="noopener">Custom Overworld Hardcoded Paths</a></dt>
+          <dd>Overworld paths the game walks by a table.</dd>
+          <dd class="by">Kevin (kkevinm)</dd></div>
+
+          <div><dt>No Overworld</dt>
+          <dd>UberASM resources that share a file of defines.</dd>
+          <dd class="by">Brolencho; modernized by AmperSam; inspired by noow.asm by Alcaro</dd></div>
+
+          <div><dt>On/Off Blocks</dt>
+          <dd>A package mixing a block, its bounce sprite, Map16 tiles, graphics, a palette and a sample level.</dd>
+          <dd class="by">MarioFanGamer</dd></div>
+
+          <div><dt>Rock Climbing Blocks</dt>
+          <dd>Block packages with a <code>list.txt</code>, Map16 and graphics.</dd>
+          <dd class="by">GreenHammerBro; SA-1 update by yoshifanatic</dd></div>
+
+          <div><dt>Aftertouch Shatter</dt>
+          <dd>Blocks that spawn their own bounce sprite.</dd>
+          <dd class="by">Arinsu; original by HammerBrother</dd></div>
+
+          <div><dt>Brutal Bill</dt>
+          <dd>Sprite packages with a sprite and a shooter.</dd>
+          <dd class="by">Sonikku; based on Carol's Homing Bullet Bill</dd></div>
+
+          <div><dt>Enemy Stack</dt>
+          <dd>Sprite images of sprites that spawn other sprites.</dd>
+          <dd class="by">dtothefourth</dd></div>
+
+          <div><dt>Graphics packages from SMW Central</dt>
+          <dd>“Sonic Mania – Studiopolis Zone Act 1” and “Ghostbusters – Ghost Trap / Java Manhattan BG”: Lunar Magic graphics packages with Map16, palettes and layer 3.</dd>
+          <dd class="by">Their authors on SMW Central</dd></div>
+        </dl>
+      </section>
+
+      <footer class="landing-footer">
+        <p class="landing-footer-links"><a href="/">Start page</a><a href="https://github.com/cgiesche/solar-magic/blob/master/docs/credits.md" rel="noopener">The full list with all sources</a></p>
+        <p>Someone missing or named wrongly? Tell us on <a href="https://discord.gg/jbukYe4vgX" rel="noopener">Discord</a> or open an issue on <a href="https://github.com/cgiesche/solar-magic/issues" rel="noopener">GitHub</a>.</p>
+        <p>Solar Magic is an unofficial fan project and is not affiliated with or endorsed by Nintendo. Super Mario World and Nintendo are trademarks of Nintendo.</p>
+      </footer>
+    </main>
+  </div>
+  <script type="module" src="/src/credits.ts"></script>
+</body>
+</html>

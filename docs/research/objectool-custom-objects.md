@@ -7,7 +7,7 @@ Short answer: the premise needs correcting first. In the Romhack Races baserom, 
 ## Sources
 
 - **ObjecTool 0.5** (imamelia; original ObjecTool by 0x400), as shipped in the Romhack Races baserom: `resources/patches/objectool/objectool.asm`, `custom_object_code.asm`, `baserom_custom_objects.asm`. Cited as `objectool.asm:line`. The official file page is https://smwc.me/s/24217 (https://www.smwcentral.net/?p=section&a=details&id=24217). It sits behind a human-verification page and could not be read. So the patch's own header comment is the primary source for its behaviour here. The baserom ships no ObjecTool readme.
-- **Romhack Races baserom 5.15** (https://github.com/romhackraces/baserom, clone at commit `60adcadb`). Its release zip is checked in as `test/fixtures/rhr-baserom-5.15.zip`. The files cited below are byte-identical in both (md5 compared). Cited as baserom `path:line`.
+- **Romhack Races baserom 5.15** (https://github.com/romhackraces/baserom, clone at commit `60adcadb`). Its release zip is the tests' `test/fixtures/rhr-baserom-5.15.zip` (downloaded by `tools/fetchfixtures.ts`). The files cited below are byte-identical in both (md5 compared). Cited as baserom `path:line`.
 - **Retry System** as configured in the baserom: `tools/UberASMTool/retry_config/code/hijacks/custom_midway.asm`, `.../include/rom.asm`, `settings_global.asm`.
 - **Lunar Magic 3.71** (FuSoYa), local copy `~/tools/lunarmagic/`: help file `Lunar Magic.chm`, cited as "LM help: `html/x.htm`", and `readme.txt`, cited as "LM readme:line".
 - **SMWDisX** (IsoFrieze/SMWDisX, local clone `~/sources/SMWDisX`, commit `3390ee1`): https://github.com/IsoFrieze/SMWDisX. Cited as `bank_0D.asm:line`.
