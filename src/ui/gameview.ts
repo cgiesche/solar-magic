@@ -2,16 +2,19 @@
 // gets into (pregame.ts: Nintendo Presents, title screen, file select, file erase, player select, the overworld's save
 // and game over prompts – one a patch removed is not there), each with its picture as the game draws it, and the
 // overworld's borders. Edited so far: the title screen's layer 3 tilemap (titlescreen.ts) and the borders
-// (owborder.ts: each map's layer 3 fixed on the screen) – painted with layer 3's 8x8 tiles as every brush editor
-// paints (brushsurface.ts, ADR 0011); a stroke is one ROM edit when the mouse is released. The other screens are
-// pictures; an editor for one of them replaces its picture in `select` (screenRoot / screenSide).
+// (owborder.ts: each map's layer 3 fixed on the screen) and the menus' texts (menutext.ts: the cells of a menu's
+// stripe image, in place; the cursor's cells and the cells the game writes over are marked) – painted with layer 3's
+// 8x8 tiles as every brush editor paints (brushsurface.ts, ADR 0011); a stroke is one ROM edit when the mouse is
+// released. The other screens are pictures; an editor for one of them replaces its picture in `showScreen`.
 
 import type { App } from './app.ts';
 import { h, toast, attachPanZoom, zoomControl } from './dom.ts';
 import { LevelEmulator } from '../core/levelemu.ts';
 import { TileCache } from '../core/render.ts';
 import { TITLE_COLS, TITLE_ROWS, TITLE_SHOWN_ROWS, titleTilemap, titlePicture, writeTitleScreen, type TitlePicture } from '../core/titlescreen.ts';
-import { GAME_SCREENS, gameScreenKind, gameScreens, screenPicture, type GameScreenId, type ReachedScreen } from '../core/pregame.ts';
+import { GAME_SCREENS, gameScreenKind, gameScreens, screenPicture, type GameScreenId, type ReachedScreen, type ScreenPicture } from '../core/pregame.ts';
+import { MENU_COLS, MENU_ROWS, menuText, paintMenuCell, paintedOverwritten, writeMenuText, type MenuText } from '../core/menutext.ts';
+import { pcToSnes } from '../core/rom.ts';
 import { layer3WordText } from '../core/layer3map.ts';
 import { layer3Picker } from './l3picker.ts';
 import { fillPixels, hidePickerPreview } from './pickerview.ts';
@@ -19,7 +22,7 @@ import type { Brush } from './app.ts';
 import { BorderView } from './owborder.ts';
 import { MAP_NAMES } from '../core/overworld.ts';
 import { BrushSurface, PAINT_HINT, PAINT_TITLE } from './brushsurface.ts';
-import { onTokensChanged, uiToken } from './marks.ts';
+import { MARK, rgba, onTokensChanged, uiToken } from './marks.ts';
 
 // a screen of the game ('title': the title screen, with its editor), or the border of an overworld map (0 the main
 // map, 1–6 the submaps)
@@ -52,6 +55,13 @@ export class GameView {
   private screenCanvas = h('canvas', { class: 'game-canvas game-screen', width: W, height: 224 });
   private screenInfo = h('div', { class: 'panel game-pick' });
   private listTimer = 0;
+  // the menu whose text is edited (the tab is its screen): the text as in the ROM, the tilemap with the stroke being
+  // painted, the picture with it
+  private menu: { id: GameScreenId; screen: ReachedScreen; text: MenuText; map: Uint16Array; pic: ScreenPicture } | null = null;
+  private menuCanvas = h('canvas', { class: 'game-canvas', width: W, height: 224 });
+  private menuInfo = h('div', { class: 'panel' });
+  private menuSurface: BrushSurface;
+  private marks = true; // the cursor's cells, the cells the game writes over and the cells that are not the menu's shown
   private frame = 0; // a picture to draw at the next animation frame (painting)
   private zoom = 3;
   private zoomCtl: { root: HTMLElement; update: () => void } | undefined;
@@ -59,7 +69,7 @@ export class GameView {
   private surface: BrushSurface;
 
   constructor(app: App) {
-    onTokensChanged(() => { this.paint(); if (this.tab !== 'border' && this.tab !== 'title') this.showScreen(this.tab); }); // (the backdrop is a UI token: another theme)
+    onTokensChanged(() => { this.paint(); if (this.tab !== 'border' && this.tab !== 'title' && !this.menu) this.showScreen(this.tab); }); // (the backdrop is a UI token: another theme)
     this.app = app;
     this.border = new BorderView(app);
     this.border.setStatus = (t) => { this.status.textContent = t; };
@@ -89,6 +99,24 @@ export class GameView {
       changed: () => this.redraw(),
       moved: (c) => this.updateStatus(c),
     });
+    this.menuSurface = new BrushSurface(this.menuCanvas, {
+      cells: { w: MENU_COLS, h: MENU_ROWS },
+      cellAt: (px, py) => (this.menu ? this.menuCellAt(px, py) : null),
+      box: (r) => this.menuBox(r),
+      brush: () => this.brush,
+      whyNot: (x, y) => (this.menu && !this.brushCells(x, y).some((c) => this.menu!.text.source[c] >= 0) ? 'Not a cell of the menu\'s stripe image: only the tiles the image has are painted here' : ''),
+      tell: (why) => { this.status.textContent = why; },
+      stamp: (x, y) => this.stampMenu(x, y),
+      end: () => this.saveMenu(),
+      cancel: () => { const m = this.menu; if (m) { m.map = m.text.map.slice(); this.redraw(); } },
+      pick: (r) => {
+        const map = this.menu!.map, w = Math.min(r.w, MENU_COLS - r.x), hh = Math.min(r.h, MENU_ROWS - r.y);
+        this.brush = { w, h: hh, tiles: Array.from({ length: w * hh }, (_, k) => map[(r.y + Math.floor(k / w)) * MENU_COLS + r.x + (k % w)]) };
+        this.buildPicker();
+      },
+      changed: () => this.redraw(),
+      moved: (c) => this.menuStatus(c),
+    });
     this.scroller = h('div', { class: 'level-scroller game-scroller' }, this.surface.root);
     attachPanZoom(this.scroller, () => this.zoom, (z, ax, ay) => this.setZoom(z, ax, ay), 1, 6, () => [1, 2, 3, 4, 5, 6]);
     this.root = h('div', { class: 'center' }, h('div', { class: 'level-view' }, this.scroller), h('div', { class: 'statusbar' }, this.status));
@@ -102,6 +130,7 @@ export class GameView {
       this.listTimer = window.setTimeout(() => { if (this.root.isConnected) this.listScreens(); }, 300);
       if (this.tab === 'border') { this.border.reload(); return; }
       this.surface.drop();
+      this.menuSurface.drop();
       if (this.tab === 'title') this.sync(); else this.showScreen(this.tab);
     });
     // the sheet follows the panel's width, drawn anew when it needs other screen pixels per pixel
@@ -124,10 +153,13 @@ export class GameView {
     this.tab = tab;
     const border = tab === 'border', edited = tab === 'title';
     this.title.textContent = border ? `${MAP_NAMES[map]} – overworld border` : gameScreenKind(tab).name;
-    this.scroller.replaceChildren(border ? this.border.root : edited ? this.surface.root : this.screenCanvas);
-    this.side.replaceChildren(border ? this.border.side : edited ? this.pickPanel : this.screenInfo);
+    this.menu = null;
+    if (border || edited) {
+      this.scroller.replaceChildren(border ? this.border.root : this.surface.root);
+      this.side.replaceChildren(border ? this.border.side : this.pickPanel);
+      this.status.textContent = PAINT_HINT;
+    }
     if (border) this.bar.append(this.border.bar); else this.border.bar.remove();
-    this.status.textContent = border || edited ? PAINT_HINT : '';
     if (border) this.border.show(map); else if (edited) this.sync(); else this.showScreen(tab);
     this.listScreens();
   }
@@ -151,7 +183,7 @@ export class GameView {
   onNav: () => void = () => {};
   // Esc: a stroke or pick in progress cancelled (else the workspace is left); whether it was taken
   key(e: KeyboardEvent): boolean {
-    return this.tab === 'border' ? this.border.key(e) : this.tab === 'title' ? this.surface.key(e) : false;
+    return this.tab === 'border' ? this.border.key(e) : this.tab === 'title' ? this.surface.key(e) : this.menu ? this.menuSurface.key(e) : false;
   }
 
   // the emulator of the ROM shown (its boot the app's)
@@ -160,25 +192,130 @@ export class GameView {
     return this.emu;
   }
 
-  // a screen's picture as the game draws it (no editor yet)
+  // A screen as the game draws it. A menu whose picture is a stripe image's: its text's editor (menutext.ts); any
+  // other screen: its picture.
   private showScreen(id: GameScreenId): void {
     const kind = gameScreenKind(id), ctx = this.screenCanvas.getContext('2d')!;
-    let why = '';
+    let why = '', note = 'The picture is the game\'s own: the editor runs the game to this screen as a player gets there. It can\'t be edited here yet.';
+    this.menu = null;
     try {
-      const emu = this.emulator(), screen = gameScreens(emu).find((s) => s.id === id);
+      const emu = this.emulator(), screens = gameScreens(emu), screen = screens.find((s) => s.id === id);
+      const text = screen && kind.menu ? menuText(emu, screen, screens) : null;
+      if (screen && text) {
+        this.menu = { id, screen, text, map: text.map.slice(), pic: screenPicture(emu, screen.state) };
+        this.scroller.replaceChildren(this.menuSurface.root);
+        this.side.replaceChildren(this.menuInfo, this.pickPanel);
+        this.buildMenuInfo();
+        this.paintMenu();
+        this.menuStatus(null);
+        this.buildPicker();
+        return;
+      }
       if (screen) {
         const img = ctx.createImageData(W, 224);
         new Uint32Array(img.data.buffer).set(screenPicture(emu, screen.state).frame);
         ctx.putImageData(img, 0, 0);
+        if (kind.menu) note = 'The picture is the game\'s own. The game draws this menu without a stripe image (a patch draws it another way, as Sprite Title Screen Menus does): its text can\'t be edited here.';
       } else why = `The game does not get to its ${kind.name.toLowerCase()}.`;
     } catch (e) {
       why = `The game does not get to its ${kind.name.toLowerCase()}: ${e instanceof Error ? e.message : e}`;
     }
     if (why) { ctx.fillStyle = uiToken('--canvas-bg', '#15171b'); ctx.fillRect(0, 0, W, 224); }
+    this.scroller.replaceChildren(this.screenCanvas);
+    this.side.replaceChildren(this.screenInfo);
     this.status.textContent = why || `${kind.name}, as the game shows it`;
     this.screenInfo.replaceChildren(h('div', { class: 'panel-title' }, kind.name),
       h('p', { class: 'hint game-screen-about' }, `${kind.about}.`),
-      h('p', { class: 'hint game-screen-about' }, why || 'The picture is the game\'s own: the editor runs the game to this screen as a player gets there. It can\'t be edited here yet.'));
+      h('p', { class: 'hint game-screen-about' }, why || note));
+  }
+
+  // ---- a menu's text ----
+  // layer 3's tilemap pixel at the screen's top left, as the game scrolled it
+  private menuScroll(): { x: number; y: number } { return this.menu?.pic.l3Scroll ?? { x: 0, y: 0 }; }
+  private menuCellAt(px: number, py: number): { x: number; y: number } | null {
+    const sc = this.menuScroll(), x = ((Math.floor(px) + sc.x) & 0x1ff) >> 3, y = ((Math.floor(py) + sc.y) & 0x1ff) >> 3;
+    return px < 0 || py < 0 || px >= W || py >= 224 || x >= MENU_COLS || y >= MENU_ROWS ? null : { x, y };
+  }
+  // the cells' rectangle on the screen (null: scrolled off it)
+  private menuBox(r: { x: number; y: number; w: number; h: number }): { x: number; y: number; w: number; h: number } | null {
+    const sc = this.menuScroll(), at = (v: number) => { const p = (v & 0x1ff); return p >= 0x100 ? p - 0x200 : p; };
+    const x = at(r.x * 8 - sc.x), y = at(r.y * 8 - sc.y), w = Math.min(r.w, MENU_COLS - r.x) * 8, hh = Math.min(r.h, MENU_ROWS - r.y) * 8;
+    return x + w <= 0 || y + hh <= 0 || x >= W || y >= 224 ? null : { x, y, w, h: hh };
+  }
+  // the cells the brush covers put at cell (x, y)
+  private brushCells(x: number, y: number): number[] {
+    const b = this.brush, out: number[] = [];
+    for (let k = 0; k < b.tiles.length; k++) {
+      const cx = x + (k % b.w), cy = y + Math.floor(k / b.w);
+      if (cx < MENU_COLS && cy < MENU_ROWS) out.push(cy * MENU_COLS + cx);
+    }
+    return out;
+  }
+  private stampMenu(cx: number, cy: number): boolean {
+    const m = this.menu!, b = this.brush;
+    let changed = false;
+    b.tiles.forEach((w, k) => {
+      const x = cx + (k % b.w), y = cy + Math.floor(k / b.w);
+      if (x < MENU_COLS && y < MENU_ROWS && paintMenuCell(m.text, m.map, y * MENU_COLS + x, w)) changed = true;
+    });
+    return changed;
+  }
+  // the stroke saved: one ROM edit, the stripe image's words in place
+  private saveMenu(): void {
+    const m = this.menu;
+    if (!m || m.map.every((w, i) => w === m.text.map[i])) return;
+    const name = gameScreenKind(m.id).name, over = paintedOverwritten(m.text, m.map), cursor = over.filter((c) => m.text.cursor.includes(c)).length;
+    try {
+      this.app.romEdit(`${name} painted`, () => { writeMenuText(this.app.rom, m.text, m.map); });
+      if (over.length) toast(`${over.length === 1 ? 'One painted cell is' : `${over.length} painted cells are`} written over by the game (${cursor === over.length ? 'the cursor' : cursor ? 'the cursor, a file\'s exit count or its blanked word' : 'a file\'s exit count or its blanked word'}): the menu's stripe image has the tiles now, the game shows its own there.`);
+    } catch (e) {
+      toast(String(e instanceof Error ? e.message : e), 'error');
+      this.showScreen(m.id);
+    }
+  }
+  // the menu as the game draws it with the tilemap as painted, and the marks over it
+  private paintMenu(): void {
+    const m = this.menu, ctx = this.menuCanvas.getContext('2d')!;
+    if (!m) return;
+    const img = ctx.createImageData(W, 224);
+    new Uint32Array(img.data.buffer).set(m.pic.frame);
+    ctx.putImageData(img, 0, 0);
+    if (this.marks) {
+      const t = m.text, box = (c: number) => this.menuBox({ x: c % MENU_COLS, y: Math.floor(c / MENU_COLS), w: 1, h: 1 });
+      // what is not the menu's: dimmed
+      ctx.fillStyle = 'rgba(0,0,0,0.45)';
+      for (let c = 0; c < t.source.length; c++) { const b = t.source[c] < 0 && !t.cursor.includes(c) ? box(c) : null; if (b) ctx.fillRect(b.x, b.y, b.w, b.h); }
+      const frame = (c: number, color: string) => { const b = box(c); if (b) { ctx.strokeStyle = color; ctx.lineWidth = 1; ctx.strokeRect(b.x + 0.5, b.y + 0.5, b.w - 1, b.h - 1); } };
+      t.written.forEach((v, c) => { if (v && !t.cursor.includes(c)) frame(c, rgba(MARK.warn, 0.9)); });
+      for (const c of t.cursor) frame(c, rgba(MARK.select, 0.9));
+    }
+    this.menuSurface.frames();
+  }
+  private menuStatus(c: { x: number; y: number } | null): void {
+    const m = this.menu;
+    if (!m) return;
+    if (!c) { this.status.textContent = PAINT_HINT; return; }
+    const i = c.y * MENU_COLS + c.x, t = m.text, choice = t.cursor.indexOf(i);
+    const what = choice >= 0 ? `the cursor's place for choice ${choice + 1}${t.source[i] >= 0 ? ': the game draws the cursor or a blank over the image\'s tile' : ' (not of the stripe image)'}`
+      : t.source[i] < 0 ? 'not of the menu\'s stripe image, not painted here'
+      : t.written[i] ? 'the game writes over it (a file\'s exit count or its blanked word)'
+      : t.shared[i] ? `one of a run of ${t.source.filter((o) => o === t.source[i]).length} cells with one tile: painted as one` : '';
+    this.status.textContent = `Column ${c.x}, row ${c.y}: tile ${layer3WordText(m.map[i])}${what ? ` – ${what}` : ''} – ${PAINT_HINT}`;
+  }
+  private buildMenuInfo(): void {
+    const m = this.menu;
+    if (!m) return;
+    const kind = gameScreenKind(m.id), t = m.text, a = pcToSnes(t.addr);
+    const hex = (n: number, d: number) => n.toString(16).toUpperCase().padStart(d, '0');
+    const box = h('input', { type: 'checkbox', checked: this.marks, onchange: () => { this.marks = box.checked; this.paintMenu(); } });
+    const key = (color: string, text: string) => h('p', { class: 'hint game-screen-about' }, h('span', { class: 'game-mark', style: `border-color:${color}` }), text);
+    this.menuInfo.replaceChildren(h('div', { class: 'panel-title' }, kind.name),
+      h('p', { class: 'hint game-screen-about' }, `${kind.about}.`),
+      h('p', { class: 'hint game-screen-about' }, `Its text is the stripe image at $${hex(a >> 16, 2)}:${hex(a & 0xffff, 4)} (${t.length} bytes), found by what the game writes to the screen on the way here. Painting changes its tiles in place: the tiles it has, where it has them.`),
+      h('label', { class: 'hint game-screen-about' }, box, ' Marks'),
+      key(MARK.select, `The cursor's place${t.cursor.length === 1 ? '' : 's'} (${t.cursor.length} choice${t.cursor.length === 1 ? '' : 's'}), as the game moves it`),
+      ...(t.written.some((v, c) => v && !t.cursor.includes(c)) ? [key(MARK.warn, 'Written over by the game: a file\'s exit count, the word blanked for a file in use')] : []),
+      h('p', { class: 'hint game-screen-about' }, 'Dimmed: not of this stripe image (what is under the menu, or drawn another way).'));
   }
 
   private sync(): void {
@@ -203,11 +340,14 @@ export class GameView {
     this.zoom = Math.max(1, Math.min(6, Math.round(z)));
     this.canvas.style.width = `${W * this.zoom}px`;
     this.canvas.style.height = `${H * this.zoom}px`;
-    this.screenCanvas.style.width = `${W * this.zoom}px`;
-    this.screenCanvas.style.height = `${224 * this.zoom}px`;
+    for (const c of [this.screenCanvas, this.menuCanvas]) {
+      c.style.width = `${W * this.zoom}px`;
+      c.style.height = `${224 * this.zoom}px`;
+    }
     this.border.setZoom(this.zoom);
     this.zoomCtl?.update();
     this.surface.frames();
+    this.menuSurface?.frames();
     // (the picture starts after the scroller's padding)
     const pad = SCROLLER_PAD, at = (s: number, a: number) => (s + a - pad) / old * this.zoom + pad - a;
     if (sc && old !== this.zoom) { sc.scrollLeft = at(sc.scrollLeft, ax); sc.scrollTop = at(sc.scrollTop, ay); }
@@ -218,6 +358,12 @@ export class GameView {
     if (this.frame) return;
     this.frame = requestAnimationFrame(() => {
       this.frame = 0;
+      const m = this.menu;
+      if (m && this.emu) {
+        try { m.pic = screenPicture(this.emu, m.screen.state, m.map); } catch (e) { toast(String(e instanceof Error ? e.message : e), 'error'); }
+        this.paintMenu();
+        return;
+      }
       if (!this.emu || !this.map) return;
       try { this.pic = titlePicture(this.emu, this.map); } catch (e) { toast(String(e instanceof Error ? e.message : e), 'error'); }
       this.paint();
@@ -289,7 +435,7 @@ export class GameView {
 
   // layer 3's 8x8 tiles as the brush (l3picker.ts), as on the title screen
   private buildPicker(): void {
-    const p = this.pic;
+    const m = this.tab !== 'title' ? this.menu : null, p = m ? m.pic : this.tab === 'title' ? this.pic : null;
     hidePickerPreview(this.pickPanel);
     this.pickPanel.replaceChildren(h('div', { class: 'panel-title' }, 'Paint', h('span', { class: 'hint' }, PAINT_TITLE)));
     this.pickPixels = 0;
@@ -297,7 +443,8 @@ export class GameView {
     const w = this.pickPanel.clientWidth;
     layer3Picker(this.pickPanel, p, this.brush, (nb) => { this.brush = nb; this.buildPicker(); }, {
       pixels: this.pickPixels = fillPixels(w, 128), shown: w / 128, from: 'the screen',
-      hint: 'click tiles here or on the title screen (drag: block). The graphics are layer 3\'s as the title screen\'s level has them; the row under the screen is written too (as Lunar Magic does), the game\'s scroll does not show it.',
+      hint: m ? 'click tiles here or on the menu (drag: block). The graphics are layer 3\'s as the game has them in this menu.'
+        : 'click tiles here or on the title screen (drag: block). The graphics are layer 3\'s as the title screen\'s level has them; the row under the screen is written too (as Lunar Magic does), the game\'s scroll does not show it.',
     });
   }
 }

@@ -236,6 +236,12 @@ _Avoid_: demo, attract mode
 **Menu**: a screen of text on layer 3 with a cursor, drawn from a stripe image: file select, file erase, player select, save prompt, game over prompt.
 _Avoid_: dialog, selection screen
 
+**Stripe image**: the game's data for tiles put on a layer's tilemap: entries of a VRAM address, a length and the tile words (or one word as a run), ended by a byte with bit 7 set. The title screen picture and every menu's text are stripe images.
+_Avoid_: stripe (alone, for the whole image), tilemap data
+
+**Menu text**: a menu's tiles on layer 3 as its stripe image has them. The editor finds the image by what the emulated game writes to the screen on the way to the menu and edits its tiles in place: the tiles the image has, where it has them. Marked on it, learned from the emulated game: the **cursor's places** (the cells the cursor is drawn in, one per choice) and the cells **written over by the game** (a file's exit count, the word blanked for a file in use). A menu a patch draws without a stripe image has no menu text: its page is a picture.
+_Avoid_: menu string, menu tilemap
+
 **File select**: the menu that chooses the save file, each shown with its exit count or as empty.
 _Avoid_: save select, file menu
 

@@ -157,6 +157,7 @@ export const RAM = {
   owProcess: 0x13d9, // what the overworld is doing: Mario standing, walking, switching submaps …
   owTarget: 0x0dc7, // per player (4 bytes apart): the pixel position Mario walks to (X, Y words; owpaths.ts path shapes)
   owPose: 0x1f13, // per player (2 bytes apart): Mario's pose on the overworld – bit 3 swimming, bit 4 climbing
+  saveFile: 0x010a, // the save file played (0–2): the one a save writes
   savePrompt: 0x13ca, // set when the overworld is to show the save prompt (shown when Mario next arrives at a tile)
   gameOverPrompt: 0x13c9, // set by a game over: the overworld shows the game over prompt ("CONTINUE / END")
   saveCopy: 0x1fa9, // the overworld's state copied to be saved ($1F02–$1F2E: owEvents … owPlayerTileY, switchPalaces …)

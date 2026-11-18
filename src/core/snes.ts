@@ -81,6 +81,9 @@ export class Snes implements Bus {
   cgTaint = new Int32Array(0x200).fill(-1);
   private inDma = false; // the bus access is a DMA transfer's
   private wtag = -1; // tracking sources: the tag of the byte written now
+  // tracking sources: where the byte being written was loaded from (a ROM offset, -1 none) – for a hook that keeps
+  // the sources of what it sees written (VRAM: menutext.ts)
+  get writeSource(): number { return this.wtag; }
   // 64 KB overlay visible at $FE8000-$FEFFFF / $FF8000-$FFFFFF (editor scratch data)
   overlay: Uint8Array | null = null;
 

@@ -50,13 +50,14 @@ export interface ReachedScreen {
   path: ScreenPath | null; // null: the title screen, which is the emulator's boot (LevelEmulator.bootState)
 }
 
-const START = 0x1000, A = 0x0080, DOWN = 0x0400; // the joypad's bits ($4218)
+export const PAD = { start: 0x1000, a: 0x0080, down: 0x0400 }; // the joypad's bits ($4218)
+const START = PAD.start, A = PAD.a, DOWN = PAD.down;
 const DIRECTIONS = [0x0100, 0x0200, 0x0400, 0x0800]; // right, left, down, up
 const PRESENTS_FRAMES = 600; // from power-on, while the game is before its title screen
 const LEAVE_FRAMES = 120; // a button pressed until the game mode changes
 const SETTLE_FRAMES = 600, SETTLED = 8; // until the game mode stays (this many frames)
 const BLINK = 32, SHOWN = 4; // the frames looked at for what a screen shows most of the time; of them in a row
-const MAX_CHOICES = 8; // a menu's choices tried (the cursor moved down this often at most)
+export const MAX_CHOICES = 8; // a menu's choices tried (the cursor moved down this often at most)
 const WALK_FRAMES = 240; // Mario walking to the next tile of the overworld
 const PROMPT_FRAMES = 64; // a prompt opening
 
@@ -216,15 +217,19 @@ export function reachScreens(emu: LevelEmulator): ReachedScreen[] {
 }
 
 // Runs the game to a screen again as it got there, `hook` watching: what it reads and writes on the way (the bytes
-// a menu's text comes from). The machine is left showing the screen.
-export function replayScreen(emu: LevelEmulator, screen: ReachedScreen, hook: MemHook | null = null): void {
+// a menu's text comes from). The machine is left showing the screen. `sram`: the save files the game finds on the
+// way instead of its own; `sources`: with every byte's source tracked (Snes.trackSources, writeSource for the hook).
+export function replayScreen(emu: LevelEmulator, screen: ReachedScreen, hook: MemHook | null = null, o: { sram?: Uint8Array; sources?: boolean } = {}): void {
   const s = emu.snes, outer = s.hook;
   if (!screen.path) { s.loadState(screen.state); return; }
   start(s, screen.path);
+  if (o.sram) s.sram.set(o.sram);
   s.hook = hook;
+  if (o.sources) s.trackSources(true);
   try {
     for (const joy of screen.path.pad) { s.joy1 = joy; s.runFrame(); }
   } finally {
+    if (o.sources) s.trackSources(false);
     s.hook = outer;
     s.joy1 = 0;
   }
@@ -246,6 +251,7 @@ export interface ScreenPicture {
   vram: Uint8Array;
   cgram: Uint8Array;
   charBase: number; // layer 3's graphics in VRAM (bytes)
+  l3Scroll: { x: number; y: number }; // layer 3's scroll as the game set it: the tilemap's pixel at the screen's top left
 }
 
 // A screen as the game draws it from the machine `state`, with `map` as the first screen of its layer 3 tilemap
@@ -265,5 +271,5 @@ export function screenPicture(emu: LevelEmulator, state: SnesState, map?: Uint16
     s.ppu = null;
     s.hook = hook;
   }
-  return { frame: ppu.frame.slice(), vram: s.vram.slice(), cgram: s.cgram.slice(), charBase: layer3CharBase(s.ppuRegs) };
+  return { frame: ppu.frame.slice(), vram: s.vram.slice(), cgram: s.cgram.slice(), charBase: layer3CharBase(s.ppuRegs), l3Scroll: { x: ppu.hofs[2], y: ppu.vofs[2] } };
 }
