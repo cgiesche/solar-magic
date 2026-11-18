@@ -325,13 +325,18 @@ Before the editor writes a save file for event progress, it should know whose la
 a patch's. Today it assumes the game's. Detection by what the save routine does in emulation (which SRAM bytes a
 save writes), not by patch names.
 
-## Open questions
+## Decided (2026-11-18)
 
-1. Can the menu stripes move to free space without a hijack (5.2)?
-2. Is the status bar hidden on the title screen by the mode or by the level, and what does death do there in the
-   clean game (Lunar Magic's help describes it only for its own playback)?
-3. Do the save prompts ("CONTINUE AND SAVE", "CONTINUE / END") belong to the same pages? Same stripes and cursor
-   table, but they are not pre-game.
-4. The patches' own pages (options, stated incompatibilities) were not read, only their list entries (section 4).
-5. Japanese and PAL ROMs differ here (own demo table, `DrawFileSelect` differs in J). Out of scope while only the
-   US game and hacks of it are supported?
+- **Base:** the US original only. The Japanese and PAL versions' differences (own movement table, `DrawFileSelect`)
+  are out of scope.
+- **Title screen movement** is recorded by the editor; Lunar Magic's recording and format are not followed (2.2).
+- **The save prompts** ("CONTINUE AND SAVE", "CONTINUE / END") are not pre-game, but the same kind of thing: a
+  stripe with a cursor from the same table. They get pages next to the pre-game menus, as "menus" of the Game
+  workspace, and the same editor.
+- **The patches' own pages** were not read and need not be: the pages come from what the game does (5.1).
+
+## Left to the tickets
+
+1. Can the menu stripes move to free space without a hijack (5.2)? Until known: edits in place, same length.
+2. What death on the title screen does in the clean game, and what hides the status bar there – to be learned by
+   emulation with the recording (5.3).
