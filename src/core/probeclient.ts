@@ -1,15 +1,16 @@
 // The editor's side of the probes (probehost.ts): asks for block, collision and sprite probes, Mario's
 // run speeds and the game view's scroll bands in the current tileset, prefetches what the panels shown
 // want (last, quietly), and runs the object kinds, the level scan, the camera at a place and the result learner's jobs (CONTEXT.md;
-// probeprotocol.ts LearnJob), all in the probe worker. It sends the ROM once, then the ranges each change
+// probeprotocol.ts LearnJob), all in the probe workers: one, or two with each message going to the worker its lane or
+// task belongs to (probeprotocol.ts probeWorker, ADR 0016). It sends each the ROM once, then the ranges each change
 // wrote (the worker keeps its queue and restarts only tasks
-// that read a changed byte; the whole ROM again, with everything still wanted, when the ROM's log of changes
-// doesn't reach back), and falls back to probing on the main thread in background slices when the worker
-// fails. Results go to the editor's ResultCache, also those from before a ROM change: they hold while the ROM
+// that read a changed byte; the whole ROM again, with everything still wanted of it, when the ROM's log of changes
+// doesn't reach back), and falls back to probing on the main thread in background slices for what a worker that
+// fails was asked. Results go to the editor's ResultCache, also those from before a ROM change: they hold while the ROM
 // bytes they read are unchanged.
 
 import { ProbeHost, pumpProbes } from './probehost.ts';
-import { jobId, jobResult, learnKeep, learnRetargets, learnParts, EDIT_STATES, type ProbeJob, type ProbeMessage, type ProbeDone, type ProbeReply, type KindsDone, type KindsShown, type ScanDone, type CameraDone, type LearnJob, type LearnMessage, type Learned, type Learning, type LearnLane, type ProbeBusyKey } from './probeprotocol.ts';
+import { jobId, jobResult, learnKeep, learnRetargets, learnParts, probeWorker, messageFor, EDIT_STATES, PROBE_WORKERS, type RoutedMessage, type ProbeJob, type ProbeMessage, type ProbeDone, type ProbeReply, type KindsDone, type KindsShown, type ScanDone, type CameraDone, type LearnJob, type LearnMessage, type Learned, type Learning, type LearnLane, type ProbeBusyKey } from './probeprotocol.ts';
 import { Lanes, laneId, type LaneLabel } from './lanes.ts';
 import { inputHash } from './inputs.ts';
 import { partKey, memoryResults, type MemoryResults, type Keep } from './jobrunner.ts';
@@ -36,8 +37,9 @@ export interface ProbeClientDeps {
   // the level object kinds are found with; first: its standard objects (their kinds are known first, kindsSoFar)
   kindLevel(): { level: KindLevel; layer2Pointer: number; first?: number[] };
   level?(): number; // the open level's number (another one opened while the kinds run: its objects' kinds next)
-  // starts the worker (replies go to reply, failed() once it broke down); null or a throw: none
+  // starts a worker (replies go to reply, failed() once it broke down); null or a throw: none. Called once per worker
   connect?(reply: (d: ProbeReply) => void, failed: () => void): Send | null;
+  workers?: number; // the workers wanted: 1 (default) or 2 (PROBE_WORKERS; where the cores are there for them)
   later(key: string, step: () => void): void; // a background slice on the main thread (waits while a dialog is open)
   soon?(step: () => void): void; // a slice that runs while a dialog is open too (default: later's)
   setBusy(key: ProbeBusyKey, label: string | null): void;
@@ -60,6 +62,10 @@ export interface LearnOptions<T> {
 }
 
 // (resent: the ROM generation it was last sent again for, a reply from an older one coming: once per generation)
+// a probe host the client talks to (a worker, or the one on the main thread): the ROM generation and size it probes
+// on, the levels as edited it has whole (the latest EDIT_STATES sent so, post)
+interface Conn { send: Send; gen: number; size: number; states: string[] }
+
 interface LearnWant { msg: LearnMessage; opts: LearnOptions<unknown>; done: ((r: unknown) => void)[]; failed: (() => void)[]; dropped: (() => void)[]; resent: number }
 
 // what a panel shown wants prefetched (ProbeClient.wantPrefetch) in the current tileset: blocks, the block probes of
@@ -70,9 +76,11 @@ export interface PrefetchWant { blocks?: boolean; tiles?: readonly number[]; spr
 export type PrefetchOwner = 'picker' | 'map16tab';
 
 export class ProbeClient {
-  private send: Send | null = null;
-  private gen = -1; // ROM generation the worker probes on
-  private size = -1; // and the ROM's size
+  // the hosts by worker (probeWorker; null: not started): one per worker, the same one for both when there is only
+  // one, the main thread's (onMain) for a worker that broke down
+  private conns: Conn[] | null = null;
+  private onMain: Conn | null = null;
+  private gen = -1; // the ROM generation the hosts were last sent
   private asked = new Map<string, ProbeJob>(); // asked for and not done yet
   private prefetched = new Map<string, ProbeJob>(); // the same, probed when nothing else is pending
   private prefetchWants = new Map<PrefetchOwner, PrefetchWant>(); // by the panel wanting it (only those shown)
@@ -88,7 +96,6 @@ export class ProbeClient {
   private lanes = new Lanes<LearnLane, LearnWant>((w) => laneId(w.msg.key, w.msg.input)); // learn jobs asked for and not done yet
   private learnFailed = new Set<string>(); // learn jobs (key and input) that failed, forgotten when the ROM changes
   private memory: MemoryResults; // learn jobs' results kept in memory only, as the worker's (checked against the ROM)
-  private hostStates: string[] = []; // the levels as edited the host has whole: the latest EDIT_STATES sent so (post)
   // per key, the latest result kept as its parts put together (stored): its input, its parts and their data
   private joined = new Map<string, { input: string | undefined; parts: [string, string][]; join(d: unknown[]): unknown; data: unknown[]; result: unknown }>();
   private urges = 0; // waits a dialog shows (urge)
@@ -148,7 +155,7 @@ export class ProbeClient {
     this.busy();
     // (stored results first: the job may be known by then)
     this.d.cacheReady.then(() => {
-      if (jobResult(this.d.results, job) === undefined) this.send?.({ type: 'ask', jobs: [job] });
+      if (jobResult(this.d.results, job) === undefined) this.route({ type: 'ask', jobs: [job] });
       else this.probeDone({ type: 'probe', gen: this.gen, job, put: [], failed: false });
     });
   }
@@ -184,7 +191,7 @@ export class ProbeClient {
       if (!jobs.size && !this.prefetchSent) return;
       this.prefetched = jobs;
       this.prefetchSent = jobs.size > 0;
-      this.send?.({ type: 'prefetch', jobs: [...jobs.values()] });
+      this.route({ type: 'prefetch', jobs: [...jobs.values()] });
     });
   }
 
@@ -206,7 +213,7 @@ export class ProbeClient {
     // (stored results first: they may be known by then)
     this.d.cacheReady.then(() => {
       if (this.kindsWant !== msg) return;
-      if (this.d.results.get(kindsKey(ts)) === undefined) this.send?.(msg);
+      if (this.d.results.get(kindsKey(ts)) === undefined) this.route(msg);
       else this.kindsDone({ type: 'kinds', gen: this.gen, ts, failed: false, put: [] });
     });
     return undefined;
@@ -225,7 +232,7 @@ export class ProbeClient {
 
   // the scan asked for is not wanted any more (the worker stops playing it)
   cancelScan(): void {
-    if (this.playWant.delete('scan')) this.send?.({ type: 'cancel', task: 'scan' });
+    if (this.playWant.delete('scan')) this.route({ type: 'cancel', task: 'scan' });
     this.d.setBusy('scan', null);
   }
 
@@ -244,7 +251,7 @@ export class ProbeClient {
     this.d.cacheReady.then(() => {
       if (this.playWant.get(msg.type) !== want) return;
       const known = this.d.results.get(msg.key);
-      if (known === undefined) this.send?.(msg);
+      if (known === undefined) this.route(msg);
       else this.playDone({ type: msg.type, gen: this.gen, id: msg.id, result: known, put: [] } as ScanDone | CameraDone);
     });
   }
@@ -267,7 +274,7 @@ export class ProbeClient {
     if (gone.length) {
       // (the worker drops them too: the job kept answers a replacing request, without one the lane goes)
       const kept = this.lanes.get(name)?.first;
-      if (kept) this.post({ ...kept.msg, replace: true }); else this.send?.({ type: 'unlearn', lane: name });
+      if (kept) this.post({ ...kept.msg, replace: true }); else this.route({ type: 'unlearn', lane: name });
       this.drop(gone);
     }
     const stored = this.stored<T>(key, input, job);
@@ -304,7 +311,7 @@ export class ProbeClient {
   unlearn(name: LearnLane): void {
     const gone = this.lanes.clear(name);
     if (!gone.length) return;
-    this.send?.({ type: 'unlearn', lane: name });
+    this.route({ type: 'unlearn', lane: name });
     this.learnBusy(name);
     this.drop(gone);
   }
@@ -348,52 +355,90 @@ export class ProbeClient {
   }
   private cache(keep: Keep): MemoryResults | ResultCache { return keep === 'memory' ? this.memory : this.d.results; }
 
-  // Starts the worker, and sends it what a ROM change wrote: the ranges, or the whole ROM when they aren't known
-  // or the size changed (it drops its queue then: the asked jobs and tasks are sent again). The prefetch is made anew.
+  // Starts the workers, and sends each what a ROM change wrote: the ranges, or the whole ROM when they aren't known
+  // or the size changed (it drops its queue then: the asked jobs and tasks of it are sent again). The prefetch is made anew.
   private sync(): void {
-    if (!this.send) { this.send = this.start(); this.hostStates = []; }
+    const conns = this.conns ??= this.start();
     const rom = this.d.rom();
     if (this.gen === rom.gen) return;
-    // (a new size is a new ROM to the worker: it starts anew)
-    const changes = this.gen < 0 || rom.data.length !== this.size ? null : rom.changesSince(this.gen);
     this.gen = rom.gen;
-    this.size = rom.data.length;
     this.failed.clear();
     this.kindsFailed.clear();
     this.prefetched.clear();
     this.learnFailed.clear();
-    if (changes) {
-      const edits = changes.map(([a, e]): [number, Uint8Array] => [a, rom.data.slice(a, e)]);
-      this.send({ type: 'edit', gen: this.gen, size: this.size, edits });
-    } else {
-      this.send({ type: 'rom', gen: this.gen, data: rom.data.slice() });
-      this.prefetchSent = false; // (the worker dropped its queue)
-      this.levelKinds = null; // (a new ROM: shown again for it)
-      if (this.asked.size) this.send({ type: 'ask', jobs: [...this.asked.values()] });
-      if (this.kindsWant) this.send(this.kindsWant);
-      for (const w of this.playWant.values()) this.send(w.msg);
-      for (const lane of this.lanes.values()) for (const w of lane.jobs) { w.resent = this.gen; this.post(this.withParts(w.msg)); }
+    for (const c of new Set(conns)) {
+      if (c.gen === rom.gen) continue;
+      // (a new size is a new ROM to the worker: it starts anew)
+      const changes = c.gen < 0 || rom.data.length !== c.size ? null : rom.changesSince(c.gen);
+      c.gen = rom.gen;
+      c.size = rom.data.length;
+      // (each its own copies: the buffers go to the worker)
+      if (changes) c.send({ type: 'edit', gen: c.gen, size: c.size, edits: changes.map(([a, e]): [number, Uint8Array] => [a, rom.data.slice(a, e)]) });
+      else {
+        c.send({ type: 'rom', gen: c.gen, data: rom.data.slice() });
+        this.resend(c);
+      }
     }
     // (what the panels shown want: results that read changed ROM data are redone)
     this.d.later('probe-prefetch', () => this.refreshPrefetch());
   }
 
-  // the worker; without one (it failed to start or broke down) the jobs run here in slices
-  private start(): Send {
+  // the host that what key names is asked of (the probes, a task, a lane)
+  private conn(key: ProbeBusyKey): Conn | undefined { return this.conns?.[probeWorker(key, this.conns.length)]; }
+  private route(m: RoutedMessage): void { this.conn(messageFor(m))?.send(m); }
+
+  // a host got the whole ROM (it dropped its queue): what is wanted of it again
+  private resend(c: Conn): void {
+    if (this.conn('probe') === c) {
+      this.prefetchSent = false;
+      if (this.asked.size) c.send({ type: 'ask', jobs: [...this.asked.values()] });
+    }
+    if (this.conn('kinds') === c) {
+      this.levelKinds = null; // (a new ROM: shown again for it)
+      if (this.kindsWant) c.send(this.kindsWant);
+    }
+    for (const w of this.playWant.values()) if (this.conn(w.msg.type) === c) c.send(w.msg);
+    for (const lane of this.lanes.values()) {
+      if (this.conn(lane.name) === c) for (const w of lane.jobs) { w.resent = this.gen; this.post(this.withParts(w.msg)); }
+    }
+  }
+
+  // The hosts by worker: a worker each (ProbeClientDeps.workers); the first one's for all when no other starts.
+  // Without any (none started) the jobs run here in slices.
+  private start(): Conn[] {
+    const conns: Conn[] = [], n = Math.min(PROBE_WORKERS, Math.max(1, this.d.workers ?? 1));
+    for (let i = 0; i < n; i++) {
+      const c = this.open();
+      if (!c) break;
+      conns.push(c);
+    }
+    return conns.length ? conns : [this.mainThread()];
+  }
+
+  // a worker; one that breaks down hands what it was asked to the main thread's host (which starts anew with the whole
+  // ROM and what is wanted of it), the other worker goes on as it is
+  private open(): Conn | null {
     try {
+      const c: Conn = { gen: -1, size: -1, states: [], send: null as unknown as Send };
       const send = this.d.connect?.((d) => this.reply(d), () => {
+        if (!this.conns?.includes(c)) return;
         console.error('probe worker failed, probing on the main thread');
-        this.send = this.local();
-        this.hostStates = [];
+        const main = this.mainThread();
+        main.gen = -1;
+        main.states = [];
+        this.conns = this.conns.map((x) => (x === c ? main : x));
         this.gen = -1;
         this.sync();
       });
-      if (send) return send;
+      if (send) { c.send = send; return c; }
     } catch (e) {
       console.error(e);
     }
-    return this.local();
+    return null;
   }
+
+  // the host on the main thread (one, whatever it stands in for)
+  private mainThread(): Conn { return this.onMain ??= { gen: -1, size: -1, states: [], send: this.local() }; }
 
   private local(): Send {
     const send = pumpProbes(new ProbeHost(), (d) => this.reply(d), {
@@ -476,18 +521,19 @@ export class ProbeClient {
   // it (it keeps the latest EDIT_STATES sent whole, as counted here), without the owners of its bytes (the host
   // serializes the level again for them)
   private post(msg: LearnMessage): void {
-    if (!this.send) return;
+    const c = this.conn(msg.lane);
+    if (!c) return;
     const j = msg.job;
     if ('state' in j && 'level' in j.state) {
       const s = j.state;
-      if (this.hostStates.includes(s.id)) msg = { ...msg, job: { ...j, state: { id: s.id } } };
+      if (c.states.includes(s.id)) msg = { ...msg, job: { ...j, state: { id: s.id } } };
       else {
-        this.hostStates.push(s.id);
-        if (this.hostStates.length > EDIT_STATES) this.hostStates.shift();
+        c.states.push(s.id);
+        if (c.states.length > EDIT_STATES) c.states.shift();
         msg = { ...msg, job: { ...j, state: { ...s, ov: { ...s.ov, byteOwner: undefined } } } };
       }
     }
-    this.send(msg);
+    c.send(msg);
   }
 
   private learnBusy(name: LearnLane): void {
@@ -501,7 +547,7 @@ export class ProbeClient {
     this.take(d);
     const id = jobId(d.job);
     if (d.gen !== this.gen && jobResult(this.d.results, d.job) === undefined) {
-      if (this.asked.has(id)) this.send?.({ type: 'ask', jobs: [d.job] });
+      if (this.asked.has(id)) this.route({ type: 'ask', jobs: [d.job] });
       return;
     }
     if (d.failed && d.gen === this.gen) this.failed.add(id);
@@ -516,7 +562,7 @@ export class ProbeClient {
   private kindsDone(d: KindsDone): void {
     this.take(d);
     if (this.kindsWant?.ts !== d.ts) return;
-    if (d.gen !== this.gen && this.d.results.get(kindsKey(d.ts)) === undefined) { this.send?.(this.kindsWant); return; }
+    if (d.gen !== this.gen && this.d.results.get(kindsKey(d.ts)) === undefined) { this.route(this.kindsWant); return; }
     if (d.failed) this.kindsFailed.add(d.ts);
     this.kindsWant = this.levelKinds = null;
     this.d.setBusy('kinds', null);
@@ -537,7 +583,7 @@ export class ProbeClient {
     const want = this.playWant.get(d.type);
     this.take(d);
     if (want?.msg.id !== d.id) return;
-    if (d.gen !== this.gen && this.d.results.get(want.msg.key) === undefined) { this.send?.(want.msg); return; }
+    if (d.gen !== this.gen && this.d.results.get(want.msg.key) === undefined) { this.route(want.msg); return; }
     this.playWant.delete(d.type);
     this.d.setBusy(d.type, null);
     want.done(d.result);

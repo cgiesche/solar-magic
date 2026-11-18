@@ -54,7 +54,7 @@ import { MARIO_W, MARIO_H, type CameraBands } from '../core/camerabands.ts';
 import { tideLines, type TideLines, type Layer3Kind } from '../core/layer3.ts';
 import { type Layer2Motions } from '../core/l2scroll.ts';
 import { variantOf, blockKey, collisionKey, type BlockProbe, type CollisionProbe, type RunStates, type SwitchState, SWITCH_STATES, SWITCH_TRIGGER } from '../core/blockprobe.ts';
-import { SAVE_LANES, OW_LEFT_LANES, type ProbeReply, type ProbeBusyKey, type LearnLane, type SaveAsker } from '../core/probeprotocol.ts';
+import { SAVE_LANES, OW_LEFT_LANES, PROBE_WORKERS, type ProbeReply, type ProbeBusyKey, type LearnLane, type SaveAsker } from '../core/probeprotocol.ts';
 import { spriteJobs, spriteInput, layer3Spec, levelObjects, type SpriteInput } from '../core/learnspecs.ts';
 import { ProbeClient, FAILED } from '../core/probeclient.ts';
 import { messageRoutineInput, UNKNOWN_ROUTINE, type MessageRoutine } from '../core/messagedraw.ts';
@@ -324,6 +324,8 @@ export class App {
         return { level: { number: lv.number, header: lv.header }, layer2Pointer: levelBgPointer(this.rom, lv), first };
       },
       level: () => this.level.number,
+      // (two workers, the main thread and the browser need the cores: one worker below four, ADR 0016)
+      workers: navigator.hardwareConcurrency >= 4 ? PROBE_WORKERS : 1,
       connect: (reply, failed) => {
         const w = new Worker(new URL('./probeworker.ts', import.meta.url), { type: 'module' });
         w.onmessage = (e: MessageEvent<ProbeReply>) => reply(e.data);

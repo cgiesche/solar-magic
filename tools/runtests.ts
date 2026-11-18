@@ -42,6 +42,7 @@ const TESTS: readonly string[] = [
   'tools/testcamerareach.ts',
   'tools/testprobehost.ts',
   'tools/testprobeclient.ts',
+  'tools/testprobeworkers.ts',
   'tools/testspriteprobes.ts',
   'tools/testlanes.ts',
   'tools/testlearner.ts',

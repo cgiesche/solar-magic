@@ -282,3 +282,22 @@ export type ProbeMessage =
   | { type: 'unlearn'; lane: LearnLane };
 
 export type TaskMessage = ProbeMessage & { type: TaskType };
+
+// The probe workers (ADR 0016): at most two, each a probe host of its own. Which one a message goes to is fixed by what
+// it is for (the probes, a task, a lane): the second worker has the object kinds and the sprites' lanes (their images,
+// variants, bytes and the sprite memory check), the first everything else; with one worker everything is its. Jobs that
+// share what a host keeps between them (probehost.ts LearnState: the levels' uses and the block prober with the saves at
+// an event progress, the overworld's loads) are on the same worker; results reach the other's jobs through the editor.
+export const PROBE_WORKERS = 2;
+const SECOND_WORKER: ReadonlySet<ProbeBusyKey> = new Set<ProbeBusyKey>(['kinds', 'sprites', 'variants', 'bytes', 'spritemem']);
+export function probeWorker(key: ProbeBusyKey, workers: number): number { return workers > 1 && SECOND_WORKER.has(key) ? 1 : 0; }
+// what a message is for (the ROM and its changes are for every worker)
+export type RoutedMessage = Exclude<ProbeMessage, { type: 'rom' | 'edit' }>;
+export function messageFor(m: RoutedMessage): ProbeBusyKey {
+  switch (m.type) {
+    case 'ask': case 'prefetch': return 'probe';
+    case 'cancel': return m.task;
+    case 'learn': case 'unlearn': return m.lane;
+    default: return m.type;
+  }
+}
