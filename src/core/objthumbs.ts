@@ -6,7 +6,7 @@ import type { Rom } from './rom.ts';
 import { readOffset, type LevelEmulator, type LevelRender, type LevelOverride } from './levelemu.ts';
 import type { Recorded } from './romdeps.ts';
 import { type Level, type LevelObject, newUid, levelRows } from './level.ts';
-import { TileCache, map16Source, drawMap16, layerGeom, renderLayerTiles, tileByOffset } from './render.ts';
+import { TileCache, map16Source, drawMap16, charBase, layerGeom, renderLayerTiles, tileByOffset } from './render.ts';
 import { objectKey } from './objboxes.ts';
 import { MAP_BASE, map16Tile } from './ram.ts';
 import { objectVariant, sizedByte, type ObjKind } from './objkinds.ts';
@@ -111,8 +111,7 @@ interface Alone { thumb: ObjThumb | null }
 
 // in batches of 32 test levels (each section's objects among themselves: standard, extended, object 2D's custom
 // numbers – so a change of one section's list leaves the others' batches as they were), a step each; a batch whose
-// load fails (some objects together break the game,
-// like two of tileset 7's object 33) is rendered in halves, an object that fails alone gets no thumbnail. An
+// load fails (some objects together break the game, like two of tileset 7's object 33) is rendered in halves, an object that fails alone gets no thumbnail. An
 // extended object or one of object 2D's custom numbers that drew nothing in its batch (a quiet one) is loaded again
 // without the drawing ones – in groups of quiet objects first, alone where its group does something
 // (#104's rule: listed are the objects that draw tiles or do something): it may draw alone what it didn't among
@@ -138,9 +137,13 @@ export function* objectThumbsJob(
   const objOf = (s: ObjSpec, i: number): LevelObject => ({ uid: newUid(), num: s.num, ext: s.ext, size: s.size, x: i * 16 + 3, y: 12, ...(s.extension ? { extension: s.extension } : {}) });
   // the routines of the game's own extended numbers, by its pointer table (read once needed), as ROM offsets (FastROM
   // moves some of the pointers to the fast banks)
-  let own: Set<number> | null = null;
+  // (what reading them read counts for each load that asks: each is kept with the bytes it read)
+  let own: Recorded<Set<number>> | null = null;
   const routine = (n: number): number => snesToPc(rom.r24(EXT_OBJ_TABLE + n * 3));
-  const ownRoutine = (n: number): boolean => (own ??= new Set(Array.from({ length: CUSTOM_EXT }, (_, k) => routine(k)))).has(routine(n));
+  const ownRoutine = (n: number): boolean => {
+    if (own) emu.count(own.reads); else own = emu.tracked(() => new Set(Array.from({ length: CUSTOM_EXT }, (_, k) => routine(k))));
+    return own.result.has(routine(n));
+  };
   // the thumbnails of a load's objects that wrote tiles
   const collect = (r: LevelRender, batch: ObjSpec[], out: ObjThumb[]): void => {
     const unhandled = (s: ObjSpec, i: number): boolean => {
@@ -150,7 +153,7 @@ export function* objectThumbsJob(
       return false;
     };
     // (only the tiles the objects wrote are drawn, as renderLevel draws layer 1: not the whole test level and its BG)
-    const tc = new TileCache(r.vram, r.cgram, (r.ppuRegs[0x0b] & 0x0f) << 13), src = map16Source(rom, r);
+    const tc = new TileCache(r.vram, r.cgram, charBase(r, false)), src = map16Source(rom, r);
     const g = layerGeom(rom, 0, 0, 32);
     const tileAt = tileByOffset(g);
     batch.forEach((s, i) => {
@@ -196,7 +199,7 @@ export function* objectThumbsJob(
     }
   }
   const drawn = new Set(out.map((t) => t.key));
-  const quiet = specs.filter((s) => (s.num === 0 || s.extension) && !drawn.has(keyOf(s)));
+  const quiet = specs.filter((s) => sectionOf(s) !== 0 && !drawn.has(keyOf(s)));
   // the load without objects, once a single load is learned; what it read counts for each of them
   let base: Recorded<LevelRender> | null = null;
   const baseLoad = (): LevelRender => {
