@@ -520,7 +520,7 @@ export class LevelEmulator {
     for (let n = 0; w[RAM.gameMode] !== GM.overworld; n++) {
       if (n > 1500) throw new Error(newGame ? 'new game did not reach the overworld' : 'the overworld did not load');
       const m = w[RAM.gameMode];
-      if (events && (m === GM.fileSelect || m === GM.overworldLoad)) w.set(events, RAM.owEvents);
+      if (events && (m === GM.playerSelect || m === GM.overworldLoad)) w.set(events, RAM.owEvents);
       if (m === GM.overworldLoad) w[RAM.introLevel] = 0; // no intro level
       s.joy1 = newGame && (n % 16) < 4 ? (m === GM.title ? 0x1000 : 0x0080) : 0;
       s.runFrame();

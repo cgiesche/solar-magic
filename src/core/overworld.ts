@@ -952,7 +952,7 @@ export class OverworldEmulator {
     s.romReads = reads;
     try {
       while (w[RAM.gameMode] !== GM.overworld && n < 1500) {
-        if (w[RAM.gameMode] === GM.fileSelect) w.set(eventBits(progress), RAM.owEvents);
+        if (w[RAM.gameMode] === GM.playerSelect) w.set(eventBits(progress), RAM.owEvents);
         if (w[RAM.gameMode] === GM.overworldLoad) {
           w[RAM.introLevel] = 0;
           w[RAM.submap] = map;

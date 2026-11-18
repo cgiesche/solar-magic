@@ -7,8 +7,13 @@
 
 // game modes ($0100)
 export const GM = {
-  title: 0x07, // title screen (waits for a button)
-  fileSelect: 0x0a, // choosing the save file and the players; a loaded file's layer 2 events are drawn here
+  // the pre-game (CONTEXT.md): everything from reset to the first overworld
+  presentsLoad: 0x00, presents: 0x01, // Nintendo Presents: loading, shown
+  titleFadeOut: 0x02, titleLoad: 0x03, titlePrepare: 0x04, titleFadeIn: 0x05, titleSpotlight: 0x06, // the title screen loading
+  title: 0x07, // title screen (title screen movement runs; waits for a button)
+  fileSelect: 0x08, // choosing the save file
+  fileErase: 0x09, // choosing the save file to erase
+  playerSelect: 0x0a, // choosing the players; the file is loaded by now, its layer 2 events are drawn from here on
   overworldLoad: 0x0b, // fading into the overworld
   overworldReturn: 0x0c, // loading the overworld after a level
   overworld: 0x0e,
