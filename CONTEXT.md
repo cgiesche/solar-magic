@@ -218,14 +218,50 @@ _Avoid_: error, limit message
 
 ### The game
 
-**Game workspace**: screens belonging to no level: title screen, overworld borders (credits etc. to follow).
+**Game workspace**: the game's screens belonging to no level: the pre-game's screens, the overworld's prompts, the overworld borders (credits etc. to follow). It lists the screens the emulated game gets into, each with its picture; a screen a patch removed is not listed.
 _Avoid_: game settings, title screen editor
+
+**Pre-game**: everything the game shows from reset to the first overworld: Nintendo Presents, the title screen, file select, file erase, player select and, on a new save file, the intro.
+_Avoid_: boot screens, front end, main menu
+
+**Nintendo Presents**: the logo at power-on.
+_Avoid_: intro logo, presents screen
+
+**Title screen**: what the game shows until a button is pressed: the **title screen level** (C7 in the clean game) with the title screen movement, the **title screen picture** on layer 3 over it (the logo, the frame and the copyright line: a 32x29 tilemap in Lunar Magic's layout, stripe image entry 03, $0084D3) and the **title screen colours**.
+_Avoid_: welcome screen, start screen, title logo
+
+**Title screen movement**: the recorded joypad input the game plays the title screen level with (Lunar Magic: "Title Moves").
+_Avoid_: demo, attract mode
+
+**Menu**: a screen of text on layer 3 with a cursor, drawn from a stripe image: file select, file erase, player select, save prompt, game over prompt.
+_Avoid_: dialog, selection screen
+
+**File select**: the menu that chooses the save file, each shown with its exit count or as empty.
+_Avoid_: save select, file menu
+
+**File erase**: the menu that erases a save file, entered by "ERASE DATA" in the file select.
+_Avoid_: file delete, erase screen
+
+**Player select**: the menu that chooses a 1 or 2 player game.
+_Avoid_: player count, mode select
+
+**Save prompt**: the overworld's menu after a level that saves: "CONTINUE AND SAVE" or "CONTINUE WITHOUT SAVE". Not pre-game, but a menu like its menus.
+_Avoid_: save dialog, save menu
+
+**Game over prompt**: the overworld's menu after a game over: "CONTINUE" or "END".
+_Avoid_: continue screen, continue/end menu
+
+**Intro**: what a new save file shows before its first overworld: the **intro level** (C5 in the clean game) showing the intro message (level 0's message 1).
+_Avoid_: intro cutscene, welcome message
+
+**Save file**: one of the three saved games in SRAM.
+_Avoid_: savegame, slot
+
+**New file data**: what an empty save file starts with: the start position, the initial level flags, the lives.
+_Avoid_: defaults, initial save
 
 **Overworld border**: a map's layer 3 (Lunar Magic's "Load Layer 3 of Submap"), saved into its LT3 file. Row 4 (lives, level name) not painted.
 _Avoid_: layer 3, overworld frame, HUD
-
-**Title screen**: the title's layer 3 tilemap, 32x29, in Lunar Magic's layout (stripe image entry 03, $0084D3).
-_Avoid_: title logo, title screen level
 
 ### Third-party content
 

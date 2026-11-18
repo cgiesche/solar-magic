@@ -11,8 +11,8 @@
 
 import { Rom, snesToPc } from './rom.ts';
 import type { LevelEmulator } from './levelemu.ts';
-import { PPU } from './ppu.ts';
-import { L3_MAP_VRAM, layer3Word, layer3CharBase } from './layer3map.ts';
+import { L3_MAP_VRAM, layer3Word } from './layer3map.ts';
+import { screenPicture, type ScreenPicture } from './pregame.ts';
 
 export const TITLE_COLS = 32, TITLE_ROWS = 29, TITLE_SHOWN_ROWS = 28;
 export const TITLE_STRIPE_PTR = 0x0084d3; // the stripe image table ($0084D0), entry 03
@@ -51,28 +51,10 @@ export function writeTitleScreen(rom: Rom, map: Uint16Array): void {
   rom.writeAt(snesToPc(TITLE_STRIPE_PTR), Uint8Array.from([at & 0xff, (at >> 8) & 0xff, at >> 16]));
 }
 
-export interface TitlePicture {
-  frame: Uint32Array; // 256 × 224, as the game draws it
-  vram: Uint8Array;
-  cgram: Uint8Array;
-  charBase: number; // layer 3's graphics in VRAM (bytes)
-}
+export type TitlePicture = ScreenPicture;
 
 // the title screen as the game draws it, with `map` as its tilemap (default: its own); the emulator's state
-// state at the title screen stays as booted (its machine is left after the frames drawn)
+// at the title screen stays as booted (its machine is left after the frames drawn)
 export function titlePicture(emu: LevelEmulator, map?: Uint16Array): TitlePicture {
-  const s = emu.snes, ppu = new PPU(s), hook = s.hook;
-  s.loadState(emu.bootState());
-  if (map) map.forEach((w, i) => { s.vram[(VRAM + i) * 2] = w & 0xff; s.vram[(VRAM + i) * 2 + 1] = w >> 8; });
-  s.ppu = ppu;
-  s.hook = null;
-  try {
-    // the first frame is drawn before the NMI sets the scroll registers of a PPU new to them
-    s.runFrame();
-    s.runFrame();
-  } finally {
-    s.ppu = null;
-    s.hook = hook;
-  }
-  return { frame: ppu.frame.slice(), vram: s.vram.slice(), cgram: s.cgram.slice(), charBase: layer3CharBase(s.ppuRegs) };
+  return screenPicture(emu, emu.bootState(), map);
 }

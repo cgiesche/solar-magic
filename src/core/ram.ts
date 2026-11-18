@@ -91,6 +91,7 @@ export const RAM = {
   sublevelCount: 0x141a,
   introShown: 0x141d, // the level's no-Yoshi intro has played (the level itself loads next)
   levelFlags: 0x1ea2, // per translevel: bits 0-3 the directions Mario may walk from its tiles (right, left, down, up), 4 save prompt and 5 no entry if passed (Lunar Magic's), 6 the midway point was touched, 7 passed
+  levelFlagsEnd: 0x1f02,
   midwayTouched: 0x13ce, // the midway tape was touched in this level (dying then marks the translevel's $1EA2 bit 6)
   midwayUsed: 0x13cf, // the level was loaded at its midway point
   message: 0x1426, // the message box to show: 1 or 2 the level's messages, 3 Yoshi's thank-you
@@ -156,7 +157,8 @@ export const RAM = {
   owProcess: 0x13d9, // what the overworld is doing: Mario standing, walking, switching submaps …
   owTarget: 0x0dc7, // per player (4 bytes apart): the pixel position Mario walks to (X, Y words; owpaths.ts path shapes)
   owPose: 0x1f13, // per player (2 bytes apart): Mario's pose on the overworld – bit 3 swimming, bit 4 climbing
-  savePrompt: 0x13ca, // set when the overworld is to show the save prompt
+  savePrompt: 0x13ca, // set when the overworld is to show the save prompt (shown when Mario next arrives at a tile)
+  gameOverPrompt: 0x13c9, // set by a game over: the overworld shows the game over prompt ("CONTINUE / END")
   saveCopy: 0x1fa9, // the overworld's state copied to be saved ($1F02–$1F2E: owEvents … owPlayerTileY, switchPalaces …)
   paused: 0x13d4, // in a level: paused; on the main map: looking around with Start
   lifeExchange: 0x1b87, // the life exchange window of a 2-player game (set when L/R opens it, counts while it shows)

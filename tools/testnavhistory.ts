@@ -25,6 +25,9 @@ const places: NavLoc[] = [
   { w: 'gfx', tab: 'anim', anim: { global: true, slot: 3 } },
   { w: 'gfx', tab: 'anim', anim: { global: false, slot: 0x1f } },
   { w: 'game', tab: 'title' },
+  { w: 'game', tab: 'presents' },
+  { w: 'game', tab: 'fileSelect' },
+  { w: 'game', tab: 'gameOverPrompt' },
   { w: 'game', tab: 'border', map: 0 },
   { w: 'game', tab: 'border', map: 6 },
 ];
@@ -36,7 +39,7 @@ check(toHash({ w: 'level', level: 0x105, mode: 'spr', cx: 10, cy: 20 }) === '#le
 check(fromHash('#gfx/map16/bg/130')?.w === 'gfx', 'hash without leading # works too');
 
 for (const h of ['', '#', '#level', '#level/200', '#level/xyz', '#level/105/1', '#ow/7', '#ow/a', '#gfx', '#gfx/foo',
-  '#gfx/pal/100', '#gfx/map16/bg/bg/1', '#gfx/map16/ow/bg/1', '#gfx/anim/x3', '#gfx/anim/g', '#game/border', '#game/border/7', '#game/title/1', '#something'])
+  '#gfx/pal/100', '#gfx/map16/bg/bg/1', '#gfx/map16/ow/bg/1', '#gfx/anim/x3', '#gfx/anim/g', '#game/border', '#game/border/7', '#game/title/1', '#game/intro', '#game/fileSelect/1', '#something'])
   check(fromHash(h) === null, `“${h}” leads nowhere`);
 
 const k = (l: NavLoc) => stepKey(l);

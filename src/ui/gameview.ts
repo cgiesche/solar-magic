@@ -1,13 +1,17 @@
-// The Game workspace: the game's screens that belong to no level – the title screen's layer 3 tilemap
-// (titlescreen.ts: its picture as the game draws it) and the overworld's borders (owborder.ts: each map's layer 3
-// fixed on the screen) – painted with layer 3's 8x8 tiles as every brush editor paints (brushsurface.ts, ADR 0011); a
-// stroke is one ROM edit when the mouse is released.
+// The Game workspace: the game's screens that belong to no level. Listed are the screens and menus the emulated game
+// gets into (pregame.ts: Nintendo Presents, title screen, file select, file erase, player select, the overworld's save
+// and game over prompts – one a patch removed is not there), each with its picture as the game draws it, and the
+// overworld's borders. Edited so far: the title screen's layer 3 tilemap (titlescreen.ts) and the borders
+// (owborder.ts: each map's layer 3 fixed on the screen) – painted with layer 3's 8x8 tiles as every brush editor
+// paints (brushsurface.ts, ADR 0011); a stroke is one ROM edit when the mouse is released. The other screens are
+// pictures; an editor for one of them replaces its picture in `select` (screenRoot / screenSide).
 
 import type { App } from './app.ts';
 import { h, toast, attachPanZoom, zoomControl } from './dom.ts';
 import { LevelEmulator } from '../core/levelemu.ts';
 import { TileCache } from '../core/render.ts';
 import { TITLE_COLS, TITLE_ROWS, TITLE_SHOWN_ROWS, titleTilemap, titlePicture, writeTitleScreen, type TitlePicture } from '../core/titlescreen.ts';
+import { GAME_SCREENS, gameScreenKind, gameScreens, screenPicture, type GameScreenId, type ReachedScreen } from '../core/pregame.ts';
 import { layer3WordText } from '../core/layer3map.ts';
 import { layer3Picker } from './l3picker.ts';
 import { fillPixels, hidePickerPreview } from './pickerview.ts';
@@ -17,8 +21,9 @@ import { MAP_NAMES } from '../core/overworld.ts';
 import { BrushSurface, PAINT_HINT, PAINT_TITLE } from './brushsurface.ts';
 import { onTokensChanged, uiToken } from './marks.ts';
 
-// the title screen, or the border of an overworld map (0 the main map, 1–6 the submaps)
-export type GameTab = 'title' | 'border';
+// a screen of the game ('title': the title screen, with its editor), or the border of an overworld map (0 the main
+// map, 1–6 the submaps)
+export type GameTab = GameScreenId | 'border';
 const GAP = 4; // pixels between the screen and the row below it
 const SCROLLER_PAD = 16; // .game-scroller's padding (style.css)
 const W = 256, H = TITLE_SHOWN_ROWS * 8 + GAP + 8;
@@ -43,6 +48,10 @@ export class GameView {
   private pickPanel = h('div', { class: 'panel game-pick' });
   private pickPixels = 0; // the screen pixels per pixel the tile sheet is drawn at (0: none shown)
   private error = ''; // why there is no title screen to edit
+  private screens: ReachedScreen[] = []; // the screens the game gets into (pregame.ts), as of the ROM shown
+  private screenCanvas = h('canvas', { class: 'game-canvas game-screen', width: W, height: 224 });
+  private screenInfo = h('div', { class: 'panel game-pick' });
+  private listTimer = 0;
   private frame = 0; // a picture to draw at the next animation frame (painting)
   private zoom = 3;
   private zoomCtl: { root: HTMLElement; update: () => void } | undefined;
@@ -50,7 +59,7 @@ export class GameView {
   private surface: BrushSurface;
 
   constructor(app: App) {
-    onTokensChanged(() => this.paint()); // (the backdrop is a UI token: another theme)
+    onTokensChanged(() => { this.paint(); if (this.tab !== 'border' && this.tab !== 'title') this.showScreen(this.tab); }); // (the backdrop is a UI token: another theme)
     this.app = app;
     this.border = new BorderView(app);
     this.border.setStatus = (t) => { this.status.textContent = t; };
@@ -88,9 +97,12 @@ export class GameView {
     // a ROM edit, undo or redo: shown as in the ROM (a stroke being painted is dropped)
     app.on('rom-change', () => {
       if (!this.root.isConnected) return;
+      // (the list a moment later: the game run to every screen again, not while a stroke's edit is shown)
+      clearTimeout(this.listTimer);
+      this.listTimer = window.setTimeout(() => { if (this.root.isConnected) this.listScreens(); }, 300);
       if (this.tab === 'border') { this.border.reload(); return; }
       this.surface.drop();
-      this.sync();
+      if (this.tab === 'title') this.sync(); else this.showScreen(this.tab);
     });
     // the sheet follows the panel's width, drawn anew when it needs other screen pixels per pixel
     new ResizeObserver(() => requestAnimationFrame(() => { if (this.pickPixels && fillPixels(this.pickPanel.clientWidth, 128) !== this.pickPixels) this.buildPicker(); })).observe(this.pickPanel);
@@ -103,39 +115,78 @@ export class GameView {
   // shown: the title screen as in the ROM, or the border of the map shown last
   show(): void {
     if (this.tab === 'border') this.border.show(this.border.map);
-    else this.sync();
+    else if (this.tab === 'title') this.sync();
+    else this.showScreen(this.tab);
+    this.listScreens();
   }
-  // the title screen, or the border of map `map`
+  // a screen of the game, or the border of map `map`
   select(tab: GameTab, map = this.border.map): void {
     this.tab = tab;
-    const border = tab === 'border';
-    this.title.textContent = border ? `${MAP_NAMES[map]} – overworld border` : 'Title screen';
-    this.scroller.replaceChildren(border ? this.border.root : this.surface.root);
-    this.side.replaceChildren(border ? this.border.side : this.pickPanel);
+    const border = tab === 'border', edited = tab === 'title';
+    this.title.textContent = border ? `${MAP_NAMES[map]} – overworld border` : gameScreenKind(tab).name;
+    this.scroller.replaceChildren(border ? this.border.root : edited ? this.surface.root : this.screenCanvas);
+    this.side.replaceChildren(border ? this.border.side : edited ? this.pickPanel : this.screenInfo);
     if (border) this.bar.append(this.border.bar); else this.border.bar.remove();
-    this.status.textContent = PAINT_HINT;
-    if (border) this.border.show(map); else this.sync();
+    this.status.textContent = border || edited ? PAINT_HINT : '';
+    if (border) this.border.show(map); else if (edited) this.sync(); else this.showScreen(tab);
+    this.listScreens();
+  }
+  // the list with the screens the game gets into as of the ROM shown
+  private listScreens(): void {
+    try { this.screens = gameScreens(this.emulator()); } catch { this.screens = []; }
     this.buildList();
   }
   private buildList(): void {
     const item = (label: string, title: string, on: boolean, go: () => void) => h('div', { class: `level-item${on ? ' current' : ''}`, title, onclick: go }, label);
+    // the screens reached – and the one shown, also when the game no longer gets there (its page says so)
+    const screens = GAME_SCREENS.filter((k) => this.tab === k.id || this.screens.some((s) => s.id === k.id))
+      .map((k) => ({ k, el: item(k.name, k.about, this.tab === k.id, () => { this.select(k.id); this.onNav(); }) }));
+    const prompts = screens.filter((s) => !s.k.pregame);
     this.list.replaceChildren(
-      item('Title screen', 'The title screen\'s layer 3: the logo, the frame and the copyright line', this.tab === 'title', () => { this.select('title'); this.onNav(); }),
+      ...screens.filter((s) => s.k.pregame).map((s) => s.el),
+      ...(prompts.length ? [h('div', { class: 'panel-title' }, 'Overworld prompts'), ...prompts.map((s) => s.el)] : []),
       h('div', { class: 'panel-title' }, 'Overworld border'),
       ...MAP_NAMES.map((n, m) => item(n, `${n}'s border: layer 3, fixed on the screen while the map is shown`, this.tab === 'border' && this.border.map === m, () => { this.select('border', m); this.onNav(); })));
   }
   onNav: () => void = () => {};
   // Esc: a stroke or pick in progress cancelled (else the workspace is left); whether it was taken
   key(e: KeyboardEvent): boolean {
-    return this.tab === 'border' ? this.border.key(e) : this.surface.key(e);
+    return this.tab === 'border' ? this.border.key(e) : this.tab === 'title' ? this.surface.key(e) : false;
+  }
+
+  // the emulator of the ROM shown (its boot the app's)
+  private emulator(): LevelEmulator {
+    if (!this.emu || this.emu.rom !== this.app.rom) { this.emu = new LevelEmulator(this.app.rom); this.emu.adoptBoot(this.app.emu); }
+    return this.emu;
+  }
+
+  // a screen's picture as the game draws it (no editor yet)
+  private showScreen(id: GameScreenId): void {
+    const kind = gameScreenKind(id), ctx = this.screenCanvas.getContext('2d')!;
+    let why = '';
+    try {
+      const emu = this.emulator(), screen = gameScreens(emu).find((s) => s.id === id);
+      if (screen) {
+        const img = ctx.createImageData(W, 224);
+        new Uint32Array(img.data.buffer).set(screenPicture(emu, screen.state).frame);
+        ctx.putImageData(img, 0, 0);
+      } else why = `The game does not get to its ${kind.name.toLowerCase()}.`;
+    } catch (e) {
+      why = `The game does not get to its ${kind.name.toLowerCase()}: ${e instanceof Error ? e.message : e}`;
+    }
+    if (why) { ctx.fillStyle = uiToken('--canvas-bg', '#15171b'); ctx.fillRect(0, 0, W, 224); }
+    this.status.textContent = why || `${kind.name}, as the game shows it`;
+    this.screenInfo.replaceChildren(h('div', { class: 'panel-title' }, kind.name),
+      h('p', { class: 'hint game-screen-about' }, `${kind.about}.`),
+      h('p', { class: 'hint game-screen-about' }, why || 'The picture is the game\'s own: the editor runs the game to this screen as a player gets there. It can\'t be edited here yet.'));
   }
 
   private sync(): void {
-    if (!this.emu || this.emu.rom !== this.app.rom) { this.emu = new LevelEmulator(this.app.rom); this.emu.adoptBoot(this.app.emu); }
+    this.emulator();
     try {
-      this.saved = titleTilemap(this.emu);
+      this.saved = titleTilemap(this.emu!);
       this.map = this.saved.slice();
-      this.pic = titlePicture(this.emu, this.map);
+      this.pic = titlePicture(this.emu!, this.map);
       this.error = '';
     } catch (e) {
       this.saved = this.map = this.pic = null;
@@ -152,6 +203,8 @@ export class GameView {
     this.zoom = Math.max(1, Math.min(6, Math.round(z)));
     this.canvas.style.width = `${W * this.zoom}px`;
     this.canvas.style.height = `${H * this.zoom}px`;
+    this.screenCanvas.style.width = `${W * this.zoom}px`;
+    this.screenCanvas.style.height = `${224 * this.zoom}px`;
     this.border.setZoom(this.zoom);
     this.zoomCtl?.update();
     this.surface.frames();

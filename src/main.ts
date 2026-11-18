@@ -557,7 +557,7 @@ function buildUi(app: App): { start: (at: NavLoc | null) => Promise<void> } {
   // ---- browser back/forward through the places (navhistory.ts)
   let nav: NavHistory | null = null;
   const capture = (): NavLoc => {
-    if (workspace === 'game') return game?.tab === 'border' ? { w: 'game', tab: 'border', map: game.borderMap } : { w: 'game', tab: 'title' };
+    if (workspace === 'game') return game?.tab === 'border' ? { w: 'game', tab: 'border', map: game.borderMap } : { w: 'game', tab: game?.tab ?? 'title' };
     if (workspace === 'ow') { const o = owShown(); return { w: 'ow', map: o?.map ?? 0, ...(o && o.selected >= 0 ? { tile: o.selected } : {}) }; }
     if (workspace === 'gfx' && ws) {
       const t = ws.tab, sub = ws.target.submap ?? undefined, g = { w: 'gfx' as const, tab: t, ...(sub !== undefined ? { sub } : {}) };
