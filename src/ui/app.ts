@@ -241,9 +241,9 @@ export class App {
   reveal = { x: 0, y: 0 }; // pixel the level view scrolls to on 'reveal'
   // tile/palette animation: frames stored as pixel diffs against the static composite (base), one per step
   // steps: the steps of the render (null: no animation), emulated in the background, carried over to a new render
-  // while what they read is unchanged (levelanimsteps.ts); phase: the step shown (-1 none yet), kept while the steps
-  // are; ready: the frames are those of the composite shown
-  // heldStep: the next slice of building the frames, held while a level edit is open (dragging, #452: each drag step
+  // while what they read is unchanged, else as a guess checked in the background (levelanimsteps.ts); phase: the step
+  // shown (-1 none yet), kept while the steps are; ready: the frames are those of the composite shown
+  // heldStep: the next slice of building the frames (or of checking carried steps), held while a level edit is open (dragging, #452: each drag step
   // would emulate steps that don't carry over to the next one); it goes on once the edit ended
   // rects: per frame the rectangles around its pixels (changedRects)
   anim = { gen: 0, steps: null as LevelAnimSteps | null, base: null as Uint32Array | null,
@@ -462,8 +462,8 @@ export class App {
       const r = this.emu.load(lv.number, ov);
       this.renderError = r.ok ? null : r.error ?? 'Error';
       // as many steps as the level's own animations take to repeat (the game's repeat after 8), emulated in
-      // the background (startAnimation) – or the last render's, carried over while nothing they read changed (an
-      // object moved: no emulation, the phase kept)
+      // the background (startAnimation) – or the last render's, carried over (the phase kept): for sure while nothing
+      // they read changed (an object moved: no emulation), else as a guess startAnimation checks (an object added)
       const count = this.view.show.anim && r.ok ? exanimPeriod([readLevelList(this.rom, lv.number), readGlobalList(this.rom)], MAX_ANIM_STEPS, 8) : 0;
       const kept = count ? this.anim.steps?.carry(this.emu, count) ?? null : null;
       if (!kept) this.anim.phase = -1;
@@ -538,6 +538,16 @@ export class App {
     const first = a.phase >= 0 && made.length ? a.phase % made.length : 0;
     if (a.phase >= 0) a.phase = made.length ? first : -1;
     let i = 0;
+    // steps carried as a guess (LevelAnimSteps.carry) checked once their frames run, one a slice: emulated and
+    // compared, without a word in the busy indicator – the same ones go on, others start anew with those emulated
+    const verify = () => {
+      if (gen !== a.gen) return;
+      if (this.edits.editing) { a.heldStep = verify; return; }
+      const same = steps.check();
+      this.rendered?.reads.add(steps.reads);
+      if (same === null) this.scheduler.later('anim', verify);
+      else if (!same) { a.phase = -1; this.startAnimation(); }
+    };
     const step = () => {
       if (gen !== a.gen) return;
       if (i === made.length && !steps.done) {
@@ -576,6 +586,7 @@ export class App {
       busy();
       if (i < made.length || !steps.done) { this.scheduler.later('anim', step); return; }
       a.ready = true;
+      if (!steps.checked) this.scheduler.later('anim', verify);
       if (!a.frames.length) { a.phase = -1; this.stopAnimation(); return; }
       if (!a.timer) a.timer = window.setInterval(() => this.animTick(), 1000 / ANIM_STEPS_PER_SECOND);
     };
