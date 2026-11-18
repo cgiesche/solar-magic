@@ -34,6 +34,8 @@ export const RAM = {
   gameMode: 0x0100,
   frameCounter: 0x14, // advances once per game frame (not in lag frames)
   introLevel: 0x0109, // level the game starts with instead of the overworld (0 = none)
+  padHeld: 0x15, // the joypad's B, Y, Select, Start and directions as the game has them held
+  titleMoveIndex: 0x1df4, titleMoveTimer: 0x1df5, // title screen movement: the game's place in its table, the frames left of the pair played
 
   // camera: layer 1 position (16-bit) and its copy for the next frame, layer 3 position
   layer1X: 0x1a, layer1Y: 0x1c,

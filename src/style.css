@@ -372,6 +372,13 @@ label.game-screen-about { display: flex; align-items: center; gap: 4px; }
 .brush-surface { position: relative; width: max-content; }
 .brush-over { position: absolute; left: 0; top: 0; pointer-events: none; }
 .game-pick { flex: 1; min-height: 0; overflow-y: auto; }
+/* the title screen movement: its panel beside the picture, its timeline under it */
+.game-move { flex: none; }
+.game-move-note { margin: 4px 8px; }
+.game-move-buttons { display: flex; flex-wrap: wrap; gap: 6px; padding: 4px 8px; }
+.game-timeline { flex: none; padding: 4px 8px; background: var(--surface); border-top: 1px solid var(--border); }
+.game-timeline[hidden] { display: none; }
+.game-timeline-canvas { display: block; width: 100%; cursor: pointer; touch-action: none; }
 .level-sizer { pointer-events: none; }
 .statusbar { height: 24px; padding: 3px 8px; background: var(--surface); border-top: 1px solid var(--border); font-family: var(--font-mono); font-size: 12px; white-space: nowrap; overflow: hidden; display: flex; gap: 16px; }
 .statusbar .status-pos { flex: none; min-width: 19ch; color: var(--text-muted); }

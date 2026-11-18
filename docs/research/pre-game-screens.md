@@ -343,5 +343,17 @@ save writes), not by patch names.
 ## Left to the tickets
 
 1. Can the menu stripes move to free space without a hijack (5.2)? Until known: edits in place, same length.
-2. What death on the title screen does in the clean game, and what hides the status bar there – to be learned by
-   emulation with the recording (5.3).
+2. ~~What death on the title screen does in the clean game, and what hides the status bar there~~ – learned by
+   emulation with the recording (#523, `src/core/titlemovement.ts`, `tools/testtitlemovement.ts`):
+   - **Death:** the title screen runs with 0 lives, so a death is a game over: game mode 15, the game over screen
+     (16, 17), then 0B and 0C – and as `$0109` still holds the title screen level, 0C loads it as a level to play
+     (10–14): with the status bar, the player's own joypad, lives `$FF`. Every death there is the next game over, without
+     end. (Holding right from the start, Mario dies at frame 92.) This is what Lunar Magic's
+     help warns of. The editor does not write a recording in which Mario dies.
+   - **Status bar:** nothing hides it; on the title screen it is never drawn. Its tilemap is written by a level's
+     load in mode 12 and its counters every frame of modes 13 and 14 (the NMI's routine at `$008DAC`); the title
+     screen loads through modes 03 and 04, which upload the title screen picture's stripe image to the same rows of
+     layer 3, and mode 07 writes none of them. It also runs without the IRQ that splits layer 3 under the status
+     bar: NMITIMEN is `$81` there, `$A1` in a level.
+   - **The table's timing:** the 34 pairs last 1426 frames; the 1427th frame of mode 07 reads the `$FF`. A button
+     byte goes to `$15` and to `$16` every frame: a button of the table is pressed anew each frame it is held.

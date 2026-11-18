@@ -29,7 +29,7 @@ import { SaveSlot } from '../core/savestate.ts';
 import type { SnesState } from '../core/snes.ts';
 import { iconLabel } from './icons.ts';
 
-const KEYMAP: Record<string, number> = {
+export const KEYMAP: Record<string, number> = {
   ArrowUp: PAD.up, ArrowDown: PAD.down, ArrowLeft: PAD.left, ArrowRight: PAD.right,
   x: PAD.b, X: PAD.b, // B: jump
   z: PAD.y, Z: PAD.y, y: PAD.y, Y: PAD.y, // Y: run / fire
@@ -55,7 +55,7 @@ const AUDIO_LEAD = 1800; // sample pairs to keep queued at first (~56 ms; grows 
 
 // buttons of all connected gamepads; pause: the pause button is held on one of them; save / load: Select+L /
 // Select+R held on one of them (Select, L and R are then left out of bits); rewind: a stick pressed on one of them
-function readPads(): { bits: number; pause: boolean; save: boolean; load: boolean; rewind: boolean; names: string[] } {
+export function readPads(): { bits: number; pause: boolean; save: boolean; load: boolean; rewind: boolean; names: string[] } {
   let bits = 0, pause = false, save = false, load = false, rewind = false;
   const names: string[] = [];
   for (const p of navigator.getGamepads?.() ?? []) {

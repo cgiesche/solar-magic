@@ -6,13 +6,17 @@
 // stripe image, in place; the cursor's cells and the cells the game writes over are marked) – painted with layer 3's
 // 8x8 tiles as every brush editor paints (brushsurface.ts, ADR 0011); a stroke is one ROM edit when the mouse is
 // released. Nintendo Presents has fields beside its picture (presents.ts: what the game reads the logo from). The
-// other screens are pictures; an editor for one of them replaces its picture in `showScreen`.
+// title screen page also has the title screen movement (titlemoves.ts): its timeline under the picture, which is the
+// game's at the playhead, played and recorded there. The other screens are pictures; an editor for one of them
+// replaces its picture in `showScreen`.
 
 import type { App } from './app.ts';
 import { h, toast, attachPanZoom, zoomControl, hexInput } from './dom.ts';
 import { LevelEmulator } from '../core/levelemu.ts';
 import { TileCache } from '../core/render.ts';
-import { TITLE_COLS, TITLE_ROWS, TITLE_SHOWN_ROWS, titleTilemap, titlePicture, writeTitleScreen, type TitlePicture } from '../core/titlescreen.ts';
+import { TITLE_COLS, TITLE_ROWS, TITLE_SHOWN_ROWS, titleTilemap, writeTitleScreen, type TitlePicture } from '../core/titlescreen.ts';
+import type { SnesState } from '../core/snes.ts';
+import { MovementView } from './titlemoves.ts';
 import { GAME_SCREENS, gameScreenKind, gameScreens, screenPicture, type GameScreenId, type ReachedScreen, type ScreenPicture } from '../core/pregame.ts';
 import { MENU_COLS, MENU_ROWS, menuText, paintMenuCell, paintedOverwritten, writeMenuText, type MenuText } from '../core/menutext.ts';
 import { pcToSnes } from '../core/rom.ts';
@@ -49,6 +53,8 @@ export class GameView {
   private saved: Uint16Array | null = null; // the tilemap as in the ROM
   private map: Uint16Array | null = null; // with the stroke being painted
   private pic: TitlePicture | null = null;
+  private head: SnesState | null = null; // the machine the title screen's picture is of: at the movement's playhead (null: as booted)
+  private moves: MovementView;
   private canvas = h('canvas', { class: 'game-canvas', width: W, height: H });
   private status = h('span', { class: 'status-text' });
   private pickPanel = h('div', { class: 'panel game-pick' });
@@ -82,10 +88,17 @@ export class GameView {
       h('span', { class: 'sep' }),
       this.zoomCtl.root,
       h('span', { class: 'sep' }));
+    this.moves = new MovementView({
+      app,
+      emulator: () => this.emulator(),
+      shown: () => this.root.isConnected && this.tab === 'title',
+      head: (state) => { this.head = state; if (this.tab === 'title') { this.surface.drop(); this.redraw(); } },
+      frame: (frame) => this.showFrame(frame),
+    });
     this.left = h('div', { class: 'left' }, h('div', { class: 'panel levels' }, h('div', { class: 'panel-title' }, 'Game'), this.list));
     this.surface = new BrushSurface(this.canvas, {
       cells: { w: TITLE_COLS, h: TITLE_ROWS },
-      cellAt: (px, py) => (this.map ? this.cellAt(px, py) : null),
+      cellAt: (px, py) => (this.map && !this.moves.live ? this.cellAt(px, py) : null),
       box: (r) => {
         const y0 = this.cellY(r.y), y1 = this.cellY(Math.min(TITLE_ROWS - 1, r.y + r.h - 1));
         return y0 < 0 || y1 < 0 ? null : { x: r.x * 8, y: y0, w: Math.min(r.w, TITLE_COLS - r.x) * 8, h: y1 + 8 - y0 };
@@ -122,7 +135,7 @@ export class GameView {
     });
     this.scroller = h('div', { class: 'level-scroller game-scroller' }, this.surface.root);
     attachPanZoom(this.scroller, () => this.zoom, (z, ax, ay) => this.setZoom(z, ax, ay), 1, 6, () => [1, 2, 3, 4, 5, 6]);
-    this.root = h('div', { class: 'center' }, h('div', { class: 'level-view' }, this.scroller), h('div', { class: 'statusbar' }, this.status));
+    this.root = h('div', { class: 'center' }, h('div', { class: 'level-view' }, this.scroller), this.moves.strip, h('div', { class: 'statusbar' }, this.status));
     this.side = h('div', { class: 'ow-side' }, this.pickPanel);
     this.buildList();
     // a ROM edit, undo or redo: shown as in the ROM (a stroke being painted is dropped)
@@ -157,11 +170,15 @@ export class GameView {
     const border = tab === 'border', edited = tab === 'title';
     this.title.textContent = border ? `${MAP_NAMES[map]} – overworld border` : gameScreenKind(tab).name;
     this.menu = null;
-    if (border || edited) {
-      this.scroller.replaceChildren(border ? this.border.root : this.surface.root);
-      this.side.replaceChildren(border ? this.border.side : this.pickPanel);
-      this.status.textContent = PAINT_HINT;
+    if (!edited) { this.moves.leave(); this.moves.strip.hidden = true; }
+    if (border) {
+      this.scroller.replaceChildren(this.border.root);
+      this.side.replaceChildren(this.border.side);
+    } else if (edited) {
+      this.scroller.replaceChildren(this.surface.root);
+      this.side.replaceChildren(this.moves.panel, this.pickPanel);
     }
+    if (border || edited) this.status.textContent = PAINT_HINT;
     if (border) this.bar.append(this.border.bar); else this.border.bar.remove();
     if (border) this.border.show(map); else if (edited) this.sync(); else this.showScreen(tab);
     this.listScreens();
@@ -186,7 +203,7 @@ export class GameView {
   onNav: () => void = () => {};
   // Esc: a stroke or pick in progress cancelled (else the workspace is left); whether it was taken
   key(e: KeyboardEvent): boolean {
-    return this.tab === 'border' ? this.border.key(e) : this.tab === 'title' ? this.surface.key(e) : this.menu ? this.menuSurface.key(e) : false;
+    return this.tab === 'border' ? this.border.key(e) : this.tab === 'title' ? this.moves.key(e) || this.surface.key(e) : this.menu ? this.menuSurface.key(e) : false;
   }
 
   // the emulator of the ROM shown (its boot the app's)
@@ -388,15 +405,27 @@ export class GameView {
     try {
       this.saved = titleTilemap(this.emu!);
       this.map = this.saved.slice();
-      this.pic = titlePicture(this.emu!, this.map);
+      this.head = this.moves.sync();
+      this.pic = this.titlePic();
       this.error = '';
     } catch (e) {
-      this.saved = this.map = this.pic = null;
+      this.saved = this.map = this.pic = this.head = null;
       this.error = `The game does not reach its title screen: ${e instanceof Error ? e.message : e}`;
     }
     this.paint();
     this.updateStatus(null);
     this.buildPicker();
+  }
+
+  // the title screen as the game draws it at the movement's playhead, with the tilemap as painted
+  private titlePic(): TitlePicture {
+    return screenPicture(this.emu!, this.head ?? this.emu!.bootState(), this.map ?? undefined);
+  }
+  // a frame of the game running on the page (the movement played or recorded): over the screen's rows
+  private showFrame(frame: Uint32Array): void {
+    const ctx = this.canvas.getContext('2d')!, img = ctx.createImageData(W, 224);
+    new Uint32Array(img.data.buffer).set(frame);
+    ctx.putImageData(img, 0, 0);
   }
 
   // z: zoom factor; anchor: the point in the scroller that stays put (default: its top left)
@@ -430,7 +459,7 @@ export class GameView {
         return;
       }
       if (!this.emu || !this.map) return;
-      try { this.pic = titlePicture(this.emu, this.map); } catch (e) { toast(String(e instanceof Error ? e.message : e), 'error'); }
+      try { this.pic = this.titlePic(); } catch (e) { toast(String(e instanceof Error ? e.message : e), 'error'); }
       this.paint();
     });
   }
