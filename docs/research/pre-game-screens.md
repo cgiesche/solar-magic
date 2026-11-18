@@ -300,6 +300,8 @@ help warns of, a passed Special World or Yoshi's greeting, can't differ between 
 - Up to 34 pairs fit the game's table in place, with no code changed. The clean game's demo is 1427 frames.
 - Longer needs playback code of the editor's own: the game's format at another address with the table's address
   repointed, as an editor patch. Lunar Magic's format is not followed (2.2).
+  *Done (#525):* three 16-bit reads in bank 0 can't be repointed to free space in place, so the patch hooks the code
+  (`$009C6F`, `$009C82`, `$009C93`; `docs/patches.md`), installed when a recording first needs it.
 - **Sync check:** the editor replays the recording after a change to the level, its sprites, blocks or code and
   compares it with the run recorded (Mario's position at the end, whether he died, whether the level was left). Out
   of sync shows as a problem on the title screen page instead of being found by players.

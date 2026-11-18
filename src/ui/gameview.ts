@@ -136,7 +136,7 @@ export class GameView {
     this.scroller = h('div', { class: 'level-scroller game-scroller' }, this.surface.root);
     attachPanZoom(this.scroller, () => this.zoom, (z, ax, ay) => this.setZoom(z, ax, ay), 1, 6, () => [1, 2, 3, 4, 5, 6]);
     this.root = h('div', { class: 'center' }, h('div', { class: 'level-view' }, this.scroller), this.moves.strip, h('div', { class: 'statusbar' }, this.status));
-    this.side = h('div', { class: 'ow-side' }, this.pickPanel);
+    this.side = h('div', { class: 'ow-side' }, this.moves.panel, this.pickPanel);
     this.buildList();
     // a ROM edit, undo or redo: shown as in the ROM (a stroke being painted is dropped)
     app.on('rom-change', () => {

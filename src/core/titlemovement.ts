@@ -31,10 +31,24 @@
 // in the ROM ("SMWT", the game reads none of it), and the run as the game plays it now is compared with it: the first
 // frame Mario is elsewhere, or the frame one run ends and the other goes on. A movement without such a block (the
 // clean game's) is compared with its run as the editor first saw it for the ROM opened.
+//
+// A recording of more pairs than the game's table holds (34 in the clean game) needs the table elsewhere, and the
+// game's three reads of it are 16-bit addresses in bank 0. The editor's patch (TITLE_MOVE_ASM, installed when a
+// recording first needs it, applied anew with every recording after) keeps the game's format – pairs of buttons and
+// frames, $FF – in free space, read by a routine there; the game's place in the table ($1DF4) then counts pairs, not
+// bytes: 254 pairs. It is installed only where the reads found by emulation are the clean game's code. Beside the
+// community's patches of this place – No Title Screen Movement ($009C82), Playable Title Screen ($009C67), Multiple
+// Title Screen Demos ($009C6C), Lunar Magic's playback ($009C6F): they change the code the patch hooks, so the
+// patch registry refuses them while it is installed; removeMovementPatch takes it out again (the title screen page
+// offers it), and the page says what plays the title screen where it is no table (titlePlays). (The bytes are laid
+// out so that No Title Screen Movement's edit, written over the patch by other means, does what it does to the game.)
 
 import type { LevelEmulator } from './levelemu.ts';
 import type { Rom } from './rom.ts';
-import { pcToSnes } from './rom.ts';
+import { pcToSnes, snesToPc } from './rom.ts';
+import { applyPatch, reapplyPatch, uninstallPatch, type PatchSource } from './patchapply.ts';
+import { listPatches, type PatchEntry } from './patchreg.ts';
+import { asarReady } from './asar.ts';
 import { Snes, type SnesState } from './snes.ts';
 import { PPU } from './ppu.ts';
 import { GM, RAM, PAD, MARIO_DYING, marioX, marioY } from './ram.ts';
@@ -63,7 +77,8 @@ export interface TitleMovement {
   at: number; // the table's ROM offset
   pairs: MovePair[]; // as the table has them
   frames: number; // the frames they last
-  capacity: number; // the pairs the table holds where it is
+  capacity: number; // the pairs the table holds where it is (the editor's patch installed: as many as it plays)
+  patched: boolean; // the table is the editor's patch's, in free space
   reads: number[]; // the instructions seen to read it (SNES addresses)
 }
 
@@ -92,7 +107,7 @@ export function movePairs(frames: ArrayLike<number>): MovePair[] {
 // known by it): the longest pairs split in two; a movement of fewer frames than pairs is filled with frames of no
 // button. Throws when it has more than n.
 export function fitPairs(pairs: readonly MovePair[], n: number): MovePair[] {
-  if (pairs.length > n) throw new Error(`The recording has ${pairs.length} pairs of buttons and frames: ${pairs.length - n} more than the game's table holds (${n})`);
+  if (pairs.length > n) throw new Error(`${pairs.length} pairs don't fit a table of ${n}`);
   const out = pairs.map((p): MovePair => [p[0], p[1]]);
   while (out.length < n) {
     let k = -1;
@@ -160,8 +175,33 @@ export function learnMovement(emu: LevelEmulator): TitleMovement | null {
     if (pairs.length >= MAX_TABLE || o + 2 >= d.length) return null;
     pairs.push([d[o], pairFrames(d[o + 1])]);
   }
-  return { at, pairs, frames: pairs.reduce((n, p) => n + p[1], 0), capacity: pairs.length, reads };
+  const patched = movementPatch(emu.rom) !== null;
+  return { at, pairs, frames: pairs.reduce((n, p) => n + p[1], 0), capacity: patched ? PATCH_PAIRS : pairs.length, patched, reads };
 }
+
+// What plays the title screen level: the game's table ('table'), the player (the joypad is passed on: Playable
+// Title Screen), nothing (no button is ever held: No Title Screen Movement), or something else the editor doesn't
+// read (several tables, another format: Multiple Title Screen Demos, Lunar Magic's playback). By what the game does.
+export type TitlePlays = 'table' | 'player' | 'none' | 'other';
+const PLAY_FRAMES = 120; // frames looked at for a button held
+export function titlePlays(emu: LevelEmulator, mv: TitleMovement | null = learnMovement(emu)): TitlePlays {
+  if (mv) return 'table';
+  const s = emu.snes, w = s.wram, hook = s.hook;
+  s.hook = null;
+  try {
+    const held = (pad: number) => {
+      let any = 0;
+      s.loadState(emu.bootState());
+      for (let f = 0; f < PLAY_FRAMES && w[RAM.gameMode] === GM.title; f++) { s.joy1 = pad; s.runFrame(); any |= w[RAM.padHeld]; }
+      s.joy1 = 0;
+      return any;
+    };
+    const alone = held(0);
+    if (alone) return 'other';
+    return held(PAD.right) & MOVE.right ? 'player' : 'none';
+  } finally { s.hook = hook; s.joy1 = 0; }
+}
+
 
 // how a run of the title screen ended: at the table's end (the game fades out and loads the title screen again),
 // with Mario dying, with the level left another way, or not within the frames run
@@ -217,14 +257,14 @@ export function runState(emu: LevelEmulator, run: MovementRun, frame: number): S
 }
 
 // The movement and its run, kept per emulator while the ROM bytes the game read for them are as they were.
-const kept = new WeakMap<LevelEmulator, { gen: number; reads: RomReads; movement: TitleMovement | null; run: MovementRun | null }>();
-export function titleMovement(emu: LevelEmulator): { movement: TitleMovement | null; run: MovementRun | null } {
+const kept = new WeakMap<LevelEmulator, { gen: number; reads: RomReads; movement: TitleMovement | null; run: MovementRun | null; plays: TitlePlays }>();
+export function titleMovement(emu: LevelEmulator): { movement: TitleMovement | null; run: MovementRun | null; plays: TitlePlays } {
   const had = kept.get(emu);
   if (had && holds(emu.rom, had)) return had;
   emu.ensureBoot();
   const r = emu.recordAll(() => {
     const movement = learnMovement(emu);
-    return { movement, run: movement ? runMovement(emu, movement) : null };
+    return { movement, run: movement ? runMovement(emu, movement) : null, plays: titlePlays(emu, movement) };
   });
   const k = { gen: r.gen, reads: r.reads, ...r.result };
   kept.set(emu, k);
@@ -294,15 +334,117 @@ export class TitleSession {
   }
 }
 
-// Writes the movement of the buttons of every frame (a recording's) into the game's table, in place: the pairs the
-// table holds there. Throws when it has more pairs than that. `trace`: the run as recorded, written with it for the
-// sync check (none: the check compares with the run as the editor first sees it).
-export function writeMovement(rom: Rom, mv: TitleMovement, frames: ArrayLike<number>, trace?: MovementTrace): void {
+// ---- the table in free space ----
+export const TITLE_MOVE_PATCH_NAME = 'Title screen movement table';
+export const PATCH_PAIRS = 254; // the pairs the patch's table holds: the game's place in it is a byte, the end one of them
+const hx = (v: number, d = 4) => v.toString(16).toUpperCase().padStart(d, '0');
+
+// the clean game's code that plays the table (LDX index … STA $16, before its JMP to the level's frame), the table
+// at SNES address `table`: what the patch's hooks expect
+const gameCode = (table: number): number[] => {
+  const i = RAM.titleMoveIndex, t = RAM.titleMoveTimer, w = (a: number) => [a & 0xff, (a >> 8) & 0xff];
+  return [0xae, ...w(i), 0xce, ...w(t), 0xd0, 0x0b, 0xbd, ...w(table + 1), 0x8d, ...w(t), 0xe8, 0xe8, 0x8e, ...w(i), 0xbd, ...w(table - 2), 0xc9, 0xff, 0xd0, 0x06,
+    0xa0, GM.titleFadeOut, 0x8c, ...w(RAM.gameMode), 0x60, 0x29, 0xdf, 0x85, RAM.padHeld, 0xdd, ...w(table - 2), 0xd0, 0x02, 0x29, 0x9f, 0x85, RAM.padHeld + 1];
+};
+const CODE = 0x009c6f, READS = [0x009c77, 0x009c82, 0x009c93]; // that code and its three reads of the table, in the clean game
+
+const titleMoveAsm = (pairs: readonly MovePair[]): string => {
+  const b = tableBytes(pairs), rows: string[] = [];
+  for (let i = 0; i < b.length; i += 16) rows.push(`  db ${Array.from(b.subarray(i, i + 16), (v) => `$${hx(v, 2)}`).join(',')}`);
+  return `asar 1.90
+lorom
+!Index = $${hx(RAM.titleMoveIndex)}   ; the game's place in the table: here the pair after the one played, not a byte offset
+!Timer = $${hx(RAM.titleMoveTimer)}   ; the frames left of the pair played
+
+org $${hx(CODE, 6)}   ; LDX !Index : DEC !Timer : BNE … (A, X/Y 8)
+  JSL Move        ; A = the pair's buttons, V set: with Y newly pressed (the Select bit)
+  BRA Buttons
+org $${hx(READS[1], 6)}   ; LDA Table-2,x
+Buttons:
+  NOP #3          ; (No Title Screen Movement writes NOP : LDA #$00 here: it still works)
+org $${hx(READS[2], 6)}   ; CMP Table-2,x : BNE +
+  NOP #3
+  db $70,$02      ; BVS +: with the Select bit, Y stays in the pressed byte
+
+freecode
+Move:
+  DEC !Timer
+  BNE .same
+  REP #$30
+  LDA !Index : AND #$00FF : ASL : TAX
+  SEP #$20
+  LDA.l Table+1,x : STA !Timer
+  INC !Index
+  BRA .buttons
+.same
+  REP #$30
+  LDA !Index : AND #$00FF : DEC : ASL : TAX
+  SEP #$20
+.buttons
+  LDA.l Table,x
+  SEP #$10
+  CLV
+  PHA
+  AND #$20 : BEQ +
+  SEP #$40
++ PLA
+  RTL
+
+Table:            ; pairs of buttons and frames, $FF; a byte the game reads past the end
+${rows.join('\n')}
+  db $00
+`;
+};
+const patchSource = (pairs: readonly MovePair[]): PatchSource => ({ name: TITLE_MOVE_PATCH_NAME, main: 'titlemove.asm', files: new Map([['titlemove.asm', titleMoveAsm(pairs)]]), kind: 'titlemove' });
+
+export function movementPatch(rom: Rom): PatchEntry | null {
+  return listPatches(rom).find((p) => p.kind === 'titlemove') ?? null;
+}
+
+// The editor's patch removed: the game reads its own table again, as it was before the patch (a movement of the pairs
+// that fit there). For a patch of the title screen's code, which the registry refuses beside this one.
+export function removeMovementPatch(rom: Rom): void {
+  const p = movementPatch(rom);
+  if (!p) return;
+  uninstallPatch(rom, p.id);
+  writeTrace(rom, null);
+}
+
+// how a recording of the buttons of every frame is written: into the table where it is ('place'), with the editor's
+// patch ('patch': Asar is needed, loadAsar) – or why it can't be
+export function movementFit(rom: Rom, mv: TitleMovement, frames: ArrayLike<number>): { how: 'place' | 'patch' } | { how: 'none'; why: string } {
+  const n = movePairs(frames).length;
+  if (mv.patched) return n <= PATCH_PAIRS ? { how: 'patch' } : { how: 'none', why: tooMany(n, PATCH_PAIRS) };
+  if (n <= mv.capacity) return { how: 'place' };
+  if (n > PATCH_PAIRS) return { how: 'none', why: `${tooMany(n, mv.capacity)}; with the table moved to free space it would hold ${PATCH_PAIRS}` };
+  // the patch fits the clean game's code only: the reads found by emulation are its three, the code around them its own
+  const code = gameCode(pcToSnes(mv.at) & 0xffff), at = snesToPc(CODE);
+  const own = mv.at < 0x8000 && mv.reads.length === READS.length && READS.every((a) => mv.reads.some((r) => (r & 0x7fffff) === a)) && code.every((v, i) => rom.data[at + i] === v);
+  return own ? { how: 'patch' } : { how: 'none', why: `${tooMany(n, mv.capacity)}, and the game reads its table with other code than its own (a patch's): the editor's table in free space does not fit it` };
+}
+const tooMany = (n: number, holds_: number) => `The recording has ${n} pairs of buttons and frames: ${n - holds_} more than the game's table holds (${holds_})`;
+
+// Writes the movement of the buttons of every frame (a recording's): into the game's table in place where it fits
+// (split to the pairs the table has there), else into the editor's patch's table in free space – the patch installed
+// or applied anew (Asar loaded: loadAsar). Throws when it has more pairs than either holds, or the patch can't be
+// applied. `trace`: the run as recorded, written with it for the sync check (none: the check compares with the run as
+// the editor first sees it). How it was written.
+export function writeMovement(rom: Rom, mv: TitleMovement, frames: ArrayLike<number>, trace?: MovementTrace): 'place' | 'patch' {
   if (!frames.length) throw new Error('A recording of no frames');
-  const pairs = fitPairs(movePairs(frames), mv.capacity);
-  rom.writeAt(mv.at, tableBytes(pairs));
+  const fit = movementFit(rom, mv, frames);
+  if (fit.how === 'none') throw new Error(fit.why);
+  let pairs = movePairs(frames);
+  if (fit.how === 'place') {
+    pairs = fitPairs(pairs, mv.capacity);
+    rom.writeAt(mv.at, tableBytes(pairs));
+  } else {
+    if (!asarReady()) throw new Error('The assembler is not loaded');
+    const had = movementPatch(rom), r = had ? reapplyPatch(rom, had.id, patchSource(pairs)) : applyPatch(rom, patchSource(pairs));
+    if (!r.ok) throw new Error(`The title screen movement's table could not be moved to free space: ${r.errors.join(' ')}`);
+  }
   // (a recording of fewer frames than the table's pairs was filled: its run is not the one recorded)
   writeTrace(rom, trace && pairs.reduce((n, p) => n + p[1], 0) === frames.length ? trace : null);
+  return fit.how;
 }
 
 // ---- the sync check ----
@@ -371,13 +513,15 @@ export function compareRuns(was: MovementTrace, now: MovementTrace): MovementDri
 
 // The run as the game plays it now against the run as recorded – or, for a movement the ROM has no recorded run of,
 // against its run as the editor first saw it for this ROM (`since`: which). null: in sync, or no movement.
-const firstSeen = new WeakMap<Rom, MovementTrace>();
+// (first seen: of the table as it is – another table without a recorded run, an undo's or the game's own after the
+// patch was removed, is seen anew)
+const firstSeen = new WeakMap<Rom, { table: string; trace: MovementTrace }>();
 export function movementDrift(emu: LevelEmulator): (MovementDrift & { since: 'recorded' | 'opened' }) | null {
-  const run = titleMovement(emu).run;
-  if (!run) return null;
-  const recorded = recordedTrace(emu.rom);
-  if (!recorded && !firstSeen.has(emu.rom)) firstSeen.set(emu.rom, { x: run.x, y: run.y, end: run.end });
-  const d = compareRuns(recorded ?? firstSeen.get(emu.rom)!, run);
+  const { movement: mv, run } = titleMovement(emu);
+  if (!mv || !run) return null;
+  const recorded = recordedTrace(emu.rom), table = `${mv.at}:${mv.pairs.join(' ')}`;
+  if (!recorded && firstSeen.get(emu.rom)?.table !== table) firstSeen.set(emu.rom, { table, trace: { x: run.x, y: run.y, end: run.end } });
+  const d = compareRuns(recorded ?? firstSeen.get(emu.rom)!.trace, run);
   return d && { ...d, since: recorded ? 'recorded' : 'opened' };
 }
 

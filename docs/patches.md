@@ -545,6 +545,27 @@ VRAM patch (the newer release reads Lunar Magic's previous camera position `$7F8
 The editor writes nothing at `$0FFFE6` – Lunar Magic and other tools would take it for its VRAM patch – and has the
 fix as its own patch; the original is a replaced patch.
 
+### Title screen movement table
+
+The game plays its title screen level with a table of 34 pairs of buttons and frames at `$009C1F` (`$FF` ends it),
+read by three instructions with 16-bit addresses in bank 0. A recording made on the title screen page (*Game →
+Title screen*) that fits is written there, with no code changed. One of more pairs gets the editor patch "Title
+screen movement table", installed then – not when the ROM is opened, since the community's patches of the title
+screen use the same place – and applied anew with every recording after: the game's format in free space, read by a
+routine there. The game's place in the table (`$1DF4`) counts pairs instead of bytes then, so it holds 254 pairs.
+Hooks: `$009C6F` (`JSL` to the routine, which returns the pair's buttons; the game's own load of the next pair is
+skipped), `$009C82` (three `NOP`s where the game loaded the buttons) and `$009C93` (the game's second read of
+the buttons, which tells whether the Select bit is set, becomes a `BVS` on the routine's flag). The game's own table
+stays where it is, unused; removing the patch brings it back.
+
+Beside the community's patches of this place – *No Title Screen Movement* (`$009C82`), *Playable Title Screen*
+(`$009C67`), *Multiple Title Screen Demos* (`$009C6C`), Lunar Magic's Title Moves playback (`$009C6F`): they change
+the code the patch hooks, so with it installed they are refused as a conflict. *Remove the patch* on the title
+screen page takes it out again (the game then plays the table it had in place). Without it they install as on the
+clean game, and the title screen page shows what the game does then – played by the player, no buttons, or buttons
+from something the editor doesn't read – instead of a movement. The patch is installed only where the reads of the table found by emulation are the clean
+game's (`src/core/titlemovement.ts`, `tools/testtitlemovement.ts`).
+
 ### Level heights
 
 A horizontal level without layer 2 objects can be taller or shorter than the game's 27 rows, as in Lunar
@@ -1036,6 +1057,7 @@ not compatible with the respective feature.
 | `$00A9DA`, `$00A01F` | Layer 3 graphics per level (SMWL); RAM `$7F3678` |
 | `$05D915`, `$00F79D`, table `$06FA00` | Layer 2 scroll rates; RAM `$7F3660–$7F3665` |
 | `$00F713`, `$00F728`, `$00F7F4`, `$00F80C` | Sprite scroll fix; RAM `$7F3683–$7F3686` |
+| `$009C6F`, `$009C82`, `$009C93` | Title screen movement table (only once a recording needs more than the game's 34 pairs); `$1DF4` counts pairs |
 | `$05D928`, `$0586BB`, entrance options and screen exit flags `$009708`, `$0DA532`, `$0DA536`, the slanted pipe to the left `$00D2B2`, the midway entrance `$05D9B8`, `$05D9DE` (also by a screen exit, its flags `$05D7C5`), new-style exits `$05D7CE`, `$05D836`, `$0DA963`, `$0DA9D6`, `$0DA9EF`, `$058091`, ext. object table `$0DA118` (entry `$03`, the swapped screen jump), tables `$06CA00`, `$05DE00`, `$06FC00`, `$06FE00`, `$06CC00`, `$06CE00`, `$07E800`, `$07EA00`, `$07EC00`, `$07EE00`; finding a block `$00F478`, `$00F492`, `$00F49A`, `$0194D6`, `$019500`, `$019512`, `$01D97B`, `$01D981`, `$0292D9`, `$0292F9`, `$02930A`, `$0295C0`, `$0295EC`, `$0295FD`, `$02A6BA`, `$02A6CB`, `$02BA50`, `$02BA71`, `$02BA82`, `$02D15A`, `$02D18C`, `$02D19D`, `$03D793`; changing a tile `$00BEEC`, `$00BF41`, `$00C079`, `$00C0C6`, `$00C1B1`, `$00C3D3`; mode tables `$00BDA8`, `$00BDE8`, `$00BE28`, `$00BE68`; sprites `$02A82E`, `$02A968`, `$02AA5F`, `$02AB54`, `$02ABD0`, `$02AF3D`, `$02AFA7`, `$01AC3E`, `$02D038`, `$03B86A`; camera `$00F70D`; entrances `$05D7E0`, `$05DA17`; secondary entrances to the overworld `$05D836` | Level heights (Lunar Magic 3.00's entrances, their options); RAM `$7F3666–$7F3677`, `$7F3679`, Lunar Magic's `$13D7`, `$0BF6–$0CF5` |
 | `$008A7F`, `$0087AD`, `$0085E3`, `$0082B6`, `$0580B0`, `$0580B4`, `$0580BF`, `$0580C3`, `$058730`, `$058770`, `$0587D4`, `$0587DB`, `$05880B`, `$058812`, `$0586F7`, `$058A3A` | VRAM patch (SMWV): tilemaps relocated, taller levels' rows; RAM `$7F0000–$7F3654` |
 | Header `$00FFD5`, vectors `$00FFEA`, `$00FFEE`, `$00FFFC`, stubs `$00BA4E–$00BA59` (the rewritten bank bytes of long jumps are not hooks) | FastROM (SMWR) |

@@ -1,7 +1,9 @@
 // The title screen page's title screen movement (core/titlemovement.ts): a timeline of the buttons the game's table
 // holds, with a playhead – the title screen's picture is the game's at that frame –, played on the page, checked
 // against the run as recorded (out of sync: a problem here, with the frame where the runs part), and recorded: the title screen level played from the title screen's own state with the keyboard or a gamepad, the
-// buttons fed to the game through its table; Stop writes the recording into the table as one ROM edit.
+// buttons fed to the game through its table; Stop writes the recording into the table as one ROM edit – a recording
+// of more pairs than the table holds with the editor's patch, which has the table in free space. Where the game plays
+// its title screen without a table (a patch's way), the page says what plays it.
 
 import type { App } from './app.ts';
 import { h } from './dom.ts';
@@ -9,11 +11,12 @@ import { uiToken } from './marks.ts';
 import { KEYMAP, readPads } from './testplay.ts';
 import type { LevelEmulator } from '../core/levelemu.ts';
 import type { SnesState } from '../core/snes.ts';
-import { MOVE, MOVE_BUTTONS, MAX_RECORD_FRAMES, TitleSession, titleMovement, movementDrift, runState, writeMovement, moveFrames, movePairs, movementPlace,
-  type TitleMovement, type MovementRun, type MovePair, type MovementDrift, type MovementEnd } from '../core/titlemovement.ts';
+import { MOVE, MOVE_BUTTONS, MAX_RECORD_FRAMES, PATCH_PAIRS, TITLE_MOVE_PATCH_NAME, TitleSession, titleMovement, movementDrift, movementFit, removeMovementPatch, runState, writeMovement, moveFrames, movePairs, movementPlace,
+  type TitleMovement, type MovementRun, type MovePair, type MovementDrift, type MovementEnd, type TitlePlays } from '../core/titlemovement.ts';
+import { asarReady, loadAsar } from '../core/asar.ts';
 
 const FPS = 60.0988; // the game's frames per second
-const LABELS = 44, ROW = 9, RULER = 12; // the timeline: the button names' column, a button's row, the ruler (CSS pixels)
+const LABELS = 44, ROW = 12, RULER = 14; // the timeline: the button names' column, a button's row, the ruler (CSS pixels)
 
 export interface MovementHost {
   app: App;
@@ -33,6 +36,7 @@ export class MovementView {
   private run: MovementRun | null = null;
   private drift: (MovementDrift & { since: 'recorded' | 'opened' }) | null = null; // out of sync: where the runs part
   private error = '';
+  private plays: TitlePlays = 'table'; // what plays the title screen level
   private playhead = 0; // a frame of the run (its count: after the last)
   private session: TitleSession | null = null;
   private armed = false; // recording: waiting for the first button
@@ -71,6 +75,7 @@ export class MovementView {
       const k = titleMovement(this.host.emulator());
       this.mv = k.movement;
       this.run = k.run;
+      this.plays = k.plays;
       this.drift = movementDrift(this.host.emulator());
     } catch (e) {
       this.mv = this.run = this.drift = null;
@@ -188,18 +193,38 @@ export class MovementView {
       else if (s.end === 'left') this.note = { text: `The level was left at frame ${n}: not written. The title screen movement ends where its table ends, not with the level.`, warn: true };
       else if (!n) this.note = { text: 'Nothing was recorded.', warn: false };
       else {
-        try {
-          // (the ROM edit shows the page anew: sync)
-          this.host.app.romEdit('Title screen movement recorded', () => writeMovement(this.host.app.rom, mv, s.buttons, s.run()));
-          this.note = { text: `Recorded: ${n} frames (${seconds(n)}), ${pairs} pair${pairs === 1 ? '' : 's'} of buttons and frames${n >= MAX_RECORD_FRAMES ? ' – the longest the editor records' : ''}.`, warn: false };
-        } catch (e) {
-          this.note = { text: `${e instanceof Error ? e.message : e}. Not written.`, warn: true };
-        }
+        const app = this.host.app, fit = movementFit(app.rom, mv, s.buttons);
+        const put = () => {
+          try {
+            // (the ROM edit shows the page anew: sync)
+            const how = app.romEdit('Title screen movement recorded', () => writeMovement(app.rom, mv, s.buttons, s.run()));
+            this.note = { text: `Recorded: ${n} frames (${seconds(n)}), ${pairs} pair${pairs === 1 ? '' : 's'} of buttons and frames${n >= MAX_RECORD_FRAMES ? ' – the longest the editor records' : ''}`
+              + `${how === 'patch' && !mv.patched ? ` – more than the game's table holds (${mv.capacity}): the table is in free space now, read by the editor's patch "${TITLE_MOVE_PATCH_NAME}"` : ''}.`, warn: false };
+          } catch (e) {
+            this.note = { text: `${e instanceof Error ? e.message : e}. Not written.`, warn: true };
+          }
+        };
+        if (fit.how === 'patch' && !asarReady()) {
+          // (the patch is assembled: the assembler loads first; the ROM changed meanwhile, the recording is not of it)
+          this.note = { text: 'Loading the assembler …', warn: false };
+          const done = () => { this.build(); this.draw(); };
+          loadAsar().then(() => { if (this.mv === mv && !this.session) put(); else this.note = { text: 'The ROM changed meanwhile: the recording was not written.', warn: true }; done(); },
+            (e) => { this.note = { text: `The assembler did not load (${e instanceof Error ? e.message : e}). Not written.`, warn: true }; done(); });
+        } else put();
       }
     }
     this.build();
     this.draw();
     this.host.head(this.state());
+  }
+
+  private unpatch(): void {
+    const app = this.host.app;
+    try {
+      app.romEdit('Title screen movement table removed', () => removeMovementPatch(app.rom));
+      this.note = { text: 'The patch is removed: the game plays the table it had in place before.', warn: false };
+    } catch (e) { this.note = { text: String(e instanceof Error ? e.message : e), warn: true }; }
+    this.build();
   }
 
   private onKey(e: KeyboardEvent, down: boolean): void {
@@ -219,15 +244,26 @@ export class MovementView {
     const out: HTMLElement[] = [h('div', { class: 'panel-title' }, 'Title screen movement')];
     if (!mv || !run) {
       out.push(p(this.error ? `The game does not reach its title screen: ${this.error}`
-        : 'The game plays its title screen without a table of buttons and frames here: a patch plays it another way (as No Title Screen Movement or Playable Title Screen do). There is no title screen movement to record.'));
+        : this.plays === 'player' ? 'The title screen level is played by the player here: the game passes the joypad on to it instead of buttons from a table (a patch does this, as Playable Title Screen). There is no title screen movement to record.'
+        : this.plays === 'none' ? 'Mario is given no buttons on the title screen here: the game holds none, from no table (a patch does this, as No Title Screen Movement). There is no title screen movement to record.'
+        : 'The game plays its title screen level with buttons that are not from a table of buttons and frames the editor reads: a patch plays it its own way (several movements or another format, as Multiple Title Screen Demos or Lunar Magic\'s Title Moves). The movement can\'t be recorded here.'));
       this.panel.replaceChildren(...out);
       this.strip.hidden = true;
       return;
     }
     this.strip.hidden = false;
+    const btn = (label: string, title: string, run_: () => void, cls = '') => h('button', { class: cls, title, onclick: run_ }, label);
+    // (first: they stay where they are when a note comes or goes)
+    out.push(h('div', { class: 'game-move-buttons' }, ...(s
+      ? [btn(s.recording ? 'Stop and write' : 'Stop', s.recording ? 'Ends the recording and writes it into the game\'s table' : 'Stops at this frame', () => this.stop(true), 'primary'),
+        ...(s.recording ? [btn('Drop', 'Ends the recording without writing it (Esc)', () => this.stop(false))] : [])]
+      : [btn('Play', 'Plays the movement from the playhead, as the game does', () => this.play()),
+        btn('Record', 'Plays the title screen level from the title screen\'s start and records the buttons', () => this.record()),
+        ...(mv.patched ? [btn('Remove the patch', 'Removes the editor\'s patch: the game plays the table it had in place before. Needed before a patch of the title screen\'s code is installed (Playable Title Screen, Multiple Title Screen Demos, No Title Screen Movement): beside this one it is refused as a conflict', () => this.unpatch())] : [])])));
     const used = movePairs(moveFrames(mv.pairs)).length;
     out.push(p(`The buttons the game plays the title screen level with: ${run.frames === mv.frames ? mv.frames : `${run.frames} of ${mv.frames}`} frames (${seconds(run.frames)}), then it loads the title screen again. `
-      + `The game's table at ${movementPlace(mv)} holds ${mv.capacity} pairs of buttons and frames; this movement needs ${used}.`));
+      + (mv.patched ? `The table is in free space at ${movementPlace(mv)}, read by the editor's patch "${TITLE_MOVE_PATCH_NAME}": it holds ${mv.capacity} pairs of buttons and frames; this movement needs ${used}.`
+        : `The game's table at ${movementPlace(mv)} holds ${mv.capacity} pairs of buttons and frames; this movement needs ${used}. A recording of more pairs moves the table to free space (an editor patch; up to ${PATCH_PAIRS} pairs).`)));
     if (run.end === 'died') out.push(p(`Mario dies at frame ${run.frames}. On the title screen a death is a game over, after which the game loads the title screen level as a level to play, again and again.`, 'warn-box game-move-note'));
     else if (run.end !== 'table') out.push(p(`The level is left at frame ${run.frames}, before the table ends.`, 'warn-box game-move-note'));
     const d = this.drift;
@@ -241,12 +277,6 @@ export class MovementView {
         h('button', { title: 'The playhead at the frame where the runs part', onclick: () => this.seek(d.frame) }, `Show frame ${d.frame}`)));
     }
     if (this.note) out.push(p(this.note.text, this.note.warn ? 'warn-box game-move-note' : 'hint game-screen-about'));
-    const btn = (label: string, title: string, run_: () => void, cls = '') => h('button', { class: cls, title, onclick: run_ }, label);
-    out.push(h('div', { class: 'game-move-buttons' }, ...(s
-      ? [btn(s.recording ? 'Stop and write' : 'Stop', s.recording ? 'Ends the recording and writes it into the game\'s table' : 'Stops at this frame', () => this.stop(true), 'primary'),
-        ...(s.recording ? [btn('Drop', 'Ends the recording without writing it (Esc)', () => this.stop(false))] : [])]
-      : [btn('Play', 'Plays the movement from the playhead, as the game does', () => this.play()),
-        btn('Record', 'Plays the title screen level from the title screen\'s start and records the buttons', () => this.record())])));
     if (s?.recording) out.push(p('Recording starts with the first button (Space: with none held). Arrow keys; X is B (jump), Z is Y (run, and what Y does when pressed) – or a gamepad. The game\'s table has no A, L, R, Start or Select: they are not recorded. A button of the table is pressed anew every frame it is held: Mario jumps again as soon as he lands while B is held.'));
     else out.push(p('Click the timeline for the picture at a frame. Recording replaces the movement; undo brings it back.'));
     this.panel.replaceChildren(...out);
@@ -300,7 +330,7 @@ export class MovementView {
     // the frame's line
     if (s?.recording) {
       this.info.textContent = this.armed ? 'Recording: waiting for the first button'
-        : `Recording: frame ${s.buttons.length} (${seconds(s.buttons.length)}), ${pairs.length} pair${pairs.length === 1 ? '' : 's'} – the game's table holds ${mv.capacity}`;
+        : `Recording: frame ${s.buttons.length} (${seconds(s.buttons.length)}), ${pairs.length} pair${pairs.length === 1 ? '' : 's'} – the game's table holds ${mv.capacity}${mv.patched ? '' : `, in free space ${PATCH_PAIRS}`}`;
     } else if (run) {
       const frames = moveFrames(mv.pairs), b = frames[this.playhead] ?? 0;
       const held = MOVE_BUTTONS.filter((k) => b & k.bit).map((k) => k.name).join(' + ') || 'no button';
