@@ -290,12 +290,13 @@ export type TaskMessage = ProbeMessage & { type: TaskType };
 // Jobs that share what a host keeps between them (probehost.ts LearnState: the levels' uses and the block prober with
 // the saves at an event progress, the overworld's loads) are on the same worker; results reach the other's jobs
 // through the editor.
-export const PROBE_WORKERS = 3;
-const WORKER_OF: Partial<Record<ProbeBusyKey, number>> = { kinds: 1, sprites: 2, variants: 2, bytes: 2, spritemem: 2 };
-export function probeWorker(key: ProbeBusyKey, workers: number): number { return Math.max(0, Math.min(WORKER_OF[key] ?? 0, workers - 1)); }
+const WORKER_OF = { kinds: 1, sprites: 2, variants: 2, bytes: 2, spritemem: 2 } satisfies Partial<Record<ProbeBusyKey, number>>;
+export const PROBE_WORKERS = 1 + Math.max(...Object.values(WORKER_OF)); // 3
+export function probeWorker(key: ProbeBusyKey, workers: number): number { return Math.max(0, Math.min((WORKER_OF as Partial<Record<ProbeBusyKey, number>>)[key] ?? 0, workers - 1)); }
 // the workers to start on a machine with that many logical cores: one per two of them (the main thread and the browser
 // need theirs), so two from four cores on, three from six
-export function probeWorkersFor(cores: number): number { return Math.max(1, Math.min(PROBE_WORKERS, Math.floor(cores / 2) || 1)); }
+// (not known: one)
+export function probeWorkersFor(cores: number): number { return Math.max(1, Math.min(PROBE_WORKERS, Math.floor((cores || 0) / 2))); }
 // what a message is for (the ROM and its changes are for every worker)
 export type RoutedMessage = Exclude<ProbeMessage, { type: 'rom' | 'edit' }>;
 export function messageFor(m: RoutedMessage): ProbeBusyKey {

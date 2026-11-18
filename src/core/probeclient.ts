@@ -412,7 +412,7 @@ export class ProbeClient {
   // then has what the missing ones would, probeWorker).
   // Without any (none started) the jobs run here in slices.
   private start(): Conn[] {
-    const conns: Conn[] = [], n = Math.min(PROBE_WORKERS, Math.max(1, this.d.workers ?? 1));
+    const conns: Conn[] = [], n = Math.min(PROBE_WORKERS, this.d.workers ?? 1);
     for (let i = 0; i < n; i++) {
       const c = this.open();
       if (!c) break;
@@ -422,7 +422,7 @@ export class ProbeClient {
   }
 
   // a worker; one that breaks down hands what it was asked to the main thread's host (which starts anew with the whole
-  // ROM and what is wanted of it), the other worker goes on as it is, and what failed there stays failed
+  // ROM and what is wanted of it), the other workers go on as they are, and what failed there stays failed
   private open(): Conn | null {
     try {
       const c: Conn = { gen: -1, size: -1, states: [], send: null as unknown as Send };

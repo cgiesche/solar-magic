@@ -1,8 +1,8 @@
-// The probe client (probeclient.ts) with two and three probe workers (ADR 0016, #513, #516), each a probe host in a stand-in worker the
-// test runs by hand: the ROM and the ranges a change wrote reach both, every other message only the worker its lane or
-// task belongs to (probeprotocol.ts probeWorker), a result from either lands in the same cache; a worker breaking down
-// hands its side to the main thread, the other worker goes on as it is; one worker (the default, or the second one not
-// starting): everything goes to it.
+// The probe client (probeclient.ts) with two and three probe workers (ADR 0016, #513, #516), each a probe host in a
+// stand-in worker the test runs by hand: the ROM and the ranges a change wrote reach every worker, every other message
+// only the worker its lane or task belongs to (probeprotocol.ts probeWorker), the results of all land in the same
+// cache; a worker breaking down hands its side to the main thread, the others go on as they are; fewer workers than
+// wanted (the default of one, or a later one not starting): the last one started has what the missing ones would.
 import { Rom } from '../src/core/rom.ts';
 import { BlockProber } from '../src/core/blockprobe.ts';
 import { ProbeHost } from '../src/core/probehost.ts';
@@ -81,7 +81,7 @@ check(['probe', 'scan', 'camera', 'thumbs', 'uses', 'sizes', 'lt', 'owps', 'leve
 check(['probe', 'kinds', 'sprites', 'thumbs'].every((k) => probeWorker(k as 'probe', 1) === 0), 'one worker: everything on it');
 check(['probe', 'scan', 'thumbs', 'uses', 'owps'].every((k) => probeWorker(k as 'probe', 3) === 0) && probeWorker('kinds', 3) === 1
   && ['sprites', 'variants', 'bytes', 'spritemem'].every((k) => probeWorker(k as 'sprites', 3) === 2), 'three workers: the object kinds on the second, the sprite lanes on the third');
-check([1, 2, 3, 4, 5, 6, 8, 24].map(probeWorkersFor).join() === '1,1,1,2,2,3,3,3' && probeWorkersFor(NaN) === 1, 'the workers by the cores: two from four on, three from six');
+check([0, 1, 2, 3, 4, 5, 6, 7, 8, 24].map(probeWorkersFor).join() === '1,1,1,1,2,2,3,3,3,3' && probeWorkersFor(NaN) === 1 && probeWorkersFor(undefined as unknown as number) === 1, 'the workers by the cores: two from four on, three from six');
 
 // two workers: the ROM and its changes to both, each lane's and task's messages to its worker only, the results of
 // both in the same cache
@@ -223,6 +223,7 @@ for (let broken = -1; broken < 3; broken++) {
     e.drain();
     const mine = [() => sameBlock(e, 0x130) && !e.busy.has('probe'), () => e.client.kinds(1) != null && !e.busy.has('kinds'), () => done === 1 && !e.busy.has('sprites')];
     check(mine[broken]() && e.busy.size === 2, `${what}: its side done on the main thread, the others' still busy`);
+    // (each was sent the ROM and its one request)
     check(e.workers.every((w) => w.count('rom') === 1 && w.sent.length === 2), '… nothing sent to the others again');
   }
   e.workers.forEach((w, i) => { if (i !== broken) w.run(); });
