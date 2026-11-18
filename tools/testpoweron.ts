@@ -66,8 +66,8 @@ let emptySelect: Uint8Array | null = null;
   const progress = 12, levelFlags = new Array<number>(0x60).fill(0);
   levelFlags[0x29] = 0x85; levelFlags[0x2a] = 0x83; levelFlags[0x27] = 0x8a;
   const save: ProgressSave = { levelFlags, switchPalaces: [0, 1, 0, 0], eventsTriggered: 12 };
-  const t0 = Date.now(), sram = progressSram(emu, progress, save), ms = Date.now() - t0;
-  check(!!sram && sram.some((v) => v !== 0), `the save file of an event progress, made by the game's own save (${ms} ms)`);
+  const t0 = Date.now(), { sram, why } = progressSram(emu, progress, save), ms = Date.now() - t0;
+  check(!!sram && sram.some((v) => v !== 0), `the save file of an event progress, made by the game's own save and loaded by it (${ms} ms${why ? `: ${why}` : ''})`);
   if (sram) {
     const p = PlaySession.powerOn(emu, sram);
     check(same(emu.snes.sram, sram), 'power-on with it: the SRAM the game finds');
@@ -82,7 +82,7 @@ let emptySelect: Uint8Array | null = null;
     p.close();
   }
   // any set of events, without a learned save
-  const set = eventSetOf([1, 3, 9]), sram2 = progressSram(emu, set, undefined, 1);
+  const set = eventSetOf([1, 3, 9]), sram2 = progressSram(emu, set, undefined, 1).sram;
   if (sram2) {
     const p = PlaySession.powerOn(emu, sram2);
     // file B: the cursor moved down once
@@ -94,8 +94,8 @@ let emptySelect: Uint8Array | null = null;
     check(p.mode === GM.overworld && same(w.subarray(RAM.owEvents, RAM.owEvents + 15), set) && w[RAM.saveFile] === 1, 'a set of events saved as file B: chosen there, it loads with them');
     p.close();
   } else check(false, 'a set of events saved as file B');
-  check(progressSram(emu, 0, undefined, 0, undefined) !== null && progressSram(emu, 0, undefined, 0, { id: 'savePrompt', state: emu.bootState(), mode: GM.title, path: null }) === null,
-    'a game that saves nothing at the prompt given: no save file');
+  const none = progressSram(emu, 0, undefined, 0, { id: 'savePrompt', state: emu.bootState(), mode: GM.title, path: null });
+  check(progressSram(emu, 0).sram !== null && none.sram === null && /wrote no SRAM/.test(none.why), `a game that saves nothing at the prompt given: no save file, with the reason (${none.why})`);
 }
 
 if (bad) { console.log(`${bad} FAILED`); process.exit(1); }

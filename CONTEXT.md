@@ -266,6 +266,9 @@ _Avoid_: new game settings, game options
 **Save file**: one of the three saved games in SRAM. The editor makes none itself: a save file is the SRAM the emulated game leaves when it saves at its save prompt, with the game's RAM set to what the file is to hold.
 _Avoid_: savegame, slot
 
+**Save scheme**: how the game keeps its save files in SRAM: per file the bytes a save writes and a load reads, and whose code does it – the game's own (three files of 143 bytes with their copies), or a patch's (Retry System's own table, SRAM and BW-RAM Plus). Learned by having the emulated game save each file at its save prompt and load it from power-on, not taken from a patch's name; a save the game does not load as saved is told, and no save file of an event progress is handed out then.
+_Avoid_: SRAM layout (for the whole), save format
+
 **New file data**: what an empty save file starts with: the start position, the initial level flags, the lives. The lives are a field while the game reads them from a byte of its own; a byte a package's patch writes names the package's setting instead (Retry System: `!initial_lives`).
 _Avoid_: defaults, initial save
 

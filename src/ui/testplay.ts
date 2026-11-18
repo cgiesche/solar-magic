@@ -161,13 +161,15 @@ function start(app: App, o: Origin, audio: AudioOut, fromSave: boolean): void {
   } else if (o.kind === 'powerOn') {
     let sram: Uint8Array | null = null;
     if (o.file) {
-      // (made on an emulator of its own, without the sound unit: the game run to its save prompt and saved there)
+      // (made on an emulator of its own, without the sound unit: the game run to its save prompt and saved there,
+      // then loaded from power-on to know the save is the one asked for)
+      let why = '';
       try {
         const maker = new LevelEmulator(app.rom);
         maker.adoptBoot(app.emu);
-        sram = progressSram(maker, o.file.progress, o.file.save);
-      } catch { sram = null; }
-      if (!sram) { ok = false; toast('The game saved nothing at its save prompt, so there is no save file of the event progress: started with empty save files', 'error'); }
+        ({ sram, why } = progressSram(maker, o.file.progress, o.file.save));
+      } catch (e) { why = String(e instanceof Error ? e.message : e); }
+      if (!sram) { ok = false; toast(`No save file of the event progress – ${why}. Started with empty save files.`, 'error'); }
     }
     p = PlaySession.powerOn(emu, sram ?? undefined);
   } else {

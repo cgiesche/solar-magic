@@ -27,6 +27,8 @@ export interface MemHook {
   onVideoRead?(): void; // VRAM, CGRAM or OAM read through its port
   onVramRead?(addr: number): void; // a VRAM byte read into the port's latch as its address is set
   onOamWrite?(addr: number): void; // a byte of OAM written through its port (a low table's byte lands with its pair's second)
+  onSramWrite?(addr: number, value: number): void; // a byte of SRAM written (its offset in Snes.sram; a DMA's too)
+  onSramRead?(addr: number): void; // a byte of SRAM read (savefile.ts: what a save writes and a load reads)
 }
 
 // several hooks as one, each called in turn
@@ -36,7 +38,7 @@ export function joinHooks(...hooks: MemHook[]): MemHook {
     return fs.length ? (...a: number[]) => { for (const f of fs) f(...a); } : undefined;
   };
   return { onRomRead: all('onRomRead'), onWramWrite: all('onWramWrite'), onWramRead: all('onWramRead'), onOverlayRead: all('onOverlayRead'),
-    onVramWrite: all('onVramWrite'), onCgramWrite: all('onCgramWrite'), onVideoRead: all('onVideoRead'), onVramRead: all('onVramRead'), onOamWrite: all('onOamWrite') };
+    onVramWrite: all('onVramWrite'), onCgramWrite: all('onCgramWrite'), onVideoRead: all('onVideoRead'), onVramRead: all('onVramRead'), onOamWrite: all('onOamWrite'), onSramWrite: all('onSramWrite'), onSramRead: all('onSramRead') };
 }
 
 export interface SnesState {
@@ -186,7 +188,7 @@ export class Snes implements Bus {
       } else {
         // the port to WRAM carries the byte's source; SRAM and the other registers none
         if (this.taintOn) this.cpu.noteRead(b < 0x40 && off === 0x2180 ? this.taint[this.wmaddr] : -1);
-        if (b >= 0x70 && b < 0x7e) v = this.sram[off & 0x7fff];
+        if (b >= 0x70 && b < 0x7e) { v = this.sram[off & 0x7fff]; if (this.hook?.onSramRead) this.hook.onSramRead(off & 0x7fff); }
         else if (b < 0x40) v = this.readIO(off);
         else v = this.openBus;
       }
@@ -240,6 +242,7 @@ export class Snes implements Bus {
     if (b >= 0x70 && b < 0x7e) {
       this.sram[off & 0x7fff] = v;
       this.sramWrites++;
+      if (this.hook?.onSramWrite) this.hook.onSramWrite(off & 0x7fff, v);
       return;
     }
     if (b < 0x40) {

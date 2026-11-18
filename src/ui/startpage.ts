@@ -15,6 +15,7 @@ import { readMessage, lineToText, isBlank } from '../core/messages.ts';
 import { readStart } from '../core/owsprites.ts';
 import { MAP_NAMES, MAX_TRANSLEVEL, FLAG, l1Index, initialFlags, hasLevelFlagsPatch } from '../core/overworld.ts';
 import { pcToSnes } from '../core/rom.ts';
+import { saveScheme, rangeBytes, type SaveScheme, type SramRange } from '../core/savefile.ts';
 
 export interface StartPageHost {
   openLevel(n: number): void; // the level editor on a level
@@ -125,6 +126,31 @@ export function startPage(app: App, emu: LevelEmulator, host: StartPageHost): St
     out.push(p(`Of the ${MAX_TRANSLEVEL + 1} overworld levels, a new file has ${passed} passed, ${ways} with ways open from the start${other ? ` and ${other} with another flag set (save prompt, no entry, midway point)` : ''}. They are set per level tile on the overworld (a level tile's "Initial flags").`));
   } else out.push(p('The initial level flags are the game\'s own: the editor\'s patch for them is not installed.'));
 
+  // ---- the save files ----
+  // (learned a moment later: the game saves each file at its save prompt and loads it from power-on)
+  const saves = h('div', null, p('Checking how the game saves …'));
+  out.push(title('Save files'), saves);
+  setTimeout(() => {
+    if (!saves.isConnected) return;
+    try { saves.replaceChildren(...saveSchemeText(saveScheme(emu)).map((t) => (t.warn ? warn(t.text) : p(t.text)))); } catch (e) { saves.replaceChildren(p(`The save files could not be checked: ${e instanceof Error ? e.message : e}`)); }
+  }, 50);
+
   const status = level !== null ? `The intro, as the game shows it on a new file (level ${hex(level, 3)})` : g.reached ? 'A new file\'s first overworld, as the game shows it (no intro)' : 'A new file does not get to the overworld';
   return { state: intro.shown ?? g.overworld, status, body: out };
+}
+
+// The save scheme in words (savefile.ts): what a save of a file writes and who writes it, and whether the saved
+// files load – what a play from power-on with a save file relies on.
+export function saveSchemeText(s: SaveScheme): { text: string; warn?: boolean }[] {
+  if (!s.files.length) return [{ text: `The save files could not be checked: ${s.why}. A play from power-on starts with empty save files.`, warn: true }];
+  const at = (r: SramRange) => `$70:${hex(r.from, 4)}–${hex(r.to - 1, 4)}`;
+  const who = (names: string[]) => { const ps = names.filter((n) => n); return `${names.includes('') ? 'the game\'s own code' : ''}${ps.length ? `${names.includes('') ? ' and ' : ''}${ps.map((n) => `"${n}"`).join(', ')}` : ''}`; };
+  const sizes = s.files.map((f) => rangeBytes(f.written)), even = sizes.every((n) => n === sizes[0]);
+  const out: { text: string; warn?: boolean }[] = [{
+    text: `Learned by having the game save each file at its save prompt and load it from power-on: a save writes ${even ? `${sizes[0]} bytes of SRAM per file` : `${sizes.join(', ')} bytes of SRAM (files A, B, C)`}, by ${who(s.writers)}; a load reads them by ${who(s.readers)}.`,
+  }, { text: s.files.map((f, k) => `File ${'ABC'[k]}: ${f.written.map(at).join(', ')}`).join('. ') + '.' }];
+  const bad = s.files.map((f, k) => (f.problem ? `file ${'ABC'[k]}` : '')).filter((x) => x);
+  if (bad.length) out.push({ text: `The game does not load what it saved (${bad.join(', ')}): ${s.files.find((f) => f.problem)!.problem}. A play from power-on gets no save file of an event progress then.`, warn: true });
+  else out.push({ text: 'Each saved file loads as it was saved. The save file of a play from power-on is made the same way – saved by the game, not written by the editor – so it is in this layout, whatever patch changed it.' });
+  return out;
 }

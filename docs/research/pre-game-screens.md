@@ -358,6 +358,23 @@ Before the editor writes a save file for event progress, it should know whose la
 a patch's. Today it assumes the game's. Detection by what the save routine does in emulation (which SRAM bytes a
 save writes), not by patch names.
 
+*Done (#529, `src/core/savefile.ts`):* the editor lays out no save itself (only a test did, with the game's
+layout). `saveScheme(emu)` has the game save each of the three files at its save prompt and load it from power-on,
+with the SRAM bytes written and read (`MemHook.onSramWrite`/`onSramRead`) and the code that did (the patch registry's
+owner of the instruction, or the game's own); `progressSram` hands a save out only after the game loaded it from
+power-on with the level flags, events, places and exit count that were saved. Seen:
+
+- **The clean game:** file k writes `$70:0000 + 143·k` (143 bytes) and its copy from `$70:01AD`; a load reads the
+  file only (the copy when the file's checksum fails).
+- **Retry System 2.2.0** (`!sram_feature = 1`): beside the game's files 201 bytes per file of its own table at
+  `$70:0800`, `$70:0FD5`, `$70:17AA`, written and read by its code (in the UberASM patch); the saves load.
+- **A made-up variant** (the table of the files' places at `$009CCB`/`$009CCE` changed to `$70:0000`, `$70:0400`,
+  `$70:0800`), standing in for SRAM and BW-RAM Plus, of which no copy is in the repository: the scheme follows, and a
+  save in the clean game's layout is a new file to that game – what an assumed layout would have given. The game
+  writes a copy only of a file below `$70:01AD` there.
+- *Not checked:* SRAM and BW-RAM Plus 1.4 itself, Overworld Indicators. BW-RAM Plus saves the game's RAM
+  (`$7E1EA2`, 141 bytes) rather than the game's copy at `$1F49`; `progressSram` sets both for that reason.
+
 ## Decided (2026-11-18)
 
 - **Base:** the US original only. The Japanese and PAL versions' differences (own movement table, `DrawFileSelect`)
