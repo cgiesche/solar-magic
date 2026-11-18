@@ -1,6 +1,6 @@
 // The title screen page's title screen movement (core/titlemovement.ts): a timeline of the buttons the game's table
-// holds, with a playhead – the title screen's picture is the game's at that frame –, played on the page, and
-// recorded: the title screen level played from the title screen's own state with the keyboard or a gamepad, the
+// holds, with a playhead – the title screen's picture is the game's at that frame –, played on the page, checked
+// against the run as recorded (out of sync: a problem here, with the frame where the runs part), and recorded: the title screen level played from the title screen's own state with the keyboard or a gamepad, the
 // buttons fed to the game through its table; Stop writes the recording into the table as one ROM edit.
 
 import type { App } from './app.ts';
@@ -9,8 +9,8 @@ import { uiToken } from './marks.ts';
 import { KEYMAP, readPads } from './testplay.ts';
 import type { LevelEmulator } from '../core/levelemu.ts';
 import type { SnesState } from '../core/snes.ts';
-import { MOVE, MOVE_BUTTONS, MAX_RECORD_FRAMES, TitleSession, titleMovement, runState, writeMovement, moveFrames, movePairs, movementPlace,
-  type TitleMovement, type MovementRun, type MovePair } from '../core/titlemovement.ts';
+import { MOVE, MOVE_BUTTONS, MAX_RECORD_FRAMES, TitleSession, titleMovement, movementDrift, runState, writeMovement, moveFrames, movePairs, movementPlace,
+  type TitleMovement, type MovementRun, type MovePair, type MovementDrift, type MovementEnd } from '../core/titlemovement.ts';
 
 const FPS = 60.0988; // the game's frames per second
 const LABELS = 44, ROW = 9, RULER = 12; // the timeline: the button names' column, a button's row, the ruler (CSS pixels)
@@ -31,6 +31,7 @@ export class MovementView {
   private info = h('span', { class: 'hint' });
   private mv: TitleMovement | null = null;
   private run: MovementRun | null = null;
+  private drift: (MovementDrift & { since: 'recorded' | 'opened' }) | null = null; // out of sync: where the runs part
   private error = '';
   private playhead = 0; // a frame of the run (its count: after the last)
   private session: TitleSession | null = null;
@@ -70,8 +71,9 @@ export class MovementView {
       const k = titleMovement(this.host.emulator());
       this.mv = k.movement;
       this.run = k.run;
+      this.drift = movementDrift(this.host.emulator());
     } catch (e) {
-      this.mv = this.run = null;
+      this.mv = this.run = this.drift = null;
       this.error = String(e instanceof Error ? e.message : e);
     }
     this.playhead = Math.min(this.playhead, this.run?.frames ?? 0);
@@ -188,7 +190,7 @@ export class MovementView {
       else {
         try {
           // (the ROM edit shows the page anew: sync)
-          this.host.app.romEdit('Title screen movement recorded', () => writeMovement(this.host.app.rom, mv, s.buttons));
+          this.host.app.romEdit('Title screen movement recorded', () => writeMovement(this.host.app.rom, mv, s.buttons, s.run()));
           this.note = { text: `Recorded: ${n} frames (${seconds(n)}), ${pairs} pair${pairs === 1 ? '' : 's'} of buttons and frames${n >= MAX_RECORD_FRAMES ? ' – the longest the editor records' : ''}.`, warn: false };
         } catch (e) {
           this.note = { text: `${e instanceof Error ? e.message : e}. Not written.`, warn: true };
@@ -228,6 +230,16 @@ export class MovementView {
       + `The game's table at ${movementPlace(mv)} holds ${mv.capacity} pairs of buttons and frames; this movement needs ${used}.`));
     if (run.end === 'died') out.push(p(`Mario dies at frame ${run.frames}. On the title screen a death is a game over, after which the game loads the title screen level as a level to play, again and again.`, 'warn-box game-move-note'));
     else if (run.end !== 'table') out.push(p(`The level is left at frame ${run.frames}, before the table ends.`, 'warn-box game-move-note'));
+    const d = this.drift;
+    if (d) {
+      const ended = (e: MovementEnd) => (e === 'died' ? 'Mario had died' : e === 'left' ? 'the level was left' : 'the movement had ended');
+      const where = d.was && d.now ? `Mario is at ${d.now.x}, ${d.now.y} after it, and was at ${d.was.x}, ${d.was.y}`
+        : d.now ? `the run goes on there, and ${ended(d.endWas)}` : `${d.endNow === 'died' ? 'Mario dies' : d.endNow === 'left' ? 'the level is left' : 'the movement ends'} there, and the run went on`;
+      out.push(h('div', { class: 'warn-box game-move-note' },
+        `Out of sync: the game no longer plays the movement as ${d.since === 'recorded' ? 'it was recorded' : 'it did when the ROM was opened'}. The runs part at frame ${d.frame}: ${where} ${d.since === 'recorded' ? 'when recorded' : 'then'}. `
+        + 'A change to the title screen level, its sprites, blocks or code does this. Record the movement again, or undo the change. ',
+        h('button', { title: 'The playhead at the frame where the runs part', onclick: () => this.seek(d.frame) }, `Show frame ${d.frame}`)));
+    }
     if (this.note) out.push(p(this.note.text, this.note.warn ? 'warn-box game-move-note' : 'hint game-screen-about'));
     const btn = (label: string, title: string, run_: () => void, cls = '') => h('button', { class: cls, title, onclick: run_ }, label);
     out.push(h('div', { class: 'game-move-buttons' }, ...(s
@@ -281,6 +293,7 @@ export class MovementView {
     }
     const run = this.run;
     if (run && !s?.recording && run.end !== 'table') { ctx.fillStyle = uiToken('--danger', '#ff6b6b'); ctx.fillRect(x(run.frames) - 1, RULER, 2, hgt - RULER); }
+    if (this.drift && !s?.recording) { ctx.fillStyle = uiToken('--warning', '#f5a524'); ctx.fillRect(x(Math.min(this.drift.frame, n)) - 1, 0, 2, RULER); ctx.fillRect(x(Math.min(this.drift.frame, n)), RULER, 1, hgt - RULER); }
     const head = s?.recording ? s.buttons.length : this.playhead;
     ctx.fillStyle = uiToken('--text', '#e6e8ee');
     ctx.fillRect(Math.min(w - 1, x(head)), 0, 1, hgt);

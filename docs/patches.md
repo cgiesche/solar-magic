@@ -1087,6 +1087,8 @@ again.
 * `src/core/patchapply.ts`: applying, conflict checking, removing.
 * `src/core/patchreg.ts`: patch registry "SMWA" in the ROM.
 * `src/core/gfxnames.ts`: names of GFX/ExGFX files "SMWN" (the user's, or from an imported file's descriptive name).
+* `src/core/titlemovement.ts`: the title screen movement's run as recorded "SMWT" (Mario's position after every frame and
+  how the run ended, for the sync check; the game reads none of it); test `tools/testtitlemovement.ts`.
 * `src/core/pkgreg.ts`, `src/ui/pkgtrack.ts`, `src/ui/packages.ts`: package registry "SMWK", observing,
   removing; the *Packages* tab.
 * `src/core/patchpkg.ts`: `.zip`, `patch.json`, defines.

@@ -24,6 +24,13 @@
 // never drawn: its tilemap is written by a level's load in game mode 12 and its counters every frame of modes 13 and
 // 14; the title screen loads through modes 03 and 04, which put the title screen picture's stripe image there, and
 // runs without the IRQ that splits layer 3 below the status bar (NMITIMEN $81, a level's $A1).
+//
+// The sync check: a change to the title screen level, its sprites, blocks or code after recording moves the movement
+// out of sync – the buttons stay, Mario's way doesn't. Lunar Magic only warns of it in its help. Here the run as
+// recorded (Mario's position after every frame, how it ended) is written with a recording, as the editor's own block
+// in the ROM ("SMWT", the game reads none of it), and the run as the game plays it now is compared with it: the first
+// frame Mario is elsewhere, or the frame one run ends and the other goes on. A movement without such a block (the
+// clean game's) is compared with its run as the editor first saw it for the ROM opened.
 
 import type { LevelEmulator } from './levelemu.ts';
 import type { Rom } from './rom.ts';
@@ -32,6 +39,7 @@ import { Snes, type SnesState } from './snes.ts';
 import { PPU } from './ppu.ts';
 import { GM, RAM, PAD, MARIO_DYING, marioX, marioY } from './ram.ts';
 import { holds, type RomReads } from './romdeps.ts';
+import { deflateSync, inflateSync } from 'fflate';
 
 // the bits of a button byte
 export const MOVE = { b: 0x80, y: 0x40, yPress: 0x20, start: 0x10, up: 0x08, down: 0x04, left: 0x02, right: 0x01 } as const;
@@ -159,10 +167,10 @@ export function learnMovement(emu: LevelEmulator): TitleMovement | null {
 // with Mario dying, with the level left another way, or not within the frames run
 export type MovementEnd = 'table' | 'died' | 'left' | 'none';
 
-export interface MovementRun {
+// Mario's way: his position after each frame run on the title screen, and how the run ended
+export interface MovementTrace { x: Int16Array; y: Int16Array; end: MovementEnd }
+export interface MovementRun extends MovementTrace {
   frames: number; // the frames run on the title screen
-  x: Int16Array; y: Int16Array; // Mario's position after each
-  end: MovementEnd;
   states: { frame: number; state: SnesState }[]; // the machine before some of the frames, the first before frame 0
 }
 
@@ -287,10 +295,90 @@ export class TitleSession {
 }
 
 // Writes the movement of the buttons of every frame (a recording's) into the game's table, in place: the pairs the
-// table holds there. Throws when it has more pairs than that.
-export function writeMovement(rom: Rom, mv: TitleMovement, frames: ArrayLike<number>): void {
+// table holds there. Throws when it has more pairs than that. `trace`: the run as recorded, written with it for the
+// sync check (none: the check compares with the run as the editor first sees it).
+export function writeMovement(rom: Rom, mv: TitleMovement, frames: ArrayLike<number>, trace?: MovementTrace): void {
   if (!frames.length) throw new Error('A recording of no frames');
-  rom.writeAt(mv.at, tableBytes(fitPairs(movePairs(frames), mv.capacity)));
+  const pairs = fitPairs(movePairs(frames), mv.capacity);
+  rom.writeAt(mv.at, tableBytes(pairs));
+  // (a recording of fewer frames than the table's pairs was filled: its run is not the one recorded)
+  writeTrace(rom, trace && pairs.reduce((n, p) => n + p[1], 0) === frames.length ? trace : null);
+}
+
+// ---- the sync check ----
+const TRACE_MAGIC = [0x53, 0x4d, 0x57, 0x54]; // "SMWT"
+const TRACE_VERSION = 1;
+const ENDS: readonly MovementEnd[] = ['table', 'died', 'left', 'none'];
+
+function findTrace(rom: Rom): number {
+  for (const b of rom.scanRats()) {
+    const p = b.start + 8;
+    if (b.size > 6 && TRACE_MAGIC.every((m, i) => rom.data[p + i] === m)) return p;
+  }
+  return -1;
+}
+
+// the run as recorded, as the ROM has it (null: none written, or by a newer editor)
+export function recordedTrace(rom: Rom): MovementTrace | null {
+  const p = findTrace(rom);
+  if (p < 0 || rom.data[p + 4] !== TRACE_VERSION) return null;
+  const size = rom.isRatsAt(p - 8), end = ENDS[rom.data[p + 5]] ?? 'none';
+  const d = inflateSync(rom.data.subarray(p + 6, p + size)), n = d.length >> 2, x = new Int16Array(n), y = new Int16Array(n);
+  // (each frame: how far Mario moved since the frame before, X and Y as 16 bits)
+  for (let f = 0, px = 0, py = 0; f < n; f++) {
+    x[f] = px = (px + (d[f * 4] | (d[f * 4 + 1] << 8))) & 0xffff;
+    y[f] = py = (py + (d[f * 4 + 2] | (d[f * 4 + 3] << 8))) & 0xffff;
+  }
+  return { x, y, end };
+}
+
+// the run as recorded written (the one written before freed; null: none)
+function writeTrace(rom: Rom, t: MovementTrace | null): void {
+  const old = findTrace(rom);
+  if (old >= 0) rom.freeAt(pcToSnes(old));
+  if (!t) return;
+  const n = t.x.length, d = new Uint8Array(n * 4);
+  for (let f = 0, px = 0, py = 0; f < n; f++) {
+    const dx = (t.x[f] - px) & 0xffff, dy = (t.y[f] - py) & 0xffff;
+    d.set([dx & 0xff, dx >> 8, dy & 0xff, dy >> 8], f * 4);
+    px = t.x[f]; py = t.y[f];
+  }
+  const z = deflateSync(d, { level: 9 }), buf = new Uint8Array(z.length + 6);
+  buf.set(TRACE_MAGIC);
+  buf[4] = TRACE_VERSION;
+  buf[5] = ENDS.indexOf(t.end);
+  buf.set(z, 6);
+  rom.allocWrite(buf);
+}
+
+// Where two runs part: the first frame Mario is elsewhere after, or – his way the same as far as both go – the frame
+// the shorter one ends while the other goes on or ends another way. null: the same run.
+export interface MovementDrift {
+  frame: number;
+  was: { x: number; y: number } | null; // Mario after that frame in the run compared with (null: it had ended)
+  now: { x: number; y: number } | null; // … in the run as the game plays it now
+  endWas: MovementEnd; endNow: MovementEnd; // how each run ends
+  framesWas: number; framesNow: number;
+}
+export function compareRuns(was: MovementTrace, now: MovementTrace): MovementDrift | null {
+  const a = was.x.length, b = now.x.length, n = Math.min(a, b);
+  let f = 0;
+  while (f < n && was.x[f] === now.x[f] && was.y[f] === now.y[f]) f++;
+  if (f === n && a === b && was.end === now.end) return null;
+  const at = (t: MovementTrace) => (f < t.x.length ? { x: t.x[f], y: t.y[f] } : null);
+  return { frame: f, was: at(was), now: at(now), endWas: was.end, endNow: now.end, framesWas: a, framesNow: b };
+}
+
+// The run as the game plays it now against the run as recorded – or, for a movement the ROM has no recorded run of,
+// against its run as the editor first saw it for this ROM (`since`: which). null: in sync, or no movement.
+const firstSeen = new WeakMap<Rom, MovementTrace>();
+export function movementDrift(emu: LevelEmulator): (MovementDrift & { since: 'recorded' | 'opened' }) | null {
+  const run = titleMovement(emu).run;
+  if (!run) return null;
+  const recorded = recordedTrace(emu.rom);
+  if (!recorded && !firstSeen.has(emu.rom)) firstSeen.set(emu.rom, { x: run.x, y: run.y, end: run.end });
+  const d = compareRuns(recorded ?? firstSeen.get(emu.rom)!, run);
+  return d && { ...d, since: recorded ? 'recorded' : 'opened' };
 }
 
 // the table's place, for the user

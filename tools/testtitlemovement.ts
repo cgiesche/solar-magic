@@ -1,11 +1,15 @@
 // Title screen movement (titlemovement.ts): the game's table found by what the title screen reads (the clean game's
 // address, here only to check), its pairs decoded and encoded again, the run as the game plays it; a recording from
 // scripted joypad input written in place and played by the game as recorded; a recording that doesn't fit; what death
-// on the title screen does; a game that plays no table.
+// on the title screen does; a game that plays no table; the sync check – the title screen level changed after
+// recording, the frame where the runs part.
 import { Rom, snesToPc } from '../src/core/rom.ts';
-import { LevelEmulator } from '../src/core/levelemu.ts';
+import { LevelEmulator, titleScreenLevel } from '../src/core/levelemu.ts';
+import { loadLevel } from '../src/core/level.ts';
+import { saveLevel } from '../src/core/save.ts';
 import { PAD, RAM, GM } from '../src/core/ram.ts';
-import { learnMovement, runMovement, runState, titleMovement, TitleSession, writeMovement, moveFrames, movePairs, fitPairs, tableBytes, moveOfPad, MOVE } from '../src/core/titlemovement.ts';
+import { learnMovement, runMovement, runState, titleMovement, TitleSession, writeMovement, moveFrames, movePairs, fitPairs, tableBytes, moveOfPad, MOVE,
+  movementDrift, recordedTrace, compareRuns } from '../src/core/titlemovement.ts';
 import { editorImage } from './fixture.ts';
 
 let bad = 0;
@@ -52,10 +56,24 @@ const padOf = (b: number) => ((b & ~(MOVE.yPress | MOVE.start)) << 8);
   for (const p of script) rec.frame(p);
   const recRun = rec.run();
   check(rec.end === null && rec.frames === 600 && rec.buttons.length === 600 && same(rom.data, base), `recorded: 600 frames, ${rec.pairs.length} pairs, the ROM untouched`);
-  writeMovement(rom, mv, rec.buttons);
+  writeMovement(rom, mv, rec.buttons, recRun);
   const after = titleMovement(emu), mv2 = after.movement!, run2 = after.run!;
   check(mv2.at === TABLE && mv2.pairs.length === 34 && mv2.frames === 600 && same(moveFrames(mv2.pairs), rec.buttons) && rom.data[TABLE + 68] === 0xff, 'written in place: the table\'s 34 pairs, the recording\'s frames');
   check(run2.end === 'table' && run2.frames === 600 && same(run2.x, recRun.x) && same(run2.y, recRun.y), `the game plays it as recorded: Mario's way frame by frame (ends at ${run2.x[run2.frames - 1]}, ${run2.y[run2.frames - 1]})`);
+
+  // the sync check: the run as recorded is in the ROM; the title screen level's sprites removed, the runs part
+  const tr = recordedTrace(rom);
+  check(!!tr && same(tr.x, recRun.x) && same(tr.y, recRun.y) && tr.end === 'table' && movementDrift(emu) === null, 'the run as recorded is written with it: in sync');
+  {
+    const saved = rom.data.slice(), n = titleScreenLevel(rom)!, lv = loadLevel(rom, n), had = lv.sprites.length;
+    lv.sprites = [];
+    saveLevel(rom, lv);
+    const t2 = Date.now(), d = movementDrift(emu), ms2 = Date.now() - t2;
+    check(had > 0 && !!d && d.since === 'recorded' && d.frame > 0 && d.frame < 600 && !!d.was && d.was.x === recRun.x[d.frame] && (!d.now || d.now.x !== d.was.x || d.now.y !== d.was.y),
+      `level ${hex(n)} without its ${had} sprites: out of sync, the runs part at frame ${d?.frame} (${ms2} ms; Mario at ${d?.now?.x}, ${d?.now?.y}, was at ${d?.was?.x}, ${d?.was?.y}; ends ${d?.endNow})`);
+    rom.writeAt(0, saved);
+    check(movementDrift(emu) === null, 'the change taken back: in sync again');
+  }
 
   // a recording of more pairs than the table holds
   const busy = Array.from({ length: 80 }, (_, f) => (f & 1 ? MOVE.right : MOVE.left));
@@ -63,6 +81,20 @@ const padOf = (b: number) => ((b & ~(MOVE.yPress | MOVE.start)) << 8);
   let no = '';
   try { writeMovement(rom, mv2, busy); } catch (e) { no = String(e); }
   check(/80 pairs/.test(no) && /46 more/.test(no) && same(rom.data, before), `a recording of 80 pairs is not written (${no})`);
+}
+
+// the sync check of a movement without a recorded run (the clean game's): against its run as first seen
+{
+  const rom = fresh(), emu = new LevelEmulator(rom);
+  check(recordedTrace(rom) === null && movementDrift(emu) === null, 'the clean game\'s movement: no recorded run, in sync as first seen');
+  const first = titleMovement(emu).run!, n = titleScreenLevel(rom)!, lv = loadLevel(rom, n);
+  lv.sprites = [];
+  saveLevel(rom, lv);
+  const d = movementDrift(emu);
+  check(!!d && d.since === 'opened' && d.frame > 0 && d.frame < first.frames, `its level without sprites: out of sync since the ROM was opened, the runs part at frame ${d?.frame} (ends ${d?.endNow} after ${d?.framesNow} frames, ended ${d?.endWas} after ${d?.framesWas})`);
+  const t = { x: Int16Array.of(1, 2, 3), y: Int16Array.of(0, 0, 0), end: 'table' as const };
+  const c1 = compareRuns(t, { ...t, x: Int16Array.of(1, 2), y: Int16Array.of(0, 0), end: 'died' }), c2 = compareRuns(t, { ...t, end: 'left' });
+  check(compareRuns(t, t) === null && c1?.frame === 2 && c1.now === null && c1.was?.x === 3 && c1.endNow === 'died' && c2?.frame === 3 && c2.endNow === 'left', 'runs compared: the same; one ends sooner; one ends another way');
 }
 
 // death on the title screen: holding right, Mario dies within a few seconds – the recording ends there; in the game it is
