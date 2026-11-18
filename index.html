@@ -110,7 +110,8 @@
 
       <header class="landing-hero" id="top">
         <div class="landing-hero-text">
-          <h1><img src="/logo.webp" width="44" height="44" fetchpriority="high" alt="" />Solar Magic</h1>
+          <img class="landing-logo" src="/logo.webp" width="88" height="88" fetchpriority="high" alt="" />
+          <h1>Solar Magic</h1>
           <p class="landing-tagline">A Super Mario World level editor for the browser.</p>
           <p class="landing-lead">Edit levels, the overworld, graphics, music and the title screen, test them in the built-in emulator, and install patches, blocks, sprites and music from SMW Central.</p>
           <div class="landing-actions">
@@ -119,20 +120,15 @@
           </div>
           <p class="hint">A new project starts from a clean Super Mario World (US) ROM. You can also drop the ROM or a project file onto this page.</p>
           <noscript><p class="landing-noscript">Solar Magic needs JavaScript. Please enable it to start editing.</p></noscript>
-          <ul class="landing-facts">
-            <li>Free</li>
-            <li>Nothing to install</li>
-            <li>Files stay on your computer</li>
-            <li class="landing-get-app"><a href="#download">Desktop app for Windows, macOS and Linux</a></li>
-          </ul>
         </div>
-        <a class="landing-shot" href="/screens/level.webp" data-caption="The Level workspace: Yoshi's Island 1 with the level list and the object picker">
+        <a class="landing-shot landing-hero-shot" href="/screens/level.webp" data-caption="The Level workspace: Yoshi's Island 1 with the level list and the object picker">
           <img src="/screens/level.webp" srcset="/screens/level-800.webp 800w, /screens/level-1200.webp 1200w, /screens/level.webp 1600w" sizes="(max-width: 1152px) calc(100vw - 32px), 1120px" width="1600" height="1000" fetchpriority="high" alt="The Level workspace with Yoshi's Island 1, the level list and the object picker" />
         </a>
       </header>
 
       <section class="landing-section" aria-labelledby="level">
-        <h2 id="level">Level <span class="landing-keys"><kbd>G</kbd> <kbd>1</kbd></span></h2>
+        <p class="landing-kicker">Workspace <kbd>G</kbd> <kbd>1</kbd></p>
+        <h2 id="level">Level</h2>
         <p class="landing-intro">Levels are drawn by running the game's own code in an emulator, so the editor shows them as the game does, animated tiles and palettes included.</p>
 
         <ul class="landing-topics">
@@ -227,7 +223,8 @@
       </section>
 
       <section class="landing-section" aria-labelledby="overworld">
-        <h2 id="overworld">Overworld <span class="landing-keys"><kbd>G</kbd> <kbd>2</kbd></span></h2>
+        <p class="landing-kicker">Workspace <kbd>G</kbd> <kbd>2</kbd></p>
+        <h2 id="overworld">Overworld</h2>
         <p class="landing-intro">The main map and the six submaps, shown as they are after any set of events. The editor follows the paths the way Mario walks them and tells you where he can't get.</p>
         <a class="landing-shot" href="/screens/overworld.webp" data-caption="The Overworld workspace: the main map with every event passed, the event list, the layer 1 picker and the World check">
           <img src="/screens/overworld.webp" srcset="/screens/overworld-800.webp 800w, /screens/overworld.webp 1600w" sizes="(max-width: 1152px) calc(100vw - 32px), 1120px" width="1600" height="1000" loading="lazy" alt="The Overworld workspace showing the main map with its paths and level numbers, the event list and the World check" />
@@ -261,7 +258,8 @@
       </section>
 
       <section class="landing-section" aria-labelledby="graphics">
-        <h2 id="graphics">Graphics <span class="landing-keys"><kbd>G</kbd> <kbd>3</kbd></span></h2>
+        <p class="landing-kicker">Workspace <kbd>G</kbd> <kbd>3</kbd></p>
+        <h2 id="graphics">Graphics</h2>
         <p class="landing-intro">Palettes, 8×8 graphics, Map16 tiles and animations for the open level or a submap, with a preview of where they are used.</p>
         <a class="landing-shot" href="/screens/graphics.webp" data-caption="The Graphics workspace: Map16 tiles, a tile's four quarters, the 8×8 graphics and a preview of the level">
           <img src="/screens/graphics.webp" srcset="/screens/graphics-800.webp 800w, /screens/graphics.webp 1600w" sizes="(max-width: 1152px) calc(100vw - 32px), 1120px" width="1600" height="1000" loading="lazy" alt="The Graphics workspace with the Map16 tiles, the tile builder, the 8×8 graphics and a level preview" />
@@ -287,7 +285,8 @@
       </section>
 
       <section class="landing-section" aria-labelledby="game">
-        <h2 id="game">Game <span class="landing-keys"><kbd>G</kbd> <kbd>4</kbd></span></h2>
+        <p class="landing-kicker">Workspace <kbd>G</kbd> <kbd>4</kbd></p>
+        <h2 id="game">Game</h2>
         <p class="landing-intro">Everything between switching the console on and the first step on the overworld. Each screen is shown with its picture taken from the emulated game.</p>
         <a class="landing-shot" href="/screens/game.webp" data-caption="The Game workspace: the title screen with its recorded movement on a timeline and the tiles to paint it with">
           <img src="/screens/game.webp" srcset="/screens/game-800.webp 800w, /screens/game.webp 1600w" sizes="(max-width: 1152px) calc(100vw - 32px), 1120px" width="1600" height="1000" loading="lazy" alt="The Game workspace showing the title screen, a timeline of the buttons the game presses there and the layer 3 tiles" />
@@ -321,7 +320,8 @@
       </section>
 
       <section class="landing-section" aria-labelledby="packages">
-        <h2 id="packages">Packages <span class="landing-keys"><kbd>G</kbd> <kbd>5</kbd></span></h2>
+        <p class="landing-kicker">Workspace <kbd>G</kbd> <kbd>5</kbd></p>
+        <h2 id="packages">Packages</h2>
         <p class="landing-intro">Solar Magic uses the formats of the established SMW tools. A download from <a href="https://www.smwcentral.net/" rel="noopener">SMW Central</a> is installed unchanged as one package, and can be removed again as one.</p>
 
         <div class="landing-pair">
@@ -356,16 +356,17 @@
             <h3>Performance</h3>
             <p>Every project runs as FastROM, and the editor's own patches are kept cheap per frame. Level 106 of the Romhack Races baserom, same input, same emulator:</p>
           </div>
-          <dl class="perf-bars">
-            <div><dt>Built with Lunar Magic and Callisto</dt><dd><span style="width: 100%"></span><b>51</b></dd></div>
-            <div class="mine"><dt>Installed in Solar Magic</dt><dd><span style="width: 74.5%"></span><b>38</b></dd></div>
-          </dl>
-          <p class="hint">Lag frames. Fewer is better.</p>
+          <div class="perf-nums">
+            <div class="perf-num"><span>51</span><small>lag frames, built with Lunar Magic and Callisto</small></div>
+            <div class="perf-arrow" aria-hidden="true">→</div>
+            <div class="perf-num mine"><span>38</span><small>lag frames, installed in Solar Magic</small></div>
+          </div>
         </div>
       </section>
 
       <section class="landing-section" aria-labelledby="how">
-        <h2 id="how">Getting started</h2>
+        <p class="landing-kicker">Get started</p>
+        <h2 id="how">Three steps to your first level</h2>
         <ol class="landing-steps">
           <li><strong>New project</strong><span>Choose a clean Super Mario World (US) ROM made from your own copy of the game.</span></li>
           <li><strong>Edit</strong><span>Open a level, or install packages from SMW Central.</span></li>
@@ -374,7 +375,8 @@
       </section>
 
       <section class="landing-section landing-download" aria-labelledby="download">
-        <h2 id="download">Desktop app</h2>
+        <p class="landing-kicker">Desktop app</p>
+        <h2 id="download">Download</h2>
         <p class="landing-intro">The desktop app is the same editor. It reads and writes files directly on disk instead of through downloads.</p>
         <ul class="landing-downloads">
           <li data-os="windows">
@@ -397,6 +399,7 @@
       </section>
 
       <section class="landing-section" aria-labelledby="faq">
+        <p class="landing-kicker">FAQ</p>
         <h2 id="faq">Questions</h2>
         <dl class="landing-faq">
           <div><dt>What is Solar Magic?</dt>
