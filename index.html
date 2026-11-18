@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Solar Magic – Super Mario World Level Editor in Your Browser</title>
-  <meta name="description" content="Solar Magic is a free Super Mario World (SMW) level editor that runs in your browser. Edit levels, the overworld, graphics, palettes and music, then play-test your ROM hack instantly – no installation needed." />
+  <meta name="description" content="Solar Magic is a free Super Mario World (SMW) level editor that runs in your browser. Edit levels, the overworld, graphics, music and the title screen, then play-test your ROM hack instantly – no installation needed." />
   <meta name="keywords" content="Super Mario World level editor, SMW level editor, SMW editor, SMW hacking, Super Mario World ROM hack, Mario level editor, SNES level editor, Lunar Magic alternative, online level editor" />
   <meta name="robots" content="index, follow" />
   <link rel="canonical" href="https://smw.traumwald.net/" />
@@ -36,9 +36,9 @@
     "applicationCategory": "GameApplication",
     "applicationSubCategory": "Level editor",
     "operatingSystem": "Web browser, Windows, macOS, Linux",
-    "description": "A free level editor for Super Mario World (SNES) that runs in the browser: edit levels, the overworld, graphics, palettes and music, and play-test ROM hacks instantly.",
+    "description": "A free level editor for Super Mario World (SNES) that runs in the browser: edit levels, the overworld, graphics, music and the title screen, and play-test ROM hacks instantly.",
     "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" },
-    "featureList": ["Level editing", "Overworld editing", "Graphics and palette editing", "Prefabs: linked, reusable groups of Map16 tiles", "Test play with sound, starting at any position", "Level checks: missing exits, slowdown, misplaced sprites", "Block behavior found by emulation, including custom blocks", "Asar patches, UberASM, GPS blocks, PIXI sprites and AddmusicK music", "Lunar Magic level files", "Desktop app for Windows, macOS and Linux"]
+    "featureList": ["Level editing", "Overworld editing: paths drawn as routes, events, level names, music per submap", "World check: unreached levels, dead ends, links, ROM limits", "Graphics, palette, Map16 and ExAnimation editing", "Title screen, title screen movement recording, menu texts and the start of a new game", "Prefabs: linked, reusable groups of Map16 tiles", "Test play with sound, rewind and save states, starting at any position or from power-on", "Level checks: missing exits, slowdown, misplaced sprites", "Block behavior found by emulation, including custom blocks", "Asar patches, UberASM, GPS blocks, PIXI sprites, BOWSIE overworld sprites and AddmusicK music", "Lunar Magic level files", "Light and dark theme", "Desktop app for Windows, macOS and Linux"]
   }
   </script>
   <script type="application/ld+json">
@@ -49,9 +49,9 @@
       { "@type": "Question", "name": "What is Solar Magic?", "acceptedAnswer": { "@type": "Answer", "text": "Solar Magic is a free level editor for Super Mario World. It runs in your web browser and lets you build your own levels and ROM hacks without installing anything." } },
       { "@type": "Question", "name": "Do I need to install anything?", "acceptedAnswer": { "@type": "Answer", "text": "No. Solar Magic runs in any modern web browser. A desktop app for Windows, macOS and Linux is available as well." } },
       { "@type": "Question", "name": "Where do I get a ROM?", "acceptedAnswer": { "@type": "Answer", "text": "Solar Magic does not come with the game. You start from a clean Super Mario World (US) ROM that you made from your own copy of the game." } },
-      { "@type": "Question", "name": "Can I use patches, blocks and sprites from SMW Central?", "acceptedAnswer": { "@type": "Answer", "text": "Yes. Drop the download into the Packages dialog; patches, UberASM code, blocks, sprites, music and graphics in it are installed together." } },
+      { "@type": "Question", "name": "Can I use patches, blocks and sprites from SMW Central?", "acceptedAnswer": { "@type": "Answer", "text": "Yes. Drop the download onto the Packages workspace; patches, UberASM code, blocks, sprites, music and graphics in it are installed together." } },
       { "@type": "Question", "name": "Is my ROM uploaded anywhere?", "acceptedAnswer": { "@type": "Answer", "text": "No. Your ROM and your work stay on your own computer. Nothing is sent to a server." } },
-      { "@type": "Question", "name": "How does it compare to Lunar Magic?", "acceptedAnswer": { "@type": "Answer", "text": "Solar Magic aims to cover Lunar Magic's features and uses its file formats. It adds test play inside the editor and installs community resources without separate tools." } }
+      { "@type": "Question", "name": "How does it compare to Lunar Magic?", "acceptedAnswer": { "@type": "Answer", "text": "Solar Magic aims to cover Lunar Magic's features and uses its file formats. It adds test play inside the editor, checks of levels and the overworld, and installs community resources without separate tools." } }
     ]
   }
   </script>
@@ -95,60 +95,65 @@
     <main class="landing">
       <nav class="landing-nav" aria-label="Start page">
         <a class="landing-brand" href="#top"><img src="/logo-48.webp" width="24" height="24" alt="" />Solar Magic</a>
+        <span class="landing-ws-links" aria-label="Workspaces">
+          <a href="#level">Level</a>
+          <a href="#overworld">Overworld</a>
+          <a href="#graphics">Graphics</a>
+          <a href="#game">Game</a>
+          <a href="#packages">Packages</a>
+        </span>
         <span class="landing-nav-links">
-          <a href="#features">Features</a>
-          <a href="#community">Community content</a>
           <a href="#download" class="landing-get-app">Desktop app</a>
           <a href="#faq">FAQ</a>
         </span>
       </nav>
 
       <header class="landing-hero" id="top">
-        <img class="landing-logo" src="/logo.webp" width="88" height="88" fetchpriority="high" alt="" />
-        <h1>Solar Magic</h1>
-        <p class="landing-tagline">A Super Mario World level editor for the browser.</p>
-        <p class="landing-lead">Edit levels, the overworld, graphics and music, test them in the built-in emulator, and install patches, blocks, sprites and music from SMW Central.</p>
-        <div class="landing-actions">
-          <button type="button" class="primary big" id="landing-new-project">New project …</button>
-          <button type="button" class="big" id="landing-open-project">Open project …</button>
+        <div class="landing-hero-text">
+          <h1><img src="/logo.webp" width="44" height="44" fetchpriority="high" alt="" />Solar Magic</h1>
+          <p class="landing-tagline">A Super Mario World level editor for the browser.</p>
+          <p class="landing-lead">Edit levels, the overworld, graphics, music and the title screen, test them in the built-in emulator, and install patches, blocks, sprites and music from SMW Central.</p>
+          <div class="landing-actions">
+            <button type="button" class="primary big" id="landing-new-project">New project …</button>
+            <button type="button" class="big" id="landing-open-project">Open project …</button>
+          </div>
+          <p class="hint">A new project starts from a clean Super Mario World (US) ROM. You can also drop the ROM or a project file onto this page.</p>
+          <noscript><p class="landing-noscript">Solar Magic needs JavaScript. Please enable it to start editing.</p></noscript>
+          <ul class="landing-facts">
+            <li>Free</li>
+            <li>Nothing to install</li>
+            <li>Files stay on your computer</li>
+            <li class="landing-get-app"><a href="#download">Desktop app for Windows, macOS and Linux</a></li>
+          </ul>
         </div>
-        <p class="hint">A new project starts from a clean Super Mario World (US) ROM. You can also drop the ROM or a project file onto this page.</p>
-        <noscript><p class="landing-noscript">Solar Magic needs JavaScript. Please enable it to start editing.</p></noscript>
-        <ul class="landing-badges">
-          <li>Free</li>
-          <li>Nothing to install</li>
-          <li>Files stay on your computer</li>
-          <li class="landing-get-app"><a href="#download">Desktop app for Windows, macOS &amp; Linux</a></li>
-        </ul>
-        <a class="landing-shot landing-hero-shot" href="/screens/level.webp" data-caption="The level editor: Yoshi's Island 1 with the level list and the object picker">
-          <img src="/screens/level.webp" srcset="/screens/level-800.webp 800w, /screens/level-1200.webp 1200w, /screens/level.webp 1600w" sizes="(max-width: 1112px) calc(100vw - 32px), 1080px" width="1600" height="1000" fetchpriority="high" alt="The level editor with Yoshi's Island 1, the level list and the object picker" />
+        <a class="landing-shot" href="/screens/level.webp" data-caption="The Level workspace: Yoshi's Island 1 with the level list and the object picker">
+          <img src="/screens/level.webp" srcset="/screens/level-800.webp 800w, /screens/level-1200.webp 1200w, /screens/level.webp 1600w" sizes="(max-width: 1152px) calc(100vw - 32px), 1120px" width="1600" height="1000" fetchpriority="high" alt="The Level workspace with Yoshi's Island 1, the level list and the object picker" />
         </a>
       </header>
 
-      <section class="landing-section" aria-labelledby="features">
-        <p class="landing-kicker">Features</p>
-        <h2 id="features">What the editor does</h2>
-        <p class="landing-intro">Levels are drawn by running the game's own code in an emulator, so the editor shows them as the game does.</p>
+      <section class="landing-section" aria-labelledby="level">
+        <h2 id="level">Level <span class="landing-keys"><kbd>G</kbd> <kbd>1</kbd></span></h2>
+        <p class="landing-intro">Levels are drawn by running the game's own code in an emulator, so the editor shows them as the game does, animated tiles and palettes included.</p>
 
-        <div class="landing-row">
-          <a class="landing-shot" href="/screens/overworld.webp" data-caption="The overworld editor: the main map with its level tiles">
-            <img src="/screens/overworld.webp" srcset="/screens/overworld-800.webp 800w, /screens/overworld.webp 1600w" sizes="(max-width: 760px) calc(100vw - 32px), (max-width: 1112px) calc((100vw - 72px) * .6), 624px" width="1600" height="1000" loading="lazy" alt="The overworld editor showing the main map with its level tiles" />
-          </a>
-          <div>
-            <h3>Levels and the overworld</h3>
-            <p>Place objects and sprites, set up entrances, exits and screen exits, and edit backgrounds. On the overworld: the map, level tiles, paths, events and the directions each exit opens.</p>
-            <ul>
-              <li>Objects, sprites, entrances and exits, layer 2 and layer 3</li>
-              <li>Overworld paths, events and level tile settings</li>
-              <li>Undo and redo; search across objects, tiles and sprites</li>
-            </ul>
-          </div>
-        </div>
+        <ul class="landing-topics">
+          <li>
+            <h3>Objects, sprites and exits</h3>
+            <p>Place and resize objects on layer 1 and layer 2, place sprites, and set up entrances, exits and screen exits. Horizontal and vertical levels, backgrounds and layer 3.</p>
+          </li>
+          <li>
+            <h3>Message boxes</h3>
+            <p>Each level's two messages are typed into the game's 18×8 box, beside the level. The editor finds out by emulation which message a message box opens.</p>
+          </li>
+          <li>
+            <h3>Search and commands</h3>
+            <p><kbd>Ctrl</kbd>+<kbd>K</kbd> finds levels, objects, sprites, Map16 tiles and commands. Tiles are also found by what they do: solid, deadly, gives a coin.</p>
+          </li>
+        </ul>
 
         <div class="landing-row">
           <div class="landing-shot-stack">
-            <a class="landing-shot" href="/screens/prefabs.webp" data-caption="A prefab placed three times in level 105, listed in the picker">
-              <img src="/screens/prefabs.webp" srcset="/screens/prefabs-800.webp 800w, /screens/prefabs.webp 1000w" sizes="(max-width: 760px) calc(100vw - 32px), (max-width: 1112px) calc((100vw - 72px) * .6), 624px" width="1000" height="790" loading="lazy" alt="Three copies of a prefab selected in level 105, the prefab listed at the top of the object picker" />
+            <a class="landing-shot" href="/screens/prefabs.webp" data-caption="A prefab placed three times in level 105">
+              <img src="/screens/prefabs.webp" width="845" height="440" loading="lazy" alt="Three copies of a prefab, a small hut of cement blocks around a pipe, selected in level 105" />
             </a>
             <a class="landing-shot landing-inset" href="/screens/prefab-save.webp" data-caption="Saving a selection as prefab: size, ROM space and the bytes saved per placement">
               <img src="/screens/prefab-save.webp" width="648" height="420" loading="lazy" alt="The Selection as prefab dialog with the cost of the prefab and the space it saves" />
@@ -168,33 +173,35 @@
         </div>
 
         <div class="landing-row">
-          <a class="landing-shot" href="/screens/testplay.webp" data-caption="Test play: the level runs right in the editor, with CPU and sprite meters beside it">
-            <img src="/screens/testplay.webp" srcset="/screens/testplay-800.webp 800w, /screens/testplay.webp 1064w" sizes="(max-width: 760px) calc(100vw - 32px), (max-width: 1112px) calc((100vw - 72px) * .6), 624px" width="1064" height="872" loading="lazy" alt="Test play of a level with the CPU and sprite meters beside the game" />
+          <a class="landing-shot" href="/screens/testplay.webp" data-caption="Test play: the level runs in the editor, with CPU and sprite meters beside it">
+            <img src="/screens/testplay.webp" srcset="/screens/testplay-800.webp 800w, /screens/testplay.webp 1600w" sizes="(max-width: 760px) calc(100vw - 32px), (max-width: 1152px) calc((100vw - 72px) * .6), 648px" width="1600" height="1000" loading="lazy" alt="Test play of Yoshi's Island 1 with the CPU and sprite meters beside the game and the keys below it" />
           </a>
           <div>
             <h3>Test play</h3>
-            <p><kbd>T</kbd> starts the current level in the built-in emulator, with sound. Keyboard and gamepad are supported.</p>
+            <p><kbd>T</kbd> starts the open level in the built-in emulator, with sound. Keyboard and gamepad are supported.</p>
             <ul>
               <li><kbd>Shift</kbd>+<kbd>T</kbd> starts with Mario at the mouse position</li>
+              <li>Hold <kbd>Backspace</kbd> to rewind</li>
               <li>CPU load, lag frames and sprite slots per frame</li>
               <li>Death markers: where Mario died and what killed him</li>
               <li>Save states</li>
+              <li>From the overworld: a new game at the events shown on the map</li>
             </ul>
           </div>
         </div>
 
         <div class="landing-row">
-          <a class="landing-shot" href="/screens/problems.webp" data-caption="The problem list of a level: a missing exit, sprites that fall out, incomplete sprites">
-            <img src="/screens/problems.webp" width="870" height="420" loading="lazy" alt="The problem list in the status bar with a missing exit, falling sprites and a sprite memory warning" />
+          <a class="landing-shot" href="/screens/problems.webp" data-caption="The Problems panel of a level: messages no message box opens, an exit without a pipe or door">
+            <img src="/screens/problems.webp" width="1410" height="440" loading="lazy" alt="The Problems panel under a level, listing two messages no message box opens and an exit without a pipe or door, each with a Show button" />
           </a>
           <div>
             <h3>Level checks</h3>
-            <p>The editor checks the open level while you work and lists what it finds in the status bar. Clicking an entry shows the place in the level. Some checks play the level through in the background.</p>
+            <p>The editor checks the open level while you work and lists what it finds under Problems. Show takes you to the place in the level. Some checks play the level through in the background.</p>
             <ul>
               <li>Pipes and doors without an exit, exits without a pipe or door, exits to secondary entrances that are not set up</li>
               <li>Slowdown per screen</li>
               <li>Sprites that fall out of the level right after appearing or are stuck between blocks</li>
-              <li>Sprites drawn incompletely because of the sprite memory setting, with a fix</li>
+              <li>Sprites the game leaves out or draws incompletely because of the sprite memory setting, with a fix</li>
               <li>More than 128 sprites; objects, sprites or exits beyond the last screen</li>
             </ul>
           </div>
@@ -209,93 +216,165 @@
             <p>What a block does is found out by running the game in an emulator: Mario hits it from below, lands on it, walks against it and tries to enter it. There are no lists of known tile numbers, so the game's blocks, patched blocks and custom GPS blocks are handled the same way.</p>
             <ul>
               <li>What a block gives when hit, drawn over the block in the level</li>
-              <li>Collision overlay: solid, passable, slopes, deadly</li>
+              <li>Collision overlay: solid, passable, slopes, sides that hurt or kill</li>
+              <li>Blocks that change with a P-switch or the ON/OFF switch</li>
               <li>Pipes and doors that can be entered, with their direction</li>
               <li>What a sprite gives when hit or jumped on</li>
               <li>Jump arcs (<kbd>J</kbd>) from Mario's measured speeds</li>
             </ul>
           </div>
         </div>
+      </section>
 
-        <div class="landing-row">
-          <a class="landing-shot" href="/screens/graphics.webp" data-caption="The graphics workspace: Map16 tiles, the tile editor and a live preview of the level">
-            <img src="/screens/graphics.webp" srcset="/screens/graphics-800.webp 800w, /screens/graphics.webp 1600w" sizes="(max-width: 760px) calc(100vw - 32px), (max-width: 1112px) calc((100vw - 72px) * .6), 624px" width="1600" height="1000" loading="lazy" alt="The graphics workspace with the Map16 tiles, the tile editor and a level preview" />
-          </a>
-          <div>
-            <h3>Graphics, colors and animation</h3>
-            <p>Pixel editor for 8×8 tiles, Map16 editor, palettes and animations, with a preview of the current level.</p>
-            <ul>
-              <li>Map16 tiles with what they act like and where they are used</li>
-              <li>ExGFX, palettes and ExAnimation</li>
-              <li>Import PNG images and Lunar Magic graphics files</li>
-            </ul>
-          </div>
-        </div>
-
-        <ul class="landing-features">
-          <li><h3>Music</h3><p>AddmusicK songs and sound effects; playback of each level's music in the editor.</p></li>
-          <li><h3>Message boxes</h3><p>Edit the message box texts, with a preview in the game's font.</p></li>
-          <li><h3>Export</h3><p>A playable ROM or a BPS patch against the clean game.</p></li>
+      <section class="landing-section" aria-labelledby="overworld">
+        <h2 id="overworld">Overworld <span class="landing-keys"><kbd>G</kbd> <kbd>2</kbd></span></h2>
+        <p class="landing-intro">The main map and the six submaps, shown as they are after any set of events. The editor follows the paths the way Mario walks them and tells you where he can't get.</p>
+        <a class="landing-shot" href="/screens/overworld.webp" data-caption="The Overworld workspace: the main map with every event passed, the event list, the layer 1 picker and the World check">
+          <img src="/screens/overworld.webp" srcset="/screens/overworld-800.webp 800w, /screens/overworld.webp 1600w" sizes="(max-width: 1152px) calc(100vw - 32px), 1120px" width="1600" height="1000" loading="lazy" alt="The Overworld workspace showing the main map with its paths and level numbers, the event list and the World check" />
+        </a>
+        <ul class="landing-topics">
+          <li>
+            <h3>Paths drawn as a route</h3>
+            <p>Drag a route from one level to the next and the editor puts the path tiles. Level tiles, stars and pipes are objects on the map; a level moved takes its paths along.</p>
+          </li>
+          <li>
+            <h3>Events</h3>
+            <p>Check events in the list to see the map after them. A level's properties say what beating it does, one sentence per exit, and arrows on the map show which levels each exit opens.</p>
+          </li>
+          <li>
+            <h3>World check</h3>
+            <p>Levels Mario never reaches, dead ends, links that leave him stuck, events no exit runs. The ROM's limits are shown as gauges beside the actions they stop.</p>
+          </li>
+          <li>
+            <h3>Names, music and sprites</h3>
+            <p>Level names as free text, a song per submap, the overworld's sprites, and custom overworld sprites with BOWSIE.</p>
+          </li>
+          <li>
+            <h3>Terrain and graphics</h3>
+            <p>Layer 2 is painted in 8×8 tiles or in pieces already on the map. Each submap has its own graphics files, palettes and ExAnimation.</p>
+          </li>
+          <li>
+            <h3>Import</h3>
+            <p>Take over the whole overworld of another ROM, as Lunar Magic's overworld copy does.</p>
+          </li>
         </ul>
       </section>
 
-      <section class="landing-section landing-community" aria-labelledby="community">
-        <p class="landing-kicker">Community content</p>
-        <h2 id="community">Compatible with existing resources</h2>
+      <section class="landing-section" aria-labelledby="graphics">
+        <h2 id="graphics">Graphics <span class="landing-keys"><kbd>G</kbd> <kbd>3</kbd></span></h2>
+        <p class="landing-intro">Palettes, 8×8 graphics, Map16 tiles and animations for the open level or a submap, with a preview of where they are used.</p>
+        <a class="landing-shot" href="/screens/graphics.webp" data-caption="The Graphics workspace: Map16 tiles, a tile's four quarters, the 8×8 graphics and a preview of the level">
+          <img src="/screens/graphics.webp" srcset="/screens/graphics-800.webp 800w, /screens/graphics.webp 1600w" sizes="(max-width: 1152px) calc(100vw - 32px), 1120px" width="1600" height="1000" loading="lazy" alt="The Graphics workspace with the Map16 tiles, the tile builder, the 8×8 graphics and a level preview" />
+        </a>
+        <ul class="landing-topics">
+          <li>
+            <h3>Map16 tiles</h3>
+            <p>Foreground, background and overworld tiles: their four 8×8 quarters, what they act like, and the levels they are used in. Unused tiles can be marked.</p>
+          </li>
+          <li>
+            <h3>Graphics and palettes</h3>
+            <p>A pixel editor for 8×8 tiles, ExGFX files per level and per submap, and palettes that show where each color comes from.</p>
+          </li>
+          <li>
+            <h3>Animations</h3>
+            <p>ExAnimation for levels and for the overworld, with triggers. The level view and the pickers play them.</p>
+          </li>
+          <li>
+            <h3>Import and export</h3>
+            <p>PNG images and Lunar Magic's Map16, ExGFX and palette files.</p>
+          </li>
+        </ul>
+      </section>
+
+      <section class="landing-section" aria-labelledby="game">
+        <h2 id="game">Game <span class="landing-keys"><kbd>G</kbd> <kbd>4</kbd></span></h2>
+        <p class="landing-intro">Everything between switching the console on and the first step on the overworld. Each screen is shown with its picture taken from the emulated game.</p>
+        <a class="landing-shot" href="/screens/game.webp" data-caption="The Game workspace: the title screen with its recorded movement on a timeline and the tiles to paint it with">
+          <img src="/screens/game.webp" srcset="/screens/game-800.webp 800w, /screens/game.webp 1600w" sizes="(max-width: 1152px) calc(100vw - 32px), 1120px" width="1600" height="1000" loading="lazy" alt="The Game workspace showing the title screen, a timeline of the buttons the game presses there and the layer 3 tiles" />
+        </a>
+        <ul class="landing-topics">
+          <li>
+            <h3>Title screen</h3>
+            <p>Paint the logo, the frame and the copyright line. Record Mario's movement on the title screen with the keyboard or a gamepad, right on the page.</p>
+          </li>
+          <li>
+            <h3>Movement that stays in sync</h3>
+            <p>If a later change to the title screen level sends Mario another way than recorded, the editor tells you at which frame.</p>
+          </li>
+          <li>
+            <h3>Menus and prompts</h3>
+            <p>The texts of file select, file erase, player select, the save prompt and the game over prompt, and the Nintendo Presents logo.</p>
+          </li>
+          <li>
+            <h3>Start of game</h3>
+            <p>The intro level, the lives and the start position of a new save file, in one place.</p>
+          </li>
+          <li>
+            <h3>Play from power-on</h3>
+            <p>See the whole sequence as a player does, on empty save files or on a save at the events you choose.</p>
+          </li>
+          <li>
+            <h3>Overworld border</h3>
+            <p>Each map's border, edited as the screen the game shows.</p>
+          </li>
+        </ul>
+      </section>
+
+      <section class="landing-section" aria-labelledby="packages">
+        <h2 id="packages">Packages <span class="landing-keys"><kbd>G</kbd> <kbd>5</kbd></span></h2>
         <p class="landing-intro">Solar Magic uses the formats of the established SMW tools. A download from <a href="https://www.smwcentral.net/" rel="noopener">SMW Central</a> is installed unchanged as one package, and can be removed again as one.</p>
 
         <div class="landing-pair">
           <figure>
             <a class="landing-shot" href="/screens/rhr105.webp" data-caption="Level 105 of the Romhack Races baserom: its custom blocks, installed from the baserom's zip">
-              <img src="/screens/rhr105.webp" srcset="/screens/rhr105-800.webp 800w, /screens/rhr105.webp 1600w" sizes="(max-width: 760px) calc(100vw - 32px), (max-width: 1112px) calc((100vw - 56px) * .61), 642px" width="1600" height="1000" loading="lazy" alt="Level 105 of the Romhack Races baserom with its block legend in the editor" />
+              <img src="/screens/rhr105.webp" srcset="/screens/rhr105-800.webp 800w, /screens/rhr105.webp 1600w" sizes="(max-width: 760px) calc(100vw - 32px), (max-width: 1152px) calc((100vw - 56px) * .5), 548px" width="1600" height="1000" loading="lazy" alt="Level 105 of the Romhack Races baserom with its block legend in the editor" />
             </a>
             <figcaption>Level 105 of the Romhack Races baserom in Solar Magic.</figcaption>
           </figure>
           <figure>
-            <a class="landing-shot" href="/screens/packages.webp" data-caption="The Packages dialog: the Romhack Races baserom installed as one package">
-              <img src="/screens/packages.webp" srcset="/screens/packages-800.webp 800w, /screens/packages.webp 950w" sizes="(max-width: 760px) calc(100vw - 32px), (max-width: 1112px) calc((100vw - 56px) * .39), 414px" width="950" height="841" loading="lazy" alt="The Packages dialog listing what the Romhack Races baserom brought" />
+            <a class="landing-shot" href="/screens/packages.webp" data-caption="The Packages workspace: the Romhack Races baserom installed as one package">
+              <img src="/screens/packages.webp" srcset="/screens/packages-800.webp 800w, /screens/packages.webp 1600w" sizes="(max-width: 760px) calc(100vw - 32px), (max-width: 1152px) calc((100vw - 56px) * .5), 548px" width="1600" height="1000" loading="lazy" alt="The Packages workspace listing the patches and UberASM files the Romhack Races baserom brought" />
             </a>
-            <figcaption>The baserom installed from its zip file: 85 patches, UberASM, 77 blocks, one sprite, one sound effect and its graphics.</figcaption>
+            <figcaption>The baserom installed from its zip file: 85 patches, UberASM, 205 blocks, one sprite, one sound effect and its graphics.</figcaption>
           </figure>
         </div>
 
-        <ul class="landing-compat">
-          <li><strong>Asar</strong><span>patches</span></li>
-          <li><strong>UberASM Tool</strong><span>level, game mode and global code</span></li>
-          <li><strong>GPS</strong><span>custom blocks, their behavior found by emulation</span></li>
-          <li><strong>PIXI</strong><span>custom sprites</span></li>
-          <li><strong>AddmusicK</strong><span>songs and sound effects</span></li>
-          <li><strong>Callisto</strong><span>projects such as the Romhack Races baserom</span></li>
-          <li><strong>Lunar Magic formats</strong><span>Map16, ExGFX, palettes, level files (.mwl)</span></li>
-          <li><strong>BPS</strong><span>patch export</span></li>
-        </ul>
+        <dl class="landing-compat">
+          <div><dt>Asar</dt><dd>Patches. A patch's settings and files can be edited after installing.</dd></div>
+          <div><dt>UberASM Tool</dt><dd>Level, game mode and global code</dd></div>
+          <div><dt>GPS</dt><dd>Custom blocks, their behavior found by emulation</dd></div>
+          <div><dt>PIXI</dt><dd>Custom sprites</dd></div>
+          <div><dt>BOWSIE</dt><dd>Custom overworld sprites</dd></div>
+          <div><dt>AddmusicK</dt><dd>Songs and sound effects, played in the editor</dd></div>
+          <div><dt>Callisto</dt><dd>Projects such as the Romhack Races baserom</dd></div>
+          <div><dt>Lunar Magic formats</dt><dd>Map16, ExGFX, palettes, level files (.mwl)</dd></div>
+          <div><dt>BPS</dt><dd>Patch export against the clean game</dd></div>
+        </dl>
 
         <div class="landing-perf">
           <div>
             <h3>Performance</h3>
             <p>Every project runs as FastROM, and the editor's own patches are kept cheap per frame. Level 106 of the Romhack Races baserom, same input, same emulator:</p>
           </div>
-          <div class="perf-nums">
-            <div class="perf-num"><span>51</span><small>lag frames, built with Lunar Magic and Callisto</small></div>
-            <div class="perf-arrow" aria-hidden="true">→</div>
-            <div class="perf-num mine"><span>38</span><small>lag frames, installed in Solar Magic</small></div>
-          </div>
+          <dl class="perf-bars">
+            <div><dt>Built with Lunar Magic and Callisto</dt><dd><span style="width: 100%"></span><b>51</b></dd></div>
+            <div class="mine"><dt>Installed in Solar Magic</dt><dd><span style="width: 74.5%"></span><b>38</b></dd></div>
+          </dl>
+          <p class="hint">Lag frames. Fewer is better.</p>
         </div>
       </section>
 
       <section class="landing-section" aria-labelledby="how">
-        <p class="landing-kicker">Get started</p>
         <h2 id="how">Getting started</h2>
         <ol class="landing-steps">
           <li><strong>New project</strong><span>Choose a clean Super Mario World (US) ROM made from your own copy of the game.</span></li>
           <li><strong>Edit</strong><span>Open a level, or install packages from SMW Central.</span></li>
-          <li><strong>Test and export</strong><span>Test in the editor, then export a ROM or a BPS patch.</span></li>
+          <li><strong>Test and export</strong><span>Test in the editor, then export a ROM, a BPS patch or your levels as PNG images.</span></li>
         </ol>
       </section>
 
       <section class="landing-section landing-download" aria-labelledby="download">
-        <p class="landing-kicker">Desktop app</p>
-        <h2 id="download">Download</h2>
+        <h2 id="download">Desktop app</h2>
         <p class="landing-intro">The desktop app is the same editor. It reads and writes files directly on disk instead of through downloads.</p>
         <ul class="landing-downloads">
           <li data-os="windows">
@@ -318,21 +397,20 @@
       </section>
 
       <section class="landing-section" aria-labelledby="faq">
-        <p class="landing-kicker">FAQ</p>
         <h2 id="faq">Questions</h2>
         <dl class="landing-faq">
-          <dt>What is Solar Magic?</dt>
-          <dd>Solar Magic is a free level editor for Super Mario World. It runs in your web browser and lets you build your own levels and ROM hacks without installing anything.</dd>
-          <dt>Do I need to install anything?</dt>
-          <dd>No. Solar Magic runs in any modern web browser. A <a href="#download">desktop app</a> is available as well.</dd>
-          <dt>Where do I get a ROM?</dt>
-          <dd>Solar Magic does not come with the game. You start from a clean Super Mario World (US) ROM that you made from your own copy.</dd>
-          <dt>Can I use patches, blocks and sprites from SMW Central?</dt>
-          <dd>Yes. Drop the download into the Packages dialog; patches, UberASM code, blocks, sprites, music and graphics in it are installed together.</dd>
-          <dt>Is my ROM uploaded anywhere?</dt>
-          <dd>No. Your ROM and your work stay on your own computer. Nothing is sent to a server.</dd>
-          <dt>How does it compare to Lunar Magic?</dt>
-          <dd>Solar Magic aims to cover Lunar Magic's features and uses its file formats. It adds test play inside the editor and installs community resources without separate tools.</dd>
+          <div><dt>What is Solar Magic?</dt>
+          <dd>Solar Magic is a free level editor for Super Mario World. It runs in your web browser and lets you build your own levels and ROM hacks without installing anything.</dd></div>
+          <div><dt>Do I need to install anything?</dt>
+          <dd>No. Solar Magic runs in any modern web browser. A <a href="#download">desktop app</a> is available as well.</dd></div>
+          <div><dt>Where do I get a ROM?</dt>
+          <dd>Solar Magic does not come with the game. You start from a clean Super Mario World (US) ROM that you made from your own copy.</dd></div>
+          <div><dt>Can I use patches, blocks and sprites from SMW Central?</dt>
+          <dd>Yes. Drop the download onto the Packages workspace; patches, UberASM code, blocks, sprites, music and graphics in it are installed together.</dd></div>
+          <div><dt>Is my ROM uploaded anywhere?</dt>
+          <dd>No. Your ROM and your work stay on your own computer. Nothing is sent to a server.</dd></div>
+          <div><dt>How does it compare to Lunar Magic?</dt>
+          <dd>Solar Magic aims to cover Lunar Magic's features and uses its file formats. It adds test play inside the editor, checks of levels and the overworld, and installs community resources without separate tools.</dd></div>
         </dl>
       </section>
 
