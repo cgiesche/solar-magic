@@ -127,9 +127,9 @@ but marks "Y newly pressed this frame" (the ROM map `$009C1F` says the same). At
 
 69 bytes in place; a longer recording needs other code. Lunar Magic replaces the playback (`$009C6F`, 17 bytes,
 hijack map) and installs a recording hijack (`$00A1DA`, 10 bytes) that writes WRAM "starting with the overworld
-event tiles" (`html/ov_file_install_recording.htm`). *Unknown:* where and in which format Lunar Magic stores its
-playback data and how long it may be. The help, the hijack map and the ROM map say nothing; it would have to be learned from a ROM Lunar Magic
-saved (`tools/_lmdis.ts`, `tools/lmctl.c`).
+event tiles" (`html/ov_file_install_recording.htm`). Where and how it stores its playback data is said nowhere, and
+was not looked into: the editor records by itself (decided 2026-11-18), so it needs neither Lunar Magic's recording
+nor its format.
 
 ### 2.3 The menus
 
@@ -158,10 +158,12 @@ What the game draws on top, which an editor of these texts has to respect:
 
 So text and layout can move freely only together with the cursor's place and the exit count's place.
 
-Two differences to the ROM map, both to be settled by emulation: it gives the title screen's stripe at `$05B375`
-as 488 bytes (905 is the distance to the next label in `SMW_U.sym`), and it calls the cursor entries `$51CB` and
-`$51C4` unused, where SMWDisX has them as the continue/end and the save prompt. It has the background colour of the
-menus at `$009B1D` and `$009CD4`, the cursor's tile at `$009EC1` and the blank tile at `$009EBA`.
+Two differences to the ROM map, settled for SMWDisX: it gives the title screen's stripe at `$05B375` as 488 bytes
+– walked in the clean ROM, the stripe has 17 entries and ends with its `$FF` after 905 bytes, right before
+`$05B6FE` (the others likewise: 203, 169, 85, 85 and 31 bytes). And it calls the cursor entries `$51CB` and `$51C4`
+unused – `HandleSelectionCursor` is called with them from `DispContinueEndMenu` (`!CursorContinueEnd`) and the save
+menu (`!CursorSaveNoSave`) in `bank_00.asm`. The ROM map has the background colour of the menus at `$009B1D` and
+`$009CD4`, the cursor's tile at `$009EC1` and the blank tile at `$009EBA`.
 
 ### 2.4 Save files
 
@@ -291,8 +293,8 @@ game's own setup of the level, not a play entered from the overworld as Lunar Ma
 help warns of, a passed Special World or Yoshi's greeting, can't differ between recording and playback), the pad logged per frame, run-length encoded into pairs. Stop ends the recording.
 
 - Up to 34 pairs fit the game's table in place, with no code changed. The clean game's demo is 1427 frames.
-- Longer needs playback code. *To decide after learning Lunar Magic's format:* write that format (a hack recorded
-  in Lunar Magic stays editable, and the reverse), or the game's own format at another address.
+- Longer needs playback code of the editor's own: the game's format at another address with the table's address
+  repointed, as an editor patch. Lunar Magic's format is not followed (2.2).
 - **Sync check:** the editor replays the recording after a change to the level, its sprites, blocks or code and
   compares it with the run recorded (Mario's position at the end, whether he died, whether the level was left). Out
   of sync shows as a problem on the title screen page instead of being found by players.
@@ -325,13 +327,11 @@ save writes), not by patch names.
 
 ## Open questions
 
-1. Lunar Magic's Title Moves playback: where is the data, which format, which limit? Needed for 5.3.
-2. Can the menu stripes move to free space without a hijack (5.2)?
-3. The title screen stripe's length (905 or 488 bytes) and the two cursor entries the ROM map calls unused (2.3).
-4. Is the status bar hidden on the title screen by the mode or by the level, and what does death do there in the
+1. Can the menu stripes move to free space without a hijack (5.2)?
+2. Is the status bar hidden on the title screen by the mode or by the level, and what does death do there in the
    clean game (Lunar Magic's help describes it only for its own playback)?
-5. Do the save prompts ("CONTINUE AND SAVE", "CONTINUE / END") belong to the same pages? Same stripes and cursor
+3. Do the save prompts ("CONTINUE AND SAVE", "CONTINUE / END") belong to the same pages? Same stripes and cursor
    table, but they are not pre-game.
-6. The patches' own pages (options, stated incompatibilities) were not read, only their list entries (section 4).
-7. Japanese and PAL ROMs differ here (own demo table, `DrawFileSelect` differs in J). Out of scope while only the
+4. The patches' own pages (options, stated incompatibilities) were not read, only their list entries (section 4).
+5. Japanese and PAL ROMs differ here (own demo table, `DrawFileSelect` differs in J). Out of scope while only the
    US game and hacks of it are supported?
