@@ -49,7 +49,7 @@
       { "@type": "Question", "name": "What is Solar Magic?", "acceptedAnswer": { "@type": "Answer", "text": "Solar Magic is a free level editor for Super Mario World. It runs in your web browser and lets you build your own levels and ROM hacks without installing anything." } },
       { "@type": "Question", "name": "Do I need to install anything?", "acceptedAnswer": { "@type": "Answer", "text": "No. Solar Magic runs in any modern web browser. A desktop app for Windows, macOS and Linux is available as well." } },
       { "@type": "Question", "name": "Where do I get a ROM?", "acceptedAnswer": { "@type": "Answer", "text": "Solar Magic does not come with the game. You start from a clean Super Mario World (US) ROM that you made from your own copy of the game." } },
-      { "@type": "Question", "name": "Can I use patches, blocks and sprites from SMW Central?", "acceptedAnswer": { "@type": "Answer", "text": "Yes. Drop the download onto the Packages workspace; patches, UberASM code, blocks, sprites, music and graphics in it are installed together." } },
+      { "@type": "Question", "name": "Can I use patches, blocks and sprites from SMW Central?", "acceptedAnswer": { "@type": "Answer", "text": "Yes. Drop the download onto the Packages workspace; patches, UberASM code, blocks, sprites, music and graphics in it are installed together. You don't write a list.txt or run GPS, PIXI, UberASM Tool or AddmusicK yourself." } },
       { "@type": "Question", "name": "Is my ROM uploaded anywhere?", "acceptedAnswer": { "@type": "Answer", "text": "No. Your ROM and your work stay on your own computer. Nothing is sent to a server." } },
       { "@type": "Question", "name": "How does it compare to Lunar Magic?", "acceptedAnswer": { "@type": "Answer", "text": "Solar Magic aims to cover Lunar Magic's features and uses its file formats. It adds test play inside the editor, checks of levels and the overworld, and installs community resources without separate tools." } }
     ]
@@ -95,12 +95,12 @@
     <main class="landing">
       <nav class="landing-nav" aria-label="Start page">
         <a class="landing-brand" href="#top"><img src="/logo-48.webp" width="24" height="24" alt="" />Solar Magic</a>
-        <span class="landing-ws-links" aria-label="Workspaces">
+        <span class="landing-ws-links" aria-label="Sections">
           <a href="#level">Level</a>
           <a href="#overworld">Overworld</a>
           <a href="#graphics">Graphics</a>
           <a href="#game">Game</a>
-          <a href="#packages">Packages</a>
+          <a href="#community">Community content</a>
         </span>
         <span class="landing-nav-links">
           <a href="#download" class="landing-get-app">Desktop app</a>
@@ -319,10 +319,11 @@
         </ul>
       </section>
 
-      <section class="landing-section" aria-labelledby="packages">
-        <p class="landing-kicker">Workspace <kbd>G</kbd> <kbd>5</kbd></p>
-        <h2 id="packages">Packages</h2>
-        <p class="landing-intro">Solar Magic uses the formats of the established SMW tools. A download from <a href="https://www.smwcentral.net/" rel="noopener">SMW Central</a> is installed unchanged as one package, and can be removed again as one.</p>
+      <section class="landing-section" aria-labelledby="community">
+        <p class="landing-kicker">Community content</p>
+        <h2 id="community">Patches, blocks, sprites and music from the community</h2>
+        <p class="landing-intro">Solar Magic uses the formats of the established SMW tools. Drop a download from <a href="https://www.smwcentral.net/" rel="noopener">SMW Central</a> onto the Packages workspace (<kbd>G</kbd> <kbd>5</kbd>): it is installed unchanged as one package, and can be removed again as one.</p>
+        <p class="landing-intro">There is no <code>list.txt</code> to write and no tool to run. The editor reads what a download contains, gives its blocks, sprites and songs their numbers, and shows where everything goes before it installs.</p>
 
         <div class="landing-pair">
           <figure>
@@ -409,7 +410,7 @@
           <div><dt>Where do I get a ROM?</dt>
           <dd>Solar Magic does not come with the game. You start from a clean Super Mario World (US) ROM that you made from your own copy.</dd></div>
           <div><dt>Can I use patches, blocks and sprites from SMW Central?</dt>
-          <dd>Yes. Drop the download onto the Packages workspace; patches, UberASM code, blocks, sprites, music and graphics in it are installed together.</dd></div>
+          <dd>Yes. Drop the download onto the Packages workspace; patches, UberASM code, blocks, sprites, music and graphics in it are installed together. You don't write a list.txt or run GPS, PIXI, UberASM Tool or AddmusicK yourself.</dd></div>
           <div><dt>Is my ROM uploaded anywhere?</dt>
           <dd>No. Your ROM and your work stay on your own computer. Nothing is sent to a server.</dd></div>
           <div><dt>How does it compare to Lunar Magic?</dt>

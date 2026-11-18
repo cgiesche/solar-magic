@@ -118,6 +118,8 @@ input.invalid, input.invalid:focus { outline: 1px solid var(--danger); border-co
 .landing-section { padding: 72px 0; border-top: 1px solid var(--border); }
 .landing-kicker kbd { text-transform: none; letter-spacing: 0; margin-left: 4px; color: var(--text); }
 .landing-kicker { text-transform: uppercase; letter-spacing: .12em; font-size: 12px; font-weight: 700; color: var(--brand-sun); margin-bottom: 6px !important; }
+.landing-intro:has(+ .landing-intro) { margin-bottom: 12px !important; }
+.landing code { font: 500 .9em var(--font-mono); background: var(--surface-2); border: 1px solid var(--border); border-radius: 4px; padding: 0 5px; }
 .landing-intro { max-width: 720px; color: var(--text-muted); font-size: 17px; margin-bottom: 36px !important; }
 .landing-row { display: grid; grid-template-columns: minmax(0, 3fr) minmax(0, 2fr); gap: 40px; align-items: center; margin-top: 64px; }
 .landing-row:nth-of-type(even) { grid-template-columns: minmax(0, 2fr) minmax(0, 3fr); }
