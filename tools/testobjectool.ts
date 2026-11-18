@@ -81,11 +81,18 @@ const name = (ext: number) => objectName(rom, 0, ext, null);
 const extended = (): ObjThumb[] => renderObjectThumbs(rom, emu, loadLevel(rom, 0x105), range(0x10, 0xff).map((e) => ({ num: 0, ext: e, size: 0 })), (s) => hx(s.ext));
 {
   const t0 = Date.now();
+  let loads = 0;
+  const load = emu.load.bind(emu);
+  emu.load = (n, ov) => { loads++; return load(n, ov); };
   const thumbs = extended();
+  emu.load = load;
   const byKey = new Map(thumbs.map((t) => [t.key, t]));
   const listed = (ns: number[]) => ns.filter((n) => byKey.has(hx(n)));
   check(listed(range(0x98, 0xdf)).length === 72 && range(0x98, 0xdf).every((n) => byKey.get(hx(n))?.effect), `98–DF listed for what they do (${listed(range(0x98, 0xdf)).length}, ${Date.now() - t0} ms)`);
   check(!listed(range(0xe0, 0xff)).length, `E0–FF not listed (${listed(range(0xe0, 0xff)).map(hx)})`);
+  // (#512) the 104 that draw nothing are loaded in groups first: those of a group that does nothing (E0–FF) not
+  // again alone – 8 batches, the load without objects, and less than a load per quiet object
+  check(loads > 8 + 1 + 72 && loads < 8 + 1 + 104, `the objects that do nothing found in groups, not each alone (${loads} loads)`);
   check(!thumbs.some((t) => t.unhandled), 'with ObjecTool\'s handler: none without one');
   // each sets its bit of ObjecTool's flags ($7FA400 on), some do more at once (UberASM's init)
   const flag = (n: number) => `$${(0x7fa400 + ((n - 0x98) >> 3)).toString(16).toUpperCase()} bit ${(n - 0x98) & 7}`;

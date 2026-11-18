@@ -113,7 +113,8 @@ interface Alone { thumb: ObjThumb | null }
 // numbers – so a change of one section's list leaves the others' batches as they were), a step each; a batch whose
 // load fails (some objects together break the game,
 // like two of tileset 7's object 33) is rendered in halves, an object that fails alone gets no thumbnail. An
-// extended object or one of object 2D's custom numbers that drew nothing in its batch is loaded again alone
+// extended object or one of object 2D's custom numbers that drew nothing in its batch (a quiet one) is loaded again
+// without the drawing ones – in groups of quiet objects first, alone where its group does something
 // (#104's rule: listed are the objects that draw tiles or do something): it may draw alone what it didn't among
 // the others (Retry's midway bars: only so many per level), else it is listed for what its load changes in RAM
 // (objeffects.ts). A custom extended object (CUSTOM_EXT on) whose load reads its entry of the game's own pointer
@@ -123,8 +124,8 @@ interface Alone { thumb: ObjThumb | null }
 // (#110). It is shown as its object box instead, as Lunar Magic shows a placeholder for unused extended objects;
 // never left out of the list. (Told apart from 47/48 by "reads its data from code" doesn't work: C2–D7 read another
 // routine's table, tools/extcodeprobe.ts)
-// Each batch and each single load is a part of the result (jobrunner.ts Part, under the hash of its objects and their
-// keys, with input: the hash of thumbsInput), kept with the bytes it read: asked again with another list – the types
+// Each batch, each group of quiet objects and each single load is a part of the result (jobrunner.ts Part, under the
+// hash of its objects and their keys, with input: the hash of thumbsInput), kept with the bytes it read: asked again with another list – the types
 // of an object found meanwhile (the kinds arrive while the thumbnails are learned, #511) – the loads of the same
 // objects are taken as stored, without a step.
 export function* objectThumbsJob(
@@ -133,6 +134,7 @@ export function* objectThumbsJob(
   const out: ObjThumb[] = [];
   const subOf = (kind: string, of: ObjSpec[]): string => `${kind}:${inputHash(of.map((s) => specId(s, keyOf)))}`;
   const PER = 32;
+  const ALONE = 8; // quiet objects of a group that does something are loaded alone from this many on (halved above)
   const objOf = (s: ObjSpec, i: number): LevelObject => ({ uid: newUid(), num: s.num, ext: s.ext, size: s.size, x: i * 16 + 3, y: 12, ...(s.extension ? { extension: s.extension } : {}) });
   // the routines of the game's own extended numbers, by its pointer table (read once needed), as ROM offsets (FastROM
   // moves some of the pointers to the fast banks)
@@ -210,10 +212,34 @@ export function* objectThumbsJob(
     if (effect) o.push({ key: keyOf(s), w: 0, h: 0, px: new Uint32Array(0), m16: [], cells: [], effect });
     return { thumb: o[0] ?? null };
   };
-  for (const s of quiet) {
-    const p = part<Alone>(subOf('q', [s]), input, () => alone(s));
-    if (!p.result) return out; // (the level without objects doesn't load)
-    if (p.result.thumb) out.push(p.result.thumb);
+  // The quiet objects, a section's among themselves: first in groups (#512 – most of them do nothing, which a load
+  // shows for all of a group at once: it is fine, no object of it wrote a tile and its RAM is the load's without
+  // objects). A group that does anything is halved, from ALONE objects on each is loaded alone – so an object that
+  // draws only without others still gets to (the group has none that drew among the drawing ones; if some of its own
+  // draw now, it isn't quiet). Taken for granted: no two objects of a group undo each other's RAM change exactly –
+  // both would count as doing nothing.
+  const todo: ObjSpec[][] = [];
+  for (let section = 1; section < 3; section++) {
+    const of = quiet.filter((s) => sectionOf(s) === section);
+    for (let b = 0; b < of.length; b += PER) todo.push(of.slice(b, b + PER));
+  }
+  while (todo.length) {
+    const g = todo.shift()!;
+    if (g.length === 1) {
+      const p = part<Alone>(subOf('q', g), input, () => alone(g[0]));
+      if (!p.result) return out; // (the level without objects doesn't load)
+      if (p.result.thumb) out.push(p.result.thumb);
+      if (p.learned) yield;
+      continue;
+    }
+    const p = part<{ quiet: boolean }>(subOf('g', g), input, () => {
+      const b = baseLoad();
+      if (!b.ok) return undefined;
+      const r = effectLoad(emu, level, g.map(objOf), true);
+      return { quiet: r.ok && !r.touched.size && ramEffect(b.wram, r.wram) === null };
+    });
+    if (!p.result) return out;
+    if (!p.result.quiet) todo.unshift(...(g.length > ALONE ? [g.slice(0, g.length >> 1), g.slice(g.length >> 1)] : g.map((s) => [s])));
     if (p.learned) yield;
   }
   return out;
