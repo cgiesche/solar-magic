@@ -334,3 +334,12 @@ src/core/amk.ts          AddmusicK as WebAssembly (tools/build-amk.sh); music.ts
 src/ui/*                 user interface (no framework)
 tools/*                  tests and analysis tools (disassembler: node tools/dis.ts 05D796 40)
 ```
+
+## License
+
+Solar Magic's own code is under the [MIT License](LICENSE).
+
+Parts by others keep their own licenses: Asar (LGPL-3.0, `src/vendor/asar`), snes_spc (LGPL-2.1, `src/vendor/spc`),
+Kobo's ExAnimation engine (MPL-2.0, `src/core/kobo`), BOWSIE (BSD-2-Clause, `src/vendor/bowsie`) and AddmusicK
+(no license stated, `src/vendor/amk`). The packages in `test/fixtures/` belong to their authors. All of them are
+named in [docs/credits.md](docs/credits.md).
