@@ -43,6 +43,7 @@
 // offers it), and the page says what plays the title screen where it is no table (titlePlays). (The bytes are laid
 // out so that No Title Screen Movement's edit, written over the patch by other means, does what it does to the game.)
 
+import { L3_MAP_VRAM, L3_MAP_WORDS } from './layer3map.ts';
 import type { LevelEmulator } from './levelemu.ts';
 import type { Rom } from './rom.ts';
 import { pcToSnes, snesToPc } from './rom.ts';
@@ -245,7 +246,10 @@ export function runMovement(emu: LevelEmulator, mv: TitleMovement): MovementRun 
 }
 
 // the machine before frame `frame` of a run (the last: after its last frame). The emulator's machine is left there.
+// With the title screen picture as booted: a run is kept when the picture is painted (titleMovement), so the cells
+// of layer 3's tilemap that the run left as its first machine has them are the boot's.
 export function runState(emu: LevelEmulator, run: MovementRun, frame: number): SnesState {
+  const boot = emu.bootState().vram as Uint8Array, first = run.states[0].state.vram as Uint8Array;
   const s = emu.snes, hook = s.hook, f = Math.max(0, Math.min(frame, run.frames));
   let from = run.states[0];
   for (const k of run.states) if (k.frame <= f) from = k;
@@ -253,6 +257,8 @@ export function runState(emu: LevelEmulator, run: MovementRun, frame: number): S
   s.hook = null;
   s.joy1 = 0;
   try { for (let i = from.frame; i < f; i++) s.runFrame(); } finally { s.hook = hook; }
+  for (let a = L3_MAP_VRAM * 2; a < (L3_MAP_VRAM + L3_MAP_WORDS) * 2; a += 2)
+    if (s.vram[a] === first[a] && s.vram[a + 1] === first[a + 1]) { s.vram[a] = boot[a]; s.vram[a + 1] = boot[a + 1]; }
   return s.saveState();
 }
 
@@ -262,10 +268,11 @@ export function titleMovement(emu: LevelEmulator): { movement: TitleMovement | n
   const had = kept.get(emu);
   if (had && holds(emu.rom, had)) return had;
   emu.ensureBoot();
+  // (without the title screen picture: Mario's way doesn't show it, and runState gives a machine the picture)
   const r = emu.recordAll(() => {
     const movement = learnMovement(emu);
     return { movement, run: movement ? runMovement(emu, movement) : null, plays: titlePlays(emu, movement) };
-  });
+  }, false);
   const k = { gen: r.gen, reads: r.reads, ...r.result };
   kept.set(emu, k);
   return k;

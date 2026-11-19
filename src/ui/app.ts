@@ -476,7 +476,7 @@ export class App {
       cells = p?.cells ?? null;
       this.images = p?.images ?? renderLevel(this.rom, r, lv.header.mode, lv.header.screens, drawn.rows);
       this.drawnFor = drawn;
-    }) };
+    }, false) };
     if (this.anim.steps) this.rendered.reads.add(this.anim.steps.reads); // (the steps carried over)
     // picker thumbnails are transparent: shown on the level's backdrop as in the game
     const c = this.images.backdrop;

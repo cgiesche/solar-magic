@@ -13,7 +13,7 @@ import type { Snes, SnesState, MemHook } from './snes.ts';
 import { PPU } from './ppu.ts';
 import { GM, RAM } from './ram.ts';
 import { L3_MAP_VRAM, layer3CharBase } from './layer3map.ts';
-import { holds, type RomReads } from './romdeps.ts';
+import { holds, RomReads } from './romdeps.ts';
 
 export type GameScreenId = 'presents' | 'title' | 'fileSelect' | 'fileErase' | 'playerSelect' | 'savePrompt' | 'gameOverPrompt';
 
@@ -249,9 +249,22 @@ export function gameScreens(emu: LevelEmulator): ReachedScreen[] {
   const had = kept.get(emu);
   if (had && holds(emu.rom, had)) return had.screens;
   emu.ensureBoot();
-  const r = emu.recordAll(() => reachScreens(emu));
-  kept.set(emu, { gen: r.gen, reads: r.reads, screens: r.result });
+  // which screens are reached doesn't show the title screen picture, their machines do (a menu is drawn over it)
+  const r = emu.recordAll(() => reachScreens(emu), false), reads = new RomReads(emu.rom, r.reads);
+  if (emu.bootPicture) reads.add(emu.bootPicture);
+  kept.set(emu, { gen: r.gen, reads, screens: r.result });
+  keptIds.set(emu, { gen: r.gen, reads: r.reads, ids: r.result.map((s) => s.id) });
   return r.result;
+}
+
+// Which screens the game reaches (gameScreens' ids): kept also when the title screen picture is painted, which
+// only their machines show.
+const keptIds = new WeakMap<LevelEmulator, { gen: number; reads: RomReads; ids: GameScreenId[] }>();
+export function reachedScreenIds(emu: LevelEmulator): GameScreenId[] {
+  const had = keptIds.get(emu);
+  if (had && holds(emu.rom, had)) return had.ids;
+  gameScreens(emu);
+  return keptIds.get(emu)!.ids;
 }
 
 export interface ScreenPicture {

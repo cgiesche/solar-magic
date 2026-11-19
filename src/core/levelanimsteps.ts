@@ -117,7 +117,7 @@ export class LevelAnimSteps {
     s.hook = outer ? joinHooks(outer, watch) : watch;
     let step: AnimStep | null;
     try {
-      const r = this.emu.recordAll(() => this.emu.animationFrames(1, STEP_FRAMES)[0] ?? null);
+      const r = this.emu.recordAll(() => this.emu.animationFrames(1, STEP_FRAMES)[0] ?? null, false);
       this.recorded.reads.add(r.reads);
       step = r.result;
     } finally { s.hook = outer; }

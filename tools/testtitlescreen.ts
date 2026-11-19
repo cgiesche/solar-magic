@@ -5,6 +5,8 @@ import { existsSync, readFileSync } from 'node:fs';
 import { Rom, snesToPc } from '../src/core/rom.ts';
 import { LevelEmulator } from '../src/core/levelemu.ts';
 import { TITLE_COLS, TITLE_ROWS, TITLE_STRIPE_PTR, titleTilemap, titleStripe, writeTitleScreen, titlePicture, titleStripeAddr } from '../src/core/titlescreen.ts';
+import { titleMovement, runState } from '../src/core/titlemovement.ts';
+import { gameScreens, reachedScreenIds } from '../src/core/pregame.ts';
 import { editorImage } from './fixture.ts';
 
 let bad = 0;
@@ -102,6 +104,22 @@ const same = (a: ArrayLike<number>, b: ArrayLike<number>) => a.length === b.leng
   const again = e.tracked(() => e.load(0x105)).reads, then = rom.data.slice(); // (boots again, inside the recording)
   writeTitleScreen(rom, titleTilemap(e).map((w) => w ^ 0x0400));
   check(!e.bootReads!.differ(then, rom.data) && !again.differ(then, rom.data), 'booted again inside a level\'s load: they hold after painting again');
+}
+
+// painted: what doesn't show the picture is kept (#550) – the title screen movement's run (its machines get the
+// picture as booted), the screens' list, a level's picture; the screens' machines are learned again
+{
+  const rom = fresh(), e = new LevelEmulator(rom);
+  const mv = titleMovement(e), screens = gameScreens(e), ids = reachedScreenIds(e);
+  const level = e.recordAll(() => e.load(0x105), false).reads, before = rom.data.slice();
+  const map = titleTilemap(e).map((w) => w ^ 0x0400);
+  writeTitleScreen(rom, map);
+  check(titleMovement(e) === mv, 'painted: the title screen movement\'s run is kept');
+  check(same(vramRows(runState(e, mv.run!, 700).vram as Uint8Array), map), 'painted: the run\'s machine at frame 700 has the picture as painted');
+  check(!level.differ(before, rom.data), 'painted: a level\'s picture (recordAll without the title screen picture) holds');
+  check(reachedScreenIds(e) === ids, 'painted: the screens\' list is kept');
+  const again = gameScreens(e);
+  check(again !== screens && again.map((x) => x.id).join() === screens.map((x) => x.id).join(), 'painted: the screens\' machines are learned again, the same screens');
 }
 
 // a ROM Lunar Magic saved: its title screen's first stripe is the editor's layout (header, 32 × 29 tiles), the

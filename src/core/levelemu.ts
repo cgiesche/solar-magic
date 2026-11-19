@@ -133,6 +133,9 @@ export class LevelEmulator {
   // the reads the boot's skipMask left out: GFX files uploaded on the title screen stay in VRAM, and a
   // level with the same files doesn't upload them again – a change makes the snapshot stale as well
   private bootMasked: RomReads | null = null;
+  // the title screen picture's bytes (titlepicture.ts), which the boot draws: a change makes the snapshot stale too.
+  // No reads of the boot's, and counted only by what shows the title screen (recordAll)
+  bootPicture: RomReads | null = null;
   private bootRom: Uint8Array | null = null; // the ROM as it was booted
 
   // the boot snapshot of another emulator on the same ROM (saves booting again)
@@ -140,6 +143,7 @@ export class LevelEmulator {
     this.baseState = other.baseState;
     this.bootReads = other.bootReads;
     this.bootMasked = other.bootMasked;
+    this.bootPicture = other.bootPicture;
     this.bootRom = other.bootRom;
     this.romGen = -1; // it may be from an older ROM: checked with the next entry
   }
@@ -150,8 +154,8 @@ export class LevelEmulator {
   // aren't recorded, so an overworld sprite edit keeps every result and the snapshot.
   // It draws the title screen picture (titlepicture.ts), of which nothing is left in a level loaded – its load writes
   // layer 3's tilemap anew and doesn't read the picture (testtitlescreen.ts): the picture's reads aren't recorded as
-  // the boot's but kept with those its skip mask left out (bootMasked). So painting it boots the snapshot again and
-  // keeps every result learned from a level (#550); what shows the title screen counts them (recordAll).
+  // the boot's but kept on their own (bootPicture). So painting it boots the snapshot again and keeps every result
+  // learned from a level (#550); what shows the title screen counts them (recordAll).
   // The per-sprite tables are found from the snapshot (spritetables.ts) when those found for the ROM no longer hold
   // (or none were): the boot's reads are then recorded by byte, and kept by byte only in the tables' pages.
   boot(): void {
@@ -163,8 +167,9 @@ export class LevelEmulator {
     const skipped: number[] = [];
     const slots = hasOwSpriteSlots(this.rom) ? snesToPc(OW_SPRITES) : -1, slotsEnd = slots + OW_SPRITE_SLOTS * 5;
     for (let o = slots; o >= 0 && o < slotsEnd; o++) skipped.push(o);
+    const picture = new RomReads(this.rom);
     for (const [a, b] of unrecorded(this.rom, () => titlePictureRanges(this.rom))) {
-      masked.read(a, b - a);
+      picture.read(a, b - a);
       for (let o = a; o < b; o++) skipped.push(o);
     }
     for (const o of skipped) s.romSkip.add(o);
@@ -183,6 +188,7 @@ export class LevelEmulator {
       for (const o of skipped) s.romSkip.delete(o);
     }
     this.bootMasked = masked;
+    this.bootPicture = picture;
     this.baseState = s.saveState();
     this.bootRom = this.rom.data.slice();
     if (find) findSpriteTables(this, this.bootReads);
@@ -216,8 +222,9 @@ export class LevelEmulator {
   }
 
   // runs fn recording every ROM byte it and the boot it starts from read, those skipMask leaves out too: what
-  // fn's outcome depends on (a render shows GFX file data)
-  recordAll<T>(fn: () => T): Recorded<T> {
+  // fn's outcome depends on (a render shows GFX file data). picture: the title screen picture's bytes too (bootPicture;
+  // false for what starts from the boot and doesn't show it: a level loaded, the title screen movement's run)
+  recordAll<T>(fn: () => T, picture = true): Recorded<T> {
     const s = this.snes, outer = s.romMasked, masked = new RomReads(this.rom);
     s.romMasked = masked;
     try {
@@ -225,6 +232,7 @@ export class LevelEmulator {
       r.reads.add(masked);
       if (this.bootReads) r.reads.add(this.bootReads);
       if (this.bootMasked) r.reads.add(this.bootMasked);
+      if (picture && this.bootPicture) r.reads.add(this.bootPicture);
       return r;
     } finally { s.romMasked = outer; }
   }
@@ -238,10 +246,11 @@ export class LevelEmulator {
     if (this.romGen === this.rom.gen) return;
     this.romGen = this.rom.gen;
     if (this.baseState && this.bootReads && this.bootRom &&
-      (this.bootReads.differ(this.bootRom, this.rom.data) || this.bootMasked?.differ(this.bootRom, this.rom.data))) {
+      (this.bootReads.differ(this.bootRom, this.rom.data) || this.bootMasked?.differ(this.bootRom, this.rom.data) || this.bootPicture?.differ(this.bootRom, this.rom.data))) {
       this.baseState = null;
       this.bootReads = null;
       this.bootMasked = null;
+      this.bootPicture = null;
       this.bootRom = null;
     }
   }
