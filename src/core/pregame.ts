@@ -13,7 +13,8 @@ import type { Snes, SnesState, MemHook } from './snes.ts';
 import { PPU } from './ppu.ts';
 import { GM, RAM } from './ram.ts';
 import { L3_MAP_VRAM, layer3CharBase } from './layer3map.ts';
-import { holds, RomReads } from './romdeps.ts';
+import { holds, type RomReads } from './romdeps.ts';
+import type { BootSnapshot } from './bootsnapshot.ts';
 
 export type GameScreenId = 'presents' | 'title' | 'fileSelect' | 'fileErase' | 'playerSelect' | 'savePrompt' | 'gameOverPrompt';
 
@@ -243,28 +244,29 @@ export function replayScreen(emu: LevelEmulator, screen: ReachedScreen, hook: Me
   }
 }
 
-// The screens reached, kept per emulator while the ROM bytes the game read to get there are as they were.
-const kept = new WeakMap<LevelEmulator, { gen: number; reads: RomReads; screens: ReachedScreen[] }>();
+// The screens reached, kept per emulator while the ROM bytes the game read to get there are as they were. Which
+// screens are reached is a full picture: it doesn't show the title screen picture and is kept when that is painted.
+// Their machines show the title screen (a menu is drawn over the picture): they are those of the boot snapshot they
+// were reached from, which is booted again when the picture is painted.
+interface Reached { gen: number; reads: RomReads; from: BootSnapshot; screens: ReachedScreen[]; ids: GameScreenId[] }
+const kept = new WeakMap<LevelEmulator, Reached>();
+function reach(emu: LevelEmulator): Reached {
+  const from = emu.bootSnapshot(), r = emu.record('full picture', () => reachScreens(emu));
+  const k = { gen: r.gen, reads: r.reads, from, screens: r.result, ids: r.result.map((s) => s.id) };
+  kept.set(emu, k);
+  return k;
+}
 export function gameScreens(emu: LevelEmulator): ReachedScreen[] {
   const had = kept.get(emu);
-  if (had && holds(emu.rom, had)) return had.screens;
-  emu.ensureBoot();
-  // which screens are reached doesn't show the title screen picture, their machines do (a menu is drawn over it)
-  const r = emu.recordAll(() => reachScreens(emu), false), reads = new RomReads(emu.rom, r.reads);
-  if (emu.bootPicture) reads.add(emu.bootPicture);
-  kept.set(emu, { gen: r.gen, reads, screens: r.result });
-  keptIds.set(emu, { gen: r.gen, reads: r.reads, ids: r.result.map((s) => s.id) });
-  return r.result;
+  // (the snapshot is asked for only when the rest holds: a stale one is booted again there)
+  return (had && holds(emu.rom, had) && had.from === emu.bootSnapshot() ? had : reach(emu)).screens;
 }
 
 // Which screens the game reaches (gameScreens' ids): kept also when the title screen picture is painted, which
 // only their machines show.
-const keptIds = new WeakMap<LevelEmulator, { gen: number; reads: RomReads; ids: GameScreenId[] }>();
 export function reachedScreenIds(emu: LevelEmulator): GameScreenId[] {
-  const had = keptIds.get(emu);
-  if (had && holds(emu.rom, had)) return had.ids;
-  gameScreens(emu);
-  return keptIds.get(emu)!.ids;
+  const had = kept.get(emu);
+  return (had && holds(emu.rom, had) ? had : reach(emu)).ids;
 }
 
 export interface ScreenPicture {

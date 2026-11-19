@@ -161,10 +161,10 @@ function checkGroup(ctx: SpriteMemContext, m: number, group: SpriteGroup, cams: 
   if (kept !== undefined) return kept;
   let c = cams.get(m);
   if (!c || c.gen !== emu.rom.gen) {
-    const r = emu.tracked(() => testLevel(emu, ctx.level, ctx.header, m, ctx.bgPointer));
+    const r = emu.record('behaviour', () => testLevel(emu, ctx.level, ctx.header, m, ctx.bgPointer));
     cams.set(m, (c = { gen: emu.rom.gen, cam: r.result, reads: r.reads }));
   }
-  const cam = c.cam, { result, reads } = emu.tracked(() => runGroup(ctx, m, group, cam), c.reads);
+  const cam = c.cam, { result, reads } = emu.record('behaviour', () => runGroup(ctx, m, group, cam), { base: c.reads });
   if (groupResults) {
     const ix = (uids: Set<number>) => group.flatMap((s, i) => (uids.has(s.uid) ? [i] : []));
     groupResults.set(key, result && { lost: ix(result.lost), absent: ix(result.absent), live: result.live }, reads);
@@ -219,7 +219,7 @@ export function usedSpriteMemory(rom: Rom): number[] {
 // current one (base: its check), tried in the order given (most used first); null if none.
 // A value is first checked against the kept group results (one that fails rules it out without playing a group),
 // then the other groups are played, those with conflicts first, so a candidate usually fails fast. Only the chosen
-// value's reads count for an enclosing tracked() call (a stored check depends on the current value and the suggestion);
+// value's reads count for an enclosing record() call (a stored check depends on the current value and the suggestion);
 // when none fits, the reads of every value tried count (a ROM change that lets one fit checks again, #219).
 export function suggestSpriteMemory(ctx: SpriteMemContext, current: number, candidates: number[], groups: SpriteGroup[], base: SpriteMemCheck): number | null {
   return runJob(suggestJob(ctx, current, candidates, groups, base));
@@ -238,7 +238,7 @@ function* suggestJob(ctx: SpriteMemContext, current: number, candidates: number[
     // what the value's checks read counts only when it is chosen or none fits (#219): a ROM change that lets a rejected
     // value fit checks again only when there is no suggestion (one that fits is enough, maybe not the first)
     const reads = new RomReads(emu.rom);
-    const apart = <T>(fn: () => T): T => { const r = emu.tracked(fn, null, false); reads.add(r.reads); return r.result; };
+    const apart = <T>(fn: () => T): T => { const r = emu.record('behaviour', fn, { base: null, counted: false }); reads.add(r.reads); return r.result; };
     const play: number[] = [];
     let ok = true;
     for (const i of order) {

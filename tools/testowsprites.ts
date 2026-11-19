@@ -128,14 +128,14 @@ const rom = new Rom(await editorImage());
   const r = new Rom(rom.data.slice()), emu = new LevelEmulator(r), lo = snesToPc(OW_SPRITES), hi = lo + OW_SPRITE_SLOTS * 5;
   const inTable = (reads: RomReads) => [...reads.bytes].filter((o) => o >= lo && o < hi).length;
   emu.boot();
-  check(inTable(emu.bootReads!) === 0, `the boot: no byte of the slot table read (${inTable(emu.bootReads!)})`);
-  const reads = emu.tracked(() => emu.load(0x105)).reads;
+  check(inTable(emu.snapshot!.reads) === 0, `the boot: no byte of the slot table read (${inTable(emu.snapshot!.reads)})`);
+  const reads = emu.record('picture', () => emu.load(0x105)).reads;
   check(inTable(reads) === 0, `a level load: no byte of the slot table read (${inTable(reads)})`);
-  const boot = emu.baseState;
+  const boot = emu.snapshot;
   const boo = readOwSprite(r, 10);
   writeOwSprite(r, 10, { ...boo, num: 1, x: boo.x + 0x30 });
   const kept = emu.load(0x105), fresh = new LevelEmulator(new Rom(r.data.slice())).load(0x105);
-  check(emu.baseState === boot && Buffer.compare(kept.vram, fresh.vram) === 0 && Buffer.compare(kept.wram.subarray(0x1000), fresh.wram.subarray(0x1000)) === 0,
+  check(emu.snapshot === boot && Buffer.compare(kept.vram, fresh.vram) === 0 && Buffer.compare(kept.wram.subarray(0x1000), fresh.wram.subarray(0x1000)) === 0,
     'a slot edited: the boot snapshot kept, level 105 loads as on a ROM booted with the slot');
 }
 

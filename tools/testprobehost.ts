@@ -241,7 +241,7 @@ check(host.pending === 0, 'new ROM: tasks dropped');
   const started = h.started, pending = h.pending;
   // a byte the boot read (the scan counts it from its first slice; object kinds don't depend on it): changed, and
   // changed back before the restarted scan read anything (no second restart)
-  const page = emu.bootReads!.pages.indexOf(1), o = page << 8;
+  const page = emu.snapshot!.reads.pages.indexOf(1), o = page << 8;
   const flip = (gen: number) => { r.writeAt(o, Uint8Array.of(r.data[o] ^ 1)); h.handle({ type: 'edit', gen, size: r.size, edits: [[o, r.data.slice(o, o + 1)]] }); };
   flip(2); flip(3);
   check(h.started === started && h.pending === pending, 'a byte the scan read: nothing restarted at once, the kinds and the queue stay');
@@ -283,7 +283,7 @@ check(host.pending === 0, 'new ROM: tasks dropped');
   h.handle({ type: 'scan', id: 3, key: 'scan-d', level: scanLevel });
   for (let i = 0; i < 4; i++) h.next();
   h.handle({ type: 'cancel', task: 'scan' });
-  const o = emu.bootReads!.pages.indexOf(1) << 8, started2 = h.started;
+  const o = emu.snapshot!.reads.pages.indexOf(1) << 8, started2 = h.started;
   r.writeAt(o, Uint8Array.of(r.data[o] ^ 1));
   h.handle({ type: 'edit', gen: 2, size: r.size, edits: [[o, r.data.slice(o, o + 1)]] });
   check(h.started === started2 && h.pending === 0, 'a byte the cancelled scan read: not run, not started over yet');
@@ -334,13 +334,13 @@ check(host.pending === 0, 'new ROM: tasks dropped');
   };
   const prober = (h as unknown as { prober: BlockProber }).prober; // (its boot snapshot: booted again when replaced)
   const edit = (what: string, change: () => void) => {
-    const boot = prober.emu.baseState;
+    const boot = prober.emu.snapshot;
     send(change);
     const lost = keys.filter((k) => ed.get(k) === undefined);
     check(lost.length === 0, `${what}: no result dropped${lost.length ? ` (${lost.join(', ')})` : ''}`);
     h.ask([{ kind: 'block', ts: 0, tile: 0x025 }]);
     h.next();
-    check(prober.emu.baseState === boot, `${what}: not booted again`);
+    check(prober.emu.snapshot === boot, `${what}: not booted again`);
     h.ask(jobs); // (the dropped ones again)
     while (h.pending) keep(h.next());
   };

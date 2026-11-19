@@ -4,6 +4,8 @@
 // entries: they only lead to the data (an LZ2 file that grows when drawn in is moved to free space, which
 // changes its entry). Sprite images do depend on the sprite graphics: their key holds a hash of the sprite
 // files' content instead.
+// A result says what it shows (bootsnapshot.ts Shows); a full picture counts the reads the mask leaves out too, as
+// its outcome shows the files' data as the ROM holds it.
 // The same for the ExAnimation data (pointer table, settings, lists, alternative files): editing an
 // animation keeps the block probes (whose test level may be the level being animated).
 // For what blocks do (block probes, probehost.ts) and the editor's other results that are no pictures (learner.ts)

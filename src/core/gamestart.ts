@@ -182,7 +182,7 @@ export function gameStart(emu: LevelEmulator): GameStart {
   const had = kept.get(emu);
   if (had && holds(emu.rom, had)) return had.start;
   emu.ensureBoot();
-  const r = emu.recordAll(() => learnGameStart(emu));
+  const r = emu.record('title screen', () => learnGameStart(emu));
   kept.set(emu, { gen: r.gen, reads: r.reads, start: r.result });
   return r.result;
 }

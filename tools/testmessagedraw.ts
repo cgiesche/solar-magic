@@ -13,6 +13,7 @@ import { readFileSync } from 'node:fs';
 import { Rom } from '../src/core/rom.ts';
 import { loadAsar } from '../src/core/asar.ts';
 import { LevelEmulator } from '../src/core/levelemu.ts';
+import type { BootSnapshot } from '../src/core/bootsnapshot.ts';
 import { PlaySession } from '../src/core/playsession.ts';
 import { map16Source } from '../src/core/render.ts';
 import { RomHistory } from '../src/core/romhistory.ts';
@@ -37,10 +38,10 @@ const same = (a: MessageRoutine | undefined, b: MessageRoutine) => JSON.stringif
 // the packages tried without (messagedraw.ts drawnWithout: its copy of the ROM is made with their bytes undone)
 const candidates: string[] = [];
 const adopt = LevelEmulator.prototype.adoptBoot;
-LevelEmulator.prototype.adoptBoot = function (this: LevelEmulator, other: LevelEmulator) {
+LevelEmulator.prototype.adoptBoot = function (this: LevelEmulator, snapshot: BootSnapshot | null) {
   const name = listPackages(rom).find((k) => k.patches.some((id) => { const e = listPatches(rom).find((x) => x.id === id); return e && e.segs.some(([pc, n]) => this.rom.data.subarray(pc, pc + n).some((v, i) => v !== rom.data[pc + i])); }))?.name;
   if (name) candidates.push(name);
-  return adopt.call(this, other);
+  return adopt.call(this, snapshot);
 };
 
 // levels played, counted by where they run (the stand-in worker sets inWorker while it runs the host)

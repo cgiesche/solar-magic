@@ -55,18 +55,18 @@ const same = (a: ArrayLike<number>, b: ArrayLike<number>) => a.length === b.leng
 
 // painted: no dependency of what is learned from a level (#550). The boot runs to the title screen and reads the
 // picture, and every result starts from the boot: its reads leave the picture out, the snapshot is booted again, the
-// title screen's own results (recordAll) depend on it. A level loaded shows nothing of it.
+// title screen's own results (record 'title screen') depend on it. A level loaded shows nothing of it.
 {
   const rom = fresh(), e = booted(rom);
   const load = () => { const r = e.load(0x105); return { vram: r.vram.slice(), cgram: r.cgram.slice() }; };
   const unpainted = load();
   // (painted: every cell with another palette; first the game's picture, which moves to a block of the editor's, then that one)
   for (const [what, edit] of [['the game\'s picture painted', 0x0400], ['the editor\'s picture painted', 0x0800]] as const) {
-    const bootReads = e.bootReads!, titleReads = e.recordAll(() => 0).reads, before = rom.data.slice();
+    const bootReads = e.snapshot!.reads, titleReads = e.record('title screen', () => 0).reads, before = rom.data.slice();
     const map = titleTilemap(e).map((w) => w ^ edit);
     writeTitleScreen(rom, map);
     check(!bootReads.differ(before, rom.data), `${what}: nothing the boot's reads hold changed`);
-    check(titleReads.differ(before, rom.data), `${what}: a result of the title screen itself (recordAll) no longer holds`);
+    check(titleReads.differ(before, rom.data), `${what}: a result that shows the title screen no longer holds`);
     check(same(titleTilemap(e), map), `${what}: the boot snapshot is booted again, the title screen shows it`);
     const painted = load();
     check(same(painted.vram, unpainted.vram) && same(painted.cgram, unpainted.cgram), `${what}: level 105 loads to the same VRAM and CGRAM`);
@@ -98,12 +98,12 @@ const same = (a: ArrayLike<number>, b: ArrayLike<number>) => a.length === b.leng
 // picture's entry is on a page of code every load runs, read by byte (romdeps.ts)
 {
   const rom = fresh(), e = new LevelEmulator(rom);
-  const first = e.tracked(() => e.load(0x105)).reads, before = rom.data.slice();
+  const first = e.record('picture', () => e.load(0x105)).reads, before = rom.data.slice();
   writeTitleScreen(rom, titleTilemap(e).map((w) => w ^ 0x0400));
-  check(!e.bootReads!.differ(before, rom.data) && !first.differ(before, rom.data), 'booted inside a level\'s load: the boot\'s and the load\'s reads hold after painting');
-  const again = e.tracked(() => e.load(0x105)).reads, then = rom.data.slice(); // (boots again, inside the recording)
+  check(!e.snapshot!.reads.differ(before, rom.data) && !first.differ(before, rom.data), 'booted inside a level\'s load: the boot\'s and the load\'s reads hold after painting');
+  const again = e.record('picture', () => e.load(0x105)).reads, then = rom.data.slice(); // (boots again, inside the recording)
   writeTitleScreen(rom, titleTilemap(e).map((w) => w ^ 0x0400));
-  check(!e.bootReads!.differ(then, rom.data) && !again.differ(then, rom.data), 'booted again inside a level\'s load: they hold after painting again');
+  check(!e.snapshot!.reads.differ(then, rom.data) && !again.differ(then, rom.data), 'booted again inside a level\'s load: they hold after painting again');
 }
 
 // painted: what doesn't show the picture is kept (#550) – the title screen movement's run (its machines get the
@@ -111,12 +111,12 @@ const same = (a: ArrayLike<number>, b: ArrayLike<number>) => a.length === b.leng
 {
   const rom = fresh(), e = new LevelEmulator(rom);
   const mv = titleMovement(e), screens = gameScreens(e), ids = reachedScreenIds(e);
-  const level = e.recordAll(() => e.load(0x105), false).reads, before = rom.data.slice();
+  const level = e.record('full picture', () => e.load(0x105)).reads, before = rom.data.slice();
   const map = titleTilemap(e).map((w) => w ^ 0x0400);
   writeTitleScreen(rom, map);
   check(titleMovement(e) === mv, 'painted: the title screen movement\'s run is kept');
   check(same(vramRows(runState(e, mv.run!, 700).vram as Uint8Array), map), 'painted: the run\'s machine at frame 700 has the picture as painted');
-  check(!level.differ(before, rom.data), 'painted: a level\'s picture (recordAll without the title screen picture) holds');
+  check(!level.differ(before, rom.data), 'painted: a level\'s picture (a full picture) holds');
   check(reachedScreenIds(e) === ids, 'painted: the screens\' list is kept');
   const again = gameScreens(e);
   check(again !== screens && again.map((x) => x.id).join() === screens.map((x) => x.id).join(), 'painted: the screens\' machines are learned again, the same screens');

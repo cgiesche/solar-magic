@@ -36,7 +36,7 @@ const ENTER_FRAMES = 60; // A pressed on a tile he stopped at, until a level loa
 
 // The kind of every layer 1 tile 000–1FF (its high byte at $7FC800, overworld.ts readL1), a tile per step (the result
 // learner's job). The overworld's data the editor writes isn't recorded as read (emu.skipMask, restored when it ends:
-// not withSkipMask, the mask stays set between the job's steps, each run in a tracked() that reads it).
+// not withSkipMask, the mask stays set between the job's steps, each run in a record() that reads it).
 export function pathKindsJob(emu: LevelEmulator): Job<PathKind[]> {
   return probeAll(emu, maskOverworldData(emu));
 }

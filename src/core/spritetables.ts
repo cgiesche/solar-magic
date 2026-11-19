@@ -33,12 +33,12 @@ export function spriteTablesHold(rom: Rom): boolean {
 // Returns the pages, kept with the bytes read (the boot's among them); none when fewer than two sprites could be
 // spawned. When the game crashes, the pages learned before stay (and none are returned).
 export function findSpriteTables(emu: LevelEmulator, boot: RomReads): number[] {
-  const s = emu.snes, cpu = s.cpu, base = emu.baseState!;
+  const s = emu.snes, cpu = s.cpu, base = emu.snapshot!.state;
   const seen = new Map<string, { base: number; stride: number; numbers: Set<number> }>(); // by `${base}/${stride}`
   // (ROM as the emulator reads it: WRAM in banks 7E/7F, the emulator's overlay in FE/FF)
   const isRom = (a: number) => (a & 0xffff) >= 0x8000 && ((a >> 16) & 0x7e) !== 0x7e;
   let crashed = false;
-  const r = emu.tracked(() => {
+  const r = emu.record('behaviour', () => {
     s.loadState(base);
     const w = s.wram, free: number[] = [];
     for (let i = 0; i < SPRITE_SLOTS; i++) if (!w[SPR.status + i]) free.push(i);
@@ -70,7 +70,7 @@ export function findSpriteTables(emu: LevelEmulator, boot: RomReads): number[] {
       for (let a = t.base; a < t.base + t.stride * 256; a++) if (isRom(a)) pages.add(s.romOffset(a) >> PAGE_SHIFT);
     }
     return [...pages].sort((x, y) => x - y);
-  }, null, false);
+  }, { base: null, counted: false });
   if (!crashed) learnBytePages(emu.rom, r.result);
   boot.coarsen();
   r.reads.add(boot);

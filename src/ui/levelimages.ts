@@ -182,7 +182,7 @@ export function openLevelImages(app: App, listed: () => number[], arcPin: ArcPin
     // (an emulator of its own: the level view's keeps its level and its animation)
     const emu = new LevelEmulator(app.rom);
     emu.skipMask = app.gfxSkipMask;
-    emu.adoptBoot(app.emu);
+    emu.adoptBoot(app.emu.snapshot);
     // (the probes run while the dialog is open)
     const release = app.probes.urge();
     try {

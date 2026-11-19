@@ -75,6 +75,6 @@ export async function checkJobRunner(check: (ok: boolean, what: string) => void)
   // picture vs no picture: from the main boot snapshot, or from one without the display data (the shared colors)
   const pic = runner.emu('pic', true), plain = runner.emu('plain', false), pal = snesToPc(FG_PALS);
   const has = (r: RomReads | null) => !!r && (!!r.pages[pal >> 8] || r.bytes.has(pal));
-  check(pic.baseState === main.baseState && has(pic.bootReads), 'runner: a picture starts from the main boot snapshot, which read the colors');
-  check(!!plain.baseState && plain.baseState !== main.baseState && !has(plain.bootReads), 'runner: a result that is no picture starts from a boot snapshot without them');
+  check(pic.snapshot === main.snapshot && has(pic.snapshot?.reads ?? null), 'runner: a picture starts from the main boot snapshot, which read the colors');
+  check(!!plain.snapshot && plain.snapshot !== main.snapshot && !has(plain.snapshot?.reads ?? null), 'runner: a result that is no picture starts from a boot snapshot without them');
 }

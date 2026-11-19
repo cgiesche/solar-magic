@@ -73,7 +73,7 @@ const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b)
 {
   const N = 0x01f, lv = loadLevel(rom, N), edited = structuredClone(lv);
   edited.header.mode = 1;
-  const kinds = [lv, edited].map((l) => { const ov = ovOf(l); return learner.now(`l3k2:${l.header.tileset}`, (e) => e.tracked(() => layer3Kinds(e, N, ov)), { input: levelInput(N, ov) }).join(); });
+  const kinds = [lv, edited].map((l) => { const ov = ovOf(l); return learner.now(`l3k2:${l.header.tileset}`, (e) => e.record('picture', () => layer3Kinds(e, N, ov)), { input: levelInput(N, ov) }).join(); });
   check(kinds[0] !== kinds[1], `layer 3 kinds: an unsaved mode changes them (${kinds[0]} / ${kinds[1]})`);
 }
 
@@ -92,7 +92,7 @@ const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b)
   check(a !== b && thumbsKey(lv) === thumbsKey(other), 'thumbnails: another level with the same header looks different (its graphics slots)');
   check(inputHash(thumbsInput(r, lv)) !== inputHash(thumbsInput(r, other)), 'thumbnails: the level number is in their input');
   const fg1 = layerSlots(levelSlots(r, lv.number, lv.header))[0].file, before = inputHash(thumbsInput(r, lv));
-  const fp = new RomFingerprint(r), deps = fp.deps(e.tracked(() => thumbs(lv)).reads);
+  const fp = new RomFingerprint(r), deps = fp.deps(e.record('picture', () => thumbs(lv)).reads);
   // a pixel drawn in FG1: a literal byte of its (LZ2) data changed, as drawing in place does
   const at = snesToPc(gfxEntry(r, fg1)!.addr), old = lz2Decompress(r.data, at).data;
   const flip = (o: number) => { r.data[o] ^= 0x10; r.gen++; };

@@ -127,13 +127,13 @@ check(uses.missing(levels).length === 0, 'every level known after scanning');
 // with others; saving one of them keeps the boot snapshot, the probes, the sprite images and the other levels' uses
 {
   const lv105 = loadLevel(rom, 0x105), bg = lv105.layer2Pointer >> 16 === 0xff ? lv105.layer2Pointer : 0xffd900;
-  const images = results.fp.deps(emu.tracked(() => captureSprites(emu, { number: 0x105, header: lv105.header, spriteHeader: lv105.spriteHeader, bgPointer: bg }, [0x04, 0x05, 0x0d])).reads);
+  const images = results.fp.deps(emu.record('picture', () => captureSprites(emu, { number: 0x105, header: lv105.header, spriteHeader: lv105.spriteHeader, bgPointer: bg }, [0x04, 0x05, 0x0d])).reads);
   const host = new ProbeHost(), probes = new Map<string, RomDeps>();
   const jobs: ProbeJob[] = [{ kind: 'block', ts: 0, tile: 0x130 }, { kind: 'block', ts: 0, tile: 0x12b }, { kind: 'sprite', ts: 0, num: 0x04 }];
   host.setRom(rom.gen, rom.data.slice());
   host.ask(jobs);
   while (host.pending) { const d = host.next(); if (d?.type === 'probe') for (const [k, e] of d.put) probes.set(k, e.deps); }
-  const base = () => { emu.load(0x105); return emu.baseState; };
+  const base = () => { emu.load(0x105); return emu.snapshot; };
   let state = base();
   const kept = (what: string, level: number) => {
     const m = uses.missing(levels), s = base();
@@ -145,7 +145,7 @@ check(uses.missing(levels).length === 0, 'every level known after scanning');
     state = s;
   };
   // the boot loads the title screen's level: the level whose pointer it read
-  const boot = emu.bootReads!;
+  const boot = emu.snapshot!.reads;
   const title = Array.from({ length: 0x200 }, (_, n) => n).filter((n) => boot.bytes.has(snesToPc(L1_PTRS + n * 3)));
   const shares = (n: number) => { const p = snesToPc(loadLevel(rom, n).l1Addr) >> PAGE_SHIFT; return !!boot.pages[p] || [...boot.bytes].some((b) => b >> PAGE_SHIFT === p); };
   check(title.length === 1, `the boot loads one level (${title.map((x) => x.toString(16))})`);
@@ -206,7 +206,7 @@ check(uses.missing(levels).length === 0, 'every level known after scanning');
 {
   for (const n of uses.missing(levels)) uses.scan(n, emu);
   emu.load(0x105);
-  const boot = results.fp.deps(emu.bootReads!);
+  const boot = results.fp.deps(emu.snapshot!.reads);
   const kept = (what: string, level: number) => {
     const m = uses.missing(levels);
     check(m.length === 1 && m[0] === level, `${what}: only level ${level.toString(16)} is scanned again (${m.map((x) => x.toString(16))})`);
@@ -246,14 +246,14 @@ check(uses.missing(levels).length === 0, 'every level known after scanning');
 {
   for (const n of uses.missing(levels)) uses.scan(n, emu);
   const lv105 = loadLevel(rom, 0x105), bg = lv105.layer2Pointer >> 16 === 0xff ? lv105.layer2Pointer : 0xffd900;
-  const images = results.fp.deps(emu.tracked(() => captureSprites(emu, { number: 0x105, header: lv105.header, spriteHeader: lv105.spriteHeader, bgPointer: bg }, [0x04, 0x05, 0x0d])).reads);
+  const images = results.fp.deps(emu.record('picture', () => captureSprites(emu, { number: 0x105, header: lv105.header, spriteHeader: lv105.spriteHeader, bgPointer: bg }, [0x04, 0x05, 0x0d])).reads);
   const host = new ProbeHost(), probes = new Map<string, RomDeps>();
   const jobs: ProbeJob[] = [{ kind: 'block', ts: 0, tile: 0x130 }, { kind: 'block', ts: 0, tile: 0x12b }, { kind: 'sprite', ts: 0, num: 0x04 }];
   host.setRom(rom.gen, rom.data.slice());
   host.ask(jobs);
   while (host.pending) { const d = host.next(); if (d?.type === 'probe') for (const [k, e] of d.put) probes.set(k, e.deps); }
   emu.load(0x105);
-  const boot = results.fp.deps(emu.bootReads!);
+  const boot = results.fp.deps(emu.snapshot!.reads);
   const kept = (what: string, dropped: number[]) => {
     const m = uses.missing(levels);
     check(m.join() === dropped.join(), `${what}: ${dropped.length ? `only level ${dropped.map((x) => x.toString(16))}` : 'no level'} is scanned again (${m.map((x) => x.toString(16))})`);
@@ -263,7 +263,7 @@ check(uses.missing(levels).length === 0, 'every level known after scanning');
     for (const n of m) uses.scan(n, emu);
   };
   // the GFX files the title screen loads (a render, which shows them, depends on their pointer entries)
-  const p = editorPatch(rom)!, title = emu.recordAll(() => null).reads;
+  const p = editorPatch(rom)!, title = emu.record('title screen', () => null).reads;
   const slots = levelSlots(rom, 0x105, lv105.header), files = layerSlots(slots).map((s) => s.file), sprites = slots.filter((s) => s.sprite).map((s) => s.file);
   for (const f of [0x14, 0x00]) {
     const gfx = `GFX${f.toString(16).padStart(2, '0')}`;

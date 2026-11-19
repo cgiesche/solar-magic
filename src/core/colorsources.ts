@@ -27,7 +27,7 @@ export class ColorSources {
     const emu = this.emu, input = inputHash(levelInput(level, ov)), k = this.kept;
     if (k?.input === input && holds(emu.rom, k.load)) return k.load.result;
     emu.ensureBoot(); // (first: its reads are the base of the load's)
-    this.kept = { input, load: emu.tracked(() => emu.load(level, { ...ov, trackSources: true })) };
+    this.kept = { input, load: emu.record('picture', () => emu.load(level, { ...ov, trackSources: true })) };
     this.traces++;
     return this.kept.load.result;
   }

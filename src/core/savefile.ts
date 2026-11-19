@@ -220,7 +220,7 @@ const kept = new WeakMap<LevelEmulator, { gen: number; reads: RomReads; prompt: 
 export function saveScheme(emu: LevelEmulator): SaveScheme {
   const prompt = gameScreens(emu).find((x) => x.id === 'savePrompt'), had = kept.get(emu);
   if (had && had.prompt === prompt && holds(emu.rom, had)) return had.scheme;
-  const r = emu.recordAll(() => learnSaveScheme(emu, prompt));
+  const r = emu.record('title screen', () => learnSaveScheme(emu, prompt));
   kept.set(emu, { gen: r.gen, reads: r.reads, prompt, scheme: r.result });
   return r.result;
 }

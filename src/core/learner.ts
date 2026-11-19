@@ -31,7 +31,7 @@ export class ResultLearner {
   }
 
   // The result under key for the input, else learned at once: run returns it with the ROM bytes it read
-  // (emu.tracked)
+  // (emu.record)
   now<T>(key: string, run: (emu: LevelEmulator) => { result: T; reads: RomReads }, opts: { input?: unknown; keep?: true | 'memory'; picture?: boolean } = {}): T {
     const input = this.hash(opts.input), keep = opts.keep ?? true;
     const stored = this.runner.stored<T>(key, input, keep);

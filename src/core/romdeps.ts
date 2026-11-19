@@ -22,7 +22,8 @@
 // every sprite in each page: found by emulation (spritetables.ts, learnBytePages), so a change of one sprite's entry
 // only drops what loaded that sprite.
 // The title screen picture (its stripe image and the entry pointing to it) is drawn by the boot and written anew by
-// every level's load: the boot's reads leave it out (LevelEmulator.boot), painting it keeps what a level's load learned.
+// every level's load: the boot snapshot keeps its bytes apart from the boot's other reads (bootsnapshot.ts), and only a
+// result that shows the title screen counts them – painting it keeps what a level's load learned.
 
 import type { Rom } from './rom.ts';
 import type { Snes } from './snes.ts';
@@ -222,7 +223,7 @@ export class RomReads {
 export interface Recorded<T> { result: T; reads: RomReads; gen: number }
 
 // the emulated CPU whose ROM reads are recorded with the editor code's (Snes)
-type RecordingCpu = Pick<Snes, 'romReads' | 'romSkipMask'>;
+export type RecordingCpu = Pick<Snes, 'romReads' | 'romSkipMask'>;
 
 export interface RecordOptions {
   cpu?: RecordingCpu | null; // its reads are recorded too

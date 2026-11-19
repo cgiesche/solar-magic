@@ -157,14 +157,14 @@ function drawnWithout(rom: Rom, emu: LevelEmulator, pkg: Package, level: number,
     for (const [pc, n] of e.segs) { copy.data.set(orig.subarray(k, k + n), pc); k += n; }
   }
   const other = new LevelEmulator(copy);
-  other.adoptBoot(emu);
-  const { result, reads } = other.tracked(() => {
+  other.adoptBoot(emu.snapshot);
+  const { result, reads } = other.record('behaviour', () => {
     const play = Play.start(other, level);
     if (!play) return false;
     try {
       return openers.every((o) => { const b = play.open(o).box; return !!b && drawn(copy, b); });
     } finally { play.close(); }
-  }, null);
+  }, { base: null });
   countReads(rom, null, reads);
   return result;
 }

@@ -141,7 +141,7 @@ export function* objectThumbsJob(
   let own: Recorded<Set<number>> | null = null;
   const routine = (n: number): number => snesToPc(rom.r24(EXT_OBJ_TABLE + n * 3));
   const ownRoutine = (n: number): boolean => {
-    if (own) emu.count(own.reads); else own = emu.tracked(() => new Set(Array.from({ length: CUSTOM_EXT }, (_, k) => routine(k))));
+    if (own) emu.count(own.reads); else own = emu.record('picture', () => new Set(Array.from({ length: CUSTOM_EXT }, (_, k) => routine(k))));
     return own.result.has(routine(n));
   };
   // the thumbnails of a load's objects that wrote tiles
@@ -203,7 +203,7 @@ export function* objectThumbsJob(
   // the load without objects, once a single load is learned; what it read counts for each of them
   let base: Recorded<LevelRender> | null = null;
   const baseLoad = (): LevelRender => {
-    if (base) emu.count(base.reads); else base = emu.tracked(() => effectLoad(emu, level, []));
+    if (base) emu.count(base.reads); else base = emu.record('picture', () => effectLoad(emu, level, []));
     return base.result;
   };
   const alone = (s: ObjSpec): Alone | undefined => {

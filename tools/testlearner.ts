@@ -52,9 +52,9 @@ function* sum(n: number): Generator<void, number> {
 // a cached result: returned without running, at once and sliced
 {
   const { results, learner, learn } = editor();
-  results.set('k', 42, results.fp.deps(main.tracked(() => rom.r8(spare)).reads));
+  results.set('k', 42, results.fp.deps(main.record('picture', () => rom.r8(spare)).reads));
   runs = 0;
-  check(learner.now('k', (emu) => emu.tracked(() => { runs++; return 7; })) === 42 && runs === 0, 'a cached result comes back at once without running');
+  check(learner.now('k', (emu) => emu.record('picture', () => { runs++; return 7; })) === 42 && runs === 0, 'a cached result comes back at once without running');
   check(learn('k', () => sum(3)) === 42 && runs === 0, 'and a step at a time');
 }
 
@@ -62,7 +62,7 @@ function* sum(n: number): Generator<void, number> {
 {
   const { learner } = editor();
   runs = 0;
-  const run = (emu: LevelEmulator) => emu.tracked(() => { runs++; return rom.r8(spare) + 1; });
+  const run = (emu: LevelEmulator) => emu.record('picture', () => { runs++; return rom.r8(spare) + 1; });
   const a = learner.now('n', run), b = learner.now('n', run);
   check(a === 1 && b === 1 && runs === 1, 'a result learned at once is kept');
 }
@@ -140,7 +140,7 @@ for (const keep of [true, 'memory'] as const) {
   const { results, learner, runner, learn } = editor();
   const what = keep === true ? 'stored' : 'kept in memory';
   runs = 0;
-  const run = (emu: LevelEmulator) => emu.tracked(() => { runs++; return rom.r8(spare) + 1; });
+  const run = (emu: LevelEmulator) => emu.record('picture', () => { runs++; return rom.r8(spare) + 1; });
   learner.now('i', run, { input: { a: 1 }, keep });
   learner.now('i', run, { input: { a: 1 }, keep });
   check(runs === 1, `${what}: the same input reuses the result (${runs} runs)`);
@@ -174,7 +174,7 @@ for (const keep of [true, 'memory'] as const) {
   const plain = await scanned(false), shown = await scanned(true);
   const { learner, results, runner, learn } = editor(r, m);
   const lv = loadLevel(r, 0x105), bg = lv.layer2Pointer >> 16 === 0xff ? lv.layer2Pointer : 0xffd900;
-  const sprites = () => learner.now('spr', (emu) => emu.tracked(() => captureSprites(emu, { number: 0x105, header: lv.header, spriteHeader: lv.spriteHeader, bgPointer: bg }, [0, 1, 2, 3, 4, 5])));
+  const sprites = () => learner.now('spr', (emu) => emu.record('picture', () => captureSprites(emu, { number: 0x105, header: lv.header, spriteHeader: lv.spriteHeader, bgPointer: bg }, [0, 1, 2, 3, 4, 5])));
   sprites();
   const specs = [...new Map(lv.objects.map((o) => [`${o.num}:${o.ext}:${o.size}`, { num: o.num, ext: o.ext, size: o.size }])).values()];
   const keyOf = (q: typeof specs[number]) => objKey(q, null);
@@ -185,7 +185,7 @@ for (const keep of [true, 'memory'] as const) {
 
   // the open level as drawn (App.refresh): every byte its load and the boot read
   const draw = () => { const x = m.load(0x105); renderLevel(r, x, lv.header.mode, lv.header.screens, levelRows(lv.secondary)); };
-  const drawn = () => { const gen = r.gen; return () => m.recordAll(draw).reads.touches(r.changesSince(gen)!); };
+  const drawn = () => { const gen = r.gen; return () => m.record('title screen', draw).reads.touches(r.changesSince(gen)!); };
   let redrawn = drawn();
   setFgWords(r, m.load(0x105), 0x130, [...map16Source(r, m.load(0x105)).fg(0x130)].map((w) => w ^ 0x4000));
   const flipped = shown.missing(levels).length;
@@ -204,7 +204,7 @@ for (const keep of [true, 'memory'] as const) {
 
 // memory-only results: the bounds (keys, not inputs, counted for the limit); a round keeps what it used
 {
-  const fp = new RomFingerprint(rom), deps = fp.deps(main.tracked(() => rom.r8(spare)).reads);
+  const fp = new RomFingerprint(rom), deps = fp.deps(main.record('picture', () => rom.r8(spare)).reads);
   const mem = memoryResults(fp, 256);
   for (let i = 0; i < 20000; i++) mem.set(`k${i % 5000}`, i, deps, `${i}`);
   check(mem.get('k4999', '19999') === 19999 && mem.get('k0', '0') === undefined, 'the latest used results stay within the limit');
@@ -221,7 +221,7 @@ for (const keep of [true, 'memory'] as const) {
     `a key keeps its latest used ${INPUTS_PER_KEY} inputs`);
   // the results of an input on the latest MEMORY_CONTENTS ROM states (#386): an undo and a redo find theirs
   {
-    const was = rom.r8(spare), at = (v: number) => { rom.w8(spare, v); return fp.deps(main.tracked(() => rom.r8(spare)).reads); };
+    const was = rom.r8(spare), at = (v: number) => { rom.w8(spare, v); return fp.deps(main.record('picture', () => rom.r8(spare)).reads); };
     const states = memoryResults(fp, 256);
     states.set('u', 'A', at(was ^ 1), 'i');
     states.set('u', 'B0', at(was ^ 2), 'i');
@@ -229,7 +229,7 @@ for (const keep of [true, 'memory'] as const) {
     for (let k = 1; k < INPUTS_PER_KEY; k++) states.set('u', `other${k}`, deps, `${k}`);
     const a = (at(was ^ 1), states.get('u', 'i')), b = (at(was ^ 2), states.get('u', 'i'));
     const none = (at(was ^ 3), states.get('u', 'i'));
-    states.set('u', 'C', fp.deps(main.tracked(() => rom.r8(spare)).reads), 'i');
+    states.set('u', 'C', fp.deps(main.record('picture', () => rom.r8(spare)).reads), 'i');
     const pushed = (at(was ^ 1), states.get('u', 'i')), kept = (at(was ^ 2), states.get('u', 'i'));
     rom.w8(spare, was); // (the other inputs' results: made on it)
     let others = 0;

@@ -11,6 +11,7 @@
 import type { Rom } from './rom.ts';
 import { LevelEmulator } from './levelemu.ts';
 import { RomReads, holds, perRomState, byFingerprint, type ResultCache, type RomDeps, type RomFingerprint, type Recorded, type Since } from './romdeps.ts';
+import type { Shows } from './bootsnapshot.ts';
 import { KeptResults } from './keptresults.ts';
 import { gfxSkipMask, gfxDisplaySkipMask } from './gfxpages.ts';
 import { TILESETS, tilesetPointers, pointersKey } from './tilesets.ts';
@@ -52,6 +53,9 @@ export interface JobSpec<T> {
   whole?: false; // the result isn't kept itself, only its parts (Part), which give it put together (keep: theirs)
   start: (emu: LevelEmulator, prepare: Prepare, part: Part) => Job<T>;
 }
+
+// what a job's result shows (bootsnapshot.ts): a picture or behaviour, by its spec
+const shows = (r: JobSpec<unknown>): Shows => r.picture ? 'picture' : 'behaviour';
 
 // a job asked for: not started yet (job null), or running with the bytes it read so far, as of the ROM generation gen
 export interface JobRun<T> extends JobSpec<T>, Since {
@@ -111,11 +115,11 @@ export class JobRunner {
       const emu = r.emu = this.emu(lane, r.picture);
       r.reads = new RomReads(rom);
       r.label = null;
-      r.job = r.start(emu, (key, prepare) => this.prepared(emu, key, prepare), (sub, input, learn) => this.part(r, emu, sub, input, learn));
+      r.job = r.start(emu, (key, prepare) => this.prepared(r, emu, key, prepare), (sub, input, learn) => this.part(r, emu, sub, input, learn));
       this.started++;
     }
     r.gen = rom.gen;
-    const emu = r.emu!, job = r.job, t = emu.tracked(() => job.next(), r.boot === false ? null : emu.bootReads);
+    const emu = r.emu!, job = r.job, t = emu.record(shows(r), () => job.next(), r.boot === false ? { base: null } : {});
     r.reads.add(t.reads);
     if (!t.result.done) {
       if (typeof t.result.value === 'string') r.label = t.result.value;
@@ -128,14 +132,14 @@ export class JobRunner {
   }
 
   // (inside a job's step)
-  private prepared<S>(emu: LevelEmulator, key: string, prepare: () => S | null): S | null {
+  private prepared<S>(r: JobRun<unknown>, emu: LevelEmulator, key: string, prepare: () => S | null): S | null {
     const p = this.preps.get(emu);
     if (p?.key === key && holds(this.d.rom, p)) {
       emu.count(p.reads);
       return p.result as S;
     }
     this.preps.delete(emu);
-    const t = emu.tracked(prepare);
+    const t = emu.record(shows(r), prepare);
     if (t.result !== null) this.preps.set(emu, { ...t, key });
     return t.result;
   }
@@ -149,7 +153,7 @@ export class JobRunner {
       emu.count(reads);
       return { result: e.data as S, learned: false };
     }
-    const t = emu.tracked(learn, r.boot === false ? null : emu.bootReads);
+    const t = emu.record(shows(r), learn, r.boot === false ? { base: null } : {});
     if (t.result !== undefined) this.store(key, input, r.keep, t.result, t.reads);
     return { result: t.result, learned: true };
   }
@@ -179,7 +183,7 @@ export class JobRunner {
     const from = picture ? this.mainBoot() : this.noDisplayBoot();
     if (!emu || emu.rom !== this.d.rom) emu = new LevelEmulator(this.d.rom);
     emu.skipMask = picture ? () => from.skipMask?.() ?? null : this.displayMask;
-    emu.adoptBoot(from);
+    emu.adoptBoot(from.snapshot);
     return emu;
   }
 

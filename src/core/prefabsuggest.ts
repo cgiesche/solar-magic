@@ -315,7 +315,7 @@ export function* prefabSuggestions(rom: Rom, src: SuggestSource): Generator<void
   const search = (n: number, lv: Level, s: Prefab) => {
     const e = (emu ??= src.emu());
     // (a load starts from the boot's state: its reads count once a load is needed)
-    return e.tracked(() => findPrefabPlaces(rom, lv, s, (ov) => { const r = e.load(n, ov); if (e.bootReads) rom.reads?.add(e.bootReads); return r; }), null);
+    return e.record('behaviour', () => findPrefabPlaces(rom, lv, s, (ov) => { const r = e.load(n, ov); if (e.snapshot) rom.reads?.add(e.snapshot.reads); return r; }), { base: null });
   };
   const out: PrefabSuggestion[] = [];
   for (const [key, { prefab, count }] of found) {

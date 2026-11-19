@@ -25,7 +25,7 @@ check(runs.walk.vx > 0 && runs.run.vx > runs.walk.vx && runs.p.vx > runs.run.vx 
 const lv = loadLevel(rom, 0x105);
 lv.objects = Array.from({ length: 8 }, (_, k) => ({ uid: newUid(), num: 0, ext: DM16_EXT, x: k * 16, y: 24, size: 0x0f, tile: 0x130 }));
 const arcEmu = new LevelEmulator(rom);
-if (prober.emu.baseState) arcEmu.adoptBoot(prober.emu);
+if (prober.emu.snapshot) arcEmu.adoptBoot(prober.emu.snapshot);
 const arcs = new JumpArcs(arcEmu);
 const prepare = () => arcs.prepare({ level: lv.number, ov: { layer1: serializeLayer1(rom, lv) }, spriteHeader: lv.spriteHeader, height: 27 * 16 });
 check(prepare(), 'level 105 runs to gameplay');
@@ -72,7 +72,7 @@ for (const dir of [-1, 1] as const) {
     learnAtOnce(runner, { key: `arcs:${tx},20`, keep: false, picture: false, start: (emu, prep) => jumpArcsJob(emu, prep, 'lv105', load, tx, 20, runs) }, 'arcs');
   const a = ask(11), b = ask(12);
   check(a.length === 8 && b.length === 8 && loads === 1, `a second request in the same level state: the level not loaded again (${loads} loads)`);
-  const o = runner.emu('arcs', false).bootReads!.pages.indexOf(1) << 8;
+  const o = runner.emu('arcs', false).snapshot!.reads.pages.indexOf(1) << 8;
   rom.writeAt(o, Uint8Array.of(rom.data[o] ^ 1));
   rom.writeAt(o, Uint8Array.of(rom.data[o] ^ 1)); // (changed back: the level still loads)
   const c = ask(13);

@@ -179,7 +179,7 @@ export function menuText(emu: LevelEmulator, screen: ReachedScreen, screens: rea
   if (!m) kept.set(emu, m = new Map());
   const had = m.get(screen.id);
   if (had && had.screen === screen && holds(emu.rom, had)) return had.text;
-  const r = emu.recordAll(() => learnMenuText(emu, screen, screens));
+  const r = emu.record('title screen', () => learnMenuText(emu, screen, screens));
   m.set(screen.id, { gen: r.gen, reads: r.reads, screen, text: r.result });
   return r.result;
 }

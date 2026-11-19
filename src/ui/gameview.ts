@@ -239,8 +239,7 @@ export class GameView {
   private emulator(): LevelEmulator {
     if (!this.emu || this.emu.rom !== this.app.rom) this.emu = new LevelEmulator(this.app.rom);
     // the app's boot snapshot, also when it was booted again (the title screen picture painted): one boot for both
-    this.app.emu.ensureBoot();
-    if (this.emu.baseState !== this.app.emu.baseState) this.emu.adoptBoot(this.app.emu);
+    this.emu.adoptBoot(this.app.emu.bootSnapshot());
     return this.emu;
   }
 
