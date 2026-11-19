@@ -9,7 +9,8 @@ import { translevelToLevel, l1XY } from './overworld.ts';
 import { OW_SPRITES, OW_SPRITE_SLOTS, hasOwSpriteSlots } from './owsprites.ts';
 import { editorPatch, musicPatch, BG_HOOK, HEADER_MUSIC_TABLE } from './patches.ts';
 import { lt3Patches, type Lt3Place } from './layer3gfx.ts';
-import { RomReads, record, countReads, PAGE_SHIFT, type Recorded } from './romdeps.ts';
+import { RomReads, record, countReads, unrecorded, PAGE_SHIFT, type Recorded } from './romdeps.ts';
+import { titlePictureRanges } from './titlepicture.ts';
 import { FrameRecorder, LoadSession, sameKey, type FrameOwner, type LoadFrames, type LoadFramesKey } from './loadframes.ts';
 import { findSpriteTables, spriteTablesHold } from './spritetables.ts';
 import { applyTriggers, type TriggerView } from './extrigger.ts';
@@ -147,6 +148,10 @@ export class LevelEmulator {
   // The title screen runs the game's overworld sprite loader ($04F678) and shows none of them (their OAM tiles off
   // the screen, their RAM unused in a level; a load of the overworld runs the loader again): reads of the slot table
   // aren't recorded, so an overworld sprite edit keeps every result and the snapshot.
+  // It draws the title screen picture (titlepicture.ts), of which nothing is left in a level loaded – its load writes
+  // layer 3's tilemap anew and doesn't read the picture (testtitlescreen.ts): the picture's reads aren't recorded as
+  // the boot's but kept with those its skip mask left out (bootMasked). So painting it boots the snapshot again and
+  // keeps every result learned from a level (#550); what shows the title screen counts them (recordAll).
   // The per-sprite tables are found from the snapshot (spritetables.ts) when those found for the ROM no longer hold
   // (or none were): the boot's reads are then recorded by byte, and kept by byte only in the tables' pages.
   boot(): void {
@@ -154,8 +159,15 @@ export class LevelEmulator {
     const s = this.snes;
     s.powerOn();
     const masked = new RomReads(this.rom), outerMasked = s.romMasked;
+    // not recorded (romSkip: also when the boot runs inside another recording, whose skip mask applies then)
+    const skipped: number[] = [];
     const slots = hasOwSpriteSlots(this.rom) ? snesToPc(OW_SPRITES) : -1, slotsEnd = slots + OW_SPRITE_SLOTS * 5;
-    for (let o = slots; o >= 0 && o < slotsEnd; o++) s.romSkip.add(o);
+    for (let o = slots; o >= 0 && o < slotsEnd; o++) skipped.push(o);
+    for (const [a, b] of unrecorded(this.rom, () => titlePictureRanges(this.rom))) {
+      masked.read(a, b - a);
+      for (let o = a; o < b; o++) skipped.push(o);
+    }
+    for (const o of skipped) s.romSkip.add(o);
     s.romMasked = masked;
     const find = !spriteTablesHold(this.rom);
     try {
@@ -168,7 +180,7 @@ export class LevelEmulator {
       }, { cpu: s, mask: this.skipMask, counted: false, fine: find }).reads;
     } finally {
       s.romMasked = outerMasked;
-      for (let o = slots; o >= 0 && o < slotsEnd; o++) s.romSkip.delete(o);
+      for (const o of skipped) s.romSkip.delete(o);
     }
     this.bootMasked = masked;
     this.baseState = s.saveState();

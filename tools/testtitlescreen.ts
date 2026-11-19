@@ -51,6 +51,26 @@ const same = (a: ArrayLike<number>, b: ArrayLike<number>) => a.length === b.leng
   check(same(titleTilemap(booted(rom)), map2), 'written again: the new tilemap');
 }
 
+// painted: no dependency of what is learned from a level (#550). The boot runs to the title screen and reads the
+// picture, and every result starts from the boot: its reads leave the picture out, the snapshot is booted again, the
+// title screen's own results (recordAll) depend on it. A level loaded shows nothing of it.
+{
+  const rom = fresh(), e = booted(rom);
+  const load = () => { const r = e.load(0x105); return { vram: r.vram.slice(), cgram: r.cgram.slice() }; };
+  const unpainted = load();
+  // (painted: every cell with another palette; first the game's picture, which moves to a block of the editor's, then that one)
+  for (const [what, edit] of [['the game\'s picture painted', 0x0400], ['the editor\'s picture painted', 0x0800]] as const) {
+    const bootReads = e.bootReads!, titleReads = e.recordAll(() => 0).reads, before = rom.data.slice();
+    const map = titleTilemap(e).map((w) => w ^ edit);
+    writeTitleScreen(rom, map);
+    check(!bootReads.differ(before, rom.data), `${what}: nothing the boot's reads hold changed`);
+    check(titleReads.differ(before, rom.data), `${what}: a result of the title screen itself (recordAll) no longer holds`);
+    check(same(titleTilemap(e), map), `${what}: the boot snapshot is booted again, the title screen shows it`);
+    const painted = load();
+    check(same(painted.vram, unpainted.vram) && same(painted.cgram, unpainted.cgram), `${what}: level 105 loads to the same VRAM and CGRAM`);
+  }
+}
+
 // the picture: the game's own tilemap written back looks the same; another tile changes its 8x8 pixels only
 {
   const rom = fresh(), e = booted(rom), map = titleTilemap(e), before = titlePicture(e);
@@ -70,6 +90,18 @@ const same = (a: ArrayLike<number>, b: ArrayLike<number>) => a.length === b.leng
   }
   check(changed > 0 && !outside, `an edit before saving: its tile's pixels only (${changed}, ${outside} elsewhere)`);
   check(same(titleTilemap(e), map), 'the emulator\'s title screen unchanged by it');
+}
+
+// the same for a boot inside a recording (the editor's level load boots there): the load's result holds too – the
+// picture's entry is on a page of code every load runs, read by byte (romdeps.ts)
+{
+  const rom = fresh(), e = new LevelEmulator(rom);
+  const first = e.tracked(() => e.load(0x105)).reads, before = rom.data.slice();
+  writeTitleScreen(rom, titleTilemap(e).map((w) => w ^ 0x0400));
+  check(!e.bootReads!.differ(before, rom.data) && !first.differ(before, rom.data), 'booted inside a level\'s load: the boot\'s and the load\'s reads hold after painting');
+  const again = e.tracked(() => e.load(0x105)).reads, then = rom.data.slice(); // (boots again, inside the recording)
+  writeTitleScreen(rom, titleTilemap(e).map((w) => w ^ 0x0400));
+  check(!e.bootReads!.differ(then, rom.data) && !again.differ(then, rom.data), 'booted again inside a level\'s load: they hold after painting again');
 }
 
 // a ROM Lunar Magic saved: its title screen's first stripe is the editor's layout (header, 32 × 29 tiles), the

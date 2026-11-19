@@ -10,13 +10,14 @@
 // the game's stripes left partly unwritten (what the game cleared VRAM to) is kept as shown.
 
 import { Rom, snesToPc } from './rom.ts';
+import { TITLE_STRIPE_PTR, titleStripeAddr } from './titlepicture.ts';
 import { hashBytes } from './patchreg.ts';
 import type { LevelEmulator } from './levelemu.ts';
 import { L3_MAP_VRAM, layer3Word } from './layer3map.ts';
 import { screenPicture, type ScreenPicture } from './pregame.ts';
 
+export { TITLE_STRIPE_PTR, titleStripeAddr } from './titlepicture.ts';
 export const TITLE_COLS = 32, TITLE_ROWS = 29, TITLE_SHOWN_ROWS = 28;
-export const TITLE_STRIPE_PTR = 0x0084d3; // the stripe image table ($0084D0), entry 03
 const VRAM = L3_MAP_VRAM; // layer 3's tilemap
 const LEN = TITLE_COLS * TITLE_ROWS * 2;
 const END = 0x80; // ends the stripe image (any byte with bit 7 where a header would start)
@@ -35,12 +36,6 @@ export function titlePictureHash(rom: Rom): number {
   if (at === GAME_TITLE_STRIPE) return 0;
   const o = snesToPc(at);
   return hashBytes([rom.data.subarray(o, o + 4 + LEN)]) || 1;
-}
-
-// where the title screen's stripe image is (SNES address)
-export function titleStripeAddr(rom: Rom): number {
-  const o = snesToPc(TITLE_STRIPE_PTR);
-  return rom.data[o] | (rom.data[o + 1] << 8) | (rom.data[o + 2] << 16);
 }
 
 // the tilemap as the game shows it on the title screen (32 × 29 words, row by row)

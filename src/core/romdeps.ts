@@ -21,6 +21,8 @@
 // The same for the per-sprite tables (tweakers, INIT/MAIN pointers, PIXI's sprite table), which hold a few bytes of
 // every sprite in each page: found by emulation (spritetables.ts, learnBytePages), so a change of one sprite's entry
 // only drops what loaded that sprite.
+// The title screen picture (its stripe image and the entry pointing to it) is drawn by the boot and written anew by
+// every level's load: the boot's reads leave it out (LevelEmulator.boot), painting it keeps what a level's load learned.
 
 import type { Rom } from './rom.ts';
 import type { Snes } from './snes.ts';
@@ -31,6 +33,7 @@ import { overworldDataRanges } from './overworld.ts';
 import { levelDataRanges } from './level.ts';
 import { KeptResults, type Validity } from './keptresults.ts';
 import { SHARED_PALETTES, SHARED_PAL_SIZE } from './sharedpal.ts';
+import { TITLE_STRIPE_PTR } from './titlepicture.ts';
 
 export const PAGE_SHIFT = 8;
 
@@ -41,14 +44,16 @@ export interface RomDeps {
   h2: number;
 }
 
-// pages whose reads are recorded by byte in every ROM state: the level tables, the ROM header page and the shared
-// palettes' first and last page
+// pages whose reads are recorded by byte in every ROM state: the level tables, the ROM header page, the shared
+// palettes' first and last page and the page of the title screen picture's entry in the stripe image table (code all
+// around it that every result runs: painting the picture moves it)
 const FIXED_BYTE_PAGES = new Uint8Array(0x10000);
 FIXED_BYTE_PAGES.fill(1, 0x2e000 >> PAGE_SHIFT, 0x30000 >> PAGE_SHIFT);
 FIXED_BYTE_PAGES[0x7f00 >> PAGE_SHIFT] = 1;
 const SHARED_PAL_PC = snesToPc(SHARED_PALETTES);
 FIXED_BYTE_PAGES[SHARED_PAL_PC >> PAGE_SHIFT] = 1;
 FIXED_BYTE_PAGES[(SHARED_PAL_PC + SHARED_PAL_SIZE - 1) >> PAGE_SHIFT] = 1;
+FIXED_BYTE_PAGES[snesToPc(TITLE_STRIPE_PTR) >> PAGE_SHIFT] = 1;
 
 // runs fn without recording the ROM bytes the editor code reads (Rom.reads): what it reads isn't part of the
 // computation running around it (a level's data read as a load's input, a mask kept per ROM state)
