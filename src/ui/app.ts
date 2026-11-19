@@ -546,7 +546,15 @@ export class App {
       const same = steps.check();
       this.rendered?.reads.add(steps.reads);
       if (same === null) this.scheduler.later('anim', verify);
-      else if (!same) { a.phase = -1; this.startAnimation(); }
+      else if (!same) {
+        // (the frames are built anew against the composite without the animation: the one shown is a frame of the
+        // steps guessed, and a step leaves a cell it doesn't change as the base has it)
+        a.phase = -1;
+        this.compositeImg = base;
+        this.animChanged = null;
+        this.emit('anim-frame');
+        this.startAnimation();
+      }
     };
     const step = () => {
       if (gen !== a.gen) return;
