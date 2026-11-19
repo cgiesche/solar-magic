@@ -364,7 +364,13 @@ _Avoid_: pool, thread
 **Watch**: records the bytes a view's drawing read; the view redraws only when one changed.
 _Avoid_: signature, subscription
 
-**Picture**: an emulated result showing looks; only pictures count display data as read (ADR 0008).
+**Boot snapshot**: the machine at the title screen as booted, with the ROM bytes the boot read sorted by what they are (code, graphics file data, display data, the title screen picture). Every emulated result starts from it and counts the boot's reads its **shows** asks for; emulators on one ROM share it. Stale when a byte it read changed.
+_Avoid_: base state, boot state (the machine alone), savestate
+
+**Shows**: what an emulated result says of itself, which decides the reads it counts – each counts the one before's and more: **behaviour** (no picture: code and tables), **picture**, **full picture**, **title screen**. A result names it; it sets no skip mask.
+_Avoid_: read class (inside the module), skip mask, record mode
+
+**Picture**: an emulated result showing looks; only pictures count display data as read (ADR 0008). Graphics file contents are its input. A **full picture** counts the graphics file data the game read from the ROM too (the open level's picture, its animation steps); one that shows the **title screen** counts the title screen picture's bytes as well (a pre-game screen's machine, a menu's text).
 _Avoid_: image, render
 
 **Display data**: ROM bytes that only say what tiles and colors look like (Map16 quarters, palettes and pointers). Not acts-like, not graphics file data (an input), not ExAnimation data.
