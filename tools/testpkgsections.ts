@@ -22,6 +22,7 @@ import { SECTIONS, SECTION_KEYS, toolContent, looseFiles, type SectionKey, type 
 import { inspectUpload, installPackage, type InstallOptions, type ReadyPreview } from '../src/core/packages.ts';
 import { setSharedColor } from '../src/core/sharedpal.ts';
 import { setOwTileWords } from '../src/core/overworld.ts';
+import { writeTitleScreen } from '../src/core/titlescreen.ts';
 import { setGlobalGfx, cleanGlobalGfx } from '../src/core/globalgfx.ts';
 import { placeGlobalSlots } from '../src/core/levelgfx.ts';
 import { testSongZip } from './testsong.ts';
@@ -78,6 +79,7 @@ const samples: Record<SectionKey, () => Promise<Package | null> | Package | null
   bgMap16: () => record('bgMap16', () => { setBgExtTileWords(rom, BG_EXT_FIRST + 0x40, [5, 6, 7, 8]); return { ok: true }; }),
   globalGfx: () => record('globalGfx', () => { setGlobalGfx(rom, 0x33, cleanGlobalGfx(rom, 0x33)!.map((v) => v ^ 0xff)); return { ok: true }; }),
   sharedPal: () => record('sharedPal', () => { setSharedColor(rom, 0x10, 0x1234); return { ok: true }; }),
+  titlePicture: () => record('titlePicture', () => { writeTitleScreen(rom, new Uint16Array(32 * 29).fill(0x38fc), true); return { ok: true }; }),
   owTiles: () => record('owTiles', () => { setOwTileWords(rom, 0x03, [0x122, 0x122, 0x122, 0x122]); return { ok: true }; }),
   // a tile slot with its frame copied into the global list's Anim graphic
   globalAnim: () => record('globalAnim', () => {

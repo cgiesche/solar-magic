@@ -283,7 +283,7 @@ _Avoid_: Patch, Resource, Download, Project
 **Upload**: the files handed in for one package, before install.
 _Avoid_: Download, patch package
 
-**Callisto project**: an upload with `tools/Callisto/*.toml` (e.g. the RHR baserom): one package, patches in the project's order (ADR 0006). Its BPS data for a Lunar Magic ROM is not part of it, except that sample levels take messages from its overworld and the overworld's changed layer 1 tiles are a graphics part.
+**Callisto project**: an upload with `tools/Callisto/*.toml` (e.g. the RHR baserom): one package, patches in the project's order (ADR 0006). Its BPS data for a Lunar Magic ROM is not part of it, except that sample levels take messages from its overworld, the overworld's changed layer 1 tiles are a graphics part and so is its title screen picture.
 _Avoid_: baserom, project import
 
 **Replaced patch**: a known patch an editor patch already covers; skipped with a note.
@@ -295,7 +295,7 @@ _Avoid_: tool patch, tool folder
 **Part**: one typed piece of a package (patch, UberASM file, block, sprite, song, sound effect, graphics part). Detected per file, never by other files in the upload (ADR 0002).
 _Avoid_: Component, Item
 
-**Graphics part**: a part without code: Map16, ExGFX, palette, changed shared palette colors, a changed global GFX file, global animation slots, changed overworld layer 1 tiles (their Map16, from a BPS of Lunar Magic's overworld). Only differences from the clean game count; two packages changing the same color/file/tile conflict; removal restores the clean game's (a color's or tile's: what was there). Keeps the author's number if free.
+**Graphics part**: a part without code: Map16, ExGFX, palette, changed shared palette colors, a changed global GFX file, global animation slots, changed overworld layer 1 tiles (their Map16, from a BPS of Lunar Magic's overworld), a title screen picture (from a BPS of Lunar Magic's title screen; not its title screen movement or colours). Only differences from the clean game count; two packages changing the same color/file/tile or both setting the title screen picture conflict; removal restores the clean game's (a color's, tile's or the title screen picture's: what was there). Keeps the author's number if free.
 _Avoid_: Resource, asset
 
 **Sound effect**: an AddmusicK SFX (bank 1DF9/1DFC); keeps the author's number if free, else renumbered and the package's defines follow.

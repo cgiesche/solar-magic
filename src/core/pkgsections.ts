@@ -24,7 +24,8 @@ import { EXT_FIRST, EXT_TILES, DEFAULT_ACTS, extTileWords, actsLike, setExtTileW
 import { BG_EXT_FIRST, BG_EXT_TILES, bgExtTileWords, setBgExtTileWords, vanillaBgWords } from './bgmap16.ts';
 import { CONTEXTS, OTHER, type UberContext, type Other } from './uberasm.ts';
 import type { SpriteFolder } from './pixirt.ts';
-import type { PackageParts, GlobalAnimPart, OwTilePart, Package } from './pkgreg.ts';
+import type { PackageParts, GlobalAnimPart, OwTilePart, TitlePicturePart, Package } from './pkgreg.ts';
+import { GAME_TITLE_STRIPE, titleStripeAddr, setTitleStripeAddr, titlePictureHash } from './titlescreen.ts';
 import { PART_KINDS, type PartKind, type ToolKind } from './parts.ts';
 import { sharedColors, setSharedColor, sharedColorNames } from './sharedpal.ts';
 import { OW_L1_TILES, GAME_OW_TILES, hasOwMap16Ext, owTileWords, setOwTileWords, sameOwTile, owTileNames } from './overworld.ts';
@@ -396,8 +397,35 @@ const owTiles: PartSection<number[][], OwTilePart[]> = {
   },
 };
 
+// the title screen picture it set, with its hash and the address of the stripe image the ROM had before (kept in
+// the ROM when the package was installed): the entry is pointed back to that one and the package's block freed –
+// unless the picture was changed since (the editor then freed the package's block), which is reported and left as
+// it is; the picture kept for the package is then freed (two packages never both set the picture, see
+// titlePictureConflicts). read: the picture's hash and its stripe image's address
+const titlePicture: PartSection<[number, number], TitlePicturePart> = {
+  none: () => [],
+  read: (rom) => [titlePictureHash(rom), titleStripeAddr(rom)],
+  added: (a, b) => (b[0] !== a[0] && b[0] ? [b[0], a[1]] : []),
+  // (set again: the picture before the first, the one set last)
+  merge: (r, p) => (!p.length ? r : !r.length ? p : [p[0], r[1]]),
+  empty: (p) => !p.length,
+  summary: (p) => (p.length ? 'Title screen picture' : null),
+  removal: (p) => (p.length ? 'the title screen picture, set back to the one before' : null),
+  remove(rom, mine) {
+    if (!mine.length) return [];
+    const [hash, before] = mine;
+    if (titlePictureHash(rom) !== hash) {
+      if (before !== GAME_TITLE_STRIPE && before !== titleStripeAddr(rom)) rom.freeAt(before);
+      return ['The title screen picture was changed since the package was installed – left as it is'];
+    }
+    rom.freeAt(titleStripeAddr(rom));
+    setTitleStripeAddr(rom, before);
+    return [];
+  },
+};
+
 // ---------- conflicts with installed packages ----------
-// (two packages never change the same shared palette color, global GFX file or overworld layer 1 tile: removing one sets back
+// (two packages never change the same shared palette color, global GFX file or overworld layer 1 tile, nor both the title screen picture: removing one sets back
 // what it found, which would undo or keep the other's)
 
 // installing a package changing these (shared palette colors, global GFX files, overworld tiles) in a section: a conflict
@@ -414,6 +442,9 @@ export const globalGfxConflicts = (installed: Package[], nums: number[]) =>
   conflicts(installed, nums, (p) => p.globalGfx, (both) => both.map(globalGfxName).join(', '));
 export const owTileConflicts = (installed: Package[], tiles: number[]) =>
   conflicts(installed, tiles, (p) => p.owTiles, (both) => `the overworld's layer 1 ${owTileNames(both)}`);
+
+export const titlePictureConflicts = (installed: Package[]) =>
+  installed.flatMap((p) => (p.titlePicture?.length ? [`Conflict with package “${p.name}”: both set the title screen picture.`] : []));
 
 // ---------- what of the tool projects is a package's ----------
 
@@ -438,12 +469,12 @@ export function looseFiles<K extends ToolKind>(recs: Package[], k: K, project: T
 
 // every field of PackageParts has its adapter (the compiler checks it)
 type Sections = { [K in keyof PackageParts]-?: PartSection<any, NonNullable<PackageParts[K]>> };
-export const SECTIONS = { patches, uberasm, sprite, block, owsprite, music, sfx, map16, bgMap16, gfx, globalGfx, sharedPal, globalAnim, owTiles } satisfies Sections;
+export const SECTIONS = { patches, uberasm, sprite, block, owsprite, music, sfx, map16, bgMap16, gfx, globalGfx, sharedPal, globalAnim, owTiles, titlePicture } satisfies Sections;
 export type SectionKey = keyof typeof SECTIONS;
 // the part kind each section records
 const SECTION_KIND: Record<SectionKey, PartKind> = {
   patches: 'patch', uberasm: 'uberasm', sprite: 'sprite', block: 'block', owsprite: 'owsprite', music: 'music', sfx: 'sfx',
-  map16: 'graphics', bgMap16: 'graphics', gfx: 'graphics', globalGfx: 'graphics', sharedPal: 'graphics', globalAnim: 'graphics', owTiles: 'graphics',
+  map16: 'graphics', bgMap16: 'graphics', gfx: 'graphics', globalGfx: 'graphics', sharedPal: 'graphics', globalAnim: 'graphics', owTiles: 'graphics', titlePicture: 'graphics',
 };
 const kindRank = (k: SectionKey) => PART_KINDS.indexOf(SECTION_KIND[k]);
 // the sections in the order of their part kinds (parts.ts PART_KINDS): what a package brought is said so

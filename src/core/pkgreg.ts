@@ -33,7 +33,11 @@ export interface PackageParts {
   globalAnim?: GlobalAnimPart; // global animation slots it filled
   globalGfx?: [number, number][]; // global GFX files it replaced (GFX00–33, the hash of its file unpacked)
   owTiles?: OwTilePart[]; // overworld layer 1 tiles it changed
+  titlePicture?: TitlePicturePart; // the title screen picture it set
 }
+// a title screen picture: its hash (titlescreen.ts titlePictureHash) and where the stripe image before it is, kept
+// in the ROM (the game's or a block of its own); none: []
+export type TitlePicturePart = [] | [hash: number, before: number];
 // an overworld layer 1 tile, its four Map16 words before and the four the package set
 export type OwTilePart = [tile: number, before: number[], set: number[]];
 // slots of the global animation list; graphic: the Anim graphic its frames went into and its size before
