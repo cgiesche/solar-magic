@@ -162,5 +162,21 @@ const retry = (tape: { x: number; y: number } | null) => {
     `level 14: the switch palace's message with the Retry System's hijack at $03BC72 – switch ${w[RAM.palaceSwitch]}, game mode ${hx(w[RAM.gameMode])} after it closed`);
 }
 
+// the title screen: the baserom's global animation uploads tiles 2D8-2FF every few frames, there as in a level.
+// The title screen level has the editor's VRAM layout (vrampatch.ts), so they land in the tiles' VRAM and not in
+// the layer 1 tilemap the game has at $2000 (the ground under Mario drawn as graphics data)
+{
+  const t = new LevelEmulator(rom); t.boot();
+  const s = t.snes;
+  s.loadState(t.bootState()); s.joy1 = 0;
+  let tiles = 0;
+  const hook = s.hook;
+  s.hook = { onVramWrite: (a) => { if (a >= 0x5b00 && a < 0x6000) tiles++; } };
+  for (let f = 0; f < 60; f++) s.runFrame();
+  s.hook = hook;
+  check(s.wram[RAM.gameMode] === GM.title && tiles > 0 && s.ppuRegs[7] === 0x31 && s.ppuRegs[8] === 0x39,
+    `title screen: the global animation's tiles 2D8-2FF are uploaded (${tiles} bytes in 60 frames), the layer 1/2 tilemaps are at $3000/$3800 (BG1SC $${hx(s.ppuRegs[7])}, BG2SC $${hx(s.ppuRegs[8])})`);
+}
+
 if (bad) { console.log(`${bad} failed`); process.exit(1); }
 console.log('all ok');

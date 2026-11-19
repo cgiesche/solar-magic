@@ -206,5 +206,37 @@ check(touching === 0, `no level writes VRAM $2000-$2FFF with the patch (${touchi
 }
 
 
+// The title screen level is loaded by the same routine as a level ($00A59C, game mode $04): the layout is on there
+// too, as with Lunar Magic – tiles 200-2FF are uploaded on the title screen as well (a global animation's frames;
+// in the game's layout they land in the layer 1 tilemap). Both ROMs from their title screen: the level played by
+// the title screen movement, then the file select and the player select – the same picture every frame, and no
+// write to VRAM $2000-$2FFF. (The first two frames are drawn by a PPU new to the scroll registers. The top line
+// is left out: the NMI that draws the file select's text ends on the frame's last lines in the game and, with the
+// patch's two lines of window upkeep, a line into the next frame – #549.)
+{
+  const A = ev.snes, B = ep.snes;
+  A.loadState(ev.bootState()); B.loadState(ep.bootState());
+  const pa = new PPU(A), pb = new PPU(B); A.ppu = pa; B.ppu = pb;
+  let low = 0, differing = 0, first = -1, topLine = 0, reg = 0, frames = 0, selects = 0;
+  const hook = B.hook;
+  B.hook = { onVramWrite: (a) => { if (a >= 0x4000 && a < 0x6000) low++; } };
+  for (let f = 0; f < 560 && B.wram[RAM.gameMode] <= GM.playerSelect; f++) {
+    A.joy1 = B.joy1 = f >= 400 && f % 60 < 4 ? PAD.b : 0; // B: the file select, file A, 1 player
+    A.runFrame(); B.runFrame();
+    if (f === 300) reg = B.ppuRegs[7];
+    if (f < 2) continue;
+    frames++;
+    if (B.wram[RAM.gameMode] === GM.playerSelect) selects++;
+    const at = pa.frame.findIndex((p, i) => p !== pb.frame[i] && i >= 256);
+    if (A.wram[RAM.gameMode] !== B.wram[RAM.gameMode] || at >= 0) { differing++; if (first < 0) first = f; }
+    else if (pa.frame.subarray(0, 256).some((p, i) => p !== pb.frame[i])) topLine++;
+  }
+  A.ppu = null; B.ppu = null; B.hook = hook;
+  check(reg === 0x31, `title screen: the layer 1 tilemap at $3000 (BG1SC $${reg.toString(16)})`);
+  check(low === 0, `title screen: VRAM $2000-$2FFF is not written (${low} bytes)`);
+  check(selects > 0 && differing === 0, `title screen, file select, player select: the clean game's picture every frame (${frames} frames, ${differing} differ${first < 0 ? '' : `, first frame ${first}`}; top line only: ${topLine})`);
+  check(topLine <= 1, `at most one frame's top line differs (${topLine})`);
+}
+
 console.log(bad ? `${bad} failures` : 'all ok');
 if (bad) process.exitCode = 1;
