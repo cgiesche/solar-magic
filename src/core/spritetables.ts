@@ -28,7 +28,8 @@ export function spriteTablesHold(rom: Rom): boolean {
   return !!k && holds(rom, k);
 }
 
-// Finds the per-sprite tables from emu's boot snapshot (just booted, its reads boot: the state is put back after) and
+// Finds the per-sprite tables from emu's boot snapshot (just booted, its reads boot: the state is put back after; run by
+// the boot, whose recording decides what the finding's reads leave out) and
 // learns their pages as byte pages of its ROM; boot's reads (recorded fine: RomReads fine) are coarsened with them.
 // Returns the pages, kept with the bytes read (the boot's among them); none when fewer than two sprites could be
 // spawned. When the game crashes, the pages learned before stay (and none are returned).

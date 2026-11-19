@@ -3,10 +3,9 @@
 // the tilesets' pointers (App.tilesetPointerTable says why); now and emu serve the tools comparing with the worker. A
 // result holds while its key, its input (state outside the ROM it depends on, inputs.ts) and the ROM bytes it read
 // (romdeps.ts) are unchanged.
-// A result that is no picture (picture: false) doesn't read the display data either (the Map16 tiles'
-// quarters, the colors: gfxDisplaySkipMask, as the probe worker's results, ADR 0008): drawing a tile or
-// changing a color keeps it. It runs from a boot snapshot that leaves them out too, booted on an own
-// emulator; pictures (CONTEXT.md) run from the main emulator's.
+// A result says what it shows (LevelEmulator.record): behaviour doesn't count the display data (the Map16 tiles'
+// quarters, the colors: as the probe worker's results, ADR 0008), so drawing a tile or changing a color keeps it;
+// pictures (CONTEXT.md) count it. All run from the main emulator's boot snapshot.
 
 import type { Rom } from './rom.ts';
 import type { LevelEmulator } from './levelemu.ts';
@@ -32,11 +31,11 @@ export class ResultLearner {
 
   // The result under key for the input, else learned at once: run returns it with the ROM bytes it read
   // (emu.record)
-  now<T>(key: string, run: (emu: LevelEmulator) => { result: T; reads: RomReads }, opts: { input?: unknown; keep?: true | 'memory'; picture?: boolean } = {}): T {
+  now<T>(key: string, run: (emu: LevelEmulator) => { result: T; reads: RomReads }, opts: { input?: unknown; keep?: true | 'memory' } = {}): T {
     const input = this.hash(opts.input), keep = opts.keep ?? true;
     const stored = this.runner.stored<T>(key, input, keep);
     if (stored !== undefined) return stored;
-    const { result, reads } = run(this.emu(opts.picture ?? true));
+    const { result, reads } = run(this.emu());
     this.runner.store(key, input, keep, result, reads);
     return result;
   }
@@ -49,10 +48,9 @@ export class ResultLearner {
     return h;
   }
 
-  // the emulator for work at once (set up from the main one's boot state; picture: false, from the boot snapshot of
-  // results that are no pictures)
-  emu(picture = true): LevelEmulator {
-    return this.runner.emu(AT_ONCE, picture);
+  // the emulator for work at once (set up from the main one's boot snapshot)
+  emu(): LevelEmulator {
+    return this.runner.emu(AT_ONCE);
   }
 
   // per tileset the pointers of FG Map16 tiles 000-1FF (tilesets.ts, JobRunner.tilesetPointers)

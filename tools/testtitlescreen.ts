@@ -98,10 +98,10 @@ const same = (a: ArrayLike<number>, b: ArrayLike<number>) => a.length === b.leng
 // picture's entry is on a page of code every load runs, read by byte (romdeps.ts)
 {
   const rom = fresh(), e = new LevelEmulator(rom);
-  const first = e.record('picture', () => e.load(0x105)).reads, before = rom.data.slice();
+  const first = e.record('full picture', () => e.load(0x105)).reads, before = rom.data.slice();
   writeTitleScreen(rom, titleTilemap(e).map((w) => w ^ 0x0400));
   check(!e.snapshot!.reads.differ(before, rom.data) && !first.differ(before, rom.data), 'booted inside a level\'s load: the boot\'s and the load\'s reads hold after painting');
-  const again = e.record('picture', () => e.load(0x105)).reads, then = rom.data.slice(); // (boots again, inside the recording)
+  const again = e.record('full picture', () => e.load(0x105)).reads, then = rom.data.slice(); // (boots again, inside the recording)
   writeTitleScreen(rom, titleTilemap(e).map((w) => w ^ 0x0400));
   check(!e.snapshot!.reads.differ(then, rom.data) && !again.differ(then, rom.data), 'booted again inside a level\'s load: they hold after painting again');
 }

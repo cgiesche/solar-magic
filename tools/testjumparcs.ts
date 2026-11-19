@@ -69,10 +69,10 @@ for (const dir of [-1, 1] as const) {
   const runner = new JobRunner({ rom, results: new ResultCache(new RomFingerprint(rom)), main });
   const load: ArcLoad = { level: orig.number, ov: { layer1: serializeLayer1(rom, orig) }, spriteHeader: orig.spriteHeader, height: 27 * 16 };
   const ask = (tx: number): JumpArc[] =>
-    learnAtOnce(runner, { key: `arcs:${tx},20`, keep: false, picture: false, start: (emu, prep) => jumpArcsJob(emu, prep, 'lv105', load, tx, 20, runs) }, 'arcs');
+    learnAtOnce(runner, { key: `arcs:${tx},20`, keep: false, shows: 'behaviour', start: (emu, prep) => jumpArcsJob(emu, prep, 'lv105', load, tx, 20, runs) }, 'arcs');
   const a = ask(11), b = ask(12);
   check(a.length === 8 && b.length === 8 && loads === 1, `a second request in the same level state: the level not loaded again (${loads} loads)`);
-  const o = runner.emu('arcs', false).snapshot!.reads.pages.indexOf(1) << 8;
+  const o = runner.emu('arcs').bootReads('behaviour')!.pages.indexOf(1) << 8;
   rom.writeAt(o, Uint8Array.of(rom.data[o] ^ 1));
   rom.writeAt(o, Uint8Array.of(rom.data[o] ^ 1)); // (changed back: the level still loads)
   const c = ask(13);

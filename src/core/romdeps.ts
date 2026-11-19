@@ -18,6 +18,7 @@
 // read its bytes. The same for the two pages the shared palettes ($00:B0A0–$00:B881) share with code: every result runs
 // the code from $00:B888 on (the boot), the goal tape and the goal sphere the end of the palette fade at $00:B000.
 // Results that are no pictures leave the colors out (gfxDisplaySkipMask), so changing a color there keeps them (#190).
+// Which reads a result leaves out follows from what it shows (bootsnapshot.ts): a recording is given its mask there.
 // The same for the per-sprite tables (tweakers, INIT/MAIN pointers, PIXI's sprite table), which hold a few bytes of
 // every sprite in each page: found by emulation (spritetables.ts, learnBytePages), so a change of one sprite's entry
 // only drops what loaded that sprite.

@@ -75,7 +75,7 @@ export class FrameRecorder {
   private ovRead = new Uint32Array(0x10000);
   private touches: number[] | null = null;
 
-  // mask: the skip mask a frame's ROM reads are recorded with outside another recording (LevelEmulator.skipMask)
+  // mask: the skip mask a frame's ROM reads are recorded with outside another recording (what a picture leaves out)
   constructor(snes: Snes, rom: Rom, overlay: Uint8Array, mask: () => Uint8Array | null) {
     this.snes = snes;
     this.rom = rom;

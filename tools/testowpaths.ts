@@ -6,7 +6,7 @@
 import { Rom, snesToPc } from '../src/core/rom.ts';
 import { RomReads, ResultCache, RomFingerprint } from '../src/core/romdeps.ts';
 import { JobRunner } from '../src/core/jobrunner.ts';
-import { pathKindsJob, levelTileTest, PATH_KINDS, type PathKind } from '../src/core/owpaths.ts';
+import { pathKindsJob, levelTileTest, PATH_KINDS, type PathKind, OVERWORLD_DATA } from '../src/core/owpaths.ts';
 import {
   readL1, writeL1, readL2, writeL2, readTranslevels, writeTranslevels, placeTile, setInitialFlags, setExitDirection, FLAG, MAX_TRANSLEVEL,
 } from '../src/core/overworld.ts';
@@ -22,7 +22,7 @@ const hx = (v: number) => v.toString(16).toUpperCase().padStart(2, '0');
 // the job run to its end as the result learner runs it, with what it read
 function learn(rom: Rom): { kinds: PathKind[]; reads: RomReads } {
   const runner = new JobRunner({ rom, results: new ResultCache(new RomFingerprint(rom)) });
-  const run = runner.run({ key: 'owpk', keep: false, picture: false, start: pathKindsJob });
+  const run = runner.run({ key: 'owpk', keep: false, shows: 'behaviour', leavesOut: OVERWORLD_DATA, start: pathKindsJob });
   for (;;) { const r = runner.step('owpk', run); if (r) return { kinds: r.result, reads: run.reads }; }
 }
 

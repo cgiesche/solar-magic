@@ -23,7 +23,6 @@ import { dm16Groups, prefabSuggestions, suggestPrefabs, KeptSuggestions } from '
 import { SessionSuggestions } from '../src/core/suggestsession.ts';
 import type { FollowUp } from '../src/core/romedit.ts';
 import { RomFingerprint, RomReads } from '../src/core/romdeps.ts';
-import { gfxSkipMask } from '../src/core/gfxpages.ts';
 import { readGfx, writeGfx } from '../src/core/gfxfiles.ts';
 import type { Level } from '../src/core/level.ts';
 import { FG_PALS } from '../src/core/sharedpal.ts';
@@ -56,7 +55,6 @@ const stairs = (x: number, y: number) => [dm(x, y + 1, 0x150), dm(x + 1, y, 0x15
 const rom = new Rom(await editorImage());
 installPrefabPatch(rom);
 const emu = new LevelEmulator(rom);
-emu.skipMask = () => gfxSkipMask(rom); // as the editor: graphics data isn't among the bytes read
 emu.boot();
 const load = () => emu;
 
@@ -121,7 +119,8 @@ const tile104 = (lv: Level) => { lv.objects = lv.objects.filter((o) => !(o.ext =
   }
   const kept = new Spy(new RomFingerprint(rom));
   // (no emulator brings the byte pages up to date before a run: a recorder takes its ROM state's)
-  const run = (open?: Level) => { kept.reset(); return suggestPrefabs(rom, { levels: usedLevels(rom), open, emu: load, kept }); };
+  // (recorded as a picture's, with the display data: the color edited below is to drop a search; the editor's runs show behaviour)
+  const run = (open?: Level) => { kept.reset(); return emu.record('picture', () => suggestPrefabs(rom, { levels: usedLevels(rom), open, emu: load, kept }), { base: null }).result; };
   const same = (open: Level | undefined, what: string) => {
     const k = run(open);
     const full = suggestPrefabs(rom, { levels: usedLevels(rom), open, emu: load });
@@ -210,7 +209,7 @@ const tile104 = (lv: Level) => { lv.objects = lv.objects.filter((o) => !(o.ext =
   }
   same(undefined, 'another level saved');
   // a place with another object between its objects: its search loads the level, and the bytes the load read count
-  // (a color of the shared palettes: the test's emulator leaves out only graphics data. One of the FG palettes, which
+  // (a color of the shared palettes: the test's runs leave out only graphics data. One of the FG palettes, which
   // every level loads: the palettes' first and last page are recorded by byte, there only the colors a load reads count)
   const h = loadLevel(rom, H1), b = block(0x70, 12);
   h.objects.push(...b.slice(0, 4), { uid: newUid(), num: 5, ext: 0, x: 0x78, y: 2, size: 0 }, ...b.slice(4));
@@ -289,7 +288,6 @@ for (const reloadFirst of [false, true]) {
   const r2 = new Rom(await editorImage());
   installPrefabPatch(r2);
   const emu2 = new LevelEmulator(r2);
-  emu2.skipMask = () => gfxSkipMask(r2);
   emu2.boot();
   {
     const lv = loadLevel(r2, H2);
@@ -351,7 +349,6 @@ for (const reloadFirst of [false, true]) {
   const r3 = new Rom(await editorImage());
   installPrefabPatch(r3);
   const emu3 = new LevelEmulator(r3);
-  emu3.skipMask = () => gfxSkipMask(r3);
   emu3.boot();
   {
     const lv = loadLevel(r3, H2);

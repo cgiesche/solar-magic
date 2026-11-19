@@ -207,10 +207,12 @@ export class BlockProber {
   private sw: SwitchState | null = null; // set by start() in the probe state
 
   // boot: another emulator on the same ROM whose title screen snapshot is taken over (saves booting
-  // again); results: where probe results are kept
-  constructor(rom: Rom, boot?: LevelEmulator, results?: ResultCache) {
+  // again); results: where probe results are kept; tilesets: where the tilesets' tile data lies, which the probes
+  // leave out as display data (LevelEmulator's: the probe host's job runner knows; without them only the display
+  // data whose place the ROM's layout says is left out)
+  constructor(rom: Rom, boot?: LevelEmulator, results?: ResultCache, tilesets?: () => number[][]) {
     this.rom = rom;
-    this.emu = new LevelEmulator(rom);
+    this.emu = new LevelEmulator(rom, tilesets);
     if (boot?.snapshot) this.emu.adoptBoot(boot.snapshot);
     this.results = results ?? new ResultCache(new RomFingerprint(rom));
     this.use(0);

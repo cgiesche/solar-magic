@@ -22,7 +22,7 @@ import { renderLevel, type LevelImages, composite, composeCells, patchLevel, pat
 import type { SpriteImage } from '../core/spritegfx.ts';
 import { usedSpriteMemory, spriteMemSpec, lostSprites, missingSprites, type SpriteMemResult } from '../core/spritemem.ts';
 import { DM16_EXT, levelGfx, levelExtGfx, customPalette, levelMusic } from '../core/patches.ts';
-import { gfxSkipMask, gfxFilesHash } from '../core/gfxpages.ts';
+import { keptGfxSkipMask, gfxFilesHash } from '../core/gfxpages.ts';
 import { flagBytes, usedFlags, isDm16, dm16Tiles } from '../core/cdm16.ts';
 import { RenderQuery, type TileCut } from '../core/renderquery.ts';
 import { PREFAB_EXT, listPrefabs, type Prefab } from '../core/prefabs.ts';
@@ -265,7 +265,6 @@ export class App {
     this.view.show.anim = animationPref.get();
     this.view.show = keptShown(this.view.show); // (the View options kept, #488)
     this.emu = new LevelEmulator(rom);
-    this.emu.skipMask = this.gfxSkipMask;
     // the level is loaded anew for every edit and drag step: frames that read the same are taken over (#448)
     this.emu.reuseLoads = true;
     this.emu.boot();
@@ -884,8 +883,7 @@ export class App {
 
   // ROM bytes of GFX file data: emulated results don't depend on them (graphics only reach VRAM);
   // sprite images and object thumbnails have the files' content in their input instead
-  private gfxMask = perRomState(gfxSkipMask);
-  readonly gfxSkipMask = (): Uint8Array | null => this.gfxMask(this.rom);
+  readonly gfxSkipMask = (): Uint8Array | null => keptGfxSkipMask(this.rom);
 
   // the content of the bytes gfxSkipMask leaves out of the bytes read (graphics and ExAnimation data), for
   // results that depend on them; once per ROM state

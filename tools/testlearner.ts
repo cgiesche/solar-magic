@@ -14,7 +14,6 @@ import { INPUTS_PER_KEY } from '../src/core/keptresults.ts';
 import { ResultLearner } from '../src/core/learner.ts';
 import { memoryResults, MEMORY_CONTENTS, JobRunner, type Job, type Keep } from '../src/core/jobrunner.ts';
 import { inputHash, levelInput } from '../src/core/inputs.ts';
-import { gfxSkipMask } from '../src/core/gfxpages.ts';
 import { LevelUses, usedLevels } from '../src/core/levelusage.ts';
 import { loadLevel, levelRows } from '../src/core/level.ts';
 import { renderLevel, setFgWords, map16Source } from '../src/core/render.ts';
@@ -34,9 +33,12 @@ const spare = rom.allocWrite(new Uint8Array(0x300)); // a page of its own no loa
 function editor(r = rom, m = main) {
   const results = new ResultCache(new RomFingerprint(r));
   const learner = new ResultLearner({ rom: r, results, main: m }), runner = new JobRunner({ rom: r, results, main: m });
+  // (what the pictures here count: every byte read, as this file's results on the main emulator; in an editor of its
+  // own, as the editor's pictures, without the graphics file data)
+  const shown = m === main ? 'full picture' : 'picture';
   // a job learned a step at a time to its end (stored as keep says; input: hashed)
   const learn = <T>(key: string, start: (emu: LevelEmulator) => Job<T>, opts: { input?: unknown; keep?: Keep; picture?: boolean } = {}): T =>
-    learnAtOnce(runner, { key, input: opts.input === undefined ? undefined : inputHash(opts.input), keep: opts.keep ?? true, picture: opts.picture ?? true, start });
+    learnAtOnce(runner, { key, input: opts.input === undefined ? undefined : inputHash(opts.input), keep: opts.keep ?? true, shows: opts.picture === false ? 'behaviour' : shown, start });
   return { results, learner, runner, learn };
 }
 
@@ -52,9 +54,9 @@ function* sum(n: number): Generator<void, number> {
 // a cached result: returned without running, at once and sliced
 {
   const { results, learner, learn } = editor();
-  results.set('k', 42, results.fp.deps(main.record('picture', () => rom.r8(spare)).reads));
+  results.set('k', 42, results.fp.deps(main.record('full picture', () => rom.r8(spare)).reads));
   runs = 0;
-  check(learner.now('k', (emu) => emu.record('picture', () => { runs++; return 7; })) === 42 && runs === 0, 'a cached result comes back at once without running');
+  check(learner.now('k', (emu) => emu.record('full picture', () => { runs++; return 7; })) === 42 && runs === 0, 'a cached result comes back at once without running');
   check(learn('k', () => sum(3)) === 42 && runs === 0, 'and a step at a time');
 }
 
@@ -62,7 +64,7 @@ function* sum(n: number): Generator<void, number> {
 {
   const { learner } = editor();
   runs = 0;
-  const run = (emu: LevelEmulator) => emu.record('picture', () => { runs++; return rom.r8(spare) + 1; });
+  const run = (emu: LevelEmulator) => emu.record('full picture', () => { runs++; return rom.r8(spare) + 1; });
   const a = learner.now('n', run), b = learner.now('n', run);
   check(a === 1 && b === 1 && runs === 1, 'a result learned at once is kept');
 }
@@ -140,7 +142,7 @@ for (const keep of [true, 'memory'] as const) {
   const { results, learner, runner, learn } = editor();
   const what = keep === true ? 'stored' : 'kept in memory';
   runs = 0;
-  const run = (emu: LevelEmulator) => emu.record('picture', () => { runs++; return rom.r8(spare) + 1; });
+  const run = (emu: LevelEmulator) => emu.record('full picture', () => { runs++; return rom.r8(spare) + 1; });
   learner.now('i', run, { input: { a: 1 }, keep });
   learner.now('i', run, { input: { a: 1 }, keep });
   check(runs === 1, `${what}: the same input reuses the result (${runs} runs)`);
@@ -163,7 +165,6 @@ for (const keep of [true, 'memory'] as const) {
 {
   const r = new Rom(await editorImage());
   const m = new LevelEmulator(r);
-  m.skipMask = () => gfxSkipMask(r); // as the editor
   m.boot();
   const levels = [0x105, ...usedLevels(r).slice(0, 12)];
   const scanned = async (picture: boolean) => {
@@ -192,7 +193,7 @@ for (const keep of [true, 'memory'] as const) {
   check(plain.missing(levels).length === 0 && flipped > 0, `flipping tile 130's quarters keeps every level's uses (as pictures ${flipped} of ${levels.length} would be learned again)`);
   check(!thumbsKept() && redrawn(), 'the object thumbnails are learned again, the open level drawn anew');
   thumbs();
-  for (const n of shown.missing(levels)) shown.scan(n, learner.emu());
+  for (const n of shown.missing(levels)) { const e = learner.emu(); e.record('picture', () => shown.scan(n, e)); } // (as pictures again)
   sprites();
   redrawn = drawn();
 
@@ -204,7 +205,7 @@ for (const keep of [true, 'memory'] as const) {
 
 // memory-only results: the bounds (keys, not inputs, counted for the limit); a round keeps what it used
 {
-  const fp = new RomFingerprint(rom), deps = fp.deps(main.record('picture', () => rom.r8(spare)).reads);
+  const fp = new RomFingerprint(rom), deps = fp.deps(main.record('full picture', () => rom.r8(spare)).reads);
   const mem = memoryResults(fp, 256);
   for (let i = 0; i < 20000; i++) mem.set(`k${i % 5000}`, i, deps, `${i}`);
   check(mem.get('k4999', '19999') === 19999 && mem.get('k0', '0') === undefined, 'the latest used results stay within the limit');
@@ -221,7 +222,7 @@ for (const keep of [true, 'memory'] as const) {
     `a key keeps its latest used ${INPUTS_PER_KEY} inputs`);
   // the results of an input on the latest MEMORY_CONTENTS ROM states (#386): an undo and a redo find theirs
   {
-    const was = rom.r8(spare), at = (v: number) => { rom.w8(spare, v); return fp.deps(main.record('picture', () => rom.r8(spare)).reads); };
+    const was = rom.r8(spare), at = (v: number) => { rom.w8(spare, v); return fp.deps(main.record('full picture', () => rom.r8(spare)).reads); };
     const states = memoryResults(fp, 256);
     states.set('u', 'A', at(was ^ 1), 'i');
     states.set('u', 'B0', at(was ^ 2), 'i');
@@ -229,7 +230,7 @@ for (const keep of [true, 'memory'] as const) {
     for (let k = 1; k < INPUTS_PER_KEY; k++) states.set('u', `other${k}`, deps, `${k}`);
     const a = (at(was ^ 1), states.get('u', 'i')), b = (at(was ^ 2), states.get('u', 'i'));
     const none = (at(was ^ 3), states.get('u', 'i'));
-    states.set('u', 'C', fp.deps(main.record('picture', () => rom.r8(spare)).reads), 'i');
+    states.set('u', 'C', fp.deps(main.record('full picture', () => rom.r8(spare)).reads), 'i');
     const pushed = (at(was ^ 1), states.get('u', 'i')), kept = (at(was ^ 2), states.get('u', 'i'));
     rom.w8(spare, was); // (the other inputs' results: made on it)
     let others = 0;

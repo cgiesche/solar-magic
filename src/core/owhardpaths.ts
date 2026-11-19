@@ -9,14 +9,14 @@
 // hardcoded path up), and walks off; while the game's flag is set ($1B78, RAM.owHardcodedPath – a patch may store more
 // than 1 there) the tiles he steps onto are the path's, the tile he stands on after it where it leads.
 // The result depends on the game's code and on the map it is given (layer 1 and the translevels, the job's input: a
-// step may take the map's own tile, $58): the overworld's data in the ROM is not recorded as read (maskOverworldData).
+// step may take the map's own tile, $58): the overworld's data in the ROM is not recorded as read (owpaths.ts OVERWORLD_DATA).
 
 import type { LevelEmulator } from './levelemu.ts';
 import type { Job } from './jobrunner.ts';
 import type { Rom } from './rom.ts';
 import { l1Index, l1XY, MAX_TRANSLEVEL, readTranslevels } from './overworld.ts';
 import { layer1AtEveryProgress } from './owcellhistory.ts';
-import { maskOverworldData, stopsOn, DX, DY, type PathKind } from './owpaths.ts';
+import { stopsOn, DX, DY, type PathKind } from './owpaths.ts';
 import { RAM, GM, PAD, get16, getS16, set16 } from './ram.ts';
 
 // A hardcoded path the game walks from layer 1 tile `from` (l1Index order) in direction `dir` (DIR_NAMES order: up,
@@ -47,90 +47,88 @@ export function hardWalksInput(rom: Rom, kinds: readonly PathKind[]): { l1: numb
 // The hardcoded paths from the candidate tiles (hardWalkCandidates) of the map l1 / tls (l1Index order; layer 1 with
 // every event passed, the translevels), each direction tried; a step per 64 tiles (the result learner's job)
 export function hardWalksJob(emu: LevelEmulator, l1: ArrayLike<number>, tls: ArrayLike<number>, cells: readonly number[]): Job<HardWalk[]> {
-  return learn(emu, l1, tls, cells, maskOverworldData(emu));
+  return learn(emu, l1, tls, cells);
 }
 
-function* learn(emu: LevelEmulator, l1: ArrayLike<number>, tls: ArrayLike<number>, cells: readonly number[], end: () => void): Generator<string | void, HardWalk[]> {
-  try {
-    emu.startGame(0);
-    const s = emu.snes, w = s.wram;
-    const standing = w[RAM.owProcess];
-    // (Mario's pixel position relative to his tile, as at the start)
-    const ox = get16(w, RAM.owPlayerX) - get16(w, RAM.owPlayerTileX) * 16, oy = get16(w, RAM.owPlayerY) - get16(w, RAM.owPlayerTileY) * 16;
-    // the overworld loaded on each map (the main map, the submaps): its state and the middle of its view, the map
-    // given (a submap's tile is tried on the submap whose view is nearest, as LevelEmulator.startGameAt does)
-    const ow = s.saveState(), maps: { state: ReturnType<typeof s.saveState>; cx: number; cy: number }[] = [];
-    for (let k = 0; k < SUBMAPS; k++) {
-      s.loadState(ow);
-      w[RAM.submap] = w[RAM.submap + 1] = k;
-      w[RAM.gameMode] = GM.overworldLoad;
-      for (let f = 0; w[RAM.gameMode] !== GM.overworld && f < 500; f++) s.runFrame();
-      for (let f = 0; f < 3; f++) s.runFrame();
-      for (let i = 0; i < 0x800; i++) {
-        w[RAM.owLayer1 + i] = l1[i] & 0xff;
-        w[RAM.owLayer1High + i] = l1[i] >> 8;
-        w[RAM.owTranslevels + i] = tls[i];
-      }
-      w.fill(0x0f, RAM.levelFlags, RAM.levelFlags + MAX_TRANSLEVEL + 1); // every direction open (and nothing passed)
-      maps.push({ state: s.saveState(), cx: getS16(w, RAM.layer1X) + 128, cy: getS16(w, RAM.layer1Y) + 112 });
+function* learn(emu: LevelEmulator, l1: ArrayLike<number>, tls: ArrayLike<number>, cells: readonly number[]): Generator<string | void, HardWalk[]> {
+  emu.startGame(0);
+  const s = emu.snes, w = s.wram;
+  const standing = w[RAM.owProcess];
+  // (Mario's pixel position relative to his tile, as at the start)
+  const ox = get16(w, RAM.owPlayerX) - get16(w, RAM.owPlayerTileX) * 16, oy = get16(w, RAM.owPlayerY) - get16(w, RAM.owPlayerTileY) * 16;
+  // the overworld loaded on each map (the main map, the submaps): its state and the middle of its view, the map
+  // given (a submap's tile is tried on the submap whose view is nearest, as LevelEmulator.startGameAt does)
+  const ow = s.saveState(), maps: { state: ReturnType<typeof s.saveState>; cx: number; cy: number }[] = [];
+  for (let k = 0; k < SUBMAPS; k++) {
+    s.loadState(ow);
+    w[RAM.submap] = w[RAM.submap + 1] = k;
+    w[RAM.gameMode] = GM.overworldLoad;
+    for (let f = 0; w[RAM.gameMode] !== GM.overworld && f < 500; f++) s.runFrame();
+    for (let f = 0; f < 3; f++) s.runFrame();
+    for (let i = 0; i < 0x800; i++) {
+      w[RAM.owLayer1 + i] = l1[i] & 0xff;
+      w[RAM.owLayer1High + i] = l1[i] >> 8;
+      w[RAM.owTranslevels + i] = tls[i];
     }
-    const mapOf = (i: number) => {
-      if (i < 0x400) return 0;
-      const { x, y } = l1XY(i);
-      let best = Infinity, sub = 1;
-      for (let k = 1; k < SUBMAPS; k++) {
-        const d = Math.max(Math.abs(x * 16 + 8 - maps[k].cx), Math.abs(y * 16 + 8 - maps[k].cy));
-        if (d < best) { best = d; sub = k; }
-      }
-      return sub;
-    };
-    const flag = () => w[RAM.owHardcodedPath] | w[RAM.owHardcodedPath + 1];
-    const out: HardWalk[] = [];
-    for (let c = 0; c < cells.length; c++) {
-      const i = cells[c], { x, y } = l1XY(i), region = i >> 10;
-      for (let d = 0; d < 4; d++) {
-        const nx = x + DX[d], ny = y + DY[d];
-        s.loadState(maps[mapOf(i)].state);
-        for (const o of [0, RAM.owPlayerStride]) { // Mario and Luigi
-          set16(w, RAM.owPlayerX + o, x * 16 + ox); set16(w, RAM.owPlayerY + o, y * 16 + oy);
-          set16(w, RAM.owPlayerTileX + o, x); set16(w, RAM.owPlayerTileY + o, y);
-        }
-        if (nx >= 0 && ny >= 0 && nx < 32 && ny < 32) {
-          const n = l1Index(region, nx, ny);
-          w[RAM.owLayer1 + n] = w[RAM.owLayer1High + n] = 0;
-        }
-        const walk = probe(d, i, region);
-        if (walk) out.push(walk);
-      }
-      if (c % 64 === 63) yield `Hardcoded paths (${cells.length - 1 - c})`;
+    w.fill(0x0f, RAM.levelFlags, RAM.levelFlags + MAX_TRANSLEVEL + 1); // every direction open (and nothing passed)
+    maps.push({ state: s.saveState(), cx: getS16(w, RAM.layer1X) + 128, cy: getS16(w, RAM.layer1Y) + 112 });
+  }
+  const mapOf = (i: number) => {
+    if (i < 0x400) return 0;
+    const { x, y } = l1XY(i);
+    let best = Infinity, sub = 1;
+    for (let k = 1; k < SUBMAPS; k++) {
+      const d = Math.max(Math.abs(x * 16 + 8 - maps[k].cx), Math.abs(y * 16 + 8 - maps[k].cy));
+      if (d < best) { best = d; sub = k; }
     }
-    return out;
+    return sub;
+  };
+  const flag = () => w[RAM.owHardcodedPath] | w[RAM.owHardcodedPath + 1];
+  const out: HardWalk[] = [];
+  for (let c = 0; c < cells.length; c++) {
+    const i = cells[c], { x, y } = l1XY(i), region = i >> 10;
+    for (let d = 0; d < 4; d++) {
+      const nx = x + DX[d], ny = y + DY[d];
+      s.loadState(maps[mapOf(i)].state);
+      for (const o of [0, RAM.owPlayerStride]) { // Mario and Luigi
+        set16(w, RAM.owPlayerX + o, x * 16 + ox); set16(w, RAM.owPlayerY + o, y * 16 + oy);
+        set16(w, RAM.owPlayerTileX + o, x); set16(w, RAM.owPlayerTileY + o, y);
+      }
+      if (nx >= 0 && ny >= 0 && nx < 32 && ny < 32) {
+        const n = l1Index(region, nx, ny);
+        w[RAM.owLayer1 + n] = w[RAM.owLayer1High + n] = 0;
+      }
+      const walk = probe(d, i, region);
+      if (walk) out.push(walk);
+    }
+    if (c % 64 === 63) yield `Hardcoded paths (${cells.length - 1 - c})`;
+  }
+  return out;
 
-    // Mario walks off his tile i in direction d: the hardcoded path, if the game takes one
-    function probe(d: number, i: number, region: number): HardWalk | null {
-      const tile = () => l1Index(region, get16(w, RAM.owPlayerTileX), get16(w, RAM.owPlayerTileY));
-      let on = false;
-      for (let f = 0; f < START_FRAMES && !on; f++) {
-        s.joy1 = f < 4 ? PADS[d] : 0;
-        s.runFrame();
-        on = flag() !== 0;
-      }
-      s.joy1 = 0;
-      if (!on) return null;
-      const path: number[] = [];
-      let cur = i;
-      for (let f = 0; f < WALK_FRAMES; f++) {
-        s.runFrame();
-        const t = tile();
-        if (t !== cur) { path.push(t); cur = t; }
-        if (!flag() && w[RAM.owProcess] === standing) {
-          const to = path.pop() ?? -1, before = path.at(-1) ?? i;
-          return { from: i, dir: d, path, to, arrive: to < 0 ? d : stepDir(before, to) };
-        }
-      }
-      return { from: i, dir: d, path, to: -1, arrive: path.length > 1 ? stepDir(path.at(-2)!, path.at(-1)!) : d };
+  // Mario walks off his tile i in direction d: the hardcoded path, if the game takes one
+  function probe(d: number, i: number, region: number): HardWalk | null {
+    const tile = () => l1Index(region, get16(w, RAM.owPlayerTileX), get16(w, RAM.owPlayerTileY));
+    let on = false;
+    for (let f = 0; f < START_FRAMES && !on; f++) {
+      s.joy1 = f < 4 ? PADS[d] : 0;
+      s.runFrame();
+      on = flag() !== 0;
     }
-  } finally { end(); }
+    s.joy1 = 0;
+    if (!on) return null;
+    const path: number[] = [];
+    let cur = i;
+    for (let f = 0; f < WALK_FRAMES; f++) {
+      s.runFrame();
+      const t = tile();
+      if (t !== cur) { path.push(t); cur = t; }
+      if (!flag() && w[RAM.owProcess] === standing) {
+        const to = path.pop() ?? -1, before = path.at(-1) ?? i;
+        return { from: i, dir: d, path, to, arrive: to < 0 ? d : stepDir(before, to) };
+      }
+    }
+    return { from: i, dir: d, path, to: -1, arrive: path.length > 1 ? stepDir(path.at(-2)!, path.at(-1)!) : d };
+  }
 }
 
 // the direction from tile a to the tile b next to it (DIR_NAMES order)

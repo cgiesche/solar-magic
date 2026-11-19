@@ -10,6 +10,7 @@ import type { LevelEmulator, LevelOverride } from './levelemu.ts';
 import { L1_PTRS } from './level.ts';
 import { map16Pointer } from './ram.ts';
 import { gfxDisplaySkipMask } from './gfxpages.ts';
+import type { LeftOut } from './bootsnapshot.ts';
 
 export const TILESETS = 16; // the header's 4 bits
 const FG_TILES = 0x200;
@@ -27,12 +28,15 @@ export const pointersKey = (ts: number) => `tsp1:${ts}`;
 // The pointers of FG Map16 tiles 000-1FF ($0FBE) as a level of tileset ts loads them, and what the load
 // read. The reads leave out the display data (gfxDisplaySkipMask), the tiles' quarters included (the pointers
 // don't depend on it, so drawing a tile or changing a color keeps the result): a first load finds where
-// it is. Not on top of the boot's reads: the title screen's level read tile data too.
+// it is. Not on top of the boot's reads: the title screen's level read tile data too. They are behaviour, but what
+// behaviour leaves out needs these pointers of every tileset: recorded as a picture that leaves out besides the
+// display data as this tileset's load places it.
 export function tilesetPointers(emu: LevelEmulator, ts: number): { result: number[]; reads: RomReads } {
   const rom = emu.rom;
   const load = () => { const r = emu.load(PROBE_LEVEL, probe(rom, ts)); return Array.from({ length: FG_TILES }, (_, t) => map16Pointer(r.wram, t)); };
   const mask = gfxDisplaySkipMask(rom, [load()]);
-  return emu.withSkipMask(mask, () => emu.record('behaviour', load, { base: null }));
+  const tileData: LeftOut = { what: 'display data of a tileset', mask: () => mask };
+  return emu.record('picture', load, { base: null, leavesOut: tileData });
 }
 
 // the tilesets in which FG tile t has the same data as in tileset ts (ts included); ptrs: per tileset

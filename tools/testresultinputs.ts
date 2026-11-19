@@ -12,7 +12,6 @@ import { learnAtOnce } from './runnercheck.ts';
 import { cameraAtKey } from '../src/core/camerareach.ts';
 import { emptyTriggerView } from '../src/core/extrigger.ts';
 import { assignSlot, levelSlots, layerSlots } from '../src/core/gfxslots.ts';
-import { gfxSkipMask } from '../src/core/gfxpages.ts';
 import { gfxEntry, GFX_FILES } from '../src/core/patches.ts';
 import { lz2Decompress } from '../src/core/lz2.ts';
 import { readGfx, writeGfx, createGfx, ANIM_FILE } from '../src/core/gfxfiles.ts';
@@ -81,7 +80,6 @@ const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b)
 // change them; the BG (layer 2 pointer) doesn't (they are layer 1)
 {
   const r = new Rom(await editorImage()), e = new LevelEmulator(r);
-  e.skipMask = () => gfxSkipMask(r); // as the editor: graphics data isn't among the bytes read
   e.boot();
   const lv = loadLevel(r, 0x105), other = { ...structuredClone(lv), number: 0x106 };
   const specs: ObjSpec[] = Array.from({ length: 16 }, (_, i) => ({ num: 0, ext: 0x40 + i, size: 0 }));
@@ -113,7 +111,6 @@ const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b)
 // content is in its input), those drawn in a file it doesn't use keep the preview
 {
   const r = new Rom(await editorImage()), e = new LevelEmulator(r);
-  e.skipMask = () => gfxSkipMask(r);
   e.boot();
   const lr = new JobRunner({ rom: r, results: new ResultCache(new RomFingerprint(r)), main: e });
   const N = 0x105, saved = loadLevel(r, N);
@@ -144,7 +141,6 @@ const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b)
 // reads keep it
 {
   const r = new Rom(await editorImage()), e = new LevelEmulator(r);
-  e.skipMask = () => gfxSkipMask(r);
   e.boot();
   const lr = new JobRunner({ rom: r, results: new ResultCache(new RomFingerprint(r)), main: e });
   const N = 0x105;

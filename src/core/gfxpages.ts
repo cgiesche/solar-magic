@@ -1,18 +1,18 @@
 // GFX file data in the ROM. The graphics only reach VRAM, so results found out by emulation (block
-// behaviour, object kinds) don't depend on them: reads of these bytes aren't recorded (see
-// LevelEmulator.skipMask) and drawing in a GFX file keeps the results. Nor are reads of the files' pointer
+// behaviour, object kinds) don't depend on them: reads of these bytes aren't recorded (gfxSkipMask: what a
+// picture leaves out, bootsnapshot.ts) and drawing in a GFX file keeps the results. Nor are reads of the files' pointer
 // entries: they only lead to the data (an LZ2 file that grows when drawn in is moved to free space, which
 // changes its entry). Sprite images do depend on the sprite graphics: their key holds a hash of the sprite
 // files' content instead.
-// A result says what it shows (bootsnapshot.ts Shows); a full picture counts the reads the mask leaves out too, as
-// its outcome shows the files' data as the ROM holds it.
+// A result says what it shows (bootsnapshot.ts Shows), and what it leaves out follows from that; a full picture counts
+// the reads the mask leaves out too, as its outcome shows the files' data as the ROM holds it.
 // The same for the ExAnimation data (pointer table, settings, lists, alternative files): editing an
 // animation keeps the block probes (whose test level may be the level being animated).
-// For what blocks do (block probes, probehost.ts) and the editor's other results that are no pictures (learner.ts)
-// also the display data (the Map16 quarters and the colors): they only reach VRAM and CGRAM as well, so drawing a
-// tile or changing a palette keeps them (gfxDisplaySkipMask). Not for pictures (CONTEXT.md): they show them.
+// What shows behaviour (block probes, probehost.ts; the result learner's results that are no pictures, learner.ts)
+// leaves out the display data too (the Map16 quarters and the colors): they only reach VRAM and CGRAM as well, so
+// drawing a tile or changing a palette keeps it (gfxDisplaySkipMask). Not pictures (CONTEXT.md): they show them.
 // Where the level's colors are loaded from (the palette tab) leaves out the GFX file data and the colors' values
-// (gfxFileColorValueSkipMask): changing a color keeps it.
+// (gfxFileColorValueSkipMask, left out besides by a full picture: colorsources.ts): changing a color keeps it.
 
 import { snesToPc, type Rom } from './rom.ts';
 import { editorPatch, gfxEntry, GFX_FILES, GFX_NONE, customPalettePatch, PALETTE_SIZE } from './patches.ts';
@@ -22,7 +22,7 @@ import { SHARED_PALETTES, SHARED_PAL_SIZE } from './sharedpal.ts';
 import { lz2Decompress } from './lz2.ts';
 import { exanimDataRanges } from './exanim.ts';
 import { submapPaletteRanges } from './submapgfx.ts';
-import { unrecorded } from './romdeps.ts';
+import { unrecorded, perRomState } from './romdeps.ts';
 
 // [start, end) ROM offsets of a file's data
 export function gfxFileRange(rom: Rom, i: number): [number, number] | null {
@@ -63,6 +63,11 @@ function addExanim(rom: Rom, mask: Uint8Array): Uint8Array {
 export function gfxSkipMask(rom: Rom): Uint8Array {
   return addExanim(rom, gfxFileMask(rom));
 }
+
+// gfxSkipMask, kept per ROM state: one mask for everything recorded on a ROM (what a picture leaves out) and the
+// editor's hash of the bytes it leaves out. None for a ROM without the editor's patch: it has no table of GFX files,
+// and nothing is left out there
+export const keptGfxSkipMask = perRomState((rom): Uint8Array | null => editorPatch(rom) ? gfxSkipMask(rom) : null);
 
 const LEVELS = 0x200;
 

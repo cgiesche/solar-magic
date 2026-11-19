@@ -7,7 +7,6 @@ import { LevelEmulator } from '../src/core/levelemu.ts';
 import { OverworldEmulator } from '../src/core/overworld.ts';
 import { RomFingerprint, RomReads, bytePages, record, PAGE_SHIFT } from '../src/core/romdeps.ts';
 import { levelDataRanges } from '../src/core/level.ts';
-import { gfxSkipMask } from '../src/core/gfxpages.ts';
 import { installEditorPatch, gfxEntry } from '../src/core/patches.ts';
 import { lz2Decompress, lz2Compress } from '../src/core/lz2.ts';
 
@@ -136,13 +135,12 @@ const TITLE_BYTE = 0x7fc0; // the internal name: not read while booting
   check(b.load(0x105).ok && b.snapshot !== booted, 'adopted stale boot: booted again');
 }
 
-// GFX file data doesn't count for results (skipMask), but the title screen uploads files that stay in
+// GFX file data doesn't count for results (a picture leaves it out), but the title screen uploads files that stay in
 // VRAM for a level with the same ones: drawing in them again and again shows each time
 {
   const rom = fresh();
   installEditorPatch(rom);
   const emu = new LevelEmulator(rom);
-  emu.skipMask = () => gfxSkipMask(rom);
   const e = gfxEntry(rom, 0x14)!;
   const { data } = lz2Decompress(rom.data, snesToPc(e.addr));
   let prev = emu.load(0x105).vram.slice();
@@ -163,7 +161,6 @@ const TITLE_BYTE = 0x7fc0; // the internal name: not read while booting
   const rom = fresh();
   installEditorPatch(rom);
   const emu = new LevelEmulator(rom);
-  emu.skipMask = () => gfxSkipMask(rom);
   const { reads } = emu.record('title screen', () => emu.load(0x105));
   let g = rom.gen;
   for (const [snes, n] of [[0x0cf7df, 0x800], [0x04a533, 0x40], [0x04c02b, 0x40], [0x04d85d, 0x10]]) {
@@ -227,7 +224,7 @@ const TITLE_BYTE = 0x7fc0; // the internal name: not read while booting
     const bp = bytePages(r);
     return reads.bytePages === bp && [...reads.bytes].every((o) => bp[o >> PAGE_SHIFT] === 1) && reads.pages.every((v, p) => !v || !bp[p]);
   };
-  const tv = a.record('picture', () => a.load(0x105)), tp = e.record('picture', () => e.load(0x105)), tv2 = a.record('picture', () => a.load(0x106));
+  const tv = a.record('full picture', () => a.load(0x105)), tp = e.record('full picture', () => e.load(0x105)), tv2 = a.record('full picture', () => a.load(0x106));
   check(own(rom, tv.reads) && own(other, tp.reads) && own(rom, tv2.reads), 'level loads on two ROMs in turns: each recorded against its ROM\'s byte pages');
   const differ = [...tp.reads.bytes].some((o) => !vanilla[o >> PAGE_SHIFT] && tv.reads.pages[o >> PAGE_SHIFT]);
   check(differ, 'a page read by both loads is recorded by byte on the patched ROM, by page on the vanilla one');

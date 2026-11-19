@@ -14,7 +14,7 @@ import { RenderQuery } from '../src/core/renderquery.ts';
 import { renderLevel } from '../src/core/render.ts';
 import { levelRows, type Level } from '../src/core/level.ts';
 import type { LevelRender } from '../src/core/levelemu.ts';
-import { pathKindsJob, pathShapesJob, levelTileTest, type PathKind, type PathShapes, type LevelTileTest } from '../src/core/owpaths.ts';
+import { pathKindsJob, pathShapesJob, levelTileTest, type PathKind, type PathShapes, type LevelTileTest, OVERWORLD_DATA } from '../src/core/owpaths.ts';
 import { OW_EVENTS, gameL1, type OverworldLoads } from '../src/core/overworld.ts';
 import { hardWalksJob, hardWalksInput, type HardWalk } from '../src/core/owhardpaths.ts';
 import { progressSaves, type ProgressMap } from '../src/core/owprogress.ts';
@@ -91,19 +91,19 @@ export async function editorImage(): Promise<Uint8Array> {
 // the kinds of the overworld's layer 1 tiles in `rom` (owpaths.ts), the job run to its end as the result learner runs it
 export function pathKinds(rom: Rom): PathKind[] {
   const runner = new JobRunner({ rom, results: new ResultCache(new RomFingerprint(rom)) });
-  const run = runner.run({ key: 'owpk', keep: false, picture: false, start: pathKindsJob });
+  const run = runner.run({ key: 'owpk', keep: false, shows: 'behaviour', leavesOut: OVERWORLD_DATA, start: pathKindsJob });
   for (;;) { const r = runner.step('owpk', run); if (r) return r.result; }
 }
 // the shapes of the overworld's path tiles in `rom` (owpaths.ts), as pathKinds
 export function pathShapes(rom: Rom): PathShapes {
   const runner = new JobRunner({ rom, results: new ResultCache(new RomFingerprint(rom)) });
-  const run = runner.run({ key: 'owsh', keep: false, picture: false, start: pathShapesJob });
+  const run = runner.run({ key: 'owsh', keep: false, shows: 'behaviour', leavesOut: OVERWORLD_DATA, start: pathShapesJob });
   for (;;) { const r = runner.step('owsh', run); if (r) return r.result; }
 }
 // the game's hardcoded paths in `rom` (owhardpaths.ts) from its path kinds, as pathKinds (the input as App asks with)
 export function hardWalks(rom: Rom, kinds: readonly PathKind[] = pathKinds(rom)): HardWalk[] {
   const runner = new JobRunner({ rom, results: new ResultCache(new RomFingerprint(rom)) }), { l1, tls, cells } = hardWalksInput(rom, kinds);
-  const run = runner.run({ key: 'owhw', keep: false, picture: false, start: (emu) => hardWalksJob(emu, l1, tls, cells) });
+  const run = runner.run({ key: 'owhw', keep: false, shows: 'behaviour', leavesOut: OVERWORLD_DATA, start: (emu) => hardWalksJob(emu, l1, tls, cells) });
   for (;;) { const r = runner.step('owhw', run); if (r) return r.result; }
 }
 // which tiles are level tiles in `rom`, learned as the editor learns them

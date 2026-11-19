@@ -129,7 +129,7 @@ const rom = new Rom(await editorImage());
   const inTable = (reads: RomReads) => [...reads.bytes].filter((o) => o >= lo && o < hi).length;
   emu.boot();
   check(inTable(emu.snapshot!.reads) === 0, `the boot: no byte of the slot table read (${inTable(emu.snapshot!.reads)})`);
-  const reads = emu.record('picture', () => emu.load(0x105)).reads;
+  const reads = emu.record('full picture', () => emu.load(0x105)).reads;
   check(inTable(reads) === 0, `a level load: no byte of the slot table read (${inTable(reads)})`);
   const boot = emu.snapshot;
   const boo = readOwSprite(r, 10);

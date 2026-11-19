@@ -2,13 +2,15 @@
 // read sets and a stand-in for the recording CPU.
 // - which of the boot's and its own reads a result counts, by what it shows: as a table, the kind of byte changed ×
 //   behaviour / picture / full picture / title screen → kept or dropped
+// - what a result leaves out besides: the colours' values (a full picture, the boot's reads too), the overworld's data
+//   (behaviour, its own reads only), the tile data while the tilesets' pointers are learned (on top of nothing)
 // - what the reads are put on top of (the boot's, nothing, an earlier result's) and whether they count around it
 // - the snapshot holds for a ROM image or is stale; emulators share it by reference
 // - the title screen picture put back into a kept result's machine
 import { Rom, pcToSnes } from '../src/core/rom.ts';
 import { LevelEmulator } from '../src/core/levelemu.ts';
 import { RomReads, record, holds } from '../src/core/romdeps.ts';
-import { BootSnapshot, recordShown, type Shows, type ShowingCpu, type RecordOn } from '../src/core/bootsnapshot.ts';
+import { BootSnapshot, recordShown, leaving, type Shows, type ShowingCpu, type RecordOn, type Places, type LeftOut, type BootReads } from '../src/core/bootsnapshot.ts';
 import { L3_MAP_VRAM, L3_MAP_WORDS } from '../src/core/layer3map.ts';
 
 let fail = 0;
@@ -16,8 +18,19 @@ const check = (ok: boolean, what: string) => { console.log((ok ? 'ok   ' : 'FAIL
 
 // a blank image: no patch, no table of the game's, every read on a page of its own (ROM offsets)
 const rom = new Rom(new Uint8Array(0x80000));
-const BOOT_CODE = 0x10000, OWN_CODE = 0x11000, BOOT_GFX = 0x20000, OWN_GFX = 0x21000, PICTURE = 0x30000, UNTOUCHED = 0x40000;
-const mask = new Uint8Array(rom.data.length).fill(1, 0x20000, 0x22000); // the skip mask: graphics file data
+const BOOT_CODE = 0x10000, OWN_CODE = 0x11000, BOOT_GFX = 0x20000, OWN_GFX = 0x21000, BOOT_ANIM = 0x22000, OWN_ANIM = 0x23000;
+const PICTURE = 0x30000, UNTOUCHED = 0x40000, BOOT_DISPLAY = 0x50000, OWN_DISPLAY = 0x51000, BOOT_COLOUR = 0x52000, OWN_COLOUR = 0x53000;
+const BOOT_OW = 0x60000, OWN_OW = 0x61000;
+// where the bytes lie a result leaves out by what it shows: a picture the graphics file and ExAnimation data,
+// behaviour the display data (the colours among it) too
+const filled = (...ranges: [number, number][]) => { const m = new Uint8Array(rom.data.length); for (const [a, b] of ranges) m.fill(1, a, b); return m; };
+const mask = filled([0x20000, 0x24000]), displayMask = filled([0x20000, 0x24000], [0x50000, 0x54000]);
+const where: Places = { picture: () => mask, behaviour: () => displayMask };
+// what results leave out besides: the colours' values with the graphics file data (in the boot's reads too), the
+// overworld's data, the display data while the tilesets' pointers are learned
+const COLOURS: LeftOut = { what: 'colours', mask: () => filled([0x20000, 0x22000], [0x52000, 0x54000]), boot: true };
+const OVERWORLD: LeftOut = { what: 'overworld', mask: () => filled([0x60000, 0x62000]) };
+const TILE_DATA: LeftOut = { what: 'tile data', mask: () => displayMask };
 
 // the recording CPU's stand-in: a read as Snes records it (the skip mask's bytes apart, when asked for)
 class Cpu implements ShowingCpu {
@@ -32,15 +45,28 @@ class Cpu implements ShowingCpu {
 }
 
 const reads = (...at: number[]) => { const r = new RomReads(rom); for (const o of at) r.read(o); return r; };
+// the boot read code, graphics file and ExAnimation data, display data (a colour among it), overworld data and the
+// title screen picture; booted for a picture
 const snapshotOf = (vram = new Uint8Array(0x10000)) =>
-  new BootSnapshot({ state: { vram }, rom: rom.data.slice(), reads: reads(BOOT_CODE), masked: reads(BOOT_GFX), picture: reads(PICTURE) });
+  new BootSnapshot({ state: { vram }, rom: rom.data.slice(), leaves: 'picture', reads: reads(BOOT_CODE, BOOT_DISPLAY, BOOT_COLOUR, BOOT_OW), masked: reads(BOOT_GFX, BOOT_ANIM), picture: reads(PICTURE) });
+// the same boot run once more, its reads recorded leaving out other bytes (as LevelEmulator boots again)
+const AGAIN: Record<string, BootReads> = {
+  behaviour: { reads: reads(BOOT_CODE, BOOT_OW), masked: reads(BOOT_GFX, BOOT_ANIM, BOOT_DISPLAY, BOOT_COLOUR) },
+  'full picture+colours': { reads: reads(BOOT_CODE, BOOT_DISPLAY, BOOT_OW, BOOT_ANIM), masked: reads(BOOT_GFX, BOOT_COLOUR) },
+};
+let boots = 0;
+const again = (leaves: string) => () => { boots++; return AGAIN[leaves]; };
 const SHOWS: Shows[] = ['behaviour', 'picture', 'full picture', 'title screen'];
 
-// a result starting from the snapshot whose code reads a byte of its own and graphics file data; kept: the ROM
-// changed at `o` since, it still holds
+// a result starting from the snapshot whose code reads a byte of its own of every kind; kept: the ROM changed at `o`
+// since, it still holds
 const snap = snapshotOf(), cpu = new Cpu();
+const shown = (shows: Shows, on: RecordOn, snapshot: () => BootSnapshot | null) => {
+  const l = leaving(rom, shows, where, on.leavesOut);
+  return { ...on, leaving: l, snapshot, again: again(l.boot) };
+};
 const result = (shows: Shows, on: RecordOn = {}) =>
-  recordShown(rom, cpu, shows, () => { cpu.read(OWN_CODE); cpu.read(OWN_GFX); return 0; }, { ...on, snapshot: () => snap, mask: () => mask });
+  recordShown(rom, cpu, shows, () => { for (const o of [OWN_CODE, OWN_GFX, OWN_ANIM, OWN_DISPLAY, OWN_COLOUR, OWN_OW]) cpu.read(o); return 0; }, shown(shows, on, () => snap));
 const kept = (shows: Shows, o: number, on: RecordOn = {}): boolean => {
   const r = result(shows, on);
   rom.writeAt(o, Uint8Array.of(rom.data[o] ^ 0xff));
@@ -49,13 +75,17 @@ const kept = (shows: Shows, o: number, on: RecordOn = {}): boolean => {
   return ok;
 };
 
-// the kind of byte changed × what the result shows (behaviour, picture, full picture, title screen): 1 kept, 0 dropped.
-// (Behaviour and picture differ by the display data in the emulator's skip mask, not here: #552.)
+// the kind of byte changed × what the result shows (behaviour, picture, full picture, title screen): 1 kept, 0 dropped
 const TABLE: [string, number, string][] = [
   ['code the boot ran', BOOT_CODE, '0000'],
   ['code the result ran', OWN_CODE, '0000'],
+  ['display data the boot read', BOOT_DISPLAY, '1000'],
+  ['display data the result read', OWN_DISPLAY, '1000'],
+  ['a colour the boot read', BOOT_COLOUR, '1000'],
   ['graphics file data the boot read', BOOT_GFX, '1100'],
   ['graphics file data the result read', OWN_GFX, '1100'],
+  ['ExAnimation data the boot read', BOOT_ANIM, '1100'],
+  ['ExAnimation data the result read', OWN_ANIM, '1100'],
   ['the title screen picture', PICTURE, '1110'],
   ['a byte nothing read', UNTOUCHED, '1111'],
 ];
@@ -64,6 +94,34 @@ for (const [what, o, want] of TABLE) {
   check(got === want, `${what} changed: ${SHOWS.map((s, i) => `${s} ${want[i] === '1' ? 'kept' : 'dropped'}`).join(', ')} (${got})`);
 }
 check(cpu.romReads === null && cpu.romSkipMask === null && cpu.romMasked === null, 'the CPU records nothing after a result');
+check(boots === 1, `the boot's reads without the display data: of the boot run once more, kept with the snapshot (${boots} more boots)`);
+
+// what a result leaves out besides, the kind of byte changed → kept (1) or dropped (0)
+const BESIDES: [string, Shows, RecordOn, [string, number, boolean][]][] = [
+  // (where the colours are loaded from: the ExAnimation data counts, the colours' values and the graphics files don't)
+  ['a full picture leaving out the colours\' values, in the boot\'s reads too', 'full picture', { leavesOut: COLOURS }, [
+    ['a colour the boot read', BOOT_COLOUR, true], ['a colour it read', OWN_COLOUR, true], ['graphics file data', BOOT_GFX, true], ['graphics file data it read', OWN_GFX, true],
+    ['ExAnimation data the boot read', BOOT_ANIM, false], ['ExAnimation data it read', OWN_ANIM, false], ['other display data the boot read', BOOT_DISPLAY, false],
+    ['other display data it read', OWN_DISPLAY, false], ['code the boot ran', BOOT_CODE, false], ['code it ran', OWN_CODE, false], ['the title screen picture', PICTURE, true],
+  ]],
+  // (the path kinds: the boot's reads count as for any behaviour)
+  ['behaviour leaving out the overworld\'s data', 'behaviour', { leavesOut: OVERWORLD }, [
+    ['overworld data it read', OWN_OW, true], ['overworld data the boot read', BOOT_OW, false], ['display data it read', OWN_DISPLAY, true], ['display data the boot read', BOOT_DISPLAY, true],
+    ['graphics file data it read', OWN_GFX, true], ['code the boot ran', BOOT_CODE, false], ['code it ran', OWN_CODE, false],
+  ]],
+  // (the tilesets' pointers: a picture's recording, since what behaviour leaves out needs them; on top of nothing)
+  ['a picture leaving out the tile data, on top of nothing', 'picture', { leavesOut: TILE_DATA, base: null }, [
+    ['display data it read', OWN_DISPLAY, true], ['a colour it read', OWN_COLOUR, true], ['graphics file data it read', OWN_GFX, true], ['code it ran', OWN_CODE, false],
+    ['overworld data it read', OWN_OW, false], ['code the boot ran', BOOT_CODE, true], ['display data the boot read', BOOT_DISPLAY, true],
+  ]],
+];
+for (const [what, shows, on, rows] of BESIDES) {
+  const wrong = rows.filter(([, o, want]) => kept(shows, o, on) !== want).map(([w]) => w);
+  check(wrong.length === 0, `${what}: ${rows.map(([w, , k]) => `${w} ${k ? 'kept' : 'dropped'}`).join(', ')}${wrong.length ? ` – WRONG: ${wrong.join(', ')}` : ''}`);
+}
+check(kept('full picture', OWN_OW, { leavesOut: OVERWORLD }) && !kept('full picture', OWN_GFX, { leavesOut: OVERWORLD }) && !kept('full picture', BOOT_GFX, { leavesOut: OVERWORLD }),
+  'a full picture leaving out bytes besides leaves out those only: the graphics file data counts, its own and the boot\'s');
+check(cpu.romReads === null && cpu.romSkipMask === null && cpu.romMasked === null, 'the CPU records nothing after such a result');
 
 // what the reads are put on top of
 check(kept('title screen', BOOT_CODE, { base: null }) && kept('title screen', BOOT_GFX, { base: null }) && kept('title screen', PICTURE, { base: null }),
@@ -88,7 +146,7 @@ cpu.romMasked = null;
 // a snapshot asked for again after the run: a result that boots inside counts the snapshot booted there
 {
   let booted: BootSnapshot | null = null;
-  const r = recordShown(rom, cpu, 'title screen', () => { booted = snap; return 0; }, { snapshot: () => booted, mask: () => mask });
+  const r = recordShown(rom, cpu, 'title screen', () => { booted = snap; return 0; }, shown('title screen', {}, () => booted));
   check(r.reads.touches(at(BOOT_CODE)) && r.reads.touches(at(BOOT_GFX)) && r.reads.touches(at(PICTURE)), 'booted inside the recording: the boot\'s reads count by what the result shows');
 }
 

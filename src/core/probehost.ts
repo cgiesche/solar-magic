@@ -205,10 +205,10 @@ export class ProbeHost {
     if (!this.rom || !this.prober) {
       const rom = this.rom = new Rom(new Uint8Array(0));
       rom.data = data;
-      this.prober = new BlockProber(rom);
-      // the tasks' emulators start from the prober's boot snapshot, which leaves out the display data as the probes
-      // do (ADR 0008): the prober's emulator gets the runner's mask (gfxDisplaySkipMask)
-      this.runner = new JobRunner({ rom, results: this.prober.results, noDisplay: this.prober.emu });
+      // the probes show behaviour, as the tasks do: they leave out the display data (ADR 0008), the tilesets' tile
+      // data where the runner's pointers say. The jobs' emulators start from the prober's boot snapshot
+      this.prober = new BlockProber(rom, undefined, undefined, () => this.runner!.tilesetPointers());
+      this.runner = new JobRunner({ rom, results: this.prober.results, booter: this.prober.emu });
       const fp = this.prober.results.fp;
       this.state = { prober: this.prober, uses: new LevelUses(rom, this.prober.results), groups: new SpriteGroupResults(fp), suggest: new KeptSuggestions(fp), sizes: null, ow: null, l1Copy: null, rom };
       return;
@@ -369,7 +369,7 @@ export class ProbeHost {
     }
     if (running) this.turns.delete(running); // (the new one's turn comes last)
     // (a job starting over runs for the latest request)
-    const task: Task = { msg, ahead: taskAhead(msg), shown: null, run: this.runner.run({ key: taskKey(msg), keep: true, picture: false, boot: msg.type !== 'kinds', start: (emu) => taskJob(task)(emu) }) };
+    const task: Task = { msg, ahead: taskAhead(msg), shown: null, run: this.runner.run({ key: taskKey(msg), keep: true, shows: 'behaviour', boot: msg.type !== 'kinds', start: (emu) => taskJob(task)(emu) }) };
     this.setTask(task);
   }
 
