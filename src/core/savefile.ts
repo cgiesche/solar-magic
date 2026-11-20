@@ -21,29 +21,28 @@ import { GM, RAM, PAD, SWITCH_PALACES } from './ram.ts';
 import { holds, type RomReads } from './romdeps.ts';
 import { ownerOf } from './patchreg.ts';
 import { gameScreens, type ReachedScreen } from './pregame.ts';
+import { drive, driveOn } from './drive.ts';
 
 export const SAVE_FILES = 3; // the file select's
 const SAVE_FRAMES = 240, SAVED = 8; // a save: until the game writes SRAM, and stopped for this many frames
 const BOOT_FRAMES = 2000; // from power-on to the title screen
 const LEAVE_FRAMES = 120; // a button pressed until the title screen is left
-const SETTLE_FRAMES = 600, SETTLED = 8; // until the game mode stays (this many frames)
 const LOAD_FRAMES = 3000; // from the file chosen to its overworld (an intro's message closed)
-const PRESS = 16, HELD = 4; // a button pressed anew every PRESS frames, for HELD
 const LEVEL_FLAGS = RAM.levelFlagsEnd - RAM.levelFlags;
 
 // From the machine at the save prompt (loaded by the caller, its RAM and SRAM set as wanted): the prompt's first
 // choice taken, frames until the game has written SRAM and stopped. false: it wrote none.
 export function saveAtPrompt(s: Snes): boolean {
   const before = s.sramWrites;
-  s.joy1 = PAD.a;
-  s.runFrame();
-  s.joy1 = 0;
-  for (let f = 0, last = before, same = 0; f < SAVE_FRAMES && (s.sramWrites === before || same < SAVED); f++) {
-    s.runFrame();
-    same = s.sramWrites === last ? same + 1 : 0;
-    last = s.sramWrites;
-  }
-  return s.sramWrites !== before;
+  return driveOn(s, (d) => {
+    d.frame(PAD.a);
+    for (let f = 0, last = before, same = 0; f < SAVE_FRAMES && (s.sramWrites === before || same < SAVED); f++) {
+      d.frame();
+      same = s.sramWrites === last ? same + 1 : 0;
+      last = s.sramWrites;
+    }
+    return s.sramWrites !== before;
+  });
 }
 
 // The game's RAM a save holds of the overworld: the level flags … the events triggered ($1EA2–$1F2E) – and the game's
@@ -92,33 +91,26 @@ export interface LoadedSave {
 // screen, the cursor moved down to the file, the first choice of what follows – until its overworld. `hook` watches
 // from the choice on. The machine is left where the run ended.
 export function loadSave(emu: LevelEmulator, sram: Uint8Array, file: number, hook: MemHook | null = null): LoadedSave {
-  const s = emu.snes, w = s.wram, outer = s.hook, out: LoadedSave = { reached: false, chosen: false, intro: false };
-  const mode = () => w[RAM.gameMode];
-  const frame = (joy = 0) => { s.joy1 = joy; s.runFrame(); s.joy1 = 0; };
+  const s = emu.snes, out: LoadedSave = { reached: false, chosen: false, intro: false };
   emu.ensureBoot(); // (the emulator caught up with the ROM)
-  s.hook = null;
-  s.powerOn();
-  s.sram.set(sram.subarray(0, s.sram.length));
   try {
-    for (let f = 0; f < BOOT_FRAMES && mode() !== GM.title; f++) frame();
-    for (let f = 0; f < LEAVE_FRAMES && mode() === GM.title; f++) frame(f % PRESS < HELD ? PAD.start : 0);
-    for (let f = 0, same = 0, last = -1; f < SETTLE_FRAMES && same < SETTLED; f++) { frame(); same = mode() === last ? same + 1 : 0; last = mode(); }
-    if (mode() === GM.fileSelect) {
-      for (let i = 0; i < file; i++) { frame(PAD.down); frame(); frame(); }
-      out.chosen = true;
-    }
-    s.hook = hook;
-    for (let f = 0; f < LOAD_FRAMES && mode() !== GM.overworld; f++) {
-      if (mode() === GM.level) out.intro = true;
-      frame(f % PRESS < HELD ? PAD.a : 0);
-    }
-    out.reached = mode() === GM.overworld;
-    out.chosen &&= w[RAM.saveFile] === file;
-    if (out.reached) for (let i = 0; i < 3; i++) frame();
-  } catch { /* the emulated game crashed: not reached */ } finally {
-    s.hook = outer;
-    s.joy1 = 0;
-  }
+    drive(s, { from: null, sram }, (d) => {
+      d.watch(null);
+      d.wait((m) => m === GM.title, BOOT_FRAMES);
+      d.press((m) => m !== GM.title, LEAVE_FRAMES);
+      d.settle();
+      if (d.mode === GM.fileSelect) {
+        d.down(file);
+        out.chosen = true;
+      }
+      d.watch(hook);
+      const level = () => { if (d.mode === GM.level) out.intro = true; };
+      level();
+      out.reached = d.press((m) => m === GM.overworld, LOAD_FRAMES, { button: PAD.a, each: level });
+      out.chosen &&= s.wram[RAM.saveFile] === file;
+      if (out.reached) d.frames(3);
+    });
+  } catch { /* the emulated game crashed: not reached */ }
   return out;
 }
 

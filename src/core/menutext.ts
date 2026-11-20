@@ -24,6 +24,7 @@ import { RAM, PAD } from './ram.ts';
 import { L3_MAP_VRAM } from './layer3map.ts';
 import { holds, type RomReads } from './romdeps.ts';
 import { replayScreen, MAX_CHOICES, type ReachedScreen } from './pregame.ts';
+import { drive } from './drive.ts';
 import { saveAtPrompt, SAVE_FILES } from './savefile.ts';
 
 export const MENU_COLS = 32, MENU_ROWS = 32; // the first screen of layer 3's tilemap
@@ -95,20 +96,18 @@ function savedFiles(emu: LevelEmulator, prompt: ReachedScreen | undefined, exits
 // the cells of the first screen of layer 3 that change while the selection moves through the menu's choices
 function cursorCells(emu: LevelEmulator, screen: ReachedScreen): number[] {
   const s = emu.snes, was = screen.state.vram as Uint8Array, cells = new Set<number>();
-  s.loadState(screen.state);
-  s.joy1 = 0;
   const look = () => {
     for (let c = 0; c < CELLS; c++) {
       const a = (L3_MAP_VRAM + c) * 2;
       if (s.vram[a] !== was[a] || s.vram[a + 1] !== was[a + 1]) cells.add(c);
     }
   };
-  for (let k = 0; k < MAX_CHOICES && s.wram[RAM.gameMode] === screen.mode; k++) {
-    for (let f = 0; f < BLINK; f++) { s.runFrame(); look(); }
-    s.joy1 = PAD.down;
-    s.runFrame();
-    s.joy1 = 0;
-  }
+  drive(s, { from: screen.state }, (d) => {
+    for (let k = 0; k < MAX_CHOICES && d.mode === screen.mode; k++) {
+      for (let f = 0; f < BLINK; f++) { d.frame(); look(); }
+      d.frame(PAD.down);
+    }
+  });
   return [...cells].sort((a, b) => a - b);
 }
 
