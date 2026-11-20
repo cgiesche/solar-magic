@@ -35,9 +35,9 @@ import { MARK } from './marks.ts';
 
 // what is selected: a link, a location (a star/pipe entry exits to the overworld teleport to), a Koopa Kid's place,
 // a tile no link starts at (to link it to a tile on another map)
-type Sel = { kind: 'link'; link: OwLink } | { kind: 'location'; i: number } | { kind: 'koopa'; k: number } | { kind: 'tile'; t: OwTile };
+export type LinkSel = { kind: 'link'; link: OwLink } | { kind: 'location'; i: number } | { kind: 'koopa'; k: number } | { kind: 'tile'; t: OwTile };
 // what is moved: the selected link's target (`target`) or source, a location, a Koopa Kid's place
-type Moved = { sel: Sel; target: boolean };
+type Moved = { sel: LinkSel; target: boolean };
 // a drag from a tile (l1Index) to another: a new link, or moving something
 type Drag = { from: number; to: number; move: Moved | null };
 // what a tile links by: an exit path, a star/pipe link, a Koopa Kid's place; null with why it doesn't
@@ -63,7 +63,9 @@ export const LINK_ARROWS_HINT = 'One head: one-way, two heads: both ways.';
 const center = (t: { x: number; y: number }) => ({ x: t.x * 16 + 8, y: t.y * 16 + 8 });
 
 export class LinkLayer {
-  sel: Sel | null = null;
+  // what is meant at the selected tile: the view's (owgesture.ts), it ends with the tile's selection
+  get sel(): LinkSel | null { return this.view.gesture.link; }
+  set sel(s: LinkSel | null) { this.view.gesture.link = s; }
   drag: Drag | null = null;
   // a source chosen to be linked to a tile on another map (the next click), or what is moved there
   pending: { from: OwTile } | { move: Moved } | null = null;
@@ -251,7 +253,7 @@ export class LinkLayer {
   // level's exits teleport to, its Koopa Kid's place) or, with `show`, all; what is dragged or chosen where it goes
   paint(ctx: CanvasRenderingContext2D, lw: number): void {
     const { links, uses } = this.info(), sel = this.sel, d = this.drag, moving = d?.move ?? null, at = this.view.selected;
-    const isMoved = (s: Sel) => !!moving && JSON.stringify(moving.sel) === JSON.stringify(s);
+    const isMoved = (s: LinkSel) => !!moving && JSON.stringify(moving.sel) === JSON.stringify(s);
     this.marks(ctx, lw);
     for (const l of links) {
       const on = sel?.kind === 'link' && sel.link === l;
@@ -366,11 +368,11 @@ export class LinkLayer {
   // ---- interaction (cells of layer 1) ----
   // the selection of what is at cell i (l1Index; -1 none), as a click on the map selects the tile: a link ending there
   // (the one on the submap the user acts on first), else a location there, a Koopa Kid's place or tile, else the tile
-  selectAt(i: number): void {
-    if (i < 0) { this.sel = null; return; }
+  selAt(i: number): LinkSel | null {
+    if (i < 0) return null;
     const t = this.tile(i), found = clickedLinks(this.info().links, i, this.around(i));
     const loc = this.locationAt(t), place = this.koopaPlaceAt(i), koopa = place >= 0 ? place : this.koopaAt(i);
-    this.sel = found[0] ? { kind: 'link', link: found[0] } : loc >= 0 ? { kind: 'location', i: loc } : koopa >= 0 ? { kind: 'koopa', k: koopa } : { kind: 'tile', t };
+    return found[0] ? { kind: 'link', link: found[0] } : loc >= 0 ? { kind: 'location', i: loc } : koopa >= 0 ? { kind: 'koopa', k: koopa } : { kind: 'tile', t };
   }
   // a press at map cell x, y on what the selection leads to – the selected link's other end (not the selected tile
   // itself), the selected location or Koopa Kid's place – not a level tile (moved itself): dragged to move it (released

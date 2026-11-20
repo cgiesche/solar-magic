@@ -24,15 +24,17 @@ import { bowsieInstalled } from '../core/owcustom.ts';
 import { MARK } from './marks.ts';
 
 // what is selected or dragged: a sprite slot, a player's start, where a Koopa Kid jumps out, a custom sprite
-type Item = { kind: 'sprite'; k: number } | { kind: 'start'; player: number } | { kind: 'koopa'; k: number } | CustomItem;
-type Drag = { item: Item; x0: number; y0: number; dx: number; dy: number };
+export type SpriteItem = { kind: 'sprite'; k: number } | { kind: 'start'; player: number } | { kind: 'koopa'; k: number } | CustomItem;
+type Drag = { item: SpriteItem; x0: number; y0: number; dx: number; dy: number };
 const PLAYERS = ['Mario', 'Luigi'];
 const NONE_SHOWN = { views: Array.from({ length: OW_SPRITE_SLOTS }, (): OwSpriteView => ({ image: null, z: 0 })), canvases: [] as (HTMLCanvasElement | null)[] };
-const same = (a: Item | null, b: Item) => !!a && a.kind === b.kind && (a.kind === 'start' ? a.player === (b as typeof a).player
+const same = (a: SpriteItem | null, b: SpriteItem) => !!a && a.kind === b.kind && (a.kind === 'start' ? a.player === (b as typeof a).player
   : (a as { k: number }).k === (b as { k: number }).k && (a.kind !== 'custom' || a.map === (b as typeof a).map));
 
 export class SpriteLayer {
-  sel: Item | null = null;
+  // the sprite selected: the view's (owgesture.ts), it ends with the sprites mode
+  get sel(): SpriteItem | null { return this.view.gesture.sprite; }
+  set sel(s: SpriteItem | null) { this.view.gesture.sprite = s; }
   drag: Drag | null = null;
   showShadows = false; // a shadow on the ground under each sprite
   showHeights = true; // a line from a sprite's position up to it at its height
@@ -52,7 +54,7 @@ export class SpriteLayer {
     return this.views ?? NONE_SHOWN;
   }
   // an item's box on the map (pixels), with a drag's offset
-  private box(it: Item): Box | null {
+  private box(it: SpriteItem): Box | null {
     const d = this.drag && same(this.drag.item, it) ? this.drag : null, dx = d?.dx ?? 0, dy = d?.dy ?? 0;
     if (it.kind === 'start') {
       const s = readStart(this.rom, it.player);
@@ -75,11 +77,11 @@ export class SpriteLayer {
     for (let i = base; i < base + 0x400; i++) if (koopaOfTile(l1[i]) === k) return true;
     return false;
   }
-  private items(): Item[] {
+  private items(): SpriteItem[] {
     return [
-      ...(hasOwSpriteSlots(this.rom) ? Array.from({ length: OW_SPRITE_SLOTS }, (_, k): Item => ({ kind: 'sprite', k })) : []),
+      ...(hasOwSpriteSlots(this.rom) ? Array.from({ length: OW_SPRITE_SLOTS }, (_, k): SpriteItem => ({ kind: 'sprite', k })) : []),
       ...this.custom.items(),
-      ...(hasKoopaKidTable(this.rom) ? Array.from({ length: KOOPA_KIDS }, (_, k): Item => ({ kind: 'koopa', k })) : []),
+      ...(hasKoopaKidTable(this.rom) ? Array.from({ length: KOOPA_KIDS }, (_, k): SpriteItem => ({ kind: 'koopa', k })) : []),
       { kind: 'start', player: 1 }, { kind: 'start', player: 0 },
     ];
   }
@@ -111,7 +113,7 @@ export class SpriteLayer {
 
   // ---- interaction (pixels of the map) ----
   // the things under the map's pixel, the topmost first
-  private hits(x: number, y: number): Item[] {
+  private hits(x: number, y: number): SpriteItem[] {
     return this.items().reverse().filter((it) => { const b = this.box(it); return !!b && x >= b.x && y >= b.y && x < b.x + b.w && y < b.y + b.h; });
   }
   down(x: number, y: number): void {
@@ -126,7 +128,7 @@ export class SpriteLayer {
     if (it) this.view.showProps(); else this.view.buildProps();
   }
   // where an item is (pixels; a start: its tile's)
-  private pos(it: Item): { x: number; y: number } {
+  private pos(it: SpriteItem): { x: number; y: number } {
     if (it.kind === 'start') { const s = readStart(this.rom, it.player); return { x: s.x * 16, y: s.y * 16 }; }
     if (it.kind === 'custom') return this.custom.pos(it);
     return it.kind === 'koopa' ? koopaKidPos(this.rom, it.k) : readOwSprites(this.rom)[it.k];
@@ -167,7 +169,7 @@ export class SpriteLayer {
       this.edit(`${PLAYERS[it.player]}'s start: moved`, () => writeStart(rom, it.player, { submap, x, y }));
     }
   }
-  private select(it: Item | null): void {
+  private select(it: SpriteItem | null): void {
     this.sel = it;
     this.view.paint();
     this.view.buildProps();

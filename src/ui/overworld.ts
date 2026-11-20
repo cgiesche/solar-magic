@@ -30,10 +30,10 @@ import { findL2Brush, l2BrushPalettes, l2SharedBits, l2SheetEntry, L2_SHEET_COLS
 import { mapPieces, piecesAt, replacePiece, samePiece, gridInside, l2Block, PIECE_COLS } from '../core/owl2pieces.ts';
 import { skipsRevealWalk, handledWithoutEvent } from '../core/revealwalk.ts';
 import type { OwSpriteView } from '../core/owsprites.ts';
-import { LinkLayer, LINK_LEGEND, LINK_ARROWS_HINT, type OffMapEnd } from './owlinkview.ts';
+import { LinkLayer, LINK_LEGEND, LINK_ARROWS_HINT, type OffMapEnd, type LinkSel } from './owlinkview.ts';
 import { LevelTileLayer, tilePlace } from './owlevelview.ts';
 import { TileLabels } from './owlevelname.ts';
-import { sideTabs, clickSelects, type SideTab } from './owselection.ts';
+import { OwGesture, clickSelects, type SideTab } from './owgesture.ts';
 import { ownsTranslevel, starOrPipe, starDirs, giveStarTranslevel, type StarPaths } from '../core/owstars.ts';
 import { levelsWithoutTile, type LevelTileEvent } from '../core/owleveltiles.ts';
 import {
@@ -43,7 +43,7 @@ import { refusalToast, refusedToast, refusalWords, refusalText, type RefusalFix 
 import { editFix } from './owfixes.ts';
 import type { OwRefusalData } from '../core/owrefusal.ts';
 import { revealPairFor, addRevealPair, newL1Tile, tileCopiesOf000, takeTileCopy } from '../core/owfixes.ts';
-import { SpriteLayer } from './owspriteview.ts';
+import { SpriteLayer, type SpriteItem } from './owspriteview.ts';
 import { CellHistoryPopup, tileWords } from './owcellhistoryview.ts';
 import { exitSentences, teleportExit, type Clause } from '../core/owexitsentence.ts';
 import { owBudgets, type Budget, type BudgetKey } from '../core/owbudget.ts';
@@ -133,8 +133,8 @@ export class OverworldView {
   private palPanel = h('div', { class: 'panel ow-pal-panel' });
   private palPixels = 0; // the screen pixels per pixel the paint sheet is drawn at (0: none shown)
   private props = h('div', { class: 'panel props', hidden: true });
-  // the side panel's tabs "Paint | Properties" (ADR 0015, owselection.ts): the tab chosen (a selection chooses Properties)
-  private sideTab: SideTab = 'paint';
+  // what is selected, and the side panel's tab with it (owgesture.ts)
+  readonly gesture = new OwGesture<LinkSel, SpriteItem>();
   private tabBar = h('div', { class: 'tabbar ow-side-tabs', role: 'tablist' });
   private rail = toolRail('Edit mode and tools');
   private evList = h('div', { class: 'level-list ow-event-list' }); // the event list (buildLeft)
@@ -206,9 +206,6 @@ export class OverworldView {
   // a reveal or destroy being added to the event in the timeline: the cell clicked on the map (at -1 until then), for
   // a reveal then the tile it becomes picked in the layer 1 sheet
   private eventPick: { kind: 'reveal' | 'destroy'; at: number } | null = null;
-  // the layer 2 selection: the rectangle last picked from layer 2 (larger than a piece), where "Replace piece…" replaces
-  // the pieces wholly inside it (null: the submap's view)
-  private l2Sel: CellRect | null = null;
   // "Replace piece…" (#370) under way: the piece to replace being picked (from: null), then the new one
   private replacing: { from: number[] | null } | null = null;
   private playing: { start: number; before: HTMLCanvasElement; stepMs: number; fade: boolean } | null = null;
@@ -253,9 +250,9 @@ export class OverworldView {
     this.redrawMap();
     if (this.mode === 'l1') this.buildLeft();
   }
-  selected = -1; // the layer 1 tile shown in the properties (l1Index)
+  // the layer 1 tile shown in the properties (l1Index; -1: none)
+  get selected(): number { return this.gesture.tile; }
   private palScroll: number | null = null; // the paint sheet's scroll while Paint is hidden (the Properties tab shown)
-  private infoTile = -1; // the tile selected by Alt+click (its info)
   mapCanvas = document.createElement('canvas'); // the map as shown: its layers at their strengths (composeMap)
   private l1Canvas = document.createElement('canvas'); // layer 1 alone (transparent where it has no pixel)
   get l1Image(): HTMLCanvasElement { return this.l1Canvas; }
@@ -590,7 +587,7 @@ export class OverworldView {
       // mouse: the one cell)
       const at = this.hover, one = !!at && (this.lookBrush >= 0 || (this.mode === 'l1' && this.levelTiles.at(at.x, at.y)));
       const pick = this.brushDrag.pickFrame(), r = pick ? this.clampRect(pick) : at && (one ? { x: at.x, y: at.y, w: 1, h: 1 } : this.brushDrag.hoverFrame(at));
-      const sel = !pick ? this.l2Sel : null; // (the layer 2 selection: where "Replace piece…" replaces)
+      const sel = !pick ? this.gesture.pieces : null; // (the layer 2 selection: where "Replace piece…" replaces)
       if (sel) drawBrushFrame(ctx, 'selection', [sel.x * s, sel.y * s, sel.w * s, sel.h * s], lw);
       // (a piece being picked for "Replace piece…": the grid cell under the mouse)
       if (this.replacing && this.hover && !pick) drawBrushFrame(ctx, 'hover', [(this.hover.x & ~1) * s, (this.hover.y & ~1) * s, 2 * s, 2 * s], lw);
@@ -1046,7 +1043,7 @@ export class OverworldView {
     if (samePiece(from, to)) { refusalToast(this.app.rom, { kind: 'pieceSame' }); return; }
     const views = this.views;
     if (!views) { toast('The submaps are still being loaded, try again'); return; }
-    const sel = this.l2Sel, inside = sel && gridInside(sel);
+    const sel = this.gesture.pieces, inside = sel && gridInside(sel);
     if (sel && !inside) { refusalToast(this.app.rom, { kind: 'pieceNoneInside' }); return; }
     const area = () => inside ?? views[this.map];
     const n = piecesAt(this.paintedL2(), this.region, area(), from).length;
@@ -1116,7 +1113,7 @@ export class OverworldView {
     if (this.mode === 'l2') {
       const p = l2BrushPalettes(entries);
       if (p.length === 1) this.l2Pal = p[0]; // (the sheet in the brush's palette)
-      this.l2Sel = r.w * r.h > 4 ? { ...r } : null; // (a click, a piece picked as the brush: no selection)
+      this.gesture.pieces = r.w * r.h > 4 ? { ...r } : null; // (a click, a piece picked as the brush: no selection)
     }
     this.revealMark = true;
     this.buildSide();
@@ -1128,7 +1125,7 @@ export class OverworldView {
   info(x: number, y: number): void {
     if (!isLayerMode(this.mode)) return;
     if (x < 0 || y < 0 || x >= 32 || y >= 32) return;
-    this.selectTile(l1Index(this.region, x, y), false, true);
+    this.selectTile(l1Index(this.region, x, y), false);
   }
 
   // shows layer 1 tile i (l1Index) selected, on the submap it is on (only the tile known: submapOf, as the World
@@ -1142,11 +1139,8 @@ export class OverworldView {
 
   // selects a layer 1 tile (a level tile clicked, any tile by Alt/Ctrl+click: byInfo; l1Index); center: scroll the map
   // to it
-  selectTile(i: number, center: boolean, byInfo = false): void {
-    this.selected = i;
-    if (i >= 0) this.sideTab = 'props'; // (a selection shows its properties, ADR 0015)
-    this.infoTile = byInfo ? i : -1;
-    this.links.selectAt(i);
+  selectTile(i: number, center: boolean): void {
+    this.gesture.selectTile(i, this.links.selAt(i)); // (a selection shows its properties, ADR 0015)
     if (center && i >= 0) {
       const t = l1XY(i), { x, y } = owShownAt(this.region, t.x * 16 + 8, t.y * 16 + 8);
       this.scroller.scrollLeft = x * this.zoom - this.scroller.clientWidth / 2;
@@ -1615,9 +1609,7 @@ export class OverworldView {
     if (n === this.map) return;
     this.cellHistory.close();
     this.map = n;
-    this.selected = -1;
-    this.links.selectAt(-1);
-    this.l2Sel = null;
+    this.gesture.leave('map', this.mode);
     this.replacing = null;
     this.redrawMap();
     this.buildBar();
@@ -1637,12 +1629,9 @@ export class OverworldView {
     this.levelTiles.cancel();
     this.pathTool.cancel();
     if (m !== 'l1' && (this.eventPick?.at ?? -1) >= 0) this.cancelEventPick(); // (the tile a reveal becomes is picked in the layer 1 sheet)
-    if (m !== 'l2') { this.replacing = null; this.l2Sel = null; }
-    // (the selection – a level tile, a link end, a tile's info – ends: it belongs to the mode it was made in)
-    this.selected = -1;
-    this.infoTile = -1;
-    this.links.selectAt(-1);
-    this.sprites.sel = null;
+    if (m !== 'l2') this.replacing = null;
+    // (the selection – a level tile, a link end, a tile's info, a sprite – ends: it belongs to the mode it was made in)
+    this.gesture.leave('mode', m);
     this.buildProps();
     this.buildLeft(); // (levels without a level tile are dragged onto the map in the layer 1 mode)
     if (isLayerMode(m) && this.brush.kind !== m) this.brush = { kind: m, w: 1, h: 1, entries: [m === 'l1' ? FIRST_L1_TILE : 0] };
@@ -1873,7 +1862,7 @@ export class OverworldView {
   /** Ctrl+' (#482): the grid on/off. */
   toggleGrid(): void { this.showGrid = !this.showGrid; this.paint(); }
   showProps(): void {
-    this.sideTab = 'props';
+    this.gesture.show('props');
     this.buildProps();
   }
   // the side panel's tabs (owselection.ts sideTabs): Paint (the tool) or Properties (of what is selected, in one fixed
@@ -1882,16 +1871,15 @@ export class OverworldView {
   // (openOptions)
   buildProps(): void {
     const sprites = this.mode === 'sprites';
-    const selected = sprites ? this.sprites.hasSelection() : this.selected >= 0;
-    if (!selected) this.sideTab = 'paint'; // (the selection ended: Paint again, the next selection shows its properties)
-    const tabs = sideTabs(this.mode, this.sideTab, selected, (this.eventPick?.at ?? -1) >= 0);
+    if (sprites) this.sprites.hasSelection(); // (a sprite that is gone is no longer selected)
+    const tabs = this.gesture.tabs(this.mode, (this.eventPick?.at ?? -1) >= 0), selected = tabs.selected;
     const howToSelect = sprites ? this.sprites.howToSelect() : this.mode === 'l1' ? 'Click a level tile, star, pipe or link end on the map to select it, any tile with Alt+click'
       : 'Alt+click a tile on the map – a level tile too – to select it';
     const tab = (t: SideTab) => h('button', {
       class: tabs.shown === t ? 'active' : '', disabled: t === 'props' && !tabs.propsEnabled,
       title: t === 'paint' ? (sprites ? 'The sprites to place' : 'The tiles to paint with (right click/Shift+click on the map)') + (selected ? ' – the selection stays' : '')
         : tabs.propsEnabled ? 'The settings of what is selected' : selected ? 'Pick the tile it becomes in the sheet first (Esc cancels)' : `Nothing selected: ${howToSelect}`,
-      onclick: () => { this.sideTab = t; this.buildProps(); },
+      onclick: () => { this.gesture.show(t); this.buildProps(); },
     }, tabs.labels[t]);
     this.tabBar.replaceChildren(tab('paint'), tab('props'));
     const propsShown = tabs.shown === 'props';
@@ -2461,14 +2449,14 @@ export class OverworldView {
   // "Replace piece…" and where it replaces: the selection (the rectangle last picked from the map, × drops it) or the
   // whole map; while under way which piece is picked next
   private replaceRow(): HTMLElement {
-    const sel = this.l2Sel, r = this.replacing;
+    const sel = this.gesture.pieces, r = this.replacing;
     return h('div', { class: 'row' },
       h('button', {
         class: r ? 'active' : '', onclick: () => { if (!this.cancelReplace()) this.startReplace(); },
         title: 'Every piece of one kind (on its 16-pixel grid) in the selection becomes another one: click the piece to replace, then the new one – on the map or below. Without a selection: the whole map, after a confirmation. One undo step; with an event edited (the event list) painted into the event',
       }, 'Replace piece…'),
       h('span', { class: 'hint' }, r ? (r.from ? 'now the new piece' : 'click the piece to replace') : sel ? `in the selection ${sel.w}×${sel.h}` : 'on the whole map'),
-      ...(sel && !r ? [h('button', { title: 'Drop the selection: replace on the whole map', 'aria-label': 'Drop the selection', onclick: () => { this.l2Sel = null; this.buildSide(); this.paint(); } }, icon('close'))] : []));
+      ...(sel && !r ? [h('button', { title: 'Drop the selection: replace on the whole map', 'aria-label': 'Drop the selection', onclick: () => { this.gesture.pieces = null; this.buildSide(); this.paint(); } }, icon('close'))] : []));
   }
   private l2TilesOpen = true; // the 8x8 sheet below the pieces shown (folded: the pieces alone)
   // "Pieces on this map" (#337, core/owl2pieces.ts): the 2x2 entry blocks on the 16-pixel grid of the submap's view (the

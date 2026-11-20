@@ -172,7 +172,7 @@ const TESTS: readonly string[] = [
   'tools/testowmusic.ts',
   'tools/testlevelnames.ts',
   'tools/testowlevelname.ts',
-  'tools/testowselection.ts',
+  'tools/testowgesture.ts',
   'tools/testsubmapgfx.ts',
   'tools/testowtilepick.ts',
   'tools/testowl1sheet.ts',

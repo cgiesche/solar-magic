@@ -98,8 +98,7 @@ export class LevelTileLayer {
   private edit(label: string, f: () => void, select: number): boolean {
     if (!this.ready()) return false;
     try {
-      this.view.selected = select;
-      this.view.links.selectAt(select); // (the link selection follows the tile's)
+      this.view.gesture.selectTile(select, this.view.links.selAt(select), false); // (the link selection follows the tile's)
       this.view.app.romEdit(this.where(label), f);
       return true;
     } catch (e) {
