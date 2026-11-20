@@ -964,7 +964,7 @@ export class OverworldView {
     if (inside) {
       this.mouse = this.point(e);
       const c = this.cell(e, 16), on = c.x >= 0 && c.y >= 0 && c.x < 32 && c.y < 32;
-      this.cellHistory.hover(on ? l1Index(this.region, c.x, c.y) : -1, e.clientX, e.clientY, e.buttons !== 0 || this.dragging() || !!this.sprites.drag);
+      this.cellHistory.hover(on ? l1Index(this.region, c.x, c.y) : -1, e.clientX, e.clientY, e.buttons !== 0 || this.dragging());
       const jump = e.buttons ? null : this.nameLabel.jumpAt(e.clientX, e.clientY);
       if ((jump?.there ?? null) !== (this.overJump?.there ?? null)) { this.overJump = jump; this.updateStatus(); }
     }
@@ -974,33 +974,47 @@ export class OverworldView {
     if (this.hover && this.hover.x === c.x && this.hover.y === c.y) return;
     this.hover = c;
     this.menuAt = null; // (dragged: a route, no menu)
-    if (this.levelTiles.drag) this.levelTiles.move(c.x, c.y);
+    const d = this.runningDrag();
+    d?.move?.(c); // (to the cell under the mouse; it paints what it shows)
     this.updateStatus();
-    if (this.links.drag) { this.links.move(c.x, c.y); return; }
-    if (this.levelTiles.moving) { this.paint(); return; }
-    if (this.pathTool.drawing) { this.pathTool.move(c.x, c.y); return; }
-    this.brushDrag.move(c);
-    this.requestPaint(); // (the hover frame, a pick's rectangle; a stamp's redraw paints)
+    if (this.levelTiles.moving) this.paint(); // (a level dragged from the list onto the map too)
+    else if (!d?.map) this.requestPaint(); // (the hover frame)
   }
 
-  // a stroke, a pick, a link or a level tile or a route being dragged (followed off the map too)
+  // The drags (#554) – one runs at a time, a button being down –, each kept by its layer; here the one list of them:
+  // which one runs, what Esc does to it (dropped, nothing changed), where the release goes. `map`: a drag over the
+  // map, followed off it too (the cell history's change is dragged from its popup, by the popup's own mouse).
+  private readonly drags: readonly { map: boolean; on: () => boolean; cancel: () => boolean; move?: (c: { x: number; y: number }) => void; up?: (e: MouseEvent) => void }[] = [
+    // a stroke or a pick (Esc: a stroke is never left running)
+    {
+      map: true, on: () => this.brushDrag.active, cancel: () => this.brushDrag.cancel() && (this.paint(), true),
+      move: (c) => { this.brushDrag.move(c); this.requestPaint(); /* (a pick's rectangle; a stamp's redraw paints) */ }, up: () => this.brushDrag.up(),
+    },
+    { map: false, on: () => this.cellHistory.moves, cancel: () => this.cellHistory.cancelMove() },
+    { map: true, on: () => !!this.levelTiles.drag, cancel: () => this.levelTiles.cancel(), move: (c) => this.levelTiles.move(c.x, c.y), up: (e) => this.levelTiles.up(e.altKey) },
+    {
+      map: true, on: () => this.pathTool.drawing, cancel: () => this.pathTool.cancel(), move: (c) => this.pathTool.move(c.x, c.y),
+      up: () => {
+        this.pathTool.up();
+        const m = this.menuAt;
+        this.menuAt = null;
+        // (a right click on a level tile or link end with the route brush)
+        if (m) { if (this.levelTiles.at(m.x, m.y)) this.levelTiles.menu(m.cx, m.cy, m.x, m.y); else this.linkMenu(l1Index(this.region, m.x, m.y), m.cx, m.cy); }
+      },
+    },
+    { map: true, on: () => !!this.links.drag, cancel: () => this.links.cancelDrag(), move: (c) => this.links.move(c.x, c.y), up: (e) => this.links.up(e.clientX, e.clientY) },
+    { map: true, on: () => !!this.sprites.drag, cancel: () => this.sprites.cancelDrag(), up: (e) => { const p = this.point(e); this.sprites.up(p.x, p.y); } },
+  ];
+  private runningDrag() { return this.drags.find((d) => d.on()) ?? null; }
+  // a drag over the map runs
   private dragging(): boolean {
-    return this.brushDrag.active || !!this.links.drag || !!this.levelTiles.drag || this.pathTool.drawing;
+    return !!this.runningDrag()?.map;
   }
 
   onUp(e: MouseEvent): void {
-    if (this.links.drag) { this.links.up(e.clientX, e.clientY); return; }
-    if (this.sprites.drag) { const p = this.point(e); this.sprites.up(p.x, p.y); return; }
-    if (this.levelTiles.drag) { this.levelTiles.up(e.altKey); return; }
-    if (this.pathTool.drawing) {
-      this.pathTool.up();
-      const m = this.menuAt;
-      this.menuAt = null;
-      // (a right click on a level tile or link end with the route brush)
-      if (m) { if (this.levelTiles.at(m.x, m.y)) this.levelTiles.menu(m.cx, m.cy, m.x, m.y); else this.linkMenu(l1Index(this.region, m.x, m.y), m.cx, m.cy); }
-      return;
-    }
-    this.brushDrag.up();
+    const d = this.runningDrag();
+    // (no drag: the brush's release, which ends nothing then)
+    if (d?.up) d.up(e); else if (!d) this.brushDrag.up();
   }
   // a right press on a level tile or link end with the route brush: its menu once released without a drag (null: none, or dragged)
   private menuAt: { cx: number; cy: number; x: number; y: number } | null = null;
@@ -1754,10 +1768,9 @@ export class OverworldView {
       if (k === 'd') return this.sprites.duplicate();
     }
     // (Esc with any modifier: a stroke is never left running)
-    if (k === 'escape' && this.brushDrag.cancel()) { this.paint(); return true; }
-    if (k === 'escape' && this.cellHistory.cancelMove()) return true;
-    if (k === 'escape' && this.levelTiles.cancel()) return true;
-    if (k === 'escape' && this.pathTool.cancel()) return true;
+    // Esc, in one order (#554): the drag running, the cell asked for, the sprite chosen in the picker, the selection,
+    // the edited event
+    if (k === 'escape' && this.runningDrag()?.cancel()) return true;
     if (k === 'escape' && this.cancelRequest()) return true;
     if (e.ctrlKey || e.metaKey || e.altKey) return false;
     if (k === 'escape' && this.mode === 'sprites' && this.sprites.unpick()) return true;

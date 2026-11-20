@@ -189,6 +189,13 @@ export class SpriteLayer {
     this.custom.duplicate(this.sel);
     return true;
   }
+  // Esc: the drag dropped, the sprite where it was; false: none
+  cancelDrag(): boolean {
+    if (!this.drag) return false;
+    this.drag = null;
+    this.view.paint();
+    return true;
+  }
   // the palette's pick dropped (Escape); false: none was picked
   unpick(): boolean {
     if (this.custom.picked === null) return false;

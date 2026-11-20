@@ -430,6 +430,14 @@ export class LinkLayer {
     this.view.paint();
     this.view.updateStatus();
   }
+  // Esc: the drag dropped, nothing changed; false: none
+  cancelDrag(): boolean {
+    if (!this.drag) return false;
+    this.drag = null;
+    this.view.paint();
+    this.view.updateStatus();
+    return true;
+  }
   // the release (the cursor at cx, cy): a link end dropped in an overlap of submaps' views asks which submap
   up(cx: number, cy: number): void {
     const d = this.drag;
