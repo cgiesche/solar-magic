@@ -16,6 +16,7 @@ import { FrameRecorder, LoadSession, sameKey, type FrameOwner, type LoadFrames, 
 import { findSpriteTables, spriteTablesHold } from './spritetables.ts';
 import { applyTriggers, type TriggerView } from './extrigger.ts';
 import { inputHash, levelInput } from './inputs.ts';
+import { driveOn } from './drive.ts';
 import { GM, RAM, SPR, MAP_BASE, MAP_SIZE, MAP_HI, CDM16_FLAGS, MUSIC_FADE, getS16, set16, setSpritePos, freezeActors } from './ram.ts';
 
 export const OV_L1 = 0x0000; // overlay offsets
@@ -37,6 +38,7 @@ export const OV_SPR = 0x8000;
 export const OV_BG = 0xa000; // edited BG tilemap (editor format, see bg.ts)
 const OV_BG_HOOK = 0xb000; // LDA #$FF : STA $6A : RTL (BG data bank = overlay)
 const OV_STUB = 0xc000; // JSL stub used to call game routines
+const OVERWORLD_FRAMES = 1501; // a new game from the title screen to its overworld; the overworld loading
 const OV_L3 = 0xd000; // an edited layer 3 tilemap as the level's LT3 file (0x2000 bytes, see layer3map.ts)
 const INIT_TABLES = 0x07f7d2; // game routine that sets up a new sprite's tables (tweakers), X = slot
 // where the level load calls the upload of the level music bank (JSR $8134, 3 bytes; AddmusicK's
@@ -553,17 +555,18 @@ export class LevelEmulator {
   // frames until the overworld runs (newGame: through the title screen and file select, buttons pressed), no intro
   // level; events (startGameAt) set as the file and the overworld load
   private untilOverworld(newGame: boolean, events?: Uint8Array): void {
-    const s = this.snes, w = s.wram;
-    for (let n = 0; w[RAM.gameMode] !== GM.overworld; n++) {
-      if (n > 1500) throw new Error(newGame ? 'new game did not reach the overworld' : 'the overworld did not load');
-      const m = w[RAM.gameMode];
-      if (events && (m === GM.playerSelect || m === GM.overworldLoad)) w.set(events, RAM.owEvents);
-      if (m === GM.overworldLoad) w[RAM.introLevel] = 0; // no intro level
-      s.joy1 = newGame && (n % 16) < 4 ? (m === GM.title ? 0x1000 : 0x0080) : 0;
-      s.runFrame();
-    }
-    s.joy1 = 0;
-    for (let i = 0; i < 3; i++) s.runFrame();
+    const w = this.snes.wram;
+    driveOn(this.snes, (d) => {
+      const there = d.press((m) => m === GM.overworld, OVERWORLD_FRAMES, {
+        button: newGame ? undefined : 0,
+        before: (m) => {
+          if (events && (m === GM.playerSelect || m === GM.overworldLoad)) w.set(events, RAM.owEvents);
+          if (m === GM.overworldLoad) w[RAM.introLevel] = 0; // no intro level
+        },
+      });
+      if (!there) throw new Error(newGame ? 'new game did not reach the overworld' : 'the overworld did not load');
+      d.frames(3);
+    });
   }
 
   // loads level n of translevel tl within the game startGame(tl) began: entered from the overworld tile as in
