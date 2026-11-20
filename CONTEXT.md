@@ -87,6 +87,12 @@ _Avoid_: GFX bypass, slot (alone)
 **Pixel editor**: the zoomed view beside a graphics sheet; the only place pixels are painted.
 _Avoid_: canvas, paint dialog
 
+**Pixel selection**: the rectangle of pixels selected in the pixel editor. Pen, eraser and fill reach only it; without one they reach the tiles the pixel editor shows.
+_Avoid_: marquee, selection (alone, where the sheet's tiles could be meant)
+
+**Float**: pixels held over the graphics file – lifted out of it (where they were is transparent) or pasted – until they are put down, which is the edit, or dropped, which leaves the file as it was.
+_Avoid_: floating selection, layer
+
 **Level size**: height of a horizontal level, one of Lunar Magic 3.00's sizes; taller = fewer screens. Below row 31 objects/sprites are placed by 32-row subscreens.
 _Avoid_: dimension, level mode
 
