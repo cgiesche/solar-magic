@@ -213,6 +213,9 @@ _Avoid_: extra option, setting
 **Overworld import**: another editor ROM's overworld replacing this one's (Lunar Magic's "Copy Overworld" reversed). Package content is not copied, only warned about.
 _Avoid_: overworld transfer, overworld export
 
+**Cell request**: the overworld editor asking for a cell of the map by the next click: the tile a reveal or a destroyed level tile is added at, the piece to replace, an overworld link's other end. At most one at a time – asking for another ends it, Esc ends it; the cells it would refuse are hatched, with the refusal over them.
+_Avoid_: pending pick, pick (taking tiles into the brush), mode
+
 **Refusal**: an overworld edit the game's limits don't allow, returned by the core as data and worded by the UI in player terms, with a fix or alternative; technical details folded away.
 _Avoid_: error, limit message
 
