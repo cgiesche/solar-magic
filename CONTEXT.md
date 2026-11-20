@@ -340,6 +340,9 @@ _Avoid_: Switch mode, P-state
 **Play session**: a level played in the emulator from gameplay start until death, exit or stop.
 _Avoid_: run, game loop, harness
 
+**Drive**: the emulated game played by the editor, frame by frame, with the buttons a player would press – to get it to a screen, a new file's first overworld, a save file loaded. Its **screen path** is what it started from (a machine or power-on, the save files, what was set in its RAM) and the joypad of each frame: enough to play the same way again, watched. Not a play session, which the user plays.
+_Avoid_: player (the person, and player select), script, macro, input sequence
+
 **Play from power-on**: the game played from reset, nothing skipped: the pre-game in sequence, then the overworld. With empty save files (the intro plays) or with file A a save at an event progress, made by the game's own save. Started in the Game workspace; level test play and test play from the overworld keep skipping the pre-game.
 _Avoid_: full game test, boot play
 
