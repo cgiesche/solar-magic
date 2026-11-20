@@ -14,6 +14,13 @@
 // piece to replace (`from`: then the new one), an overworld link's other end (`what`: the link layer's). At most one:
 // asking for another ends the one before. What it outlives depends on what is asked (leave).
 //
+// What a press on the map means (press): the buttons are the level editor's – a click or drag takes tiles into the
+// brush, a right click or Shift+click paints – and on layer 1 the level tiles and link ends are objects on top of
+// the map (ADR 0012): a click selects one, a drag moves a level tile, a right click opens its menu; a star or pipe
+// without a link is selected by a click too (#434: "Link to…" in its properties) while a right click paints over it.
+// A cell asked for takes the left click before all of that. The view says what is under the mouse and carries the
+// answer out.
+//
 // The side panel holds the tool and the selection as two tabs (ADR 0015, #460): "Picker | Properties", one shown. A
 // selection switches to Properties (a tile clicked or Alt+clicked, a sprite clicked); when it ends (Esc, a click
 // beside it) the picker comes back. The picker can be clicked with the selection kept (a right click paints with it
@@ -50,6 +57,43 @@ export function sideTabs(mode: OwMode, chosen: SideTab, selected: boolean, revea
 export function clickSelects(tile: number, linkEnd: boolean, kinds: readonly PathKind[] | null): boolean {
   return linkEnd || kinds?.[tile] === 'warp';
 }
+
+// what the view knows of a press: the mouse, and what is under it
+export interface PressFacts {
+  button: number; shift: boolean; alt: boolean; ctrl: boolean;
+  mode: OwMode;
+  jump: boolean; // on the link symbol of a label under a tile (where its link leads is shown)
+  viewsKnown: boolean; // the submaps' views are known (a moved start is written with its tile's submap)
+  // the layer 1 mode's:
+  grab: boolean; // on what the selection leads to – the selected link's other end, location or Koopa Kid's place
+  onMap: boolean; // on a cell of the map
+  levelTile: boolean; // a level tile there
+  tile: number; // the layer 1 tile there (onMap)
+  linkEnd: boolean; // an overworld link ends there
+  kinds: readonly PathKind[] | null; // the path kinds (null: being learned)
+  brush: 'tiles' | 'route' | 'look'; // the brush: tiles, the route brush, a level tile's look
+  unpaintable: 'learning' | 'noMap' | 'emulating' | null; // why layer 1 can't be painted just now
+}
+export type PressAction =
+  | { kind: 'none' }
+  | { kind: 'jump' } // the map of the link's other end shown
+  | { kind: 'answer' } // the cell request answered with the cell (or piece) there
+  | { kind: 'sprite' } // the sprites' own: select, drag
+  | { kind: 'grab' } // the link end, location or place dragged
+  // a level tile's or link end's menu; route: with the route brush a route may start there – the menu once the button
+  // is released without a drag
+  | { kind: 'menu'; of: 'level' | 'link'; route: boolean }
+  | { kind: 'select' } // the tile selected
+  | { kind: 'placeLevel' } // "Place level here…" with the look that is the brush
+  | { kind: 'moveLevelTile' } // the level tile selected; a drag moves it
+  | { kind: 'route' } // a route drawn
+  | { kind: 'refused'; why: 'learning' | 'noMap' | 'emulating' } // no stroke on layer 1 just now
+  | { kind: 'stroke' } // a paint stroke
+  | { kind: 'info' } // the tile's info (Alt+click)
+  | { kind: 'pick' }; // tiles taken into the brush (a selection ends)
+
+// a right click, or Shift+click: the button that paints (brushsurface.ts paintButton)
+const paints = (f: { button: number; shift: boolean; ctrl: boolean }) => f.button === 2 || (f.button === 0 && f.shift && !f.ctrl);
 
 export type CellRequest<P> =
   | { kind: 'reveal' | 'destroy'; at: number } // at: the reveal's cell once chosen (l1Index; -1: the cell is asked for)
@@ -97,6 +141,38 @@ export class OwGesture<L, S, P> {
   asksFor(): 'cell' | 'piece' | null {
     const r = this.asked;
     return !r ? null : r.kind === 'replace' ? 'piece' : r.kind === 'link' || r.at < 0 ? 'cell' : null;
+  }
+
+  // What a press means, by what is asked for and what is under the mouse.
+  press(f: PressFacts): PressAction {
+    const left = f.button === 0, paint = paints(f), plain = !f.shift && !f.alt && !f.ctrl, r = this.asked;
+    if (left && f.jump) return { kind: 'jump' };
+    // (a reveal's or destroy's cell is asked for in every mode; a reveal's new tile in the sheet, not here)
+    if (left && r && (r.kind === 'replace' || (r.kind !== 'link' && r.at < 0))) return { kind: 'answer' };
+    if (f.mode === 'sprites') return { kind: f.viewsKnown && left ? 'sprite' : 'none' };
+    if (left && r?.kind === 'link') return { kind: 'answer' };
+    if (f.mode === 'l1') {
+      if (left && plain && f.grab) return { kind: 'grab' };
+      const route = f.brush === 'route';
+      // the level tiles, objects on top of layer 1: a right click (or Shift+click), any brush – its menu
+      if (paint && f.levelTile) return { kind: 'menu', of: 'level', route };
+      // a link end (not a level tile): an object too; a star or pipe without a link is selected, and painted over
+      if (!f.levelTile && f.onMap && clickSelects(f.tile, f.linkEnd, f.kinds)) {
+        if (paint && f.linkEnd) return { kind: 'menu', of: 'link', route };
+        if (left && plain) return { kind: 'select' };
+      }
+      // a look as the brush places a level (a drag places nothing more)
+      if (paint && f.brush === 'look') return { kind: f.onMap ? 'placeLevel' : 'none' };
+      // a click on a level tile selects it, a drag moves it (a pick starts beside one)
+      if (left && plain && f.levelTile) return { kind: 'moveLevelTile' };
+    }
+    if (paint) {
+      if (f.mode === 'l1' && f.brush === 'route') return { kind: 'route' };
+      if (f.mode === 'l1' && f.unpaintable) return { kind: 'refused', why: f.unpaintable };
+      return { kind: 'stroke' };
+    }
+    if (!left) return { kind: 'none' };
+    return { kind: f.alt ? 'info' : 'pick' }; // (Alt+click: the tile's info; Ctrl+click no longer, #482)
   }
 
   // The mode changed to `mode`, or the map: what belonged to the one before ends. The selection as said above. A

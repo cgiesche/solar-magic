@@ -388,10 +388,19 @@ export class LinkLayer {
   // itself), the selected location or Koopa Kid's place – not a level tile (moved itself): dragged to move it (released
   // without moving: its tile selected). Whether it was
   grab(x: number, y: number): boolean {
-    if (x < 0 || y < 0 || x >= 32 || y >= 32 || !this.view.views) return false;
+    const move = this.grabs(x, y);
+    if (!move) return false;
+    const i = l1Index(this.view.region, x, y);
+    this.drag = { from: i, to: i, move };
+    this.view.paint();
+    return true;
+  }
+  // what a press at map cell x, y would grab (null: nothing)
+  grabs(x: number, y: number): Moved | null {
+    if (x < 0 || y < 0 || x >= 32 || y >= 32 || !this.view.views) return null;
     const i = l1Index(this.view.region, x, y), s = this.sel;
     // (a level tile there is dragged as itself: moved; its link end is moved by "Change target…")
-    if (!s || this.view.isLevelTile(this.view.levelL1()[i])) return false;
+    if (!s || this.view.isLevelTile(this.view.levelL1()[i])) return null;
     let move: Moved | null = null;
     if (s.kind === 'link') {
       for (const target of [true, false]) {
@@ -405,10 +414,7 @@ export class LinkLayer {
       const p = koopaTeleport(this.rom, s.k);
       if (p && this.koopaTiles(s.k).length && l1Index(this.view.region, p.x, p.y) === i) move = { sel: s, target: true };
     }
-    if (!move) return false;
-    this.drag = { from: i, to: i, move };
-    this.view.paint();
-    return true;
+    return move;
   }
   // a press while a tile is to be chosen (pending): the tile at cell x, y (the cursor at cx, cy), outside the map
   // cancelled. Whether one was pending
