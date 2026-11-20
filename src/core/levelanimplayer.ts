@@ -102,6 +102,8 @@ export class LevelAnimPlayer<S extends PlayerSteps> {
       p.emulated(steps);
       if (ok === null) p.later(verify);
       else if (!ok) {
+        // (no step shown from here: who follows the animation draws the picture as rendered)
+        this.at = -1;
         p.show(base, null);
         this.start(steps, base, width);
       }

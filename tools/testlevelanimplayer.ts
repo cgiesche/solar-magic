@@ -59,7 +59,7 @@ function setup() {
   const w = {
     queue: [] as (() => void)[], clock: null as (() => void) | null, clocks: 0,
     editing: false, held: false, on: true,
-    shown: [] as { img: number[]; changed: number | null }[], busy: [] as (string | null)[], emulated: 0,
+    shown: [] as { img: number[]; changed: number | null; step: number | null }[], stepNow: (() => null) as () => number | null, busy: [] as (string | null)[], emulated: 0,
     draws: [] as { color: number; old: boolean; cells: boolean }[],
     // the scheduler's slices run until none waits
     run(max = 100): void { for (let i = 0; i < max && this.queue.length; i++) this.queue.shift()!(); },
@@ -78,11 +78,14 @@ function setup() {
       const idx = c % 2 ? [1] : [1, 2];
       return { idx: Uint32Array.from(idx), val: Uint32Array.from(idx.map(() => c)) } as PixelChanges;
     },
-    show: (img, changed) => { w.shown.push({ img: [...img], changed: changed ? changed.length : null }); },
+    show: (img, changed) => { w.shown.push({ img: [...img], changed: changed ? changed.length : null, step: w.stepNow() }); },
     busy: (t) => { w.busy.push(t); },
     emulated: () => { w.emulated++; },
   };
-  return { w, player: new LevelAnimPlayer<Steps>(ports) };
+  const player = new LevelAnimPlayer<Steps>(ports);
+  // (the step shown at the moment a picture is told: what the pickers following the animation read then)
+  w.stepNow = () => (player.step ? colorOf(player.step) : null);
+  return { w, player };
 }
 const BASE = () => Uint32Array.of(9, 9, 9, 9);
 const eq = (a: number[] | null, b: number[]) => !!a && a.length === b.length && a.every((v, i) => v === b[i]);
@@ -230,6 +233,7 @@ const tick = (w: ReturnType<typeof setup>['w']) => w.clock?.();
   check(eq(w.last(), [9, 2, 2, 9]), 'a guess: the step shown is the guessed one\'s frame');
   w.slice(); w.slice();
   check(eq(w.last(), [9, 9, 9, 9]) && w.shown[w.shown.length - 1].changed === null && player.phase === -1, 'the guess was wrong: the base is shown, no step');
+  check(w.shown[w.shown.length - 1].step === null, 'and no step is shown at the moment the base is told');
   check(w.busy[w.busy.length - 1] === 'Animations 3/3', 'and the steps are made on, said in the indicator');
   w.draws.length = 0;
   w.run();
