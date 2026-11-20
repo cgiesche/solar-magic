@@ -20,10 +20,10 @@
 
 import type { LevelEmulator } from './levelemu.ts';
 import type { Rom } from './rom.ts';
-import { RAM } from './ram.ts';
+import { RAM, PAD } from './ram.ts';
 import { L3_MAP_VRAM } from './layer3map.ts';
 import { holds, type RomReads } from './romdeps.ts';
-import { replayScreen, PAD, MAX_CHOICES, type ReachedScreen } from './pregame.ts';
+import { replayScreen, MAX_CHOICES, type ReachedScreen } from './pregame.ts';
 import { saveAtPrompt, SAVE_FILES } from './savefile.ts';
 
 export const MENU_COLS = 32, MENU_ROWS = 32; // the first screen of layer 3's tilemap

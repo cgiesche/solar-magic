@@ -188,6 +188,7 @@ const TESTS: readonly string[] = [
   'tools/testowborder.ts',
   'tools/testbootsnapshot.ts',
   'tools/testtitlescreen.ts',
+  'tools/testdrive.ts',
   'tools/testpregame.ts',
   'tools/testmenutext.ts',
   'tools/testpresents.ts',
