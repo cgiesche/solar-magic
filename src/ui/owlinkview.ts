@@ -37,7 +37,9 @@ import { MARK } from './marks.ts';
 // a tile no link starts at (to link it to a tile on another map)
 export type LinkSel = { kind: 'link'; link: OwLink } | { kind: 'location'; i: number } | { kind: 'koopa'; k: number } | { kind: 'tile'; t: OwTile };
 // what is moved: the selected link's target (`target`) or source, a location, a Koopa Kid's place
-type Moved = { sel: LinkSel; target: boolean };
+export type Moved = { sel: LinkSel; target: boolean };
+// what a cell is asked for (the view's cell request): the tile `from` leads to, or where what is moved goes
+export type LinkAsked = { from: OwTile } | { move: Moved };
 // a drag from a tile (l1Index) to another: a new link, or moving something
 type Drag = { from: number; to: number; move: Moved | null };
 // what a tile links by: an exit path, a star/pipe link, a Koopa Kid's place; null with why it doesn't
@@ -68,7 +70,15 @@ export class LinkLayer {
   set sel(s: LinkSel | null) { this.view.gesture.link = s; }
   drag: Drag | null = null;
   // a source chosen to be linked to a tile on another map (the next click), or what is moved there
-  pending: { from: OwTile } | { move: Moved } | null = null;
+  // (the view's cell request, owgesture.ts: asking ends another request, and shows this one)
+  get pending(): LinkAsked | null {
+    const r = this.view.gesture.request;
+    return r?.kind === 'link' ? r.what : null;
+  }
+  set pending(p: LinkAsked | null) {
+    if (p) this.view.askCell({ kind: 'link', what: p });
+    else if (this.pending) this.view.gesture.endRequest();
+  }
   both = true; // new links both ways
   show = false; // every link's arrows (View → "Link arrows"); else the selected tile's
   // the ends of the links painted whose other end is on another map: labelled under their tile (owlevelname.ts
@@ -553,6 +563,10 @@ export class LinkLayer {
   status(): string | null {
     const d = this.drag;
     if (d && d.to !== d.from && this.asks(d.move, d.from)) return endChoiceText(this.choice(d.to), d.to) + this.stuckNote(d.move, d.from, d.to);
+    return null;
+  }
+  // the status bar while a tile on another map is to be chosen (null: none is)
+  askedStatus(): string | null {
     if (!this.pending) return null;
     return `Choose the map and click the tile ${'from' in this.pending ? `${tileText(this.pending.from)} leads to` : 'it goes to'} · Esc cancels`;
   }

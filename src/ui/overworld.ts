@@ -30,10 +30,10 @@ import { findL2Brush, l2BrushPalettes, l2SharedBits, l2SheetEntry, L2_SHEET_COLS
 import { mapPieces, piecesAt, replacePiece, samePiece, gridInside, l2Block, PIECE_COLS } from '../core/owl2pieces.ts';
 import { skipsRevealWalk, handledWithoutEvent } from '../core/revealwalk.ts';
 import type { OwSpriteView } from '../core/owsprites.ts';
-import { LinkLayer, LINK_LEGEND, LINK_ARROWS_HINT, type OffMapEnd, type LinkSel } from './owlinkview.ts';
+import { LinkLayer, LINK_LEGEND, LINK_ARROWS_HINT, type OffMapEnd, type LinkSel, type LinkAsked } from './owlinkview.ts';
 import { LevelTileLayer, tilePlace } from './owlevelview.ts';
 import { TileLabels } from './owlevelname.ts';
-import { OwGesture, clickSelects, type SideTab } from './owgesture.ts';
+import { OwGesture, clickSelects, type SideTab, type CellRequest } from './owgesture.ts';
 import { ownsTranslevel, starOrPipe, starDirs, giveStarTranslevel, type StarPaths } from '../core/owstars.ts';
 import { levelsWithoutTile, type LevelTileEvent } from '../core/owleveltiles.ts';
 import {
@@ -134,7 +134,7 @@ export class OverworldView {
   private palPixels = 0; // the screen pixels per pixel the paint sheet is drawn at (0: none shown)
   private props = h('div', { class: 'panel props', hidden: true });
   // what is selected, and the side panel's tab with it (owgesture.ts)
-  readonly gesture = new OwGesture<LinkSel, SpriteItem>();
+  readonly gesture = new OwGesture<LinkSel, SpriteItem, LinkAsked>();
   private tabBar = h('div', { class: 'tabbar ow-side-tabs', role: 'tablist' });
   private rail = toolRail('Edit mode and tools');
   private evList = h('div', { class: 'level-list ow-event-list' }); // the event list (buildLeft)
@@ -205,9 +205,32 @@ export class OverworldView {
   private hoverClause: Clause | null = null; // the "When beaten…" clause hovered (its tiles outlined)
   // a reveal or destroy being added to the event in the timeline: the cell clicked on the map (at -1 until then), for
   // a reveal then the tile it becomes picked in the layer 1 sheet
-  private eventPick: { kind: 'reveal' | 'destroy'; at: number } | null = null;
+  private get eventPick(): { kind: 'reveal' | 'destroy'; at: number } | null {
+    const r = this.gesture.request;
+    return r && (r.kind === 'reveal' || r.kind === 'destroy') ? r : null;
+  }
   // "Replace piece…" (#370) under way: the piece to replace being picked (from: null), then the new one
-  private replacing: { from: number[] | null } | null = null;
+  private get replacing(): { from: number[] | null } | null {
+    const r = this.gesture.request;
+    return r?.kind === 'replace' ? r : null;
+  }
+  // Asks for a cell by the next click (owgesture.ts: the cell request; one asked for before ends), or goes on with
+  // the request – and shows it: the timeline's and the side panel's buttons, the status line, the hatched cells.
+  askCell(r: CellRequest<LinkAsked>): void {
+    const was = this.gesture.request;
+    this.gesture.ask(r);
+    // (a link's other end asked for with no other request before: the panels show nothing of it)
+    if (r.kind !== 'link' || (was && was.kind !== 'link')) {
+      this.buildTimeline();
+      this.buildSide();
+    }
+    this.updateStatus();
+    this.paint();
+  }
+  // Esc: the cell request ended, nothing changed; false: none
+  private cancelRequest(): boolean {
+    return this.cancelEventPick() || this.cancelReplace() || (this.links.cancelPending() && (this.paint(), true));
+  }
   private playing: { start: number; before: HTMLCanvasElement; stepMs: number; fade: boolean } | null = null;
   private timeline = h('div', { class: 'ow-timeline' });
   showGrid = false;
@@ -590,7 +613,10 @@ export class OverworldView {
       const sel = !pick ? this.gesture.pieces : null; // (the layer 2 selection: where "Replace piece…" replaces)
       if (sel) drawBrushFrame(ctx, 'selection', [sel.x * s, sel.y * s, sel.w * s, sel.h * s], lw);
       // (a piece being picked for "Replace piece…": the grid cell under the mouse)
-      if (this.replacing && this.hover && !pick) drawBrushFrame(ctx, 'hover', [(this.hover.x & ~1) * s, (this.hover.y & ~1) * s, 2 * s, 2 * s], lw);
+      const asks = this.gesture.asksFor();
+      if (asks === 'piece' && this.hover && !pick) drawBrushFrame(ctx, 'hover', [(this.hover.x & ~1) * s, (this.hover.y & ~1) * s, 2 * s, 2 * s], lw);
+      // (a reveal's or destroy's cell asked for: the layer 1 cell under the mouse)
+      else if (asks === 'cell' && this.hover && !pick) drawBrushFrame(ctx, 'hover', [Math.floor(this.hover.x * s / 16) * 16, Math.floor(this.hover.y * s / 16) * 16, 16, 16], lw);
       else if (r && (pick || one || !this.routeBrush)) drawBrushFrame(ctx, pick ? 'pick' : 'hover', [r.x * s, r.y * s, r.w * s, r.h * s], lw);
       if (this.mode === 'l1') this.pathTool.paint(ctx, lw);
     }
@@ -1014,14 +1040,12 @@ export class OverworldView {
 
   // "Replace piece…" (#370): the piece to replace picked, then the new one (on the map or in "Pieces on this map")
   private startReplace(): void {
-    this.replacing = { from: null };
-    this.buildSide();
-    this.updateStatus();
+    this.askCell({ kind: 'replace', from: null });
   }
   // Esc or the button again: nothing replaced; false: none under way
   private cancelReplace(): boolean {
     if (!this.replacing) return false;
-    this.replacing = null;
+    this.gesture.endRequest();
     this.buildSide();
     this.updateStatus();
     this.paint();
@@ -1030,8 +1054,8 @@ export class OverworldView {
   private pickReplace(p: number[]): void {
     const r = this.replacing;
     if (!r) return;
-    if (!r.from) r.from = p.slice();
-    else { this.replacing = null; void this.replacePieces(r.from, p); }
+    if (!r.from) this.gesture.ask({ kind: 'replace', from: p.slice() });
+    else { this.gesture.endRequest(); void this.replacePieces(r.from, p); }
     this.buildSide();
     this.updateStatus();
     this.paint();
@@ -1181,6 +1205,8 @@ export class OverworldView {
       this.statusText.textContent = `${this.replacing.from ? 'Click the new piece' : 'Click the piece to replace'} on the map or in “Pieces on this map” · Esc cancels`;
       return;
     }
+    const asked = this.links.askedStatus();
+    if (asked) { this.statusText.textContent = asked; return; }
     const route = this.mode === 'l1' ? this.pathTool.status() : null;
     if (route && (this.pathTool.drawing || !c)) { this.statusText.textContent = route; return; }
     if (this.mode === 'sprites' && !c) {
@@ -1310,7 +1336,7 @@ export class OverworldView {
     this.event = e;
     this.hoverStep = null;
     this.hoverClause = null;
-    this.eventPick = null;
+    if (this.eventPick) this.gesture.endRequest(); // (it was this event's)
     storeEvents(this.app.romName, this.checked, e);
     this.syncEvent();
     this.buildLeft();
@@ -1461,15 +1487,12 @@ export class OverworldView {
   private startEventPick(kind: 'reveal' | 'destroy'): void {
     const rom = this.app.rom, why = kind === 'reveal' ? revealRefusal(rom, this.event) : destroyRefusal(rom, this.event);
     if (why) { refusalToast(rom, why); return; }
-    this.eventPick = { kind, at: -1 };
-    this.buildTimeline();
-    this.updateStatus();
-    this.paint();
+    this.askCell({ kind, at: -1 });
   }
   // Esc: no reveal or destroy added; false: none being added
   cancelEventPick(): boolean {
     if (!this.eventPick) return false;
-    this.eventPick = null;
+    this.gesture.endRequest();
     this.buildTimeline();
     this.updateStatus();
     this.buildSide();
@@ -1485,14 +1508,14 @@ export class OverworldView {
     if (pick.kind === 'reveal') {
       const why = this.pickRefusals()?.[i - this.region * 0x400];
       if (why) { refusalToast(rom, why); return; }
-      this.eventPick = { kind: 'reveal', at: i };
+      this.gesture.ask({ kind: 'reveal', at: i });
       if (this.mode !== 'l1') this.setMode('l1'); else this.buildSide();
       this.buildTimeline();
       this.updateStatus();
       this.paint();
       return;
     }
-    this.eventPick = null;
+    this.gesture.endRequest();
     this.tileEdit(`destroys ${cellText(i)}`, () => addDestroy(rom, this.event, i, this.shown.l1));
     this.buildTimeline();
     this.updateStatus();
@@ -1502,7 +1525,7 @@ export class OverworldView {
   private pickReveal(into: number): void {
     const at = this.eventPick?.at ?? -1;
     if (at < 0) return;
-    this.eventPick = null;
+    this.gesture.endRequest();
     const t = this.l1[at];
     // (no pair of the reveal list gives the tile: one added, then the reveal)
     const rom = this.app.rom, e = this.event, refresh = () => { this.buildTimeline(); this.updateStatus(); this.buildSide(); };
@@ -1609,8 +1632,7 @@ export class OverworldView {
     if (n === this.map) return;
     this.cellHistory.close();
     this.map = n;
-    this.gesture.leave('map', this.mode);
-    this.replacing = null;
+    if (this.gesture.leave('map', this.mode)) this.buildTimeline();
     this.redrawMap();
     this.buildBar();
     this.mapPop.refresh(); // (the new map's settings)
@@ -1625,13 +1647,11 @@ export class OverworldView {
     if (this.mode === m) return;
     this.cellHistory.close();
     this.mode = m;
-    this.links.cancelPending(); // (the next click on the map no longer chooses a link's tile)
     this.levelTiles.cancel();
     this.pathTool.cancel();
-    if (m !== 'l1' && (this.eventPick?.at ?? -1) >= 0) this.cancelEventPick(); // (the tile a reveal becomes is picked in the layer 1 sheet)
-    if (m !== 'l2') this.replacing = null;
-    // (the selection – a level tile, a link end, a tile's info, a sprite – ends: it belongs to the mode it was made in)
-    this.gesture.leave('mode', m);
+    // (the selection – a level tile, a link end, a tile's info, a sprite – ends: it belongs to the mode it was made in;
+    // a cell request where the new mode can't answer it: owgesture.ts)
+    if (this.gesture.leave('mode', m)) this.buildTimeline();
     this.buildProps();
     this.buildLeft(); // (levels without a level tile are dragged onto the map in the layer 1 mode)
     if (isLayerMode(m) && this.brush.kind !== m) this.brush = { kind: m, w: 1, h: 1, entries: [m === 'l1' ? FIRST_L1_TILE : 0] };
@@ -1752,12 +1772,10 @@ export class OverworldView {
     if (k === 'escape' && this.cellHistory.cancelMove()) return true;
     if (k === 'escape' && this.levelTiles.cancel()) return true;
     if (k === 'escape' && this.pathTool.cancel()) return true;
-    if (k === 'escape' && this.cancelEventPick()) return true;
-    if (k === 'escape' && this.cancelReplace()) return true;
+    if (k === 'escape' && this.cancelRequest()) return true;
     if (e.ctrlKey || e.metaKey || e.altKey) return false;
     if (k === 'escape' && this.mode === 'sprites' && this.sprites.unpick()) return true;
     if (k === 'escape' && this.mode === 'sprites' && this.sprites.deselect()) return true;
-    if (k === 'escape' && this.links.cancelPending()) { this.paint(); return true; }
     // (Esc layered: a selection ended first – Paint shown again –, then the event)
     if (k === 'escape' && this.mode !== 'sprites' && this.selected >= 0) { this.selectTile(-1, false); return true; }
     if (k === 'escape' && this.event >= 0) { this.setEvent(-1); return true; }
@@ -2059,7 +2077,7 @@ export class OverworldView {
     const others = teleports.filter((t) => !sentences.some((x) => x.exit === teleportExit(t.action)));
     // (where an exit to the overworld teleports to: moved by a click on the tile – the pick pending, #413)
     const move = (t: LevelTeleport) => h('button', { class: 'link-btn', title: `Choose the tile location ${hex(t.location, 2)} teleports to (the next click, on any map; Esc cancels)`,
-      onclick: (ev: MouseEvent) => { ev.stopPropagation(); this.links.pending = { move: { sel: { kind: 'location', i: t.location }, target: true } }; this.paint(); this.updateStatus(); } }, 'Move…');
+      onclick: (ev: MouseEvent) => { ev.stopPropagation(); this.links.pending = { move: { sel: { kind: 'location', i: t.location }, target: true } }; this.updateStatus(); } }, 'Move…');
     return [
       h('div', { class: 'hint' }, 'When beaten… (outlined on the map, a click edits its event):'),
       ...(edges ? [] : [h('div', { class: 'hint' }, 'The levels the exits open: being learned …')]),

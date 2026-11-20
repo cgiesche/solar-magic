@@ -34,7 +34,7 @@ check(clickSelects(0x04, true, kinds), 'any link end (an exit path tile, a locat
 
 // ---- the selection ----
 {
-  const g = new OwGesture<string, string>();
+  const g = new OwGesture<string, string, string>();
   check(g.tile === -1 && g.tabs('l1', false).shown === 'paint' && !g.tabs('l1', false).selected, 'nothing selected: the picker');
   g.selectTile(0x123, 'a link');
   check(g.tile === 0x123 && g.link === 'a link' && g.tabs('l1', false).shown === 'props', 'a tile selected with the link meant at it: its properties shown');
@@ -52,7 +52,7 @@ check(clickSelects(0x04, true, kinds), 'any link end (an exit path tile, a locat
 }
 // ---- what a change of mode or map ends ----
 {
-  const g = new OwGesture<string, string>();
+  const g = new OwGesture<string, string, string>();
   const all = () => { g.selectTile(7, 'l'); g.sprite = 's'; g.pieces = { x: 0, y: 0, w: 4, h: 4 }; };
   all(); g.leave('mode', 'sprites');
   check(g.tile === -1 && g.link === null && g.sprite === null && g.pieces === null, 'another mode: the tile, the link meant, the sprite and the pieces marked end');
@@ -62,6 +62,29 @@ check(clickSelects(0x04, true, kinds), 'any link end (an exit path tile, a locat
   check(g.tile === -1 && g.link === null && g.pieces === null && g.sprite === 's', 'another map: the tile and the pieces end, the sprite stays selected (the slots are the same on every submap)');
   g.leave('mode', 'sprites'); g.sprite = 's';
   check(g.tabs('sprites', false).selected && !g.tabs('l1', false).selected, 'in the sprites mode a sprite is the selection, in the layer modes a tile');
+}
+
+// ---- the cell request ----
+{
+  const g = new OwGesture<string, string, string>();
+  check(g.request === null && g.asksFor() === null && !g.endRequest(), 'no cell asked for');
+  g.ask({ kind: 'link', what: 'from a star' });
+  g.ask({ kind: 'reveal', at: -1 });
+  check(g.request?.kind === 'reveal', 'asking for another cell ends the request before: at most one');
+  check(g.asksFor() === 'cell', 'a reveal\'s tile: a layer 1 cell asked for on the map');
+  g.ask({ kind: 'reveal', at: 0x42 });
+  check(g.asksFor() === null && g.request?.kind === 'reveal', 'its cell chosen: the tile it becomes is asked for in the sheet, not on the map');
+  g.ask({ kind: 'replace', from: null });
+  check(g.asksFor() === 'piece', 'the piece to replace: a piece asked for');
+  g.ask({ kind: 'link', what: 'x' });
+  check(g.asksFor() === 'cell' && g.endRequest() && g.request === null, 'a link\'s other end: a cell; ended');
+
+  // what it outlives
+  const after = (r: Parameters<typeof g.ask>[0], what: 'mode' | 'map', mode: 'l1' | 'l2' | 'sprites') => { g.ask(r); const ended = g.leave(what, mode); const still = g.request !== null; g.endRequest(); return ended === !still && still; };
+  check(after({ kind: 'reveal', at: -1 }, 'mode', 'sprites') && after({ kind: 'destroy', at: -1 }, 'map', 'l1'), 'a reveal\'s or destroy\'s cell stays asked for over a change of mode and of map');
+  check(after({ kind: 'reveal', at: 5 }, 'mode', 'l1') && !after({ kind: 'reveal', at: 5 }, 'mode', 'l2') && after({ kind: 'reveal', at: 5 }, 'map', 'l1'), 'a reveal\'s new tile: ends outside layer 1 (its sheet), stays over the map');
+  check(after({ kind: 'replace', from: null }, 'mode', 'l2') && !after({ kind: 'replace', from: null }, 'mode', 'l1') && !after({ kind: 'replace', from: [1] }, 'map', 'l2'), 'the piece to replace: ends outside layer 2 and with the map');
+  check(!after({ kind: 'link', what: 'x' }, 'mode', 'l2') && after({ kind: 'link', what: 'x' }, 'map', 'l1'), 'a link\'s other end: ends with the mode, stays over the map (the tile may be on another one)');
 }
 
 console.log(bad ? `\n${bad} FAILED` : '\nall ok');
