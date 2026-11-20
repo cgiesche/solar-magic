@@ -207,11 +207,13 @@ export class BlockProber {
   private sw: SwitchState | null = null; // set by start() in the probe state
 
   // boot: another emulator on the same ROM whose title screen snapshot is taken over (saves booting
-  // again); results: where probe results are kept
-  constructor(rom: Rom, boot?: LevelEmulator, results?: ResultCache) {
+  // again); results: where probe results are kept; tilesets: where the tilesets' tile data lies, which the probes
+  // leave out as display data (LevelEmulator's: the probe host's job runner knows; without them only the display
+  // data whose place the ROM's layout says is left out)
+  constructor(rom: Rom, boot?: LevelEmulator, results?: ResultCache, tilesets?: () => number[][]) {
     this.rom = rom;
-    this.emu = new LevelEmulator(rom);
-    if (boot?.baseState) this.emu.adoptBoot(boot);
+    this.emu = new LevelEmulator(rom, tilesets);
+    if (boot?.snapshot) this.emu.adoptBoot(boot.snapshot);
     this.results = results ?? new ResultCache(new RomFingerprint(rom));
     this.use(0);
   }
@@ -238,7 +240,7 @@ export class BlockProber {
   // runs a probe with the pages read counted from the probe level's; stores the result under key
   private computed<T>(key: string, fn: () => T): T {
     if (!this.cur.ready) this.prepare();
-    const { result, reads } = this.emu.tracked(fn, this.cur.reads);
+    const { result, reads } = this.emu.record('behaviour', fn, { base: this.cur.reads });
     this.results.set(key, result, this.results.fp.deps(reads));
     return result;
   }
@@ -376,7 +378,7 @@ export class BlockProber {
     before.add(readers.reads);
     let byTileset = false;
     const cpu = this.emu.snes.cpu, hook: MemHook = { onWramRead: (a) => { if (a === RAM.tileset && !readers.pcs.has(cpu.opPc)) byTileset = true; } };
-    const { result, reads } = this.emu.tracked(() => this.withHook(hook, () => this.spriteProbe(num)), before);
+    const { result, reads } = this.emu.record('behaviour', () => this.withHook(hook, () => this.spriteProbe(num)), { base: before });
     const deps = this.results.fp.deps(reads), forAll = this.results.get<SpriteProbe>(spriteKey(num));
     if (byTileset || forAll?.byTileset) this.results.set(spriteTsKey(this.tileset, num), result, deps);
     if (!forAll) this.results.set(spriteKey(num), byTileset ? { ...result, byTileset: true } : result, deps);
@@ -396,11 +398,11 @@ export class BlockProber {
     const c = this.cur;
     if (c.tilesetReaders) return c.tilesetReaders;
     const pcs = new Set<number>(), s = this.emu.snes;
-    const { reads } = this.emu.tracked(() => this.withHook({ onWramRead: (a) => { if (a === RAM.tileset) pcs.add(s.cpu.opPc); } }, () => {
+    const { reads } = this.emu.record('behaviour', () => this.withHook({ onWramRead: (a) => { if (a === RAM.tileset) pcs.add(s.cpu.opPc); } }, () => {
       this.start(16, 0, SPRITE_ROW);
       this.placeMario(16 * 16, SPRITE_ROW * 16, 24, -0x60);
       try { for (let f = 0; f < PROBE_FRAMES + TIMER_FRAMES; f++) s.runFrame(); } catch { /* the code seen until the emulation stopped */ }
-    }), null, false);
+    }), { base: null, counted: false });
     c.tilesetReaders = { pcs, reads, deps: this.results.fp.deps(reads) };
     return c.tilesetReaders;
   }
@@ -473,7 +475,7 @@ export class BlockProber {
 
   // snapshot of the empty probe level running in gameplay
   private prepare(): void {
-    const { reads } = this.emu.tracked(() => this.prepareLevel());
+    const { reads } = this.emu.record('behaviour', () => this.prepareLevel());
     Object.assign(this.cur, { reads, deps: this.results.fp.deps(reads) });
   }
 
@@ -634,13 +636,13 @@ export class BlockProber {
       if (known !== undefined) return known;
       const base = this.floorIn(null);
       // the floor without a switch, if it stays one (dropped onto, as searched)
-      const { reads } = this.emu.tracked(() => { c.switchFloor[sw] = base >= 0 && this.standsOn(base) ? base : this.searchFloor(); }, null);
+      const { reads } = this.emu.record('behaviour', () => { c.switchFloor[sw] = base >= 0 && this.standsOn(base) ? base : this.searchFloor(); }, { base: null });
       if (c.reads) { c.reads.add(reads); c.deps = this.results.fp.deps(c.reads); }
       return c.switchFloor[sw]!;
     }
     if (c.floorTile !== -1) return c.floorTile;
     // later probes use the result: its pages count for the probe level
-    const { reads } = this.emu.tracked(() => this.findFloor(), null);
+    const { reads } = this.emu.record('behaviour', () => this.findFloor(), { base: null });
     if (c.reads) {
       c.reads.add(reads);
       c.deps = this.results.fp.deps(c.reads);
@@ -677,7 +679,7 @@ export class BlockProber {
   private climbTile(): number {
     const c = this.cur;
     if (c.climbTile === -1) {
-      const { reads } = this.emu.tracked(() => this.findClimb(), null);
+      const { reads } = this.emu.record('behaviour', () => this.findClimb(), { base: null });
       if (c.reads) {
         c.reads.add(reads);
         c.deps = this.results.fp.deps(c.reads);

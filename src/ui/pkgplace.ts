@@ -84,6 +84,8 @@ export function placementEditor(app: App, p: ReadyPreview, blank: number[]): Pla
       h('span', null, `${plan.globalGfx.length} file(s) differing from the clean game, replacing the game's: ${plan.globalGfx.map((g) => globalGfxName(g.num)).join(', ')}`)) : '',
     plan.owTiles ? h('div', { class: 'prop' }, h('label', { title: plan.owTiles.file }, 'Overworld layer 1 tiles'),
       h('span', null, `${plan.owTiles.tiles.size} tile(s) drawn differently from the clean game: ${owTileNames([...plan.owTiles.tiles.keys()])}`)) : '',
+    plan.titlePicture ? h('div', { class: 'prop' }, h('label', { title: plan.titlePicture.file }, 'Title screen picture'),
+      h('span', null, `the logo and text over the title screen level, from ${file(plan.titlePicture.file)}, replacing the one the ROM has`)) : '',
     plan.globalAnim ? h('div', { class: 'prop' }, h('label', { title: plan.globalAnim.file }, 'Global animation'),
       h('span', null, `${plan.globalAnim.slots.length} slot(s) into free slots of the global list (every level), their frames into ${altFileName(readGlobalList(app.rom)?.altFile ?? 0)}`)) : '',
     [...edits.blockTiles!].map(([f, tiles]) => h('div', { class: 'prop' }, h('label', { title: f }, file(f)),

@@ -18,6 +18,7 @@ import type { Rom } from './rom.ts';
 import type { SnesState } from './snes.ts';
 import { snesToPc, pcToSnes } from './rom.ts';
 import { L1_PTRS } from './level.ts';
+import { drive } from './drive.ts';
 import { GM, RAM, PAD, get16 } from './ram.ts';
 import { holds, type RomReads } from './romdeps.ts';
 import { ownerOf } from './patchreg.ts';
@@ -47,7 +48,6 @@ export interface GameStart {
 }
 
 const RUN_FRAMES = 4000; // a new file from the title screen to its first overworld, the intro's message closed
-const PRESS = 16, HELD = 4; // a button pressed anew every PRESS frames, for HELD
 const STAND_FRAMES = 300, STANDS = 30; // until Mario stands on the overworld: what it does stays for this many frames
 const MESSAGE_FRAMES = 64; // from a message box's opening until it shows its text
 
@@ -69,43 +69,39 @@ interface NewFile {
 // A new file played from the title screen until its first overworld (`untilLevel`: or until the game reads the
 // intro level's pointer). The machine is left where the run ended.
 function newFile(emu: LevelEmulator, o: { sources?: boolean; untilLevel?: boolean } = {}): NewFile {
-  const s = emu.snes, w = s.wram, outer = s.hook, table = snesToPc(L1_PTRS);
+  const s = emu.snes, w = s.wram, table = snesToPc(L1_PTRS), boot = emu.bootState();
   const r: NewFile = { reached: false, level: null, armed: null, lives: null, message: null, saves: false, shown: null };
   let sramAtLevel = -1, messageAt = -1, stop = false;
-  s.loadState(emu.bootState());
-  s.hook = {
-    onRomRead: (ro) => {
-      if (r.level !== null || ro < table || ro >= table + 0x200 * 3) return;
-      r.level = Math.floor((ro - table) / 3);
-      sramAtLevel = s.sramWrites;
-      if (o.untilLevel) stop = true;
-    },
-    onWramWrite: (a, v) => {
-      const m = w[RAM.gameMode];
-      if (a === RAM.introLevel && m < GM.playerSelect) r.armed = { value: v, src: s.writeSource };
-      else if (a === RAM.lives && m <= GM.overworldReturn && r.level === null) r.lives = { value: v, src: s.writeSource };
-      else if (a === RAM.message && v && r.level !== null && !r.message) r.message = { translevel: w[RAM.translevel], msg: v };
-    },
-  };
-  if (o.sources) s.trackSources(true);
   try {
-    for (let f = 0; f < RUN_FRAMES && !stop; f++) {
-      const m = w[RAM.gameMode];
-      if (m === GM.overworld) { r.reached = true; break; }
-      s.joy1 = f % PRESS < HELD ? (m === GM.title ? PAD.start : PAD.a) : 0;
-      s.runFrame();
-      // the picture of the intro: its message open and written, else the level's first frame of gameplay
-      if (r.level !== null && w[RAM.gameMode] === GM.level) {
-        if (r.message && messageAt < 0) messageAt = f;
-        if (!r.shown || (messageAt >= 0 && f === messageAt + MESSAGE_FRAMES)) r.shown = s.saveState();
-      }
-    }
-    if (r.level !== null && r.reached) r.saves = s.sramWrites !== sramAtLevel;
-  } catch { /* the emulated game crashed: what was seen until then */ } finally {
-    if (o.sources) s.trackSources(false);
-    s.hook = outer;
-    s.joy1 = 0;
-  }
+    drive(s, { from: boot }, (d) => {
+      d.watch({
+        onRomRead: (ro) => {
+          if (r.level !== null || ro < table || ro >= table + 0x200 * 3) return;
+          r.level = Math.floor((ro - table) / 3);
+          sramAtLevel = s.sramWrites;
+          if (o.untilLevel) stop = true;
+        },
+        onWramWrite: (a, v) => {
+          const m = w[RAM.gameMode];
+          if (a === RAM.introLevel && m < GM.playerSelect) r.armed = { value: v, src: s.writeSource };
+          else if (a === RAM.lives && m <= GM.overworldReturn && r.level === null) r.lives = { value: v, src: s.writeSource };
+          else if (a === RAM.message && v && r.level !== null && !r.message) r.message = { translevel: w[RAM.translevel], msg: v };
+        },
+      });
+      if (o.sources) d.sources();
+      r.reached = d.press((m) => m === GM.overworld, RUN_FRAMES, {
+        each: (f) => {
+          // the picture of the intro: its message open and written, else the level's first frame of gameplay
+          if (r.level !== null && d.mode === GM.level) {
+            if (r.message && messageAt < 0) messageAt = f;
+            if (!r.shown || (messageAt >= 0 && f === messageAt + MESSAGE_FRAMES)) r.shown = d.state();
+          }
+          return !stop;
+        },
+      });
+      if (r.level !== null && r.reached) r.saves = s.sramWrites !== sramAtLevel;
+    });
+  } catch { /* the emulated game crashed: what was seen until then */ }
   return r;
 }
 
@@ -182,7 +178,7 @@ export function gameStart(emu: LevelEmulator): GameStart {
   const had = kept.get(emu);
   if (had && holds(emu.rom, had)) return had.start;
   emu.ensureBoot();
-  const r = emu.recordAll(() => learnGameStart(emu));
+  const r = emu.record('title screen', () => learnGameStart(emu));
   kept.set(emu, { gen: r.gen, reads: r.reads, start: r.result });
   return r.result;
 }

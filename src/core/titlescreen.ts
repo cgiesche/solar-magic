@@ -10,20 +10,32 @@
 // the game's stripes left partly unwritten (what the game cleared VRAM to) is kept as shown.
 
 import { Rom, snesToPc } from './rom.ts';
+import { TITLE_STRIPE_PTR, titleStripeAddr } from './titlepicture.ts';
+import { hashBytes } from './patchreg.ts';
 import type { LevelEmulator } from './levelemu.ts';
 import { L3_MAP_VRAM, layer3Word } from './layer3map.ts';
 import { screenPicture, type ScreenPicture } from './pregame.ts';
 
+export { TITLE_STRIPE_PTR, titleStripeAddr } from './titlepicture.ts';
 export const TITLE_COLS = 32, TITLE_ROWS = 29, TITLE_SHOWN_ROWS = 28;
-export const TITLE_STRIPE_PTR = 0x0084d3; // the stripe image table ($0084D0), entry 03
 const VRAM = L3_MAP_VRAM; // layer 3's tilemap
 const LEN = TITLE_COLS * TITLE_ROWS * 2;
 const END = 0x80; // ends the stripe image (any byte with bit 7 where a header would start)
 
-// where the title screen's stripe image is (SNES address)
-export function titleStripeAddr(rom: Rom): number {
-  const o = snesToPc(TITLE_STRIPE_PTR);
-  return rom.data[o] | (rom.data[o + 1] << 8) | (rom.data[o + 2] << 16);
+export const GAME_TITLE_STRIPE = 0x05b375; // the clean game's stripe image
+
+// points the title screen's entry to the stripe image at `addr` (one written before and kept, or the game's)
+export function setTitleStripeAddr(rom: Rom, addr: number): void {
+  rom.writeAt(snesToPc(TITLE_STRIPE_PTR), Uint8Array.from([addr & 0xff, (addr >> 8) & 0xff, addr >> 16]));
+}
+
+// the title screen picture the ROM holds, as a hash of its stripe image: 0 the game's own (its entry points to the
+// game's data), else that of the editor's layout's bytes at the entry's address
+export function titlePictureHash(rom: Rom): number {
+  const at = titleStripeAddr(rom);
+  if (at === GAME_TITLE_STRIPE) return 0;
+  const o = snesToPc(at);
+  return hashBytes([rom.data.subarray(o, o + 4 + LEN)]) || 1;
 }
 
 // the tilemap as the game shows it on the title screen (32 × 29 words, row by row)
@@ -44,9 +56,11 @@ export function titleStripe(map: Uint16Array): Uint8Array {
 // writes the tilemap as the title screen's stripe image: a new RATS block (the one written before freed; the
 // game's own data stays where it is, unused). The whole stripe image is replaced: a further stripe Lunar Magic
 // may have written (the right screen) would be dropped – the editor opens only the clean game and its own ROMs.
-export function writeTitleScreen(rom: Rom, map: Uint16Array): void {
+// keep: the stripe image written before stays where it is (a package's picture: removing the package points the
+// entry back to it, pkgsections.ts)
+export function writeTitleScreen(rom: Rom, map: Uint16Array, keep = false): void {
   if (map.length !== TITLE_COLS * TITLE_ROWS) throw new Error('A title screen has 32 × 29 tiles');
-  rom.freeAt(titleStripeAddr(rom));
+  if (!keep) rom.freeAt(titleStripeAddr(rom));
   const at = rom.allocWrite(titleStripe(map));
   rom.writeAt(snesToPc(TITLE_STRIPE_PTR), Uint8Array.from([at & 0xff, (at >> 8) & 0xff, at >> 16]));
 }

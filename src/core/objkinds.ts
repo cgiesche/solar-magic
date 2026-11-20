@@ -349,7 +349,7 @@ export function* objKindsJob(
   emu: LevelEmulator, level: KindLevel, layer2Pointer: number, first: () => readonly number[] = () => [],
   show?: (kinds: [number, ObjKind][]) => void, ahead?: (pending: boolean) => void,
 ): Generator<void, ObjKinds> {
-  const untracked = <T>(fn: () => T) => emu.tracked(fn, null, false).result;
+  const untracked = <T>(fn: () => T) => emu.record('behaviour', fn, { base: null, counted: false }).result;
   const probe = untracked(() => new ObjKindProbe(emu, level, layer2Pointer));
   let preferred: string | null = null, shown: string | null = null;
   const lookAhead = () => {

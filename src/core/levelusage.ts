@@ -192,7 +192,7 @@ export class LevelUses {
     if (!i) return this.tiles(n)!;
     const ov = levelOverride(this.rom, i.lv), gen = this.rom.gen;
     // (a level that can't be taken apart counts as not loading: kept too, so it isn't tried again and again)
-    const run = emu.tracked(() => { try { return levelTilesAll(this.rom, i.lv, (o) => emu.load(n, o), ov); } catch (e) { console.error(e); return null; } });
+    const run = emu.record('behaviour', () => { try { return levelTilesAll(this.rom, i.lv, (o) => emu.load(n, o), ov); } catch (e) { console.error(e); return null; } });
     // the load's temporary ROM patches are undone, so the levels read before still hold
     if (this.inputs.gen === gen) this.inputs.gen = this.rom.gen;
     const tiles = run.result ?? { level: n, tileset: i.lv.header.tileset, ok: false, fg: [], bg: [] };

@@ -1,4 +1,4 @@
-// The level's animation steps (App.startAnimation, #440): the console's VRAM and CGRAM every few frames as the level
+// The level's animation steps (played by levelanimplayer.ts, #440): the console's VRAM and CGRAM every few frames as the level
 // loaded runs on (LevelEmulator.animationFrames), emulated one at a time, together with what they depend on – the ROM
 // bytes they read and what they read of the console as the load left it. An edit loads the level anew; the steps
 // carry over to the new load (no emulation) while nothing they read changed: its ROM bytes, the WRAM they read before
@@ -117,7 +117,7 @@ export class LevelAnimSteps {
     s.hook = outer ? joinHooks(outer, watch) : watch;
     let step: AnimStep | null;
     try {
-      const r = this.emu.recordAll(() => this.emu.animationFrames(1, STEP_FRAMES)[0] ?? null);
+      const r = this.emu.record('full picture', () => this.emu.animationFrames(1, STEP_FRAMES)[0] ?? null);
       this.recorded.reads.add(r.reads);
       step = r.result;
     } finally { s.hook = outer; }

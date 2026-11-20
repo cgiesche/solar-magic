@@ -19,7 +19,7 @@ import { readStart } from '../src/core/owsprites.ts';
 import { RAM, PAD, get16 } from '../src/core/ram.ts';
 import { ResultCache, RomFingerprint } from '../src/core/romdeps.ts';
 import { JobRunner } from '../src/core/jobrunner.ts';
-import { pathShapesJob, DX, DY } from '../src/core/owpaths.ts';
+import { pathShapesJob, DX, DY, OVERWORLD_DATA } from '../src/core/owpaths.ts';
 import { editorImage, pathKinds, pathShapes, hardWalks } from './fixture.ts';
 
 let bad = 0;
@@ -229,7 +229,7 @@ function playTo(r: Rom, inp: ReachInput, i: number, d: number): { tile: number; 
 // ---- the path shapes hold while the overworld is edited ----
 {
   const runner = new JobRunner({ rom, results: new ResultCache(new RomFingerprint(rom)) });
-  const run = runner.run({ key: 'owsh', keep: false, picture: false, start: pathShapesJob });
+  const run = runner.run({ key: 'owsh', keep: false, shows: 'behaviour', leavesOut: OVERWORLD_DATA, start: pathShapesJob });
   while (!runner.step('owsh', run));
   const reads = run.reads;
   const r = new Rom(rom.data.slice()), before = r.data.slice(), l1 = readL1(r), tls = readTranslevels(r);

@@ -7,6 +7,7 @@ import { Rom } from '../core/rom.ts';
 import { OBJ_2D } from '../core/obj2d.ts';
 import { LevelEmulator, type LevelRender, type LevelOverride, type Animated } from '../core/levelemu.ts';
 import { LevelAnimSteps } from '../core/levelanimsteps.ts';
+import { LevelAnimPlayer } from '../core/levelanimplayer.ts';
 import {
   type Level, type LevelObject, type LevelSprite, type ScreenExit, loadLevel, spriteLoadOrder, serializeSprites, serializeLevelSprites, spriteId,
   isL1Vertical, hasLayer2Objects, hasObjects, SEC_HDR,
@@ -22,7 +23,7 @@ import { renderLevel, type LevelImages, composite, composeCells, patchLevel, pat
 import type { SpriteImage } from '../core/spritegfx.ts';
 import { usedSpriteMemory, spriteMemSpec, lostSprites, missingSprites, type SpriteMemResult } from '../core/spritemem.ts';
 import { DM16_EXT, levelGfx, levelExtGfx, customPalette, levelMusic } from '../core/patches.ts';
-import { gfxSkipMask, gfxFilesHash } from '../core/gfxpages.ts';
+import { keptGfxSkipMask, gfxFilesHash } from '../core/gfxpages.ts';
 import { flagBytes, usedFlags, isDm16, dm16Tiles } from '../core/cdm16.ts';
 import { RenderQuery, type TileCut } from '../core/renderquery.ts';
 import { PREFAB_EXT, listPrefabs, type Prefab } from '../core/prefabs.ts';
@@ -239,15 +240,21 @@ export class App {
   // new one's), null: all of it may have (the animation's first frame after a render, its stop)
   animChanged: PixelRect[] | null = null;
   reveal = { x: 0, y: 0 }; // pixel the level view scrolls to on 'reveal'
-  // tile/palette animation: frames stored as pixel diffs against the static composite (base), one per step
-  // steps: the steps of the render (null: no animation), emulated in the background, carried over to a new render
-  // while what they read is unchanged, else as a guess checked in the background (levelanimsteps.ts); phase: the step
-  // shown (-1 none yet), kept while the steps are; ready: the frames are those of the composite shown
-  // heldStep: the next slice of building the frames (or of checking carried steps), held while a level edit is open (dragging, #452: each drag step
-  // would emulate steps that don't carry over to the next one); it goes on once the edit ended
-  // rects: per frame the rectangles around its pixels (changedRects)
-  anim = { gen: 0, steps: null as LevelAnimSteps | null, base: null as Uint32Array | null,
-    frames: [] as PixelChanges[], rects: [] as PixelRect[][], phase: -1, timer: 0, ready: false, heldStep: null as (() => void) | null };
+  // the level animation (core/levelanimplayer.ts): which of its steps is shown over the composite. The steps are the
+  // render's, carried over to a new render while what they read is unchanged, else as a guess the player checks
+  // (levelanimsteps.ts)
+  private anim: LevelAnimPlayer<LevelAnimSteps> = new LevelAnimPlayer<LevelAnimSteps>({
+    later: (fn) => this.scheduler.later('anim', fn),
+    every: (ms, fn) => { const t = window.setInterval(fn, ms); return () => clearInterval(t); },
+    editing: () => this.edits.editing,
+    held: () => this.scheduler.held(),
+    on: () => this.view.show.anim,
+    draw: (step, base, old, cells) => this.animFrame(step, base, old, cells),
+    show: (img, changed) => { this.compositeImg = img; this.animChanged = changed; this.emit('anim-frame'); },
+    busy: (text) => this.setBusy('anim', text),
+    // (what a step reads counts for the render, refresh)
+    emulated: (steps) => { this.rendered?.reads.add(steps.reads); },
+  });
 
   // changed: the project as opened has changes that are in no project file
   constructor(rom: Rom, name: string, changed = false) {
@@ -265,7 +272,6 @@ export class App {
     this.view.show.anim = animationPref.get();
     this.view.show = keptShown(this.view.show); // (the View options kept, #488)
     this.emu = new LevelEmulator(rom);
-    this.emu.skipMask = this.gfxSkipMask;
     // the level is loaded anew for every edit and drag step: frames that read the same are taken over (#448)
     this.emu.reuseLoads = true;
     this.emu.boot();
@@ -457,18 +463,17 @@ export class App {
     }
     const prev = this.drawnFor, prevRender = this.render, prevImages = this.images;
     const drawn = { level: lv.number, mode: lv.header.mode, screens: lv.header.screens, rows: levelRows(lv.secondary), gen: this.rom.gen };
-    let cells: Uint8Array | null = null, carried = false;
-    this.rendered = { key, ...this.emu.recordAll(() => {
+    let cells: Uint8Array | null = null, carried = false, steps: LevelAnimSteps | null = null;
+    this.rendered = { key, ...this.emu.record('full picture', () => {
       const r = this.emu.load(lv.number, ov);
       this.renderError = r.ok ? null : r.error ?? 'Error';
       // as many steps as the level's own animations take to repeat (the game's repeat after 8), emulated in
-      // the background (startAnimation) – or the last render's, carried over (the phase kept): for sure while nothing
-      // they read changed (an object moved: no emulation), else as a guess startAnimation checks (an object added)
+      // the background (the player) – or the last render's, carried over (the phase kept): for sure while nothing
+      // they read changed (an object moved: no emulation), else as a guess the player checks (an object added)
       const count = this.view.show.anim && r.ok ? exanimPeriod([readLevelList(this.rom, lv.number), readGlobalList(this.rom)], MAX_ANIM_STEPS, 8) : 0;
       const kept = count ? this.anim.steps?.carry(this.emu, count) ?? null : null;
-      if (!kept) this.anim.phase = -1;
       carried = !!kept;
-      this.anim.steps = count ? kept ?? new LevelAnimSteps(this.emu, count) : null;
+      steps = count ? kept ?? new LevelAnimSteps(this.emu, count) : null;
       const same = !!prev && !!prevRender?.ok && r.ok && prev.level === drawn.level && prev.mode === drawn.mode
         && prev.screens === drawn.screens && prev.rows === drawn.rows && prev.gen === drawn.gen;
       const p = same ? patchLevel(this.rom, prevRender, prevImages, r) : null;
@@ -477,7 +482,8 @@ export class App {
       this.images = p?.images ?? renderLevel(this.rom, r, lv.header.mode, lv.header.screens, drawn.rows);
       this.drawnFor = drawn;
     }) };
-    if (this.anim.steps) this.rendered.reads.add(this.anim.steps.reads); // (the steps carried over)
+    const anim = steps as LevelAnimSteps | null; // (assigned in the recording above)
+    if (anim) this.rendered.reads.add(anim.reads); // (the steps carried over)
     // picker thumbnails are transparent: shown on the level's backdrop as in the game
     const c = this.images.backdrop;
     document.documentElement.style.setProperty('--level-backdrop', `rgb(${c & 0xff},${(c >> 8) & 0xff},${(c >> 16) & 0xff})`);
@@ -487,7 +493,7 @@ export class App {
     this.compositeImg = patched ? base! : this.compose();
     this.composedLook = look;
     this.query = new RenderQuery(this.render, this.images.geom1, this.images.geom2);
-    this.startAnimation(patched && carried ? cells : null);
+    this.anim.start(anim, this.compositeImg, this.images.width, carried, patched && carried ? cells : null);
     this.emit('render');
     this.scheduleScan();
     this.updateGameViewCamera(ov);
@@ -496,7 +502,7 @@ export class App {
   recomposite(): void {
     this.compositeImg = this.compose();
     this.composedLook = this.look();
-    this.startAnimation();
+    this.anim.start(this.anim.steps, this.compositeImg, this.images.width, true);
     this.emit('render');
   }
 
@@ -517,104 +523,35 @@ export class App {
     return !this.view.show.ghost ? 0 : m === 'l3' ? 3 : m === 'bg' ? 1 : this.level.layer2Objects ? (m === 'l1' ? 2 : m === 'l2' ? 1 : 0) : 0;
   }
 
-  // the animation's frames for the composite shown, built in the background from its steps (those not yet emulated
-  // emulated then: "Animations i/n"), then cycled (8 game frames each) – on from the step shown when the steps are
-  // the same as before (a recomposite, an edit the steps carry over): its frame built first and shown at once, the
-  // level as the pickers (animStep) while the others are built. cells: the composite was composed anew there (an edit's
-  // load, the steps carried over): the frames built before are patched there (those built)
-  startAnimation(cells: Uint8Array | null = null): void {
-    const a = this.anim, steps = a.steps;
-    const gen = ++a.gen;
-    const before = cells ? a.frames : [];
-    a.heldStep = null;
-    a.frames = [];
-    a.rects = [];
-    a.ready = false;
-    a.base = this.compositeImg;
-    if (!steps?.count) { a.phase = -1; this.stopAnimation(); this.setBusy('anim', null); return; }
-    const base = a.base, lv = this.level, made = steps.steps;
-    const busy = () => this.setBusy('anim', steps.done ? null : `Animations ${made.length + 1}/${steps.count}`);
-    // (a step is shown only once all are made: phase >= 0 means all are)
-    const first = a.phase >= 0 && made.length ? a.phase % made.length : 0;
-    if (a.phase >= 0) a.phase = made.length ? first : -1;
-    let i = 0;
-    // steps carried as a guess (LevelAnimSteps.carry) checked once their frames run, one a slice: emulated and
-    // compared, without a word in the busy indicator – the same ones go on, others start anew with those emulated
-    const verify = () => {
-      if (gen !== a.gen) return;
-      if (this.edits.editing) { a.heldStep = verify; return; }
-      const same = steps.check();
-      this.rendered?.reads.add(steps.reads);
-      if (same === null) this.scheduler.later('anim', verify);
-      else if (!same) { a.phase = -1; this.startAnimation(); }
-    };
-    const step = () => {
-      if (gen !== a.gen) return;
-      if (i === made.length && !steps.done) {
-        // (not while dragging: the steps wait for the edit's end)
-        if (this.edits.editing) { a.heldStep = step; this.setBusy('anim', null); return; }
-        // the next step emulated, what it reads counting for the render (refresh)
-        steps.next();
-        this.rendered?.reads.add(steps.reads);
-      }
-      if (i < made.length) {
-        const n = (first + i) % made.length, s = made[n];
-        // only the cells the step changes drawn anew; all of them when it changes every cell. After an edit only those
-        // in the cells composed anew
-        const look = (cell: LevelImages) => this.compose(cell), old = before[n];
-        const inside = old && cells ? animatedPixels(this.rom, this.render, this.images, base, s.vram, s.cgram, look, cells) : null;
-        let f = inside ? patchFrame(old, inside, cells!, this.images.width) : animatedPixels(this.rom, this.render, this.images, base, s.vram, s.cgram, look);
-        if (!f) {
-          const li = renderLevel(this.rom, { ...this.render, vram: s.vram, cgram: s.cgram }, lv.header.mode, lv.header.screens, levelRows(lv.secondary));
-          const img = this.compose(li);
-          const idx: number[] = [];
-          for (let k = 0; k < img.length; k++) if (img[k] !== base[k]) idx.push(k);
-          const ix = Uint32Array.from(idx);
-          f = { idx: ix, val: ix.map((k) => img[k]) };
-        }
-        a.frames[n] = f;
-        a.rects[n] = changedRects(f.idx, this.images.width);
-        if (n === a.phase) {
-          const img = base.slice();
-          for (let j = 0; j < f.idx.length; j++) img[f.idx[j]] = f.val[j];
-          this.compositeImg = img;
-          this.animChanged = null;
-          this.emit('anim-frame');
-        }
-        i++;
-      }
-      busy();
-      if (i < made.length || !steps.done) { this.scheduler.later('anim', step); return; }
-      a.ready = true;
-      if (!steps.checked) this.scheduler.later('anim', verify);
-      if (!a.frames.length) { a.phase = -1; this.stopAnimation(); return; }
-      if (!a.timer) a.timer = window.setInterval(() => this.animTick(), 1000 / ANIM_STEPS_PER_SECOND);
-    };
-    busy();
-    this.scheduler.later('anim', step);
+  // The pixels an animation step changes of the composite without the animation: only the cells the step changes drawn
+  // anew, all of them when it changes every cell. old and cells: the frame built before the composite was composed
+  // anew in the cells marked (an edit's load), patched there.
+  private animFrame(s: AnimStep, base: Uint32Array, old: PixelChanges | null, cells: Uint8Array | null): PixelChanges {
+    const lv = this.level, look = (cell: LevelImages) => this.compose(cell);
+    const inside = old && cells ? animatedPixels(this.rom, this.render, this.images, base, s.vram, s.cgram, look, cells) : null;
+    const f = inside ? patchFrame(old!, inside, cells!, this.images.width) : animatedPixels(this.rom, this.render, this.images, base, s.vram, s.cgram, look);
+    if (f) return f;
+    const li = renderLevel(this.rom, { ...this.render, vram: s.vram, cgram: s.cgram }, lv.header.mode, lv.header.screens, levelRows(lv.secondary));
+    const img = this.compose(li);
+    const idx: number[] = [];
+    for (let k = 0; k < img.length; k++) if (img[k] !== base[k]) idx.push(k);
+    const ix = Uint32Array.from(idx);
+    return { idx: ix, val: ix.map((k) => img[k]) };
   }
 
-  // the animation's steps emulated on after a level edit ended (dragging: paused in startAnimation)
+  // the animation's steps emulated on after a level edit ended (dragging: held by the player)
   private resumeAnimation(): void {
-    const a = this.anim, step = a.heldStep;
-    a.heldStep = null;
-    if (step) this.scheduler.later('anim', step);
+    this.anim.resume();
   }
 
   // the canvases following the animation (pickeranim.ts) go back to the level as rendered
   private stopAnimation(): void {
-    const a = this.anim;
-    if (!a.timer) return;
-    clearInterval(a.timer);
-    a.timer = 0;
-    this.animChanged = null;
-    this.emit('anim-frame');
+    this.anim.stop();
   }
 
   // the step of the animation shown now; null when none is (the level as rendered)
   animStep(): AnimStep | null {
-    const a = this.anim;
-    return this.view.show.anim && a.timer && a.phase >= 0 ? a.steps?.steps[a.phase] ?? null : null;
+    return this.view.show.anim ? this.anim.step : null;
   }
 
   // the animation's steps on canvases of the level's Map16 tiles (the pickers'), for the render shown
@@ -622,23 +559,6 @@ export class App {
   tileAnimation(): TileAnimation {
     if (this.tileAnim?.r !== this.render) this.tileAnim = { r: this.render, anim: new TileAnimation(this.rom, this.render) };
     return this.tileAnim.anim;
-  }
-
-  animTick(): void {
-    const a = this.anim;
-    if (!a.ready || !a.frames.length || !a.base) return;
-    if (!this.view.show.anim) { this.stopAnimation(); return; }
-    if (this.scheduler.held()) return;
-    const img = this.compositeImg === a.base ? a.base.slice() : this.compositeImg;
-    const prev = a.frames[a.phase], was = prev ? a.rects[a.phase] : [];
-    if (prev) for (const k of prev.idx) img[k] = a.base[k];
-    a.phase = (a.phase + 1) % a.frames.length;
-    const f = a.frames[a.phase];
-    for (let j = 0; j < f.idx.length; j++) img[f.idx[j]] = f.val[j];
-    this.compositeImg = img;
-    // (the picture is otherwise the one before: the base's, or the last step's)
-    this.animChanged = mergeRects(was, a.rects[a.phase]);
-    this.emit('anim-frame');
   }
 
   // ------------- entrances -------------
@@ -876,8 +796,7 @@ export class App {
 
   // ROM bytes of GFX file data: emulated results don't depend on them (graphics only reach VRAM);
   // sprite images and object thumbnails have the files' content in their input instead
-  private gfxMask = perRomState(gfxSkipMask);
-  readonly gfxSkipMask = (): Uint8Array | null => this.gfxMask(this.rom);
+  readonly gfxSkipMask = (): Uint8Array | null => keptGfxSkipMask(this.rom);
 
   // the content of the bytes gfxSkipMask leaves out of the bytes read (graphics and ExAnimation data), for
   // results that depend on them; once per ROM state

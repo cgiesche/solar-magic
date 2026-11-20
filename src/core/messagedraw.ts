@@ -146,7 +146,8 @@ function readers(rom: Rom, only: Uint8Array): PatchEntry[] {
 }
 
 // whether the game draws the boxes the openers open (the box each opened, by opener) on the ROM with the patches of
-// package pkg undone (their original bytes back, on a copy); the copy's reads count as the ROM's
+// package pkg undone (their original bytes back, on a copy); the copy's reads count as the ROM's, every byte the
+// game reads there (a full picture's: which patch draws a box may show in what it draws with)
 function drawnWithout(rom: Rom, emu: LevelEmulator, pkg: Package, level: number, openers: Opener[]): boolean {
   const copy = new Rom(rom.data.slice()), patches = listPatches(rom);
   for (const id of pkg.patches) {
@@ -157,14 +158,14 @@ function drawnWithout(rom: Rom, emu: LevelEmulator, pkg: Package, level: number,
     for (const [pc, n] of e.segs) { copy.data.set(orig.subarray(k, k + n), pc); k += n; }
   }
   const other = new LevelEmulator(copy);
-  other.adoptBoot(emu);
-  const { result, reads } = other.tracked(() => {
+  other.adoptBoot(emu.snapshot);
+  const { result, reads } = other.record('full picture', () => {
     const play = Play.start(other, level);
     if (!play) return false;
     try {
       return openers.every((o) => { const b = play.open(o).box; return !!b && drawn(copy, b); });
     } finally { play.close(); }
-  }, null);
+  }, { base: null });
   countReads(rom, null, reads);
   return result;
 }

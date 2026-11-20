@@ -30,10 +30,10 @@ import { findL2Brush, l2BrushPalettes, l2SharedBits, l2SheetEntry, L2_SHEET_COLS
 import { mapPieces, piecesAt, replacePiece, samePiece, gridInside, l2Block, PIECE_COLS } from '../core/owl2pieces.ts';
 import { skipsRevealWalk, handledWithoutEvent } from '../core/revealwalk.ts';
 import type { OwSpriteView } from '../core/owsprites.ts';
-import { LinkLayer, LINK_LEGEND, LINK_ARROWS_HINT, type OffMapEnd } from './owlinkview.ts';
+import { LinkLayer, LINK_LEGEND, LINK_ARROWS_HINT, type OffMapEnd, type LinkSel, type LinkAsked } from './owlinkview.ts';
 import { LevelTileLayer, tilePlace } from './owlevelview.ts';
 import { TileLabels } from './owlevelname.ts';
-import { sideTabs, clickSelects, type SideTab } from './owselection.ts';
+import { OwGesture, type CellRequest, type SideTab } from './owgesture.ts';
 import { ownsTranslevel, starOrPipe, starDirs, giveStarTranslevel, type StarPaths } from '../core/owstars.ts';
 import { levelsWithoutTile, type LevelTileEvent } from '../core/owleveltiles.ts';
 import {
@@ -43,7 +43,7 @@ import { refusalToast, refusedToast, refusalWords, refusalText, type RefusalFix 
 import { editFix } from './owfixes.ts';
 import type { OwRefusalData } from '../core/owrefusal.ts';
 import { revealPairFor, addRevealPair, newL1Tile, tileCopiesOf000, takeTileCopy } from '../core/owfixes.ts';
-import { SpriteLayer } from './owspriteview.ts';
+import { SpriteLayer, type SpriteItem } from './owspriteview.ts';
 import { CellHistoryPopup, tileWords } from './owcellhistoryview.ts';
 import { exitSentences, teleportExit, type Clause } from '../core/owexitsentence.ts';
 import { owBudgets, type Budget, type BudgetKey } from '../core/owbudget.ts';
@@ -133,8 +133,8 @@ export class OverworldView {
   private palPanel = h('div', { class: 'panel ow-pal-panel' });
   private palPixels = 0; // the screen pixels per pixel the paint sheet is drawn at (0: none shown)
   private props = h('div', { class: 'panel props', hidden: true });
-  // the side panel's tabs "Paint | Properties" (ADR 0015, owselection.ts): the tab chosen (a selection chooses Properties)
-  private sideTab: SideTab = 'paint';
+  // what is selected, and the side panel's tab with it (owgesture.ts)
+  readonly gesture = new OwGesture<LinkSel, SpriteItem, LinkAsked>();
   private tabBar = h('div', { class: 'tabbar ow-side-tabs', role: 'tablist' });
   private rail = toolRail('Edit mode and tools');
   private evList = h('div', { class: 'level-list ow-event-list' }); // the event list (buildLeft)
@@ -205,12 +205,32 @@ export class OverworldView {
   private hoverClause: Clause | null = null; // the "When beaten…" clause hovered (its tiles outlined)
   // a reveal or destroy being added to the event in the timeline: the cell clicked on the map (at -1 until then), for
   // a reveal then the tile it becomes picked in the layer 1 sheet
-  private eventPick: { kind: 'reveal' | 'destroy'; at: number } | null = null;
-  // the layer 2 selection: the rectangle last picked from layer 2 (larger than a piece), where "Replace piece…" replaces
-  // the pieces wholly inside it (null: the submap's view)
-  private l2Sel: CellRect | null = null;
+  private get eventPick(): { kind: 'reveal' | 'destroy'; at: number } | null {
+    const r = this.gesture.request;
+    return r && (r.kind === 'reveal' || r.kind === 'destroy') ? r : null;
+  }
   // "Replace piece…" (#370) under way: the piece to replace being picked (from: null), then the new one
-  private replacing: { from: number[] | null } | null = null;
+  private get replacing(): { from: number[] | null } | null {
+    const r = this.gesture.request;
+    return r?.kind === 'replace' ? r : null;
+  }
+  // Asks for a cell by the next click (owgesture.ts: the cell request; one asked for before ends), or goes on with
+  // the request – and shows it: the timeline's and the side panel's buttons, the status line, the hatched cells.
+  askCell(r: CellRequest<LinkAsked>): void {
+    const was = this.gesture.request;
+    this.gesture.ask(r);
+    // (a link's other end asked for with no other request before: the panels show nothing of it)
+    if (r.kind !== 'link' || (was && was.kind !== 'link')) {
+      this.buildTimeline();
+      this.buildSide();
+    }
+    this.updateStatus();
+    this.paint();
+  }
+  // Esc: the cell request ended, nothing changed; false: none
+  private cancelRequest(): boolean {
+    return this.cancelEventPick() || this.cancelReplace() || (this.links.cancelPending() && (this.paint(), true));
+  }
   private playing: { start: number; before: HTMLCanvasElement; stepMs: number; fade: boolean } | null = null;
   private timeline = h('div', { class: 'ow-timeline' });
   showGrid = false;
@@ -253,9 +273,9 @@ export class OverworldView {
     this.redrawMap();
     if (this.mode === 'l1') this.buildLeft();
   }
-  selected = -1; // the layer 1 tile shown in the properties (l1Index)
+  // the layer 1 tile shown in the properties (l1Index; -1: none)
+  get selected(): number { return this.gesture.tile; }
   private palScroll: number | null = null; // the paint sheet's scroll while Paint is hidden (the Properties tab shown)
-  private infoTile = -1; // the tile selected by Alt+click (its info)
   mapCanvas = document.createElement('canvas'); // the map as shown: its layers at their strengths (composeMap)
   private l1Canvas = document.createElement('canvas'); // layer 1 alone (transparent where it has no pixel)
   get l1Image(): HTMLCanvasElement { return this.l1Canvas; }
@@ -590,10 +610,13 @@ export class OverworldView {
       // mouse: the one cell)
       const at = this.hover, one = !!at && (this.lookBrush >= 0 || (this.mode === 'l1' && this.levelTiles.at(at.x, at.y)));
       const pick = this.brushDrag.pickFrame(), r = pick ? this.clampRect(pick) : at && (one ? { x: at.x, y: at.y, w: 1, h: 1 } : this.brushDrag.hoverFrame(at));
-      const sel = !pick ? this.l2Sel : null; // (the layer 2 selection: where "Replace piece…" replaces)
+      const sel = !pick ? this.gesture.pieces : null; // (the layer 2 selection: where "Replace piece…" replaces)
       if (sel) drawBrushFrame(ctx, 'selection', [sel.x * s, sel.y * s, sel.w * s, sel.h * s], lw);
       // (a piece being picked for "Replace piece…": the grid cell under the mouse)
-      if (this.replacing && this.hover && !pick) drawBrushFrame(ctx, 'hover', [(this.hover.x & ~1) * s, (this.hover.y & ~1) * s, 2 * s, 2 * s], lw);
+      const asks = this.gesture.asksFor();
+      if (asks === 'piece' && this.hover && !pick) drawBrushFrame(ctx, 'hover', [(this.hover.x & ~1) * s, (this.hover.y & ~1) * s, 2 * s, 2 * s], lw);
+      // (a reveal's or destroy's cell asked for: the layer 1 cell under the mouse)
+      else if (asks === 'cell' && this.hover && !pick) drawBrushFrame(ctx, 'hover', [Math.floor(this.hover.x * s / 16) * 16, Math.floor(this.hover.y * s / 16) * 16, 16, 16], lw);
       else if (r && (pick || one || !this.routeBrush)) drawBrushFrame(ctx, pick ? 'pick' : 'hover', [r.x * s, r.y * s, r.w * s, r.h * s], lw);
       if (this.mode === 'l1') this.pathTool.paint(ctx, lw);
     }
@@ -865,76 +888,62 @@ export class OverworldView {
     const rc = this.scroller.getBoundingClientRect();
     if (e.clientX - rc.left > this.scroller.clientWidth || e.clientY - rc.top > this.scroller.clientHeight) return;
     this.mapFrame.flush(); // (the map as painted so far: read below)
-    // a link symbol of a label under a tile: where its link leads shown
+    const c = this.cell(e), l1 = this.mode === 'l1', onMap = l1 && c.x >= 0 && c.y >= 0 && c.x < 32 && c.y < 32;
+    const cell = onMap ? l1Index(this.region, c.x, c.y) : -1;
     const jump = e.button === 0 ? this.nameLabel.jumpAt(e.clientX, e.clientY) : null;
-    if (jump) { this.links.jump(jump); return; }
-    // a reveal or destroy being added: the tile clicked
-    if (this.eventPick && this.eventPick.at < 0 && e.button === 0) { const p = this.cell(e, 16); this.pickEventCell(p.x, p.y); return; }
-    const c = this.cell(e);
-    // "Replace piece…": the piece clicked on the map (the 16-pixel grid's cell under the mouse)
-    if (this.replacing && e.button === 0) {
-      if (c.x >= 0 && c.y >= 0 && c.x < this.cells.w && c.y < this.cells.h) this.pickReplace(l2Block(this.paintedL2(), this.region, c.x & ~1, c.y & ~1));
-      return;
-    }
-    // (moved starts are written with the submap of their tiles: not before the submaps' views are known)
-    if (this.mode === 'sprites' && !this.views) return;
-    if (this.mode === 'sprites') { if (e.button === 0) { const p = this.point(e); this.sprites.down(p.x, p.y); } return; }
-    // the overworld links (#413): a tile to link to chosen (pending), the selected link's other end, location or Koopa
-    // Kid's place dragged
-    if (e.button === 0 && this.links.pickPending(c.x, c.y, e.clientX, e.clientY)) return;
-    const plain = !e.shiftKey && !e.altKey && !e.ctrlKey;
-    if (this.mode === 'l1' && e.button === 0 && plain && this.links.grab(c.x, c.y)) return;
-    // the level tiles, objects on top of layer 1 (ADR 0012)
-    this.menuAt = null;
-    if (this.mode === 'l1') {
-      const level = this.levelTiles.at(c.x, c.y);
-      // a right click (or Shift+click) on a level tile, any brush: its menu (the route brush: once released without a
-      // drag – a route may start there)
-      if (paintButton(e) && level) {
-        const menu = { cx: e.clientX, cy: e.clientY, x: c.x, y: c.y };
-        if (this.routeBrush) { this.pathTool.down(c.x, c.y); if (this.pathTool.drawing) { this.menuAt = menu; return; } }
-        this.levelTiles.menu(menu.cx, menu.cy, menu.x, menu.y);
-        return;
-      }
-      // a link end (not a level tile): an object too – a right click its menu, a click selects it (#413); a star or
-      // pipe without a link is selected by a click too (#434: Link to… in its properties), a right click paints over it
-      const cell = c.x >= 0 && c.y >= 0 && c.x < 32 && c.y < 32 ? l1Index(this.region, c.x, c.y) : -1;
-      const linkEnd = cell >= 0 && this.links.cells().has(cell);
-      if (!level && cell >= 0 && clickSelects(this.shown.l1[cell], linkEnd, this.pathKinds())) {
-        if (paintButton(e) && linkEnd) {
-          // (the route brush: once released without a drag – a route may start there)
-          if (this.routeBrush) { this.pathTool.down(c.x, c.y); if (this.pathTool.drawing) { this.menuAt = { cx: e.clientX, cy: e.clientY, x: c.x, y: c.y }; return; } }
-          this.linkMenu(cell, e.clientX, e.clientY);
-          return;
-        }
-        if (e.button === 0 && plain) { this.selectTile(cell, false); return; }
-      }
-      // a look as the brush: "Place level here…" with it (a drag places nothing more)
-      if (paintButton(e) && this.lookBrush >= 0) {
-        if (c.x >= 0 && c.y >= 0 && c.x < 32 && c.y < 32) this.levelTiles.placeDialog(l1Index(this.region, c.x, c.y), this.lookBrush);
-        return;
-      }
-      // a click on a level tile selects it, a drag moves it (a pick starts beside one)
-      if (e.button === 0 && level && !e.shiftKey && !e.altKey && !e.ctrlKey) { this.levelTiles.down(c.x, c.y); this.updateStatus(); this.paint(); return; }
-    }
-    if (paintButton(e)) {
-      // (the route brush: the route drawn)
-      if (this.routeBrush) { this.pathTool.down(c.x, c.y); return; }
+    // what the press means (owgesture.ts press), from what is under the mouse
+    const act = this.gesture.press({
+      button: e.button, shift: e.shiftKey, alt: e.altKey, ctrl: e.ctrlKey, mode: this.mode, jump: !!jump, viewsKnown: !!this.views,
+      grab: l1 && this.links.grabs(c.x, c.y) !== null, onMap, levelTile: l1 && this.levelTiles.at(c.x, c.y),
+      tile: onMap ? this.shown.l1[cell] : -1, linkEnd: onMap && this.links.cells().has(cell), kinds: this.pathKinds(),
+      brush: this.routeBrush ? 'route' : this.lookBrush >= 0 ? 'look' : 'tiles',
       // (a stroke leaves level tiles alone: not before the level tiles are known)
-      if (this.mode === 'l1' && !this.pathKinds()) { toast('The path tiles are still being learned – layer 1 can be painted in a moment.'); return; }
-      if (this.mode === 'l1' && this.ev?.without === null) { toast('Layer 1 can\'t be painted on this event: the map without its layer 1 changes could not be emulated.', 'error'); return; }
-      if (this.mode === 'l1' && this.ev && !this.evL1Ready()) { toast('The map after the event is still being emulated – layer 1 can be painted in a moment.'); return; }
-      this.stroke = this.newStroke(this.mode);
-      this.brushDrag.startPaint(c);
-      return;
+      unpaintable: !l1 ? null : !this.pathKinds() ? 'learning' : this.ev?.without === null ? 'noMap' : this.ev && !this.evL1Ready() ? 'emulating' : null,
+    });
+    this.menuAt = null;
+    switch (act.kind) {
+      case 'none': return;
+      case 'jump': this.links.jump(jump!); return;
+      case 'answer': {
+        const r = this.gesture.request!;
+        if (r.kind === 'link') this.links.pickPending(c.x, c.y, e.clientX, e.clientY);
+        // "Replace piece…": the piece clicked on the map (the 16-pixel grid's cell under the mouse)
+        else if (r.kind === 'replace') { if (c.x >= 0 && c.y >= 0 && c.x < this.cells.w && c.y < this.cells.h) this.pickReplace(l2Block(this.paintedL2(), this.region, c.x & ~1, c.y & ~1)); }
+        // a reveal or destroy being added: the tile clicked
+        else { const p = this.cell(e, 16); this.pickEventCell(p.x, p.y); }
+        return;
+      }
+      case 'sprite': { const p = this.point(e); this.sprites.down(p.x, p.y); return; }
+      case 'grab': this.links.grab(c.x, c.y); return;
+      case 'menu': {
+        const menu = { cx: e.clientX, cy: e.clientY, x: c.x, y: c.y };
+        // (the route brush: once released without a drag – a route may start there)
+        if (act.route) { this.pathTool.down(c.x, c.y); if (this.pathTool.drawing) { this.menuAt = menu; return; } }
+        if (act.of === 'level') this.levelTiles.menu(menu.cx, menu.cy, menu.x, menu.y); else this.linkMenu(cell, menu.cx, menu.cy);
+        return;
+      }
+      case 'select': this.selectTile(cell, false); return;
+      case 'placeLevel': this.levelTiles.placeDialog(cell, this.lookBrush); return;
+      case 'moveLevelTile': this.levelTiles.down(c.x, c.y); this.updateStatus(); this.paint(); return;
+      case 'route': this.pathTool.down(c.x, c.y); return;
+      case 'refused':
+        if (act.why === 'learning') toast('The path tiles are still being learned – layer 1 can be painted in a moment.');
+        else if (act.why === 'noMap') toast('Layer 1 can\'t be painted on this event: the map without its layer 1 changes could not be emulated.', 'error');
+        else toast('The map after the event is still being emulated – layer 1 can be painted in a moment.');
+        return;
+      case 'stroke':
+        if (!isLayerMode(this.mode)) return;
+        this.stroke = this.newStroke(this.mode);
+        this.brushDrag.startPaint(c);
+        return;
+      case 'info': this.info(c.x, c.y); return;
+      case 'pick':
+        // (a pick beside the selection ends it – Delete would remove a level tile unseen –, Paint shown again with
+        // the brush picked, ADR 0015)
+        if (this.selected >= 0) this.selectTile(-1, false);
+        this.brushDrag.startPick(c);
+        this.paint();
     }
-    if (e.button !== 0) return;
-    if (e.altKey) { this.info(c.x, c.y); return; } // (Alt+click: the tile's info; Ctrl+click no longer, #482)
-    // (a pick beside the selection ends it – Delete would remove a level tile unseen –, Paint shown again with the brush
-    // picked, ADR 0015)
-    if (this.selected >= 0) this.selectTile(-1, false);
-    this.brushDrag.startPick(c);
-    this.paint();
   }
 
   // a double click on a level tile opens its level (the overworld's entry in the navigation keeps the tile); level
@@ -955,7 +964,7 @@ export class OverworldView {
     if (inside) {
       this.mouse = this.point(e);
       const c = this.cell(e, 16), on = c.x >= 0 && c.y >= 0 && c.x < 32 && c.y < 32;
-      this.cellHistory.hover(on ? l1Index(this.region, c.x, c.y) : -1, e.clientX, e.clientY, e.buttons !== 0 || this.dragging() || !!this.sprites.drag);
+      this.cellHistory.hover(on ? l1Index(this.region, c.x, c.y) : -1, e.clientX, e.clientY, e.buttons !== 0 || this.dragging());
       const jump = e.buttons ? null : this.nameLabel.jumpAt(e.clientX, e.clientY);
       if ((jump?.there ?? null) !== (this.overJump?.there ?? null)) { this.overJump = jump; this.updateStatus(); }
     }
@@ -965,33 +974,47 @@ export class OverworldView {
     if (this.hover && this.hover.x === c.x && this.hover.y === c.y) return;
     this.hover = c;
     this.menuAt = null; // (dragged: a route, no menu)
-    if (this.levelTiles.drag) this.levelTiles.move(c.x, c.y);
+    const d = this.runningDrag();
+    d?.move?.(c); // (to the cell under the mouse; it paints what it shows)
     this.updateStatus();
-    if (this.links.drag) { this.links.move(c.x, c.y); return; }
-    if (this.levelTiles.moving) { this.paint(); return; }
-    if (this.pathTool.drawing) { this.pathTool.move(c.x, c.y); return; }
-    this.brushDrag.move(c);
-    this.requestPaint(); // (the hover frame, a pick's rectangle; a stamp's redraw paints)
+    if (this.levelTiles.moving) this.paint(); // (a level dragged from the list onto the map too)
+    else if (!d?.map) this.requestPaint(); // (the hover frame)
   }
 
-  // a stroke, a pick, a link or a level tile or a route being dragged (followed off the map too)
+  // The drags (#554) – one runs at a time, a button being down –, each kept by its layer; here the one list of them:
+  // which one runs, what Esc does to it (dropped, nothing changed), where the release goes. `map`: a drag over the
+  // map, followed off it too (the cell history's change is dragged from its popup, by the popup's own mouse).
+  private readonly drags: readonly { map: boolean; on: () => boolean; cancel: () => boolean; move?: (c: { x: number; y: number }) => void; up?: (e: MouseEvent) => void }[] = [
+    // a stroke or a pick (Esc: a stroke is never left running)
+    {
+      map: true, on: () => this.brushDrag.active, cancel: () => this.brushDrag.cancel() && (this.paint(), true),
+      move: (c) => { this.brushDrag.move(c); this.requestPaint(); /* (a pick's rectangle; a stamp's redraw paints) */ }, up: () => this.brushDrag.up(),
+    },
+    { map: false, on: () => this.cellHistory.moves, cancel: () => this.cellHistory.cancelMove() },
+    { map: true, on: () => !!this.levelTiles.drag, cancel: () => this.levelTiles.cancel(), move: (c) => this.levelTiles.move(c.x, c.y), up: (e) => this.levelTiles.up(e.altKey) },
+    {
+      map: true, on: () => this.pathTool.drawing, cancel: () => this.pathTool.cancel(), move: (c) => this.pathTool.move(c.x, c.y),
+      up: () => {
+        this.pathTool.up();
+        const m = this.menuAt;
+        this.menuAt = null;
+        // (a right click on a level tile or link end with the route brush)
+        if (m) { if (this.levelTiles.at(m.x, m.y)) this.levelTiles.menu(m.cx, m.cy, m.x, m.y); else this.linkMenu(l1Index(this.region, m.x, m.y), m.cx, m.cy); }
+      },
+    },
+    { map: true, on: () => !!this.links.drag, cancel: () => this.links.cancelDrag(), move: (c) => this.links.move(c.x, c.y), up: (e) => this.links.up(e.clientX, e.clientY) },
+    { map: true, on: () => !!this.sprites.drag, cancel: () => this.sprites.cancelDrag(), up: (e) => { const p = this.point(e); this.sprites.up(p.x, p.y); } },
+  ];
+  private runningDrag() { return this.drags.find((d) => d.on()) ?? null; }
+  // a drag over the map runs
   private dragging(): boolean {
-    return this.brushDrag.active || !!this.links.drag || !!this.levelTiles.drag || this.pathTool.drawing;
+    return !!this.runningDrag()?.map;
   }
 
   onUp(e: MouseEvent): void {
-    if (this.links.drag) { this.links.up(e.clientX, e.clientY); return; }
-    if (this.sprites.drag) { const p = this.point(e); this.sprites.up(p.x, p.y); return; }
-    if (this.levelTiles.drag) { this.levelTiles.up(e.altKey); return; }
-    if (this.pathTool.drawing) {
-      this.pathTool.up();
-      const m = this.menuAt;
-      this.menuAt = null;
-      // (a right click on a level tile or link end with the route brush)
-      if (m) { if (this.levelTiles.at(m.x, m.y)) this.levelTiles.menu(m.cx, m.cy, m.x, m.y); else this.linkMenu(l1Index(this.region, m.x, m.y), m.cx, m.cy); }
-      return;
-    }
-    this.brushDrag.up();
+    const d = this.runningDrag();
+    // (no drag: the brush's release, which ends nothing then)
+    if (d?.up) d.up(e); else if (!d) this.brushDrag.up();
   }
   // a right press on a level tile or link end with the route brush: its menu once released without a drag (null: none, or dragged)
   private menuAt: { cx: number; cy: number; x: number; y: number } | null = null;
@@ -1017,14 +1040,12 @@ export class OverworldView {
 
   // "Replace piece…" (#370): the piece to replace picked, then the new one (on the map or in "Pieces on this map")
   private startReplace(): void {
-    this.replacing = { from: null };
-    this.buildSide();
-    this.updateStatus();
+    this.askCell({ kind: 'replace', from: null });
   }
   // Esc or the button again: nothing replaced; false: none under way
   private cancelReplace(): boolean {
     if (!this.replacing) return false;
-    this.replacing = null;
+    this.gesture.endRequest();
     this.buildSide();
     this.updateStatus();
     this.paint();
@@ -1033,8 +1054,8 @@ export class OverworldView {
   private pickReplace(p: number[]): void {
     const r = this.replacing;
     if (!r) return;
-    if (!r.from) r.from = p.slice();
-    else { this.replacing = null; void this.replacePieces(r.from, p); }
+    if (!r.from) this.gesture.ask({ kind: 'replace', from: p.slice() });
+    else { this.gesture.endRequest(); void this.replacePieces(r.from, p); }
     this.buildSide();
     this.updateStatus();
     this.paint();
@@ -1046,7 +1067,7 @@ export class OverworldView {
     if (samePiece(from, to)) { refusalToast(this.app.rom, { kind: 'pieceSame' }); return; }
     const views = this.views;
     if (!views) { toast('The submaps are still being loaded, try again'); return; }
-    const sel = this.l2Sel, inside = sel && gridInside(sel);
+    const sel = this.gesture.pieces, inside = sel && gridInside(sel);
     if (sel && !inside) { refusalToast(this.app.rom, { kind: 'pieceNoneInside' }); return; }
     const area = () => inside ?? views[this.map];
     const n = piecesAt(this.paintedL2(), this.region, area(), from).length;
@@ -1116,7 +1137,7 @@ export class OverworldView {
     if (this.mode === 'l2') {
       const p = l2BrushPalettes(entries);
       if (p.length === 1) this.l2Pal = p[0]; // (the sheet in the brush's palette)
-      this.l2Sel = r.w * r.h > 4 ? { ...r } : null; // (a click, a piece picked as the brush: no selection)
+      this.gesture.pieces = r.w * r.h > 4 ? { ...r } : null; // (a click, a piece picked as the brush: no selection)
     }
     this.revealMark = true;
     this.buildSide();
@@ -1128,7 +1149,7 @@ export class OverworldView {
   info(x: number, y: number): void {
     if (!isLayerMode(this.mode)) return;
     if (x < 0 || y < 0 || x >= 32 || y >= 32) return;
-    this.selectTile(l1Index(this.region, x, y), false, true);
+    this.selectTile(l1Index(this.region, x, y), false);
   }
 
   // shows layer 1 tile i (l1Index) selected, on the submap it is on (only the tile known: submapOf, as the World
@@ -1142,11 +1163,8 @@ export class OverworldView {
 
   // selects a layer 1 tile (a level tile clicked, any tile by Alt/Ctrl+click: byInfo; l1Index); center: scroll the map
   // to it
-  selectTile(i: number, center: boolean, byInfo = false): void {
-    this.selected = i;
-    if (i >= 0) this.sideTab = 'props'; // (a selection shows its properties, ADR 0015)
-    this.infoTile = byInfo ? i : -1;
-    this.links.selectAt(i);
+  selectTile(i: number, center: boolean): void {
+    this.gesture.selectTile(i, this.links.selAt(i)); // (a selection shows its properties, ADR 0015)
     if (center && i >= 0) {
       const t = l1XY(i), { x, y } = owShownAt(this.region, t.x * 16 + 8, t.y * 16 + 8);
       this.scroller.scrollLeft = x * this.zoom - this.scroller.clientWidth / 2;
@@ -1187,6 +1205,8 @@ export class OverworldView {
       this.statusText.textContent = `${this.replacing.from ? 'Click the new piece' : 'Click the piece to replace'} on the map or in “Pieces on this map” · Esc cancels`;
       return;
     }
+    const asked = this.links.askedStatus();
+    if (asked) { this.statusText.textContent = asked; return; }
     const route = this.mode === 'l1' ? this.pathTool.status() : null;
     if (route && (this.pathTool.drawing || !c)) { this.statusText.textContent = route; return; }
     if (this.mode === 'sprites' && !c) {
@@ -1316,7 +1336,7 @@ export class OverworldView {
     this.event = e;
     this.hoverStep = null;
     this.hoverClause = null;
-    this.eventPick = null;
+    if (this.eventPick) this.gesture.endRequest(); // (it was this event's)
     storeEvents(this.app.romName, this.checked, e);
     this.syncEvent();
     this.buildLeft();
@@ -1467,15 +1487,12 @@ export class OverworldView {
   private startEventPick(kind: 'reveal' | 'destroy'): void {
     const rom = this.app.rom, why = kind === 'reveal' ? revealRefusal(rom, this.event) : destroyRefusal(rom, this.event);
     if (why) { refusalToast(rom, why); return; }
-    this.eventPick = { kind, at: -1 };
-    this.buildTimeline();
-    this.updateStatus();
-    this.paint();
+    this.askCell({ kind, at: -1 });
   }
   // Esc: no reveal or destroy added; false: none being added
   cancelEventPick(): boolean {
     if (!this.eventPick) return false;
-    this.eventPick = null;
+    this.gesture.endRequest();
     this.buildTimeline();
     this.updateStatus();
     this.buildSide();
@@ -1491,14 +1508,14 @@ export class OverworldView {
     if (pick.kind === 'reveal') {
       const why = this.pickRefusals()?.[i - this.region * 0x400];
       if (why) { refusalToast(rom, why); return; }
-      this.eventPick = { kind: 'reveal', at: i };
+      this.gesture.ask({ kind: 'reveal', at: i });
       if (this.mode !== 'l1') this.setMode('l1'); else this.buildSide();
       this.buildTimeline();
       this.updateStatus();
       this.paint();
       return;
     }
-    this.eventPick = null;
+    this.gesture.endRequest();
     this.tileEdit(`destroys ${cellText(i)}`, () => addDestroy(rom, this.event, i, this.shown.l1));
     this.buildTimeline();
     this.updateStatus();
@@ -1508,7 +1525,7 @@ export class OverworldView {
   private pickReveal(into: number): void {
     const at = this.eventPick?.at ?? -1;
     if (at < 0) return;
-    this.eventPick = null;
+    this.gesture.endRequest();
     const t = this.l1[at];
     // (no pair of the reveal list gives the tile: one added, then the reveal)
     const rom = this.app.rom, e = this.event, refresh = () => { this.buildTimeline(); this.updateStatus(); this.buildSide(); };
@@ -1615,10 +1632,7 @@ export class OverworldView {
     if (n === this.map) return;
     this.cellHistory.close();
     this.map = n;
-    this.selected = -1;
-    this.links.selectAt(-1);
-    this.l2Sel = null;
-    this.replacing = null;
+    if (this.gesture.leave('map', this.mode)) this.buildTimeline();
     this.redrawMap();
     this.buildBar();
     this.mapPop.refresh(); // (the new map's settings)
@@ -1633,16 +1647,11 @@ export class OverworldView {
     if (this.mode === m) return;
     this.cellHistory.close();
     this.mode = m;
-    this.links.cancelPending(); // (the next click on the map no longer chooses a link's tile)
     this.levelTiles.cancel();
     this.pathTool.cancel();
-    if (m !== 'l1' && (this.eventPick?.at ?? -1) >= 0) this.cancelEventPick(); // (the tile a reveal becomes is picked in the layer 1 sheet)
-    if (m !== 'l2') { this.replacing = null; this.l2Sel = null; }
-    // (the selection – a level tile, a link end, a tile's info – ends: it belongs to the mode it was made in)
-    this.selected = -1;
-    this.infoTile = -1;
-    this.links.selectAt(-1);
-    this.sprites.sel = null;
+    // (the selection – a level tile, a link end, a tile's info, a sprite – ends: it belongs to the mode it was made in;
+    // a cell request where the new mode can't answer it: owgesture.ts)
+    if (this.gesture.leave('mode', m)) this.buildTimeline();
     this.buildProps();
     this.buildLeft(); // (levels without a level tile are dragged onto the map in the layer 1 mode)
     if (isLayerMode(m) && this.brush.kind !== m) this.brush = { kind: m, w: 1, h: 1, entries: [m === 'l1' ? FIRST_L1_TILE : 0] };
@@ -1759,16 +1768,13 @@ export class OverworldView {
       if (k === 'd') return this.sprites.duplicate();
     }
     // (Esc with any modifier: a stroke is never left running)
-    if (k === 'escape' && this.brushDrag.cancel()) { this.paint(); return true; }
-    if (k === 'escape' && this.cellHistory.cancelMove()) return true;
-    if (k === 'escape' && this.levelTiles.cancel()) return true;
-    if (k === 'escape' && this.pathTool.cancel()) return true;
-    if (k === 'escape' && this.cancelEventPick()) return true;
-    if (k === 'escape' && this.cancelReplace()) return true;
+    // Esc, in one order (#554): the drag running, the cell asked for, the sprite chosen in the picker, the selection,
+    // the edited event
+    if (k === 'escape' && this.runningDrag()?.cancel()) return true;
+    if (k === 'escape' && this.cancelRequest()) return true;
     if (e.ctrlKey || e.metaKey || e.altKey) return false;
     if (k === 'escape' && this.mode === 'sprites' && this.sprites.unpick()) return true;
     if (k === 'escape' && this.mode === 'sprites' && this.sprites.deselect()) return true;
-    if (k === 'escape' && this.links.cancelPending()) { this.paint(); return true; }
     // (Esc layered: a selection ended first – Paint shown again –, then the event)
     if (k === 'escape' && this.mode !== 'sprites' && this.selected >= 0) { this.selectTile(-1, false); return true; }
     if (k === 'escape' && this.event >= 0) { this.setEvent(-1); return true; }
@@ -1873,7 +1879,7 @@ export class OverworldView {
   /** Ctrl+' (#482): the grid on/off. */
   toggleGrid(): void { this.showGrid = !this.showGrid; this.paint(); }
   showProps(): void {
-    this.sideTab = 'props';
+    this.gesture.show('props');
     this.buildProps();
   }
   // the side panel's tabs (owselection.ts sideTabs): Paint (the tool) or Properties (of what is selected, in one fixed
@@ -1882,16 +1888,15 @@ export class OverworldView {
   // (openOptions)
   buildProps(): void {
     const sprites = this.mode === 'sprites';
-    const selected = sprites ? this.sprites.hasSelection() : this.selected >= 0;
-    if (!selected) this.sideTab = 'paint'; // (the selection ended: Paint again, the next selection shows its properties)
-    const tabs = sideTabs(this.mode, this.sideTab, selected, (this.eventPick?.at ?? -1) >= 0);
+    if (sprites) this.sprites.hasSelection(); // (a sprite that is gone is no longer selected)
+    const tabs = this.gesture.tabs(this.mode, (this.eventPick?.at ?? -1) >= 0), selected = tabs.selected;
     const howToSelect = sprites ? this.sprites.howToSelect() : this.mode === 'l1' ? 'Click a level tile, star, pipe or link end on the map to select it, any tile with Alt+click'
       : 'Alt+click a tile on the map – a level tile too – to select it';
     const tab = (t: SideTab) => h('button', {
       class: tabs.shown === t ? 'active' : '', disabled: t === 'props' && !tabs.propsEnabled,
       title: t === 'paint' ? (sprites ? 'The sprites to place' : 'The tiles to paint with (right click/Shift+click on the map)') + (selected ? ' – the selection stays' : '')
         : tabs.propsEnabled ? 'The settings of what is selected' : selected ? 'Pick the tile it becomes in the sheet first (Esc cancels)' : `Nothing selected: ${howToSelect}`,
-      onclick: () => { this.sideTab = t; this.buildProps(); },
+      onclick: () => { this.gesture.show(t); this.buildProps(); },
     }, tabs.labels[t]);
     this.tabBar.replaceChildren(tab('paint'), tab('props'));
     const propsShown = tabs.shown === 'props';
@@ -2071,7 +2076,7 @@ export class OverworldView {
     const others = teleports.filter((t) => !sentences.some((x) => x.exit === teleportExit(t.action)));
     // (where an exit to the overworld teleports to: moved by a click on the tile – the pick pending, #413)
     const move = (t: LevelTeleport) => h('button', { class: 'link-btn', title: `Choose the tile location ${hex(t.location, 2)} teleports to (the next click, on any map; Esc cancels)`,
-      onclick: (ev: MouseEvent) => { ev.stopPropagation(); this.links.pending = { move: { sel: { kind: 'location', i: t.location }, target: true } }; this.paint(); this.updateStatus(); } }, 'Move…');
+      onclick: (ev: MouseEvent) => { ev.stopPropagation(); this.links.pending = { move: { sel: { kind: 'location', i: t.location }, target: true } }; this.updateStatus(); } }, 'Move…');
     return [
       h('div', { class: 'hint' }, 'When beaten… (outlined on the map, a click edits its event):'),
       ...(edges ? [] : [h('div', { class: 'hint' }, 'The levels the exits open: being learned …')]),
@@ -2461,14 +2466,14 @@ export class OverworldView {
   // "Replace piece…" and where it replaces: the selection (the rectangle last picked from the map, × drops it) or the
   // whole map; while under way which piece is picked next
   private replaceRow(): HTMLElement {
-    const sel = this.l2Sel, r = this.replacing;
+    const sel = this.gesture.pieces, r = this.replacing;
     return h('div', { class: 'row' },
       h('button', {
         class: r ? 'active' : '', onclick: () => { if (!this.cancelReplace()) this.startReplace(); },
         title: 'Every piece of one kind (on its 16-pixel grid) in the selection becomes another one: click the piece to replace, then the new one – on the map or below. Without a selection: the whole map, after a confirmation. One undo step; with an event edited (the event list) painted into the event',
       }, 'Replace piece…'),
       h('span', { class: 'hint' }, r ? (r.from ? 'now the new piece' : 'click the piece to replace') : sel ? `in the selection ${sel.w}×${sel.h}` : 'on the whole map'),
-      ...(sel && !r ? [h('button', { title: 'Drop the selection: replace on the whole map', 'aria-label': 'Drop the selection', onclick: () => { this.l2Sel = null; this.buildSide(); this.paint(); } }, icon('close'))] : []));
+      ...(sel && !r ? [h('button', { title: 'Drop the selection: replace on the whole map', 'aria-label': 'Drop the selection', onclick: () => { this.gesture.pieces = null; this.buildSide(); this.paint(); } }, icon('close'))] : []));
   }
   private l2TilesOpen = true; // the 8x8 sheet below the pieces shown (folded: the pieces alone)
   // "Pieces on this map" (#337, core/owl2pieces.ts): the 2x2 entry blocks on the 16-pixel grid of the submap's view (the

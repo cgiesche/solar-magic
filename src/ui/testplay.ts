@@ -166,7 +166,7 @@ function start(app: App, o: Origin, audio: AudioOut, fromSave: boolean): void {
       let why = '';
       try {
         const maker = new LevelEmulator(app.rom);
-        maker.adoptBoot(app.emu);
+        maker.adoptBoot(app.emu.snapshot);
         ({ sram, why } = progressSram(maker, o.file.progress, o.file.save));
       } catch (e) { why = String(e instanceof Error ? e.message : e); }
       if (!sram) { ok = false; toast(`No save file of the event progress – ${why}. Started with empty save files.`, 'error'); }

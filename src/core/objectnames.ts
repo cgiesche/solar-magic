@@ -68,7 +68,7 @@ function findTable(emu: LevelEmulator, ts: number): number | null {
 
 // the same with what the load read
 export function objectTable(emu: LevelEmulator, ts: number): { result: number | null; reads: RomReads } {
-  return emu.tracked(() => findTable(emu, ts));
+  return emu.record('behaviour', () => findTable(emu, ts));
 }
 
 // the same as a job (the result learner's, no picture, CONTEXT.md) learned in the probe worker under objectTableKey: a

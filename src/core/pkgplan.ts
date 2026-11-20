@@ -35,7 +35,10 @@ import { isGlobalAnimBps, globalAnimList } from './globalanim.ts';
 import { cleanGameBytes } from './cleangame.ts';
 import { globalGfxNum, globalGfxName, cleanGlobalGfx, fromBin, isCleanGlobalGfx, setGlobalGfx, same } from './globalgfx.ts';
 import { listPackages } from './pkgreg.ts';
-import { sharedPalConflicts, globalGfxConflicts, owTileConflicts } from './pkgsections.ts';
+import { sharedPalConflicts, globalGfxConflicts, owTileConflicts, titlePictureConflicts } from './pkgsections.ts';
+import { isTitleBps, titleMapOfBps } from './titlebps.ts';
+import { GAME_TITLE_STRIPE, titleStripe, titleStripeAddr, titlePictureHash, writeTitleScreen } from './titlescreen.ts';
+import { hashBytes } from './patchreg.ts';
 import { isOwTileBps, changedOwTiles, cleanOwTiles } from './owtilebps.ts';
 import { installOwMap16Patch, owTileWords, setOwTileWords, sameOwTile, owTileNames } from './overworld.ts';
 
@@ -95,8 +98,9 @@ export function detectBlocks(files: Map<string, Uint8Array>, gps?: ToolFolder | 
 // code, else a level import)
 // (sharedpal: Lunar Magic's shared palettes, sharedpal.ts; globalanim: its global ExAnimation as a BPS,
 // globalanim.ts; globalgfx: the game's GFX00–33 as Lunar Magic's GFX##.bin, globalgfx.ts; owtiles: its overworld's
-// layer 1 tiles as a BPS, owtilebps.ts)
-export interface DetectedGraphics { map16: string[]; exgfx: string[]; pal: string[]; palmask: string[]; sharedpal: string[]; globalanim: string[]; globalgfx: string[]; owtiles: string[]; mwls: string[] }
+// layer 1 tiles as a BPS, owtilebps.ts; titlepic: its title screen picture as a BPS, titlebps.ts – a patch with
+// both is its overworld tiles)
+export interface DetectedGraphics { map16: string[]; exgfx: string[]; pal: string[]; palmask: string[]; sharedpal: string[]; globalanim: string[]; globalgfx: string[]; owtiles: string[]; titlepic: string[]; mwls: string[] }
 
 // `included`: files some .asm file includes (incbin data is code's, not graphics)
 export function detectGraphics(files: Map<string, Uint8Array>, included: Set<string>): DetectedGraphics {
@@ -106,6 +110,7 @@ export function detectGraphics(files: Map<string, Uint8Array>, included: Set<str
     const n = files.get(f)!.length;
     return /gfx/i.test(base(f)) || n === 0x1000 || n === 0xc00;
   };
+  const owtiles = keys.filter((f) => /\.bps$/i.test(f) && isOwTileBps(files.get(f)!));
   return {
     map16: keys.filter((f) => /\.map16$/i.test(f)),
     exgfx: keys.filter(isGfx),
@@ -114,12 +119,13 @@ export function detectGraphics(files: Map<string, Uint8Array>, included: Set<str
     sharedpal: keys.filter((f) => /\.pal$/i.test(f) && isSharedPalettes(files.get(f)!)),
     globalanim: keys.filter((f) => /\.bps$/i.test(f) && isGlobalAnimBps(files.get(f)!)),
     globalgfx: keys.filter((f) => !included.has(f) && globalGfxNum(f) !== null),
-    owtiles: keys.filter((f) => /\.bps$/i.test(f) && isOwTileBps(files.get(f)!)),
+    owtiles,
+    titlepic: keys.filter((f) => /\.bps$/i.test(f) && !owtiles.includes(f) && isTitleBps(files.get(f)!)),
     mwls: keys.filter((f) => /\.mwl$/i.test(f)),
   };
 }
 
-export const graphicsFiles = (g: DetectedGraphics) => [...g.map16, ...g.exgfx, ...g.pal, ...g.palmask, ...g.sharedpal, ...g.globalanim, ...g.globalgfx, ...g.owtiles];
+export const graphicsFiles = (g: DetectedGraphics) => [...g.map16, ...g.exgfx, ...g.pal, ...g.palmask, ...g.sharedpal, ...g.globalanim, ...g.globalgfx, ...g.owtiles, ...g.titlepic];
 
 // files the .asm files of an upload include (incsrc/incbin)
 export function includedFiles(files: Map<string, Uint8Array>): Set<string> {
@@ -153,6 +159,7 @@ export interface PlannedGlobalAnim { file: string; slots: ExSlot[]; frames: Fram
 export interface PlannedGlobalGfx { file: string; num: number; data: Uint8Array }
 // the package's overworld layer 1 tiles differing from the clean game's (tile → its four words)
 export interface PlannedOwTiles { file: string; tiles: Map<number, number[]> }
+export interface PlannedTitlePicture { file: string; map: Uint16Array }
 export interface PackagePlan {
   blocks: PlannedBlock[];
   map16: PlannedMap16 | null;
@@ -163,6 +170,7 @@ export interface PackagePlan {
   globalAnim: PlannedGlobalAnim | null;
   globalGfx: PlannedGlobalGfx[];
   owTiles: PlannedOwTiles | null;
+  titlePicture: PlannedTitlePicture | null;
   samples: PlannedSample[]; // the sample levels: offered as which level, or why not (pkgsamples.ts)
   sample: MwlLevel | null; // the first offered, parsed (the level setup's back area color)
   exanim: ExSlot[]; // the sample level's ExAnimation slots that write tiles the package's Map16 tiles draw from
@@ -318,10 +326,11 @@ export function planPackage(rom: Rom, input: PlanInput, blank: number[]): Packag
   const palettes = packPalettes(files, graphics.pal, graphics.palmask, notes);
   const sharedPal = planSharedPal(rom, files, graphics.sharedpal, notes), globalGfx = planGlobalGfx(rom, files, graphics.globalgfx, notes);
   const owTiles = planOwTiles(rom, files, graphics.owtiles, notes);
-  const installed = sharedPal || globalGfx.length || owTiles ? listPackages(rom) : [];
+  const titlePicture = planTitlePicture(rom, files, graphics.titlepic, notes);
+  const installed = sharedPal || globalGfx.length || owTiles || titlePicture ? listPackages(rom) : [];
   const conflicts = [...(sharedPal ? sharedPalConflicts(installed, [...sharedPal.colors.keys()]) : []), ...globalGfxConflicts(installed, globalGfx.map((g) => g.num)),
-    ...(owTiles ? owTileConflicts(installed, [...owTiles.tiles.keys()]) : [])];
-  return { blocks, map16, romMap16, gfx, palettes, sharedPal, globalAnim, globalGfx, owTiles, samples, sample, exanim, frames, notes, conflicts };
+    ...(owTiles ? owTileConflicts(installed, [...owTiles.tiles.keys()]) : []), ...(titlePicture ? titlePictureConflicts(installed) : [])];
+  return { blocks, map16, romMap16, gfx, palettes, sharedPal, globalAnim, globalGfx, owTiles, titlePicture, samples, sample, exanim, frames, notes, conflicts };
 }
 
 // the FG Map16 tiles a plan's .map16 (or whole-ROM .map16) draws
@@ -350,6 +359,17 @@ function planOwTiles(rom: Rom, files: Map<string, Uint8Array>, found: string[], 
   if (tiles === 'not known') { notes.push(`${base(file)}: needs bytes of the clean game this ROM no longer has – the overworld's layer 1 tiles are not taken over`); return null; }
   if (!tiles?.size) { notes.push(`${base(file)}: the clean game's overworld layer 1 tiles – nothing to take over`); return null; }
   return { file, tiles };
+}
+
+// the title screen picture (the first file; more are not used)
+function planTitlePicture(rom: Rom, files: Map<string, Uint8Array>, found: string[], notes: string[]): PlannedTitlePicture | null {
+  if (!found.length) return null;
+  const file = found[0];
+  for (const f of found.slice(1)) notes.push(`${base(f)}: not used – ${base(file)} has the package's title screen picture`);
+  const map = titleMapOfBps(files.get(file)!, cleanGameBytes(rom));
+  if (map === 'not known') { notes.push(`${base(file)}: needs bytes of the clean game this ROM no longer has – the title screen picture is not taken over`); return null; }
+  if (!map) { notes.push(`${base(file)}: its title screen picture is not one stripe image of 32 × 29 tiles (Lunar Magic's layout) – not taken over`); return null; }
+  return { file, map };
 }
 
 // the global GFX files (the first file of each number; more are not used): only those differing from the
@@ -503,6 +523,15 @@ export function applyGraphics(rom: Rom, files: Map<string, Uint8Array>, plan: Pa
     if (edited.length) warnings.push(`Overworld layer 1 ${owTileNames(edited)}: this ROM's own changes are replaced by ${base(file)} (removing the package sets them back)`);
     for (const [t, w] of tiles) setOwTileWords(rom, t, w);
     prints.push(`${tiles.size} overworld layer 1 tile(s) from ${base(file)}: ${owTileNames([...tiles.keys()])}`);
+  }
+  if (plan.titlePicture) {
+    const { file, map } = plan.titlePicture, s = titleStripe(map);
+    // (the ROM's picture already: nothing written; else the one before stays in the ROM for the package's removal)
+    if (titlePictureHash(rom) !== (hashBytes([s.subarray(0, s.length - 1)]) || 1)) {
+      if (titleStripeAddr(rom) !== GAME_TITLE_STRIPE) warnings.push(`Title screen picture: this ROM's own is replaced by ${base(file)} (removing the package sets it back)`);
+      writeTitleScreen(rom, map, true);
+    }
+    prints.push(`The title screen picture from ${base(file)}`);
   }
   prints.push(...storeGfx(rom, files, plan.gfx));
   if (plan.globalAnim) {

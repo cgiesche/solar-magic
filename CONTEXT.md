@@ -87,6 +87,12 @@ _Avoid_: GFX bypass, slot (alone)
 **Pixel editor**: the zoomed view beside a graphics sheet; the only place pixels are painted.
 _Avoid_: canvas, paint dialog
 
+**Pixel selection**: the rectangle of pixels selected in the pixel editor. Pen, eraser and fill reach only it; without one they reach the tiles the pixel editor shows.
+_Avoid_: marquee, selection (alone, where the sheet's tiles could be meant)
+
+**Float**: pixels held over the graphics file – lifted out of it (where they were is transparent) or pasted – until they are put down, which is the edit, or dropped, which leaves the file as it was.
+_Avoid_: floating selection, layer
+
 **Level size**: height of a horizontal level, one of Lunar Magic 3.00's sizes; taller = fewer screens. Below row 31 objects/sprites are placed by 32-row subscreens.
 _Avoid_: dimension, level mode
 
@@ -213,6 +219,9 @@ _Avoid_: extra option, setting
 **Overworld import**: another editor ROM's overworld replacing this one's (Lunar Magic's "Copy Overworld" reversed). Package content is not copied, only warned about.
 _Avoid_: overworld transfer, overworld export
 
+**Cell request**: the overworld editor asking for a cell of the map by the next click: the tile a reveal or a destroyed level tile is added at, the piece to replace, an overworld link's other end. At most one at a time – asking for another ends it, Esc ends it; the cells it would refuse are hatched, with the refusal over them.
+_Avoid_: pending pick, pick (taking tiles into the brush), mode
+
 **Refusal**: an overworld edit the game's limits don't allow, returned by the core as data and worded by the UI in player terms, with a fix or alternative; technical details folded away.
 _Avoid_: error, limit message
 
@@ -283,7 +292,7 @@ _Avoid_: Patch, Resource, Download, Project
 **Upload**: the files handed in for one package, before install.
 _Avoid_: Download, patch package
 
-**Callisto project**: an upload with `tools/Callisto/*.toml` (e.g. the RHR baserom): one package, patches in the project's order (ADR 0006). Its BPS data for a Lunar Magic ROM is not part of it, except that sample levels take messages from its overworld and the overworld's changed layer 1 tiles are a graphics part.
+**Callisto project**: an upload with `tools/Callisto/*.toml` (e.g. the RHR baserom): one package, patches in the project's order (ADR 0006). Its BPS data for a Lunar Magic ROM is not part of it, except that sample levels take messages from its overworld, the overworld's changed layer 1 tiles are a graphics part and so is its title screen picture.
 _Avoid_: baserom, project import
 
 **Replaced patch**: a known patch an editor patch already covers; skipped with a note.
@@ -295,7 +304,7 @@ _Avoid_: tool patch, tool folder
 **Part**: one typed piece of a package (patch, UberASM file, block, sprite, song, sound effect, graphics part). Detected per file, never by other files in the upload (ADR 0002).
 _Avoid_: Component, Item
 
-**Graphics part**: a part without code: Map16, ExGFX, palette, changed shared palette colors, a changed global GFX file, global animation slots, changed overworld layer 1 tiles (their Map16, from a BPS of Lunar Magic's overworld). Only differences from the clean game count; two packages changing the same color/file/tile conflict; removal restores the clean game's (a color's or tile's: what was there). Keeps the author's number if free.
+**Graphics part**: a part without code: Map16, ExGFX, palette, changed shared palette colors, a changed global GFX file, global animation slots, changed overworld layer 1 tiles (their Map16, from a BPS of Lunar Magic's overworld), a title screen picture (from a BPS of Lunar Magic's title screen; not its title screen movement or colours). Only differences from the clean game count; two packages changing the same color/file/tile or both setting the title screen picture conflict; removal restores the clean game's (a color's, tile's or the title screen picture's: what was there). Keeps the author's number if free.
 _Avoid_: Resource, asset
 
 **Sound effect**: an AddmusicK SFX (bank 1DF9/1DFC); keeps the author's number if free, else renumbered and the package's defines follow.
@@ -321,6 +330,12 @@ _Avoid_: background package, graphics import
 **Anim graphic**: one of four graphics A–D (Lunar Magic's ExGFX 60–63), the only source of animation frames; other sources are copied in on import (ADR 0003).
 _Avoid_: AN2, alternative file, animation ExGFX
 
+**Level animation**: the open level shown in the editor as the game goes on showing it after its load – its animated tiles and colors – while the view setting "Animation" is on. Found by emulation; the level is still for it (no Mario, no sprites).
+_Avoid_: ExAnimation (that is what the user edits; this is what the game shows), preview
+
+**Animation step**: the level's (or a submap's) tiles and colors a fixed number of game frames after the step before; the steps repeat, and the level animation shows one after the other in the game's rhythm.
+_Avoid_: frame (a game frame, or an animation slot's frame), phase
+
 **Color rotation**: animation slot types 18–1B rotating a palette range; colors the game sets itself every frame don't rotate (found by emulation).
 _Avoid_: palette rotate, palette cycling
 
@@ -339,6 +354,9 @@ _Avoid_: Switch mode, P-state
 
 **Play session**: a level played in the emulator from gameplay start until death, exit or stop.
 _Avoid_: run, game loop, harness
+
+**Drive**: the emulated game played by the editor, frame by frame, with the buttons a player would press – to get it to a screen, a new file's first overworld, a save file loaded. Its **screen path** is what it started from (a machine or power-on, the save files, what was set in its RAM) and the joypad of each frame: enough to play the same way again, watched. Not a play session, which the user plays.
+_Avoid_: player (the person, and player select), script, macro, input sequence
 
 **Play from power-on**: the game played from reset, nothing skipped: the pre-game in sequence, then the overworld. With empty save files (the intro plays) or with file A a save at an event progress, made by the game's own save. Started in the Game workspace; level test play and test play from the overworld keep skipping the pre-game.
 _Avoid_: full game test, boot play
@@ -364,7 +382,13 @@ _Avoid_: pool, thread
 **Watch**: records the bytes a view's drawing read; the view redraws only when one changed.
 _Avoid_: signature, subscription
 
-**Picture**: an emulated result showing looks; only pictures count display data as read (ADR 0008).
+**Boot snapshot**: the machine at the title screen as booted, with the ROM bytes the boot read, kept by what a result leaves out of them (graphics file data, display data, the title screen picture). Every emulated result starts from it and counts the boot's reads its **shows** asks for; emulators on one ROM share it. Stale when a byte it read changed.
+_Avoid_: base state, boot state (the machine alone), savestate
+
+**Shows**: what an emulated result says of itself, which decides the reads it counts – each counts the one before's and more: **behaviour** (no picture: code and tables), **picture**, **full picture**, **title screen**. A result names it; it sets no skip mask. A few results **leave out besides** bytes they name: the colours' values (where a level's colours come from), the overworld's data (the path kinds and the like), the tile data (the tilesets' pointers).
+_Avoid_: read class (inside the module), skip mask, record mode
+
+**Picture**: an emulated result showing looks; only pictures count display data as read (ADR 0008). Graphics file contents are its input. A **full picture** counts the graphics file data the game read from the ROM too (the open level's picture, its animation steps); one that shows the **title screen** counts the title screen picture's bytes as well (a pre-game screen's machine, a menu's text).
 _Avoid_: image, render
 
 **Display data**: ROM bytes that only say what tiles and colors look like (Map16 quarters, palettes and pointers). Not acts-like, not graphics file data (an input), not ExAnimation data.

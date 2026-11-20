@@ -4,7 +4,7 @@
 //   registers, the objects' tiles, the frames) and the console's state after it
 // - the same input again: no frame emulated
 // - every object of 105 moved a tile as a drag's steps: few frames emulated; the ROM bytes the load counts as read
-//   (recordAll, what App.refresh keeps its render by) cover all a whole load reads
+//   (record 'title screen'; App.refresh keeps its render by a full picture's) cover all a whole load reads
 // - other kinds of levels (layer 2 BG, vertical, layer 2 objects, layer 3, tides): objects of both layers moved and
 //   deleted, sprites moved, the header changed
 // - another level loaded in between; a ROM byte the load read changed, and changed back
@@ -26,7 +26,7 @@ const emu = new LevelEmulator(rom);
 emu.reuseLoads = true;
 emu.boot();
 const whole = new LevelEmulator(rom); // the reference: every load emulated whole
-whole.adoptBoot(emu);
+whole.adoptBoot(emu.snapshot);
 
 const bytes = (a: ArrayLike<number>, b: ArrayLike<number>) => a.length === b.length && Array.prototype.every.call(a, (v: number, k: number) => v === b[k]);
 const sameSets = (a: Map<number, Set<number>>, b: Map<number, Set<number>>) =>
@@ -80,7 +80,7 @@ function load(lv: Level): { diff: string; emulated: number; frames: number } {
     if (i % 5 === 0 && !uncovered) {
       // (the move loaded again from the load before it, its ROM reads recorded as App.refresh does)
       o.x--; emu.load(0x105, levelOverride(rom, lv)); o.x++;
-      const ov = levelOverride(rom, lv), a = emu.recordAll(() => emu.load(0x105, ov)).reads, b = whole.recordAll(() => whole.load(0x105, ov)).reads;
+      const ov = levelOverride(rom, lv), a = emu.record('title screen', () => emu.load(0x105, ov)).reads, b = whole.record('title screen', () => whole.load(0x105, ov)).reads;
       const missing = uncoveredReads(a, b);
       if (missing) uncovered = `object ${i}: ${missing}`;
     }
@@ -146,7 +146,7 @@ function load(lv: Level): { diff: string; emulated: number; frames: number } {
 // ---- reuse off: every frame emulated ----
 {
   const plain = new LevelEmulator(rom);
-  plain.adoptBoot(emu);
+  plain.adoptBoot(emu.snapshot);
   const lv = loadLevel(rom, 0x105), ov = levelOverride(rom, lv);
   const r1 = plain.load(0x105, ov), n1 = plain.emulatedFrames, r2 = plain.load(0x105, ov);
   check(n1 === r1.frames && plain.emulatedFrames === r2.frames, `reuse off: every frame emulated (${n1}/${r1.frames}, ${plain.emulatedFrames}/${r2.frames})`);

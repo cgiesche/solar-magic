@@ -23,7 +23,7 @@ function slipperyOnes(emu: LevelEmulator): number[] {
 
 // the same with what the loads read
 export function slipperyActions(emu: LevelEmulator): { result: number[]; reads: RomReads } {
-  return emu.tracked(() => slipperyOnes(emu));
+  return emu.record('behaviour', () => slipperyOnes(emu));
 }
 
 // the same as a job (the result learner's, no picture, CONTEXT.md) learned in the probe worker under slipperyKey: a

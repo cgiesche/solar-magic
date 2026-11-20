@@ -1,7 +1,7 @@
 // The overworld map's animation (#420, core/owanimsteps.ts) played in the overworld view: the steps of the submap at
 // the event progress shown learned in the probe worker (App.owAnimSteps; the busy indicator says "Animations n/m"
 // meanwhile, the map still), then shown one after the other in the game's rhythm as the level's (7.5 steps a second,
-// App.animTick), while View → "Animation" is on (App.setAnimation) and the view is in the page. Learned anew when the
+// LevelAnimPlayer.tick), while View → "Animation" is on (App.setAnimation) and the view is in the page. Learned anew when the
 // submap, the event progress or the ROM changes; a ROM edit keeps showing the steps it had until the new ones come
 // (painting changes no 8x8 tile or color: no pause while painting). The view's map and its pickers (pickeranim.ts)
 // follow it: an AnimSource.

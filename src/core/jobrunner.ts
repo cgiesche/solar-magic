@@ -3,16 +3,18 @@
 // tracked, and keeps its result under its key and input while they are unchanged (romdeps.ts). A job during which
 // bytes it read changed starts over before its next step (or before its result is kept). Which job runs next and how
 // long a turn lasts is the owner's.
-// An emulator per lane, set up from a boot snapshot: pictures (CONTEXT.md) from the main one's, results that are no
-// pictures from one that leaves out the display data too (the Map16 tiles' quarters, the colors: gfxDisplaySkipMask,
-// ADR 0008), so that drawing a tile or changing a color keeps them. A lane's emulator keeps a prepared state (a level
-// loaded) for the later jobs there while the bytes preparing it read are unchanged.
+// An emulator per lane, set up from the one boot snapshot they share. A job says what its result shows (bootsnapshot.ts
+// Shows), which decides what its reads leave out: behaviour the display data too (the Map16 tiles' quarters, the
+// colors: ADR 0008), so that drawing a tile or changing a color keeps it; pictures (CONTEXT.md) count it. Where the
+// tilesets' tile data lies the lanes' emulators ask the runner, which learns the tilesets' pointers and keeps them in
+// the result cache. A lane's emulator keeps a prepared state (a level loaded) for the later jobs there while the bytes
+// preparing it read are unchanged.
 
 import type { Rom } from './rom.ts';
 import { LevelEmulator } from './levelemu.ts';
-import { RomReads, holds, perRomState, byFingerprint, type ResultCache, type RomDeps, type RomFingerprint, type Recorded, type Since } from './romdeps.ts';
+import { RomReads, holds, byFingerprint, type ResultCache, type RomDeps, type RomFingerprint, type Recorded, type Since } from './romdeps.ts';
+import type { Shows, LeftOut, RecordOn } from './bootsnapshot.ts';
 import { KeptResults } from './keptresults.ts';
-import { gfxSkipMask, gfxDisplaySkipMask } from './gfxpages.ts';
 import { TILESETS, tilesetPointers, pointersKey } from './tilesets.ts';
 
 export const MEMORY = 256; // keys whose results are kept in memory only (keep: 'memory'), the latest used
@@ -47,7 +49,8 @@ export interface JobSpec<T> {
   key: string;
   input?: string; // the hash of what the result depends on outside the ROM (inputs.ts)
   keep: Keep;
-  picture: boolean; // the result shows what things look like: it reads the display data
+  shows: Shows; // what the result shows: decides the reads it counts (a picture reads the display data, behaviour doesn't)
+  leavesOut?: LeftOut; // bytes it leaves out besides (the overworld's data, owpaths.ts)
   boot?: boolean; // the boot snapshot's reads count for the result (default: true)
   whole?: false; // the result isn't kept itself, only its parts (Part), which give it put together (keep: theirs)
   start: (emu: LevelEmulator, prepare: Prepare, part: Part) => Job<T>;
@@ -63,8 +66,10 @@ export interface JobRun<T> extends JobSpec<T>, Since {
 export interface RunnerDeps {
   rom: Rom;
   results: ResultCache;
-  main?: LevelEmulator; // the booted emulator whose boot snapshot pictures start from (default: an own one)
-  noDisplay?: LevelEmulator; // the one whose boot snapshot the others start from (default: an own one; its skip mask is set)
+  main?: LevelEmulator; // the emulator booted by its owner whose boot snapshot the lanes start from (default: an own one)
+  // instead of main: an emulator of the owner's that the runner boots when its snapshot is stale and the lanes start
+  // from (the probe host's prober's: one boot snapshot for the probes and the jobs)
+  booter?: LevelEmulator;
 }
 
 // a lane emulator's prepared state (result) under its key, with what preparing it read
@@ -81,18 +86,14 @@ export class JobRunner {
   private d: RunnerDeps;
   readonly memory: MemoryResults;
   private emus = new Map<string, LevelEmulator>(); // by lane
-  private main: LevelEmulator | null = null; // own, without deps.main
-  private gfxMask = perRomState(gfxSkipMask); // its skip mask
-  private noDisplay: LevelEmulator | null = null; // own, without deps.noDisplay
+  private main: LevelEmulator | null = null; // own, without deps.main and deps.booter
   private pointerEmu: LevelEmulator | null = null; // learns the tilesets' pointers (tilesetPointers)
-  private display = perRomState((rom) => gfxDisplaySkipMask(rom, this.tilesetPointers())); // displayMask
   private preps = new WeakMap<LevelEmulator, Prepared>(); // by emulator
   started = 0; // jobs (re)started
 
   constructor(deps: RunnerDeps) {
     this.d = deps;
     this.memory = memoryResults(deps.results.fp);
-    if (deps.noDisplay) deps.noDisplay.skipMask = this.displayMask;
   }
 
   run<T>(spec: JobSpec<T>): JobRun<T> {
@@ -108,14 +109,14 @@ export class JobRunner {
       // (stored meanwhile, or loaded from storage)
       const stored = r.whole === false ? undefined : this.stored<T>(r.key, r.input, r.keep);
       if (stored !== undefined) return { result: stored };
-      const emu = r.emu = this.emu(lane, r.picture);
+      const emu = r.emu = this.emu(lane);
       r.reads = new RomReads(rom);
       r.label = null;
-      r.job = r.start(emu, (key, prepare) => this.prepared(emu, key, prepare), (sub, input, learn) => this.part(r, emu, sub, input, learn));
+      r.job = r.start(emu, (key, prepare) => this.prepared(r, emu, key, prepare), (sub, input, learn) => this.part(r, emu, sub, input, learn));
       this.started++;
     }
     r.gen = rom.gen;
-    const emu = r.emu!, job = r.job, t = emu.tracked(() => job.next(), r.boot === false ? null : emu.bootReads);
+    const emu = r.emu!, job = r.job, t = emu.record(r.shows, () => job.next(), this.on(r));
     r.reads.add(t.reads);
     if (!t.result.done) {
       if (typeof t.result.value === 'string') r.label = t.result.value;
@@ -128,14 +129,14 @@ export class JobRunner {
   }
 
   // (inside a job's step)
-  private prepared<S>(emu: LevelEmulator, key: string, prepare: () => S | null): S | null {
+  private prepared<S>(r: JobRun<unknown>, emu: LevelEmulator, key: string, prepare: () => S | null): S | null {
     const p = this.preps.get(emu);
     if (p?.key === key && holds(this.d.rom, p)) {
       emu.count(p.reads);
       return p.result as S;
     }
     this.preps.delete(emu);
-    const t = emu.tracked(prepare);
+    const t = emu.record(r.shows, prepare);
     if (t.result !== null) this.preps.set(emu, { ...t, key });
     return t.result;
   }
@@ -149,7 +150,7 @@ export class JobRunner {
       emu.count(reads);
       return { result: e.data as S, learned: false };
     }
-    const t = emu.tracked(learn, r.boot === false ? null : emu.bootReads);
+    const t = emu.record(r.shows, learn, this.on(r));
     if (t.result !== undefined) this.store(key, input, r.keep, t.result, t.reads);
     return { result: t.result, learned: true };
   }
@@ -167,64 +168,55 @@ export class JobRunner {
     this.storeFor(keep)?.set(key, result, this.d.results.fp.deps(reads), input);
   }
 
-  // the lane's emulator, set up from the boot snapshot for pictures or for results that are no pictures (noDisplayBoot)
-  emu(lane: string, picture: boolean): LevelEmulator {
-    const emu = this.fresh(this.emus.get(lane) ?? null, picture);
+  // what a job's reads are put on top of and leave out besides (its steps' recording is the outermost on its emulator)
+  private on(r: JobSpec<unknown>): RecordOn {
+    return { ...(r.boot === false ? { base: null } : {}), leavesOut: r.leavesOut };
+  }
+
+  // the lane's emulator, set up from the boot snapshot
+  emu(lane: string): LevelEmulator {
+    const emu = this.fresh(this.emus.get(lane) ?? null);
     this.emus.set(lane, emu);
     return emu;
   }
 
-  private fresh(emu: LevelEmulator | null, picture: boolean): LevelEmulator {
-    if (!picture) this.displayMask(); // (first: the pointers it needs are learned at once)
-    const from = picture ? this.mainBoot() : this.noDisplayBoot();
-    if (!emu || emu.rom !== this.d.rom) emu = new LevelEmulator(this.d.rom);
-    emu.skipMask = picture ? () => from.skipMask?.() ?? null : this.displayMask;
-    emu.adoptBoot(from);
+  private fresh(emu: LevelEmulator | null, boot = true): LevelEmulator {
+    const from = this.mainBoot(boot);
+    if (!emu || emu.rom !== this.d.rom) emu = new LevelEmulator(this.d.rom, this.tilesets);
+    if (from.snapshot) emu.adoptBoot(from.snapshot); // (none: it boots itself, and keeps what it booted)
     return emu;
   }
 
-  // The main boot snapshot: deps.main's, else an own one leaving out the GFX file data (gfxSkipMask) as the editor's
-  private mainBoot(): LevelEmulator {
+  // The emulator whose boot snapshot the lanes start from: deps.main (booted by its owner), else deps.booter (booted
+  // here when its snapshot is stale, unless boot is false) or an own one
+  private mainBoot(boot = true): LevelEmulator {
     if (this.d.main) return this.d.main;
-    const rom = this.d.rom;
-    if (!this.main || this.main.rom !== rom) {
-      this.main = new LevelEmulator(rom);
-      this.main.skipMask = () => this.gfxMask(rom);
+    const rom = this.d.rom, booter = this.d.booter;
+    if (booter) {
+      if (boot) booter.ensureBoot();
+      return booter;
     }
+    if (!this.main || this.main.rom !== rom) this.main = new LevelEmulator(rom, this.tilesets);
     this.main.ensureBoot();
     return this.main;
   }
 
-  // The bytes results that are no pictures don't read: the display data (gfxDisplaySkipMask, with the tilesets'
-  // pointers), the GFX file data among them; once per ROM state. Learning the pointers isn't part of the
-  // result asking for the mask.
-  displayMask = (): Uint8Array | null => this.display(this.d.rom);
+  // where the tilesets' tile data lies, for the emulators of this runner's results (LevelEmulator's tilesets)
+  readonly tilesets = (): number[][] => this.tilesetPointers();
 
   // per tileset the pointers of FG Map16 tiles 000-1FF (tilesets.ts), learned once and kept in the result cache.
-  // No picture, though learned from the main boot snapshot as pictures are: the boot snapshot of results that are
-  // no pictures needs the mask, which needs these pointers. Their reads leave out the display data by themselves,
-  // without the boot's reads (tilesetPointers). On an own emulator: the mask is asked for while the lanes' run.
+  // What behaviour leaves out needs them (asked for by the first result showing behaviour in a ROM state; learning
+  // them isn't part of that result), so their own reads leave out the display data by themselves, without the boot's
+  // reads (tilesetPointers). On an own emulator: they are asked for while the lanes' run. It doesn't boot deps.booter
+  // (it boots itself then): they are asked for as that one's first result starts, which boots it inside its recording.
   tilesetPointers(): number[][] {
     return Array.from({ length: TILESETS }, (_, ts) => {
       const key = pointersKey(ts), known = this.stored<number[]>(key, undefined, true);
       if (known !== undefined) return known;
-      const { result, reads } = tilesetPointers(this.pointerEmu = this.fresh(this.pointerEmu, true), ts);
+      const { result, reads } = tilesetPointers(this.pointerEmu = this.fresh(this.pointerEmu, false), ts);
       this.store(key, undefined, true, result, reads);
       return result;
     });
-  }
-
-  // The boot snapshot for results that are no pictures: the same state as the main one's, its reads without the
-  // display data (a title screen's tile or color isn't read by every such result). Booted on its own emulator, again
-  // when what it read changed (a display edit too: the state holds the title screen's colors).
-  private noDisplayBoot(): LevelEmulator {
-    let e = this.d.noDisplay ?? this.noDisplay;
-    if (!e || e.rom !== this.d.rom) {
-      this.noDisplay = e = new LevelEmulator(this.d.rom);
-      e.skipMask = this.displayMask;
-    }
-    e.ensureBoot();
-    return e;
   }
 }
 

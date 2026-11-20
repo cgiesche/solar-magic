@@ -258,7 +258,7 @@ export function* layer2MotionsJob(emu: LevelEmulator, level: number, ov: LevelOv
   const sec = ov.secondaryHeader ? decodeSecondaryHeader(ov.secondaryHeader) : readSecondaryHeader(emu.rom, level);
   let reads: RomReads | null = null;
   const measure = (s: SecondaryHeader) => {
-    const r = emu.tracked(() => layer2Motion(emu, level, { ...ov, secondaryHeader: encodeSecondaryHeader(s) }));
+    const r = emu.record('behaviour', () => layer2Motion(emu, level, { ...ov, secondaryHeader: encodeSecondaryHeader(s) }));
     if (reads) reads.add(r.reads); else reads = r.reads;
     return r.result;
   };

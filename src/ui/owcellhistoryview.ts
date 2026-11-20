@@ -51,6 +51,8 @@ export class CellHistoryPopup {
   private over = false; // the mouse on the popup
   on = loadOn(); // shown at all (View → Cell history, kept in the browser)
   private moving: Moving | null = null;
+  // an entry is being moved to another event
+  get moves(): boolean { return this.moving !== null; }
   private pressAt: { x: number; y: number; cell: number; from: number } | null = null; // the button pressed on a movable entry
   private dragged = false; // the press on an entry became a drag (its click then doesn't choose the event)
 

@@ -245,7 +245,10 @@ export function runMovement(emu: LevelEmulator, mv: TitleMovement): MovementRun 
 }
 
 // the machine before frame `frame` of a run (the last: after its last frame). The emulator's machine is left there.
+// With the title screen picture as booted: a run is kept when the picture is painted (titleMovement: a full
+// picture), so the boot snapshot puts the picture back where the run left layer 3's tilemap as its first machine has it.
 export function runState(emu: LevelEmulator, run: MovementRun, frame: number): SnesState {
+  const boot = emu.bootSnapshot(), first = run.states[0].state.vram as Uint8Array;
   const s = emu.snes, hook = s.hook, f = Math.max(0, Math.min(frame, run.frames));
   let from = run.states[0];
   for (const k of run.states) if (k.frame <= f) from = k;
@@ -253,6 +256,7 @@ export function runState(emu: LevelEmulator, run: MovementRun, frame: number): S
   s.hook = null;
   s.joy1 = 0;
   try { for (let i = from.frame; i < f; i++) s.runFrame(); } finally { s.hook = hook; }
+  boot.putPictureBack(s.vram, first);
   return s.saveState();
 }
 
@@ -262,7 +266,8 @@ export function titleMovement(emu: LevelEmulator): { movement: TitleMovement | n
   const had = kept.get(emu);
   if (had && holds(emu.rom, had)) return had;
   emu.ensureBoot();
-  const r = emu.recordAll(() => {
+  // (a full picture, not the title screen: Mario's way doesn't show its picture, and runState gives a machine the picture)
+  const r = emu.record('full picture', () => {
     const movement = learnMovement(emu);
     return { movement, run: movement ? runMovement(emu, movement) : null, plays: titlePlays(emu, movement) };
   });

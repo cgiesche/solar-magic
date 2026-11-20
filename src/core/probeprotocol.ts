@@ -14,6 +14,7 @@ import type { Level, LevelObject, ScreenExit } from './level.ts';
 import type { EditState } from './inputs.ts';
 import { spriteSetParts } from './spritegfx.ts';
 import type { Keep } from './jobrunner.ts';
+import type { Shows, LeftOut } from './bootsnapshot.ts';
 import type { ObjSpec } from './objthumbs.ts';
 import type { RunStates } from './blockprobe.ts';
 import type { SizeSpec } from './objresize.ts';
@@ -21,7 +22,7 @@ import type { ArcLoad } from './jumparcs.ts';
 import type { Prefab } from './prefabs.ts';
 import type { PrefabSkip } from './prefabplaces.ts';
 import type { OwTriggerSwitches } from './owanimview.ts';
-import type { PathKind, PathShapes } from './owpaths.ts';
+import { OVERWORLD_DATA, type PathKind, type PathShapes } from './owpaths.ts';
 import type { HardWalk } from './owhardpaths.ts';
 import type { EventProgress } from './eventset.ts';
 
@@ -157,58 +158,61 @@ export function learnAhead(j: LearnJob): boolean {
   return j.kind === 'sizes' || (j.kind === 'sprites' && !!j.first?.length);
 }
 
-// Per kind of learn job where its result goes (keep, jobrunner.ts Keep) and whether it is a picture (CONTEXT.md, ADR
-// 0008): the levels' uses go to the entries of each level (the job keeps none); the prefab suggestions and the object
-// boxes to the editor only (it keeps them as a run's and per ROM state); the animated tiles and colors, the tiles of
-// the level as edited, the placement preview and the jump arcs change with every edit (memory only); the others to the
-// result cache. The overworld's jobs run on the overworld's own emulator (layer 1 without an event's changes on a ROM
-// copy's), not on one booted for levels: its boot doesn't count for them (boot false, jobrunner.ts JobSpec); it has no
-// skip mask, so they count the display data, the submaps' views, the save at a progress, layer 1 without an event's
-// changes, the maps at every progress and the saves' level flags there, the World check (no pictures) too: marked
-// pictures (ADR 0008). They change with the map
-// painted, the event progress slider goes through many (memory only). A level's game BG (Map16 numbers, no picture) goes to the result cache; the places of
+// Per kind of learn job where its result goes (keep, jobrunner.ts Keep) and what it shows (bootsnapshot.ts Shows,
+// CONTEXT.md, ADR 0008: as a result on the main thread says it): the levels' uses go to the entries of each level
+// (the job keeps none); the prefab suggestions and the object boxes to the editor only (it keeps them as a run's and
+// per ROM state); the animated tiles and colors, the tiles of the level as edited, the placement preview and the jump
+// arcs change with every edit (memory only); the others to the result cache. The overworld's jobs run on the
+// overworld's own emulator (layer 1 without an event's changes on a ROM copy's), not on one booted for levels: its
+// boot doesn't count for them (boot false, jobrunner.ts JobSpec), and every byte it reads counts, graphics file data
+// too – full pictures, the submaps' views, layer 1 without an event's changes, the maps at every progress and the
+// saves' level flags there, the World check (no pictures) as well (ADR 0008). The save at a progress also scans
+// levels on the job's emulator, whose reads leave out the graphics file data: a picture. They change with the map
+// painted, the event progress slider goes through many (memory only). The path kinds, the path shapes, the reveal
+// walks and the hardcoded paths leave out the overworld's data besides (owpaths.ts OVERWORLD_DATA). A level's game BG
+// (Map16 numbers, no picture) goes to the result cache; the places of
 // a prefab and whether two loads draw the same tiles are asked for once, by a dialog or an action (to the editor only).
 // A sprite set's images are kept as their parts only (whole false, learnParts).
-export const LEARN_KINDS: { [K in LearnJob['kind']]: { keep: Keep; picture: boolean; boot?: false; whole?: false } } = {
-  sprites: { keep: true, picture: true, whole: false },
-  spriteAt: { keep: true, picture: true },
-  spriteBytes: { keep: true, picture: true },
-  uses: { keep: false, picture: false },
-  spriteMem: { keep: true, picture: false },
-  animated: { keep: 'memory', picture: true },
-  layer3: { keep: true, picture: false },
-  levelTiles: { keep: 'memory', picture: false },
-  thumbs: { keep: true, picture: true },
-  preview: { keep: 'memory', picture: true },
-  arcs: { keep: 'memory', picture: false },
-  layer2Motions: { keep: true, picture: false },
-  pathKinds: { keep: true, picture: false },
-  pathShapes: { keep: true, picture: false },
-  revealWalks: { keep: true, picture: false },
-  hardWalks: { keep: true, picture: false },
-  suggest: { keep: false, picture: false },
-  sizes: { keep: false, picture: false },
-  owMap: { keep: 'memory', picture: true, boot: false },
-  owTriggers: { keep: 'memory', picture: true, boot: false },
-  owGameColors: { keep: 'memory', picture: true, boot: false },
-  owScreen: { keep: 'memory', picture: true, boot: false },
-  owViews: { keep: 'memory', picture: true, boot: false },
-  owSprites: { keep: 'memory', picture: true, boot: false },
-  owCustom: { keep: 'memory', picture: true, boot: false },
-  owLooks: { keep: 'memory', picture: true, boot: false },
-  owSave: { keep: 'memory', picture: true, boot: false },
-  owAnimated: { keep: 'memory', picture: true, boot: false },
-  owAnimSteps: { keep: 'memory', picture: true, boot: false },
-  owL1Without: { keep: 'memory', picture: true, boot: false },
-  owExitEdges: { keep: 'memory', picture: true, boot: false },
-  owWorldCheck: { keep: 'memory', picture: true, boot: false },
-  msgRoutine: { keep: true, picture: false },
-  gameBg: { keep: true, picture: false },
-  prefabPlaces: { keep: false, picture: false },
-  sameTiles: { keep: false, picture: false },
-  slippery: { keep: true, picture: false },
-  objectTable: { keep: true, picture: false },
-  scan: { keep: true, picture: false },
+export const LEARN_KINDS: { [K in LearnJob['kind']]: { keep: Keep; shows: Shows; leavesOut?: LeftOut; boot?: false; whole?: false } } = {
+  sprites: { keep: true, shows: 'picture', whole: false },
+  spriteAt: { keep: true, shows: 'picture' },
+  spriteBytes: { keep: true, shows: 'picture' },
+  uses: { keep: false, shows: 'behaviour' },
+  spriteMem: { keep: true, shows: 'behaviour' },
+  animated: { keep: 'memory', shows: 'picture' },
+  layer3: { keep: true, shows: 'behaviour' },
+  levelTiles: { keep: 'memory', shows: 'behaviour' },
+  thumbs: { keep: true, shows: 'picture' },
+  preview: { keep: 'memory', shows: 'picture' },
+  arcs: { keep: 'memory', shows: 'behaviour' },
+  layer2Motions: { keep: true, shows: 'behaviour' },
+  pathKinds: { keep: true, shows: 'behaviour', leavesOut: OVERWORLD_DATA },
+  pathShapes: { keep: true, shows: 'behaviour', leavesOut: OVERWORLD_DATA },
+  revealWalks: { keep: true, shows: 'behaviour', leavesOut: OVERWORLD_DATA },
+  hardWalks: { keep: true, shows: 'behaviour', leavesOut: OVERWORLD_DATA },
+  suggest: { keep: false, shows: 'behaviour' },
+  sizes: { keep: false, shows: 'behaviour' },
+  owMap: { keep: 'memory', shows: 'full picture', boot: false },
+  owTriggers: { keep: 'memory', shows: 'full picture', boot: false },
+  owGameColors: { keep: 'memory', shows: 'full picture', boot: false },
+  owScreen: { keep: 'memory', shows: 'full picture', boot: false },
+  owViews: { keep: 'memory', shows: 'full picture', boot: false },
+  owSprites: { keep: 'memory', shows: 'full picture', boot: false },
+  owCustom: { keep: 'memory', shows: 'full picture', boot: false },
+  owLooks: { keep: 'memory', shows: 'full picture', boot: false },
+  owSave: { keep: 'memory', shows: 'picture', boot: false },
+  owAnimated: { keep: 'memory', shows: 'full picture', boot: false },
+  owAnimSteps: { keep: 'memory', shows: 'full picture', boot: false },
+  owL1Without: { keep: 'memory', shows: 'full picture', boot: false },
+  owExitEdges: { keep: 'memory', shows: 'full picture', boot: false },
+  owWorldCheck: { keep: 'memory', shows: 'full picture', boot: false },
+  msgRoutine: { keep: true, shows: 'behaviour' },
+  gameBg: { keep: true, shows: 'behaviour' },
+  prefabPlaces: { keep: false, shows: 'behaviour' },
+  sameTiles: { keep: false, shows: 'behaviour' },
+  slippery: { keep: true, shows: 'behaviour' },
+  objectTable: { keep: true, shows: 'behaviour' },
+  scan: { keep: true, shows: 'behaviour' },
 };
 export const learnKeep = (j: LearnJob): Keep => LEARN_KINDS[j.kind].keep;
 

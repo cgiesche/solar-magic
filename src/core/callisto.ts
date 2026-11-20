@@ -8,7 +8,8 @@
 // - the folders and list files of its UberASM Tool, GPS and PIXI;
 // - what is not part of the package: Callisto's initial patch (FastROM/SA-1) and its BPS of the overworld,
 //   title screen and credits (Lunar Magic data) – of the overworld's only its layer 1 tiles' Map16 (a
-//   graphics part, owtilebps.ts) and the sample levels' messages (pkgsamples.ts) are taken.
+//   graphics part, owtilebps.ts) and the sample levels' messages (pkgsamples.ts) are taken, of the title
+//   screen only its picture (a graphics part, titlebps.ts).
 
 import { isUberList } from './uberproject.ts';
 import { isGpsListText } from './blocks.ts';
@@ -143,7 +144,7 @@ const LIST_OF: Record<CallistoTool, (text: string) => boolean> = {
 const LEFT_OUT: [string, string][] = [
   ['initial_patch', 'Callisto’s initial patch (FastROM/SA-1 ROM base)'],
   ['overworld', 'the overworld (Lunar Magic data; only its layer 1 tiles\' Map16 and the sample levels\' messages are taken from it)'],
-  ['titlescreen', 'the title screen (Lunar Magic data)'],
+  ['titlescreen', 'the title screen (Lunar Magic data; only its picture is taken from it)'],
   ['credits', 'the credits (Lunar Magic data)'],
 ];
 

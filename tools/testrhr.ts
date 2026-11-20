@@ -23,6 +23,7 @@ import { listPatches } from '../src/core/patchreg.ts';
 import { listPackages } from '../src/core/pkgreg.ts';
 import { loadLevel, readSecondaryHeader, entrancePos, midwaySpot } from '../src/core/level.ts';
 import { messageRoutine, messageRoutineTaken } from '../src/core/messagedraw.ts';
+import { titleTilemap } from '../src/core/titlescreen.ts';
 import { editorImage } from './fixture.ts';
 
 await loadAsar();
@@ -72,7 +73,7 @@ else {
   const parts = {
     'UberASM calls': k.uberasm.calls.length, 'GPS block tiles': k.block.tiles.length, 'PIXI sprite files': k.sprite.files.length, ExGFX: k.gfx.length,
     'FG Map16 tiles': k.map16?.length ?? 0, 'BG Map16 tiles': k.bgMap16?.length ?? 0, 'shared palette colors': k.sharedPal?.length ?? 0,
-    'global animation slots': k.globalAnim?.slots.length ?? 0, 'global GFX files': k.globalGfx?.length ?? 0, 'overworld tiles': k.owTiles?.length ?? 0, 'sound effects': k.sfx?.length ?? 0,
+    'global animation slots': k.globalAnim?.slots.length ?? 0, 'global GFX files': k.globalGfx?.length ?? 0, 'overworld tiles': k.owTiles?.length ?? 0, 'title screen pictures': k.titlePicture?.length ? 1 : 0, 'sound effects': k.sfx?.length ?? 0,
   };
   check(Object.values(parts).every((n) => n > 0) && parts['global animation slots'] === 7 && parts['global GFX files'] === 20 && parts['overworld tiles'] === 21 && parts['sound effects'] === 1,
     `one package with all its parts: ${Object.entries(parts).map(([a, n]) => `${n} ${a}`).join(', ')}`);
@@ -160,6 +161,26 @@ const retry = (tape: { x: number; y: number } | null) => {
   p.play(90); p.play(4, PAD.b); p.play(120);
   check(rom.r8(0x03bc72) === 0x22 && w[RAM.palaceSwitch] === 1 && w[RAM.gameMode] !== GM.level,
     `level 14: the switch palace's message with the Retry System's hijack at $03BC72 – switch ${w[RAM.palaceSwitch]}, game mode ${hx(w[RAM.gameMode])} after it closed`);
+}
+
+// the title screen: the baserom's global animation uploads tiles 2D8-2FF every few frames, there as in a level.
+// The title screen level has the editor's VRAM layout (vrampatch.ts), so they land in the tiles' VRAM and not in
+// the layer 1 tilemap the game has at $2000 (the ground under Mario drawn as graphics data)
+{
+  const t = new LevelEmulator(rom); t.boot();
+  const s = t.snes;
+  s.loadState(t.bootState()); s.joy1 = 0;
+  let tiles = 0;
+  const hook = s.hook;
+  s.hook = { onVramWrite: (a) => { if (a >= 0x5b00 && a < 0x6000) tiles++; } };
+  for (let f = 0; f < 60; f++) s.runFrame();
+  s.hook = hook;
+  // its own title screen picture (export/global/titlescreen.bps) over it: no frame (the top left tile empty), and
+  // none of the copyright line's letters, which the baserom's layer 3 graphics redraw ("Ni89ndo", #548)
+  const map = titleTilemap(t);
+  check(map[0] === 0x38fc && map[24 * 32 + 21] === 0x38fc, `title screen: the baserom's picture (top left tile ${hx(map[0])}, the copyright line's "n" ${hx(map[24 * 32 + 21])})`);
+  check(s.wram[RAM.gameMode] === GM.title && tiles > 0 && s.ppuRegs[7] === 0x31 && s.ppuRegs[8] === 0x39,
+    `title screen: the global animation's tiles 2D8-2FF are uploaded (${tiles} bytes in 60 frames), the layer 1/2 tilemaps are at $3000/$3800 (BG1SC $${hx(s.ppuRegs[7])}, BG2SC $${hx(s.ppuRegs[8])})`);
 }
 
 if (bad) { console.log(`${bad} failed`); process.exit(1); }

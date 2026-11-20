@@ -150,7 +150,7 @@ const kept = new WeakMap<LevelEmulator, { gen: number; reads: RomReads; screen: 
 export function presentsLogo(emu: LevelEmulator, screen: ReachedScreen): PresentsLogo {
   const had = kept.get(emu);
   if (had && had.screen === screen && holds(emu.rom, had)) return had.logo;
-  const r = emu.recordAll(() => learnPresents(emu, screen));
+  const r = emu.record('title screen', () => learnPresents(emu, screen));
   kept.set(emu, { gen: r.gen, reads: r.reads, screen, logo: r.result });
   return r.result;
 }

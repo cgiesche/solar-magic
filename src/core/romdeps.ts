@@ -18,9 +18,13 @@
 // read its bytes. The same for the two pages the shared palettes ($00:B0A0–$00:B881) share with code: every result runs
 // the code from $00:B888 on (the boot), the goal tape and the goal sphere the end of the palette fade at $00:B000.
 // Results that are no pictures leave the colors out (gfxDisplaySkipMask), so changing a color there keeps them (#190).
+// Which reads a result leaves out follows from what it shows (bootsnapshot.ts): a recording is given its mask there.
 // The same for the per-sprite tables (tweakers, INIT/MAIN pointers, PIXI's sprite table), which hold a few bytes of
 // every sprite in each page: found by emulation (spritetables.ts, learnBytePages), so a change of one sprite's entry
 // only drops what loaded that sprite.
+// The title screen picture (its stripe image and the entry pointing to it) is drawn by the boot and written anew by
+// every level's load: the boot snapshot keeps its bytes apart from the boot's other reads (bootsnapshot.ts), and only a
+// result that shows the title screen counts them – painting it keeps what a level's load learned.
 
 import type { Rom } from './rom.ts';
 import type { Snes } from './snes.ts';
@@ -31,6 +35,7 @@ import { overworldDataRanges } from './overworld.ts';
 import { levelDataRanges } from './level.ts';
 import { KeptResults, type Validity } from './keptresults.ts';
 import { SHARED_PALETTES, SHARED_PAL_SIZE } from './sharedpal.ts';
+import { TITLE_STRIPE_PTR } from './titlepicture.ts';
 
 export const PAGE_SHIFT = 8;
 
@@ -41,14 +46,16 @@ export interface RomDeps {
   h2: number;
 }
 
-// pages whose reads are recorded by byte in every ROM state: the level tables, the ROM header page and the shared
-// palettes' first and last page
+// pages whose reads are recorded by byte in every ROM state: the level tables, the ROM header page, the shared
+// palettes' first and last page and the page of the title screen picture's entry in the stripe image table (code all
+// around it that every result runs: painting the picture moves it)
 const FIXED_BYTE_PAGES = new Uint8Array(0x10000);
 FIXED_BYTE_PAGES.fill(1, 0x2e000 >> PAGE_SHIFT, 0x30000 >> PAGE_SHIFT);
 FIXED_BYTE_PAGES[0x7f00 >> PAGE_SHIFT] = 1;
 const SHARED_PAL_PC = snesToPc(SHARED_PALETTES);
 FIXED_BYTE_PAGES[SHARED_PAL_PC >> PAGE_SHIFT] = 1;
 FIXED_BYTE_PAGES[(SHARED_PAL_PC + SHARED_PAL_SIZE - 1) >> PAGE_SHIFT] = 1;
+FIXED_BYTE_PAGES[snesToPc(TITLE_STRIPE_PTR) >> PAGE_SHIFT] = 1;
 
 // runs fn without recording the ROM bytes the editor code reads (Rom.reads): what it reads isn't part of the
 // computation running around it (a level's data read as a load's input, a mask kept per ROM state)
@@ -217,7 +224,7 @@ export class RomReads {
 export interface Recorded<T> { result: T; reads: RomReads; gen: number }
 
 // the emulated CPU whose ROM reads are recorded with the editor code's (Snes)
-type RecordingCpu = Pick<Snes, 'romReads' | 'romSkipMask'>;
+export type RecordingCpu = Pick<Snes, 'romReads' | 'romSkipMask'>;
 
 export interface RecordOptions {
   cpu?: RecordingCpu | null; // its reads are recorded too

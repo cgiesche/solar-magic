@@ -54,19 +54,13 @@ const ptrs = runs.map((r) => r.result);
   rom.data.set(before);
 }
 
-// learning the pointers sets its own mask for the load and restores the emulator's (withSkipMask), after an
-// exception too
+// learning the pointers leaves out the display data for its own load only: a picture recorded on the emulator after
+// it counts the tile data again
 {
-  const own = () => null;
-  emu.skipMask = own;
   tilesetPointers(emu, 0);
-  check(emu.skipMask === own, "the emulator's mask is restored after learning the pointers");
-  let seen: Uint8Array | null = null, thrown = false;
-  try { emu.withSkipMask(new Uint8Array(1), () => { seen = emu.skipMask!(); throw new Error('x'); }); } catch { thrown = true; }
-  check(thrown && seen !== null && emu.skipMask === own, 'the previous mask is restored after an exception');
-  const fnMask = () => null;
-  check(emu.withSkipMask(fnMask, () => emu.skipMask) === fnMask && emu.skipMask === own, 'a function given as the mask is set as it is');
-  emu.skipMask = null;
+  const ts = loadLevel(rom, 0x105).header.tileset, reads = emu.record('picture', () => emu.load(0x105), { base: null }).reads;
+  const pages = ptrs[ts].filter((p) => p >= 0x8000).map((p) => snesToPc(0x0d0000 | p) >> 8);
+  check(pages.some((p) => reads.pages[p] && !runs[ts].reads.pages[p]), 'a picture recorded after learning the pointers counts the tile data');
 }
 
 console.log(fail ? `${fail} FAILED` : 'all ok');

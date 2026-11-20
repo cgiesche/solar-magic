@@ -420,7 +420,7 @@ export function sheetCells(first: number, count: number): number[] {
 
 // An image of the animation: the level's VRAM and CGRAM at one of its steps
 export interface AnimStep { vram: Uint8Array; cgram: Uint8Array }
-// the animation's rhythm, the level's and the overworld's (App.startAnimation, owanimsteps.ts): the steps shown a
+// the animation's rhythm, the level's and the overworld's (levelanimplayer.ts, owanimsteps.ts): the steps shown a
 // second and the most steps emulated
 export const ANIM_STEPS_PER_SECOND = 7.5;
 export const MAX_ANIM_STEPS = 64;

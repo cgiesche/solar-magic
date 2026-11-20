@@ -20,7 +20,7 @@ import { TITLE_COLS, TITLE_ROWS, TITLE_SHOWN_ROWS, titleTilemap, writeTitleScree
 import type { SnesState } from '../core/snes.ts';
 import { MovementView } from './titlemoves.ts';
 import { startPage } from './startpage.ts';
-import { GAME_SCREENS, gameScreenKind, gameScreens, screenPicture, type GameScreenId, type ReachedScreen, type ScreenPicture } from '../core/pregame.ts';
+import { GAME_SCREENS, gameScreenKind, gameScreens, reachedScreenIds, screenPicture, type GameScreenId, type ReachedScreen, type ScreenPicture } from '../core/pregame.ts';
 import { MENU_COLS, MENU_ROWS, menuText, paintMenuCell, paintedOverwritten, writeMenuText, type MenuText } from '../core/menutext.ts';
 import { pcToSnes } from '../core/rom.ts';
 import { presentsLogo, sharedFields, writePresentsValue, type PresentsValue, type LogoObj } from '../core/presents.ts';
@@ -64,7 +64,7 @@ export class GameView {
   private pickPanel = h('div', { class: 'panel game-pick' });
   private pickPixels = 0; // the screen pixels per pixel the tile sheet is drawn at (0: none shown)
   private error = ''; // why there is no title screen to edit
-  private screens: ReachedScreen[] = []; // the screens the game gets into (pregame.ts), as of the ROM shown
+  private screens: GameScreenId[] = []; // the screens the game gets into (pregame.ts), as of the ROM shown
   private screenCanvas = h('canvas', { class: 'game-canvas game-screen', width: W, height: 224 });
   private screenInfo = h('div', { class: 'panel game-pick' });
   private listTimer = 0;
@@ -198,13 +198,13 @@ export class GameView {
   }
   // the list with the screens the game gets into as of the ROM shown
   private listScreens(): void {
-    try { this.screens = gameScreens(this.emulator()); } catch { this.screens = []; }
+    try { this.screens = reachedScreenIds(this.emulator()); } catch { this.screens = []; }
     this.buildList();
   }
   private buildList(): void {
     const item = (label: string, title: string, on: boolean, go: () => void) => h('div', { class: `level-item${on ? ' current' : ''}`, title, onclick: go }, label);
     // the screens reached – and the one shown, also when the game no longer gets there (its page says so)
-    const screens = GAME_SCREENS.filter((k) => this.tab === k.id || this.screens.some((s) => s.id === k.id))
+    const screens = GAME_SCREENS.filter((k) => this.tab === k.id || this.screens.includes(k.id))
       .map((k) => ({ k, el: item(k.name, k.about, this.tab === k.id, () => { this.select(k.id); this.onNav(); }) }));
     const prompts = screens.filter((s) => !s.k.pregame);
     this.list.replaceChildren(
@@ -237,7 +237,9 @@ export class GameView {
 
   // the emulator of the ROM shown (its boot the app's)
   private emulator(): LevelEmulator {
-    if (!this.emu || this.emu.rom !== this.app.rom) { this.emu = new LevelEmulator(this.app.rom); this.emu.adoptBoot(this.app.emu); }
+    if (!this.emu || this.emu.rom !== this.app.rom) this.emu = new LevelEmulator(this.app.rom);
+    // the app's boot snapshot, also when it was booted again (the title screen picture painted): one boot for both
+    this.emu.adoptBoot(this.app.emu.bootSnapshot());
     return this.emu;
   }
 

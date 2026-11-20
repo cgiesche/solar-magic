@@ -9,11 +9,14 @@ import { translevelToLevel, l1XY } from './overworld.ts';
 import { OW_SPRITES, OW_SPRITE_SLOTS, hasOwSpriteSlots } from './owsprites.ts';
 import { editorPatch, musicPatch, BG_HOOK, HEADER_MUSIC_TABLE } from './patches.ts';
 import { lt3Patches, type Lt3Place } from './layer3gfx.ts';
-import { RomReads, record, countReads, PAGE_SHIFT, type Recorded } from './romdeps.ts';
+import { RomReads, record, countReads, unrecorded, PAGE_SHIFT, type Recorded } from './romdeps.ts';
+import { BootSnapshot, recordShown, leaving, places, type Shows, type RecordOn, type Leaving, type Places, type BootReads } from './bootsnapshot.ts';
+import { titlePictureRanges } from './titlepicture.ts';
 import { FrameRecorder, LoadSession, sameKey, type FrameOwner, type LoadFrames, type LoadFramesKey } from './loadframes.ts';
 import { findSpriteTables, spriteTablesHold } from './spritetables.ts';
 import { applyTriggers, type TriggerView } from './extrigger.ts';
 import { inputHash, levelInput } from './inputs.ts';
+import { driveOn } from './drive.ts';
 import { GM, RAM, SPR, MAP_BASE, MAP_SIZE, MAP_HI, CDM16_FLAGS, MUSIC_FADE, getS16, set16, setSpritePos, freezeActors } from './ram.ts';
 
 export const OV_L1 = 0x0000; // overlay offsets
@@ -35,6 +38,7 @@ export const OV_SPR = 0x8000;
 export const OV_BG = 0xa000; // edited BG tilemap (editor format, see bg.ts)
 const OV_BG_HOOK = 0xb000; // LDA #$FF : STA $6A : RTL (BG data bank = overlay)
 const OV_STUB = 0xc000; // JSL stub used to call game routines
+const OVERWORLD_FRAMES = 1501; // a new game from the title screen to its overworld; the overworld loading
 const OV_L3 = 0xd000; // an edited layer 3 tilemap as the level's LT3 file (0x2000 bytes, see layer3map.ts)
 const INIT_TABLES = 0x07f7d2; // game routine that sets up a new sprite's tables (tweakers), X = slot
 // where the level load calls the upload of the level music bank (JSR $8134, 3 bytes; AddmusicK's
@@ -108,11 +112,11 @@ export { MAP_BASE, MAP_SIZE };
 export class LevelEmulator {
   rom: Rom;
   snes: Snes;
-  baseState: SnesState | null = null;
   private romGen: number; // the ROM's generation the emulator is synced to (see sync)
-  // ROM bytes whose reads by the emulated CPU don't count for tracked() results (GFX file and ExAnimation data,
-  // gfxSkipMask; for results that are no pictures the display data too, gfxDisplaySkipMask)
-  skipMask: (() => Uint8Array | null) | null = null;
+  // where the bytes lie that a result leaves out by what it shows (bootsnapshot.ts places)
+  private at: Places;
+  // what the outermost record() running leaves out (a recording inside it leaves out the same); null: none runs
+  private leaving: Leaving | null = null;
   overlay = new Uint8Array(0x10000);
   // a load takes over the frames of the previous load that read the same (loadframes.ts, #448): for the emulator of a
   // view loading one level again and again (an edit, a drag's steps); emulatedFrames: how many the last load emulated
@@ -121,100 +125,141 @@ export class LevelEmulator {
   private lastLoad: LoadFrames | null = null;
   private recorder: FrameRecorder | null = null;
 
-  constructor(rom: Rom) {
+  // tilesets: per tileset the pointers of FG Map16 tiles 000-1FF, from who learns and keeps them (jobrunner.ts): where
+  // the tile data lies that a result showing behaviour leaves out (without them: bootsnapshot.ts places)
+  constructor(rom: Rom, tilesets: (() => number[][]) | null = null) {
     this.rom = rom;
+    this.at = places(tilesets);
     this.snes = new Snes(rom.data);
     this.snes.overlay = this.overlay;
     this.romGen = rom.gen;
   }
 
-  bootReads: RomReads | null = null; // ROM read while booting (every load starts from that state)
-  // the reads the boot's skipMask left out: GFX files uploaded on the title screen stay in VRAM, and a
-  // level with the same files doesn't upload them again – a change makes the snapshot stale as well
-  private bootMasked: RomReads | null = null;
-  private bootRom: Uint8Array | null = null; // the ROM as it was booted
+  // the boot snapshot every load starts from (bootsnapshot.ts): booted here or taken over, shared by reference
+  snapshot: BootSnapshot | null = null;
 
-  // the boot snapshot of another emulator on the same ROM (saves booting again)
-  adoptBoot(other: LevelEmulator): void {
-    this.baseState = other.baseState;
-    this.bootReads = other.bootReads;
-    this.bootMasked = other.bootMasked;
-    this.bootRom = other.bootRom;
+  // takes over a boot snapshot of another emulator on the same ROM (saves booting again)
+  adoptBoot(snapshot: BootSnapshot | null): void {
+    if (snapshot === this.snapshot) return;
+    this.snapshot = snapshot;
     this.romGen = -1; // it may be from an older ROM: checked with the next entry
   }
 
   // Power on and boot to the title screen once; all level loads start from this snapshot.
+  // Its reads are recorded leaving out what the result booting it does (the outermost record() running; outside one
+  // what a picture leaves out) – not what that one leaves out besides, unless the boot's reads leave it out too
+  // (LeftOut.boot): the snapshot is shared, and says what its reads leave out (BootSnapshot.leaves).
   // The title screen runs the game's overworld sprite loader ($04F678) and shows none of them (their OAM tiles off
   // the screen, their RAM unused in a level; a load of the overworld runs the loader again): reads of the slot table
   // aren't recorded, so an overworld sprite edit keeps every result and the snapshot.
+  // It draws the title screen picture (titlepicture.ts), of which nothing is left in a level loaded – its load writes
+  // layer 3's tilemap anew and doesn't read the picture (testtitlescreen.ts): the picture's reads aren't recorded as
+  // the boot's but kept on their own in the snapshot. So painting it boots the snapshot again and keeps every result
+  // that doesn't show the title screen (#550); a result that does counts them (record 'title screen').
   // The per-sprite tables are found from the snapshot (spritetables.ts) when those found for the ROM no longer hold
   // (or none were): the boot's reads are then recorded by byte, and kept by byte only in the tables' pages.
   boot(): void {
     this.sync();
-    const s = this.snes;
+    const s = this.snes, around = this.leaving;
+    const leaves = around?.boot ?? 'picture', mask = around ? around.bootMask : this.at.picture(this.rom);
     s.powerOn();
-    const masked = new RomReads(this.rom), outerMasked = s.romMasked;
+    const masked = new RomReads(this.rom), outerMasked = s.romMasked, outerReads = s.romReads;
+    // not recorded (romSkip: also when the boot runs inside another recording)
+    const skipped: number[] = [];
     const slots = hasOwSpriteSlots(this.rom) ? snesToPc(OW_SPRITES) : -1, slotsEnd = slots + OW_SPRITE_SLOTS * 5;
-    for (let o = slots; o >= 0 && o < slotsEnd; o++) s.romSkip.add(o);
+    for (let o = slots; o >= 0 && o < slotsEnd; o++) skipped.push(o);
+    const picture = new RomReads(this.rom);
+    for (const [a, b] of unrecorded(this.rom, () => titlePictureRanges(this.rom))) {
+      picture.read(a, b - a);
+      for (let o = a; o < b; o++) skipped.push(o);
+    }
+    for (const o of skipped) s.romSkip.add(o);
     s.romMasked = masked;
+    s.romReads = null; // (the boot's own mask applies, not the one of a recording around it: romdeps.ts record)
     const find = !spriteTablesHold(this.rom);
+    let reads: RomReads;
     try {
-      this.bootReads = record(this.rom, () => {
+      reads = record(this.rom, () => {
         let f = 0;
         while (s.wram[RAM.gameMode] !== GM.title) {
           s.runFrame();
           if (++f > 2000) throw new Error('boot did not reach title screen');
         }
-      }, { cpu: s, mask: this.skipMask, counted: false, fine: find }).reads;
+      }, { cpu: s, mask: () => mask, counted: false, fine: find }).reads;
     } finally {
+      s.romReads = outerReads;
       s.romMasked = outerMasked;
-      for (let o = slots; o >= 0 && o < slotsEnd; o++) s.romSkip.delete(o);
+      for (const o of skipped) s.romSkip.delete(o);
     }
-    this.bootMasked = masked;
-    this.baseState = s.saveState();
-    this.bootRom = this.rom.data.slice();
-    if (find) findSpriteTables(this, this.bootReads);
-    this.count(this.bootReads);
+    this.snapshot = new BootSnapshot({ state: s.saveState(), rom: this.rom.data.slice(), leaves, reads, masked, picture });
+    if (find) {
+      // (found as a part of the boot: leaving out what the boot's recording does, whatever the finding names)
+      this.leaving = around ?? { mask, alone: false, boot: leaves, bootToo: false, bootMask: mask };
+      try { findSpriteTables(this, reads); } finally { this.leaving = around; }
+    }
+    this.count(reads);
   }
 
-  // runs fn with skipMask set to mask (a mask or a function returning one), the previous one restored
-  // when it returns or throws
-  withSkipMask<T>(mask: Uint8Array | null | (() => Uint8Array | null), fn: () => T): T {
-    const base = this.skipMask;
-    this.skipMask = typeof mask === 'function' ? mask : () => mask;
-    try { return fn(); } finally { this.skipMask = base; }
+  // the boot run once more on a machine of its own, its reads recorded as `l.boot` says (BootSnapshot.recorded): for
+  // the first result of a snapshot that leaves out other bytes than the result that booted it. Nothing of it counts
+  // for the recordings running: the result asking takes the reads.
+  private bootAgain(l: Leaving): BootReads {
+    return unrecorded(this.rom, () => {
+      const e = new LevelEmulator(this.rom);
+      e.leaving = { mask: l.bootMask, alone: false, boot: l.boot, bootToo: l.bootToo, bootMask: l.bootMask };
+      e.boot();
+      return e.snapshot!;
+    });
+  }
+
+  // the boot's reads a result showing `shows` counts (inside a record(): by what that one leaves out); null: not booted
+  bootReads(shows: Shows): RomReads | null {
+    const s = this.snapshot, l = this.leaving ?? leaving(this.rom, shows, this.at);
+    if (!s) return null;
+    const whole = shows !== 'behaviour' && shows !== 'picture' && !l.bootToo, b = whole ? s : s.recorded(l.boot, () => this.bootAgain(l));
+    if (!whole) return b.reads;
+    const all = new RomReads(this.rom, b.reads);
+    all.add(b.masked);
+    if (shows === 'title screen') all.add(s.picture);
+    return all;
+  }
+
+  // the boot snapshot, booted (again) when there is none or what the boot read changed
+  bootSnapshot(): BootSnapshot {
+    this.ensureBoot();
+    return this.snapshot!;
   }
 
   // the machine at the title screen, as booted (booting first when the ROM changed what the boot read)
   bootState(): SnesState {
-    this.sync();
-    if (!this.baseState) this.boot();
-    return this.baseState!;
+    return this.bootSnapshot().state;
   }
 
-  // runs fn recording the ROM it reads, on top of base (default: the boot's); the reads also
-  // count for an enclosing tracked() call (with counted false only when given to count())
-  tracked<T>(fn: () => T, base: RomReads | null = this.bootReads, counted = true): Recorded<T> {
-    return record(this.rom, fn, { cpu: this.snes, base, mask: this.skipMask, counted });
+  // Runs fn recording the ROM it reads, as a result that shows `shows` counts it (bootsnapshot.ts Shows): behaviour
+  // without the display data and the graphics file and ExAnimation data, a picture without the graphics file and
+  // ExAnimation data, each on top of the boot's reads recorded leaving out the same; a full picture all of them,
+  // fn's and the boot's (a render shows GFX file data); what shows the title screen the title screen picture's
+  // bytes as well (not what only starts from the boot: a level loaded, the title screen movement's run).
+  // What is left out is decided by the outermost record() of the emulator, before fn runs: a record() inside it
+  // leaves out the same, and counts the same of the boot's reads unless it is a full picture.
+  // on: what the reads are put on top of instead of the boot's, bytes left out besides, and whether the reads count
+  // for an enclosing record() (with counted false only when given to count()).
+  record<T>(shows: Shows, fn: () => T, on: RecordOn = {}): Recorded<T> {
+    const around = this.leaving, l = around ?? leaving(this.rom, shows, this.at, on.leavesOut);
+    this.leaving = l;
+    try {
+      return recordShown(this.rom, this.snes, shows, fn, { ...on, leaving: l, snapshot: () => this.snapshot, again: () => this.bootAgain(l) });
+    } finally { this.leaving = around; }
   }
 
-  // reads (of a tracked() call not counted) count for the enclosing tracked() call as if read in it
+  // the skip mask in effect: a recording's, outside one what a picture leaves out (a load's frames are recorded so)
+  private maskNow(): Uint8Array | null {
+    return this.snes.romReads ? this.snes.romSkipMask : this.at.picture(this.rom);
+  }
+
+  // reads (of a record() call not counted) count for the enclosing record() call as if read in it
   count(reads: RomReads): void {
     countReads(this.rom, this.snes, reads);
-  }
-
-  // runs fn recording every ROM byte it and the boot it starts from read, those skipMask leaves out too: what
-  // fn's outcome depends on (a render shows GFX file data)
-  recordAll<T>(fn: () => T): Recorded<T> {
-    const s = this.snes, outer = s.romMasked, masked = new RomReads(this.rom);
-    s.romMasked = masked;
-    try {
-      const r = this.tracked(fn);
-      r.reads.add(masked);
-      if (this.bootReads) r.reads.add(this.bootReads);
-      if (this.bootMasked) r.reads.add(this.bootMasked);
-      return r;
-    } finally { s.romMasked = outer; }
   }
 
   // Every entry (boot, load, startGame, call, animationFrames) first catches up with a changed ROM
@@ -225,25 +270,19 @@ export class LevelEmulator {
     this.snes.rom = this.rom.data;
     if (this.romGen === this.rom.gen) return;
     this.romGen = this.rom.gen;
-    if (this.baseState && this.bootReads && this.bootRom &&
-      (this.bootReads.differ(this.bootRom, this.rom.data) || this.bootMasked?.differ(this.bootRom, this.rom.data))) {
-      this.baseState = null;
-      this.bootReads = null;
-      this.bootMasked = null;
-      this.bootRom = null;
-    }
+    if (this.snapshot && !this.snapshot.holds(this.rom.data)) this.snapshot = null;
   }
 
   // the boot snapshot, booted (again) when there is none or what it read changed
   ensureBoot(): void {
     this.sync();
-    if (!this.baseState) this.boot();
+    if (!this.snapshot) this.boot();
   }
 
   load(level: number, ov: LevelOverride = {}): LevelRender {
     this.ensureBoot();
     const s = this.snes;
-    if (!ov.continueState) s.loadState(this.baseState!);
+    if (!ov.continueState) s.loadState(this.snapshot!.state);
     const w = s.wram;
     w[RAM.marioX + 1] = 0;
     w[RAM.marioY + 1] = 0;
@@ -355,7 +394,7 @@ export class LevelEmulator {
     const trace: ObjectTrace | undefined = ov.trace ? { code: new Set(), reads: new Map(), writes: new Map(), rom: new Set() } : undefined;
     const cpu = s.cpu;
     let sublevels = 1; // $141A as the load set it, while the music call sees 0
-    const skip = trace ? this.skipMask?.() ?? null : null; // not dependencies of the result (GFX, ExAnimation data)
+    const skip = trace ? this.maskNow() : null; // not dependencies of the result (GFX, ExAnimation data; what it leaves out)
     const put = (o: number, v: number, hi: boolean) => {
       let m = trace!.writes.get(own.current);
       if (!m) { m = new Map(); trace!.writes.set(own.current, m); }
@@ -392,12 +431,12 @@ export class LevelEmulator {
     let error: string | undefined;
     // the frames of the previous load taken over where they read the same (#448): with reuse on, not for a game in
     // progress, a traced or source-tracked load, a watched fade-in, the sound unit or the PPU's renderer. (The mask the
-    // frames' ROM reads are recorded with: an enclosing recording's, else the emulator's.)
+    // frames' ROM reads are recorded with: an enclosing recording's, else what a picture leaves out.)
     const reuse = this.reuseLoads && !ov.continueState && !ov.trace && !ov.trackSources && !ov.fadeHook && !s.apu && !s.ppu;
-    const key: LoadFramesKey | null = reuse ? { data: rom.data, base: this.baseState!, patches: saved.map(([o]) => `${o}:${rom.data[o]}`).join(),
-      mask: s.romReads ? s.romSkipMask : this.skipMask?.() ?? null } : null;
+    const key: LoadFramesKey | null = reuse ? { data: rom.data, base: this.snapshot!.state, patches: saved.map(([o]) => `${o}:${rom.data[o]}`).join(),
+      mask: this.maskNow() } : null;
     const last = this.lastLoad;
-    const session = new LoadSession(s, reuse ? (this.recorder ??= new FrameRecorder(s, rom, this.overlay, () => this.skipMask?.() ?? null)) : null,
+    const session = new LoadSession(s, reuse ? (this.recorder ??= new FrameRecorder(s, rom, this.overlay, () => this.at.picture(this.rom))) : null,
       key && last && sameKey(last.key, key) ? last.frames : null, own);
     const frame = () => session.frame();
     const run = () => {      // GM $11 loads the level; hooks only needed there. With the sound unit emulated, the upload of
@@ -461,9 +500,9 @@ export class LevelEmulator {
   // tile: Mario's layer 1 tile on the overworld the new game reached (< 0: he stays at the start)
   private startOn(tile: (wram: Uint8Array) => number, events?: Uint8Array): void {
     this.sync();
-    if (!this.baseState) this.boot();
+    if (!this.snapshot) this.boot();
     const s = this.snes, w = s.wram;
-    s.loadState(this.baseState!);
+    s.loadState(this.snapshot!.state);
     this.untilOverworld(true, events);
     const i = tile(w);
     if (i < 0) return;
@@ -516,17 +555,18 @@ export class LevelEmulator {
   // frames until the overworld runs (newGame: through the title screen and file select, buttons pressed), no intro
   // level; events (startGameAt) set as the file and the overworld load
   private untilOverworld(newGame: boolean, events?: Uint8Array): void {
-    const s = this.snes, w = s.wram;
-    for (let n = 0; w[RAM.gameMode] !== GM.overworld; n++) {
-      if (n > 1500) throw new Error(newGame ? 'new game did not reach the overworld' : 'the overworld did not load');
-      const m = w[RAM.gameMode];
-      if (events && (m === GM.playerSelect || m === GM.overworldLoad)) w.set(events, RAM.owEvents);
-      if (m === GM.overworldLoad) w[RAM.introLevel] = 0; // no intro level
-      s.joy1 = newGame && (n % 16) < 4 ? (m === GM.title ? 0x1000 : 0x0080) : 0;
-      s.runFrame();
-    }
-    s.joy1 = 0;
-    for (let i = 0; i < 3; i++) s.runFrame();
+    const w = this.snes.wram;
+    driveOn(this.snes, (d) => {
+      const there = d.press((m) => m === GM.overworld, OVERWORLD_FRAMES, {
+        button: newGame ? undefined : 0,
+        before: (m) => {
+          if (events && (m === GM.playerSelect || m === GM.overworldLoad)) w.set(events, RAM.owEvents);
+          if (m === GM.overworldLoad) w[RAM.introLevel] = 0; // no intro level
+        },
+      });
+      if (!there) throw new Error(newGame ? 'new game did not reach the overworld' : 'the overworld did not load');
+      d.frames(3);
+    });
   }
 
   // loads level n of translevel tl within the game startGame(tl) began: entered from the overworld tile as in

@@ -172,11 +172,11 @@ console.log('used sprite memory', candidates.map((m) => m.toString(16)).join(' '
   else console.log(`001 $E0 added: ${firstRan} groups played; moved: ${groupResults.ran} (${withE0} groups with it), suggestion ${kept.suggestion?.toString(16)}`);
 }
 
-// what a check reads, as the learner records it (each step tracked, as Learner runs a job)
+// what a check reads, as the learner records it (each step recorded, as Learner runs a job)
 const jobReads = (ctx: SpriteMemContext, m: number, values: number[], sprites: LevelSprite[]) => {
   const job = spriteMemJob(ctx, m, values, sprites), reads = new RomReads(rom);
   for (;;) {
-    const r = emu.tracked(() => job.next());
+    const r = emu.record('behaviour', () => job.next());
     reads.add(r.reads);
     if (r.result.done) return { result: r.result.value, reads };
   }
@@ -210,8 +210,8 @@ class Marked extends Counted {
     const tried = values.slice(0, values.indexOf(s)).filter((v) => v !== 0).length;
     if (!tried) fail('00C reads: no value rejected before the suggestion');
     // the results of the current value and the suggestion (all kept by now)
-    const own = emu.tracked(() => checkSpriteMemory({ ...ctx, groupResults }, 0, groups)).reads;
-    own.add(emu.tracked(() => checkSpriteMemory({ ...ctx, groupResults }, s, groups)).reads);
+    const own = emu.record('behaviour', () => checkSpriteMemory({ ...ctx, groupResults }, 0, groups)).reads;
+    own.add(emu.record('behaviour', () => checkSpriteMemory({ ...ctx, groupResults }, s, groups)).reads);
     const want = groupResults.in(own);
     if (!want) fail('00C reads: no group results marked');
     if (groupResults.in(played.reads) !== want) fail('00C reads: the check playing the groups depends on a rejected value');

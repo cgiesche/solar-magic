@@ -35,9 +35,11 @@ import { MARK } from './marks.ts';
 
 // what is selected: a link, a location (a star/pipe entry exits to the overworld teleport to), a Koopa Kid's place,
 // a tile no link starts at (to link it to a tile on another map)
-type Sel = { kind: 'link'; link: OwLink } | { kind: 'location'; i: number } | { kind: 'koopa'; k: number } | { kind: 'tile'; t: OwTile };
+export type LinkSel = { kind: 'link'; link: OwLink } | { kind: 'location'; i: number } | { kind: 'koopa'; k: number } | { kind: 'tile'; t: OwTile };
 // what is moved: the selected link's target (`target`) or source, a location, a Koopa Kid's place
-type Moved = { sel: Sel; target: boolean };
+export type Moved = { sel: LinkSel; target: boolean };
+// what a cell is asked for (the view's cell request): the tile `from` leads to, or where what is moved goes
+export type LinkAsked = { from: OwTile } | { move: Moved };
 // a drag from a tile (l1Index) to another: a new link, or moving something
 type Drag = { from: number; to: number; move: Moved | null };
 // what a tile links by: an exit path, a star/pipe link, a Koopa Kid's place; null with why it doesn't
@@ -63,10 +65,20 @@ export const LINK_ARROWS_HINT = 'One head: one-way, two heads: both ways.';
 const center = (t: { x: number; y: number }) => ({ x: t.x * 16 + 8, y: t.y * 16 + 8 });
 
 export class LinkLayer {
-  sel: Sel | null = null;
+  // what is meant at the selected tile: the view's (owgesture.ts), it ends with the tile's selection
+  get sel(): LinkSel | null { return this.view.gesture.link; }
+  set sel(s: LinkSel | null) { this.view.gesture.link = s; }
   drag: Drag | null = null;
   // a source chosen to be linked to a tile on another map (the next click), or what is moved there
-  pending: { from: OwTile } | { move: Moved } | null = null;
+  // (the view's cell request, owgesture.ts: asking ends another request, and shows this one)
+  get pending(): LinkAsked | null {
+    const r = this.view.gesture.request;
+    return r?.kind === 'link' ? r.what : null;
+  }
+  set pending(p: LinkAsked | null) {
+    if (p) this.view.askCell({ kind: 'link', what: p });
+    else if (this.pending) this.view.gesture.endRequest();
+  }
   both = true; // new links both ways
   show = false; // every link's arrows (View → "Link arrows"); else the selected tile's
   // the ends of the links painted whose other end is on another map: labelled under their tile (owlevelname.ts
@@ -251,7 +263,7 @@ export class LinkLayer {
   // level's exits teleport to, its Koopa Kid's place) or, with `show`, all; what is dragged or chosen where it goes
   paint(ctx: CanvasRenderingContext2D, lw: number): void {
     const { links, uses } = this.info(), sel = this.sel, d = this.drag, moving = d?.move ?? null, at = this.view.selected;
-    const isMoved = (s: Sel) => !!moving && JSON.stringify(moving.sel) === JSON.stringify(s);
+    const isMoved = (s: LinkSel) => !!moving && JSON.stringify(moving.sel) === JSON.stringify(s);
     this.marks(ctx, lw);
     for (const l of links) {
       const on = sel?.kind === 'link' && sel.link === l;
@@ -366,20 +378,29 @@ export class LinkLayer {
   // ---- interaction (cells of layer 1) ----
   // the selection of what is at cell i (l1Index; -1 none), as a click on the map selects the tile: a link ending there
   // (the one on the submap the user acts on first), else a location there, a Koopa Kid's place or tile, else the tile
-  selectAt(i: number): void {
-    if (i < 0) { this.sel = null; return; }
+  selAt(i: number): LinkSel | null {
+    if (i < 0) return null;
     const t = this.tile(i), found = clickedLinks(this.info().links, i, this.around(i));
     const loc = this.locationAt(t), place = this.koopaPlaceAt(i), koopa = place >= 0 ? place : this.koopaAt(i);
-    this.sel = found[0] ? { kind: 'link', link: found[0] } : loc >= 0 ? { kind: 'location', i: loc } : koopa >= 0 ? { kind: 'koopa', k: koopa } : { kind: 'tile', t };
+    return found[0] ? { kind: 'link', link: found[0] } : loc >= 0 ? { kind: 'location', i: loc } : koopa >= 0 ? { kind: 'koopa', k: koopa } : { kind: 'tile', t };
   }
   // a press at map cell x, y on what the selection leads to – the selected link's other end (not the selected tile
   // itself), the selected location or Koopa Kid's place – not a level tile (moved itself): dragged to move it (released
   // without moving: its tile selected). Whether it was
   grab(x: number, y: number): boolean {
-    if (x < 0 || y < 0 || x >= 32 || y >= 32 || !this.view.views) return false;
+    const move = this.grabs(x, y);
+    if (!move) return false;
+    const i = l1Index(this.view.region, x, y);
+    this.drag = { from: i, to: i, move };
+    this.view.paint();
+    return true;
+  }
+  // what a press at map cell x, y would grab (null: nothing)
+  grabs(x: number, y: number): Moved | null {
+    if (x < 0 || y < 0 || x >= 32 || y >= 32 || !this.view.views) return null;
     const i = l1Index(this.view.region, x, y), s = this.sel;
     // (a level tile there is dragged as itself: moved; its link end is moved by "Change target…")
-    if (!s || this.view.isLevelTile(this.view.levelL1()[i])) return false;
+    if (!s || this.view.isLevelTile(this.view.levelL1()[i])) return null;
     let move: Moved | null = null;
     if (s.kind === 'link') {
       for (const target of [true, false]) {
@@ -393,10 +414,7 @@ export class LinkLayer {
       const p = koopaTeleport(this.rom, s.k);
       if (p && this.koopaTiles(s.k).length && l1Index(this.view.region, p.x, p.y) === i) move = { sel: s, target: true };
     }
-    if (!move) return false;
-    this.drag = { from: i, to: i, move };
-    this.view.paint();
-    return true;
+    return move;
   }
   // a press while a tile is to be chosen (pending): the tile at cell x, y (the cursor at cx, cy), outside the map
   // cancelled. Whether one was pending
@@ -411,6 +429,14 @@ export class LinkLayer {
     this.drag.to = l1Index(this.view.region, x, y);
     this.view.paint();
     this.view.updateStatus();
+  }
+  // Esc: the drag dropped, nothing changed; false: none
+  cancelDrag(): boolean {
+    if (!this.drag) return false;
+    this.drag = null;
+    this.view.paint();
+    this.view.updateStatus();
+    return true;
   }
   // the release (the cursor at cx, cy): a link end dropped in an overlap of submaps' views asks which submap
   up(cx: number, cy: number): void {
@@ -551,6 +577,10 @@ export class LinkLayer {
   status(): string | null {
     const d = this.drag;
     if (d && d.to !== d.from && this.asks(d.move, d.from)) return endChoiceText(this.choice(d.to), d.to) + this.stuckNote(d.move, d.from, d.to);
+    return null;
+  }
+  // the status bar while a tile on another map is to be chosen (null: none is)
+  askedStatus(): string | null {
     if (!this.pending) return null;
     return `Choose the map and click the tile ${'from' in this.pending ? `${tileText(this.pending.from)} leads to` : 'it goes to'} · Esc cancels`;
   }

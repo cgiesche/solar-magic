@@ -8,8 +8,10 @@
 // vertically. Vertical levels already stream rows: there the rows built are the camera's and 14 below
 // it instead of 8 above / 23 below (the tilemap holds 16 block rows) and addresses are mapped. Single
 // tile changes (stripes) go to the shadow and, inside the window, to VRAM (in a vertical level: only on
-// the camera's rows). Everything else (overworld, title, credits) is unchanged:
-// the layout is only switched on by the level load (game mode $12), not in boss/mode 7 rooms.
+// the camera's rows). The layout is switched on wherever the game loads a level ($00A59C, as Lunar Magic
+// does): entering one (game mode $12), the title screen level ($04) and the ending's scene ($1D, run as $1C) –
+// tiles 200-2FF are uploaded there too (a global animation's every frame, which in the game's layout lands
+// in the layer 1 tilemap). Not in boss/mode 7 rooms; everything else (overworld, credits) is unchanged.
 //
 // A horizontal level taller than the game's 27 rows (levelheight.ts: its height in $13D7, its screens'
 // Map16 addresses at $0CB6/$0CD6) doesn't fit a shadow: its layer 1 window is 16 block rows, built from
@@ -139,7 +141,10 @@ db "SMWV"
 
 ; boss/mode 7 rooms ($0D9B != 0, already set here) build their own VRAM layout: left alone
 SetSC:
-  LDA $0100 : CMP #$12 : BNE .van
+  LDA $0100 : CMP #$12 : BEQ .lvl     ; the game modes running the level load $00A59C
+  CMP #$04 : BEQ .lvl
+  CMP #$1C : BNE .van
+.lvl
   LDA $0D9B : BNE .van
   LDA #$31 : STA $2107
   LDA #$39 : STA $2108

@@ -70,7 +70,7 @@ for (const level of [0x105, 0x106, 0x001, 0x127, 0x002, 0x01f, 0x009, 0x011, 0x0
       if (got.idx.length === want.length && want.every((k, j) => got.idx[j] === k && got.val[j] === full[k])) same++;
     }
     check(same === steps && steps + fallback === snaps.length, `level ${level.toString(16)}, ${what}: ${same}/${steps} steps the same as drawn whole (${changed} pixels changed${fallback ? `, ${fallback} drawn whole` : ''}, ${li.geom1.vertical ? 'vertical' : 'horizontal'}${li.layer3 ? ', layer 3' : ''})`);
-    // the frames cycled (twice, back to the first) as App.animTick does, shown by their rectangles only
+    // the frames cycled (twice, back to the first) as LevelAnimPlayer.tick does, shown by their rectangles only
     const W = li.width, H = li.height, rects = frames.map((f) => changedRects(f.idx, W));
     const inside = rects.every((rs) => rs.every((r) => r.x >= 0 && r.y >= 0 && r.w > 0 && r.h > 0 && r.x + r.w <= W && r.y + r.h <= H && r.w <= CHANGE_BLOCK && r.h <= CHANGE_BLOCK));
     const img = base.slice(), shown = base.slice();

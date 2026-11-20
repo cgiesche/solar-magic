@@ -2,12 +2,11 @@
 // a job runs a step at a time and its result is stored with its input and the bytes it read; a job whose read bytes
 // change between two steps starts over before its next one, one whose read bytes don't change keeps running; a
 // prepared state is reused on the lane's emulator while the bytes preparing it read are unchanged, and its reads count
-// for every job using it; pictures start from the main boot snapshot, other results from one without the display data.
+// for every job using it; pictures count the boot's reads with the display data, other results without (one boot snapshot for both).
 import { Rom, snesToPc } from '../src/core/rom.ts';
 import { LevelEmulator } from '../src/core/levelemu.ts';
 import { ResultCache, RomFingerprint, type RomReads } from '../src/core/romdeps.ts';
 import { JobRunner, type JobRun, type JobSpec } from '../src/core/jobrunner.ts';
-import { gfxSkipMask } from '../src/core/gfxpages.ts';
 import { FG_PALS } from '../src/core/sharedpal.ts';
 import { editorImage } from './fixture.ts';
 
@@ -21,7 +20,6 @@ export function learnAtOnce<T>(runner: JobRunner, spec: JobSpec<T>, lane = 'at-o
 export async function checkJobRunner(check: (ok: boolean, what: string) => void): Promise<void> {
   const rom = new Rom(await editorImage());
   const main = new LevelEmulator(rom);
-  main.skipMask = () => gfxSkipMask(rom); // as the editor
   main.boot();
   const results = new ResultCache(new RomFingerprint(rom)), runner = new JobRunner({ rom, results, main });
   const spare = rom.allocWrite(new Uint8Array(0x300)); // a page of its own no load reads
@@ -34,7 +32,7 @@ export async function checkJobRunner(check: (ok: boolean, what: string) => void)
     for (let i = 0; i < n; i++) { steps++; s += rom.r8(spare + i); yield; }
     return s;
   }
-  const job = (key: string, input?: string) => runner.run({ key, input, keep: true, picture: false, start: () => sum(4) });
+  const job = (key: string, input?: string) => runner.run({ key, input, keep: true, shows: 'behaviour', start: () => sum(4) });
 
   // step, store with input
   const a = job('a', 'in');
@@ -60,7 +58,7 @@ export async function checkJobRunner(check: (ok: boolean, what: string) => void)
   // prepared state: reused while what preparing it read is unchanged, its reads counted for every job using it
   let prepared = 0;
   const using = (key: string) => runner.run({
-    key, keep: true, picture: false,
+    key, keep: true, shows: 'behaviour',
     start: (emu, prepare) => (function* () { yield; return prepare('p', () => { prepared++; return rom.r8(spare + 0x100) + 1; }); })(),
   });
   const reads = (r: JobRun<unknown>): RomReads => { toEnd(r); return r.reads; };
@@ -72,9 +70,10 @@ export async function checkJobRunner(check: (ok: boolean, what: string) => void)
   check(toEnd(using('u3')) === 8 && prepared === 2, 'runner: a byte preparing it read changed: prepared again');
   rom.w8(spare + 0x100, 0);
 
-  // picture vs no picture: from the main boot snapshot, or from one without the display data (the shared colors)
-  const pic = runner.emu('pic', true), plain = runner.emu('plain', false), pal = snesToPc(FG_PALS);
+  // picture vs no picture: from the main boot snapshot, on top of the boot's reads with or without the display data
+  // (the shared colors)
+  const pic = runner.emu('pic'), plain = runner.emu('plain'), pal = snesToPc(FG_PALS);
   const has = (r: RomReads | null) => !!r && (!!r.pages[pal >> 8] || r.bytes.has(pal));
-  check(pic.baseState === main.baseState && has(pic.bootReads), 'runner: a picture starts from the main boot snapshot, which read the colors');
-  check(!!plain.baseState && plain.baseState !== main.baseState && !has(plain.bootReads), 'runner: a result that is no picture starts from a boot snapshot without them');
+  check(pic.snapshot === main.snapshot && has(pic.bootReads('picture')), 'runner: a picture starts from the main boot snapshot, which read the colors');
+  check(!!plain.snapshot && !has(plain.bootReads('behaviour')), 'runner: a result that is no picture starts from the boot\'s reads without them');
 }
