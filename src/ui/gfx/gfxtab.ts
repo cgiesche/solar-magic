@@ -34,7 +34,8 @@ import type { Package } from '../../core/pkgreg.ts';
 import { importForPackage } from '../../core/packages.ts';
 import { gfxName, lmAnimName } from './map16tab.ts';
 import { ALT_FILE_MAX } from '../../core/exanim.ts';
-import { PixelSheet, type Rect, type Change } from '../../core/pixelsheet.ts';
+import { BrushDrag, paintButton } from '../brushsurface.ts';
+import { PixelSheet, type Rect, type Change, type Pixels } from '../../core/pixelsheet.ts';
 import { readGfx, writeGfx, hasGfx, gfxBytes, createGfx, importGfxFile, ANIM_FILE, type GfxFile } from '../../core/gfxfiles.ts';
 import { openHeaderDialog } from '../headerdialog.ts';
 import { animsAt, animLinks } from './animtab.ts';
@@ -952,7 +953,7 @@ export class GfxTab implements WsPanel {
       e.preventDefault();
       const a = tileAt(e);
       if (e.button === 0 && isGoto(e)) { this.gotoAnim(a.y * 16 + a.x); return; }
-      if (e.button === 2 || e.shiftKey) { this.stamp(a, tileAt); return; }
+      if (paintButton(e)) { this.stamp(a, tileAt); return; }
       this.dropFloat();
       this.sheet.sel = null;
       this.focusTile = a.y * 16 + a.x;
@@ -988,27 +989,45 @@ export class GfxTab implements WsPanel {
     return `Tile ${hex(t, 2)}${spr}${this.animatedTiles().has(t) ? ' (animated – F12: open its animation)' : ''}`;
   }
 
-  // right drag on the sheet: pastes the pixel editor's tiles with their top left at each tile under the mouse
-  private stamp(a: { x: number; y: number }, tileAt: (e: MouseEvent) => { x: number; y: number }): void {
-    if (!this.canWrite()) return;
-    this.dropFloat();
-    const r = this.sheet.brush();
-    this.watch.hold();
-    let last = -1;
-    const put = (t: { x: number; y: number }) => {
-      if (t.y * 16 + t.x === last) return;
-      last = t.y * 16 + t.x;
-      for (let y = 0; y < r.h; y += 8) for (let x = 0; x < r.w; x += 8) if (t.x * 8 + x < this.W()) this.warnAnimated(t.x * 8 + x, t.y * 8 + y);
-      this.changed(this.sheet.stamp(r, t.x, t.y));
-    };
-    put(a);
-    const move = (ev: MouseEvent) => put(tileAt(ev));
-    const up = () => {
-      window.removeEventListener('mousemove', move);
-      window.removeEventListener('mouseup', up);
+  // Right click/Shift+click on the sheet stamps the pixel editor's tiles with their top left at the tile under the
+  // mouse; a drag stamps on on their grid from the first tile, Esc cancels it with nothing stored (ADR 0011).
+  private stamped: { brush: Pixels; before: Uint8Array } | null = null; // the stroke under way
+  private stampDrag = new BrushDrag({
+    brush: () => ({ w: this.area.w, h: this.area.h }),
+    stamp: (tx, ty) => {
+      const b = this.stamped!.brush;
+      for (let y = 0; y < b.h; y += 8) for (let x = 0; x < b.w; x += 8) {
+        const px = tx * 8 + x, py = ty * 8 + y;
+        if (px >= 0 && py >= 0 && px < this.W() && py < this.H()) this.warnAnimated(px, py);
+      }
+      this.changed(this.sheet.stamp(b, tx, ty));
+      return true;
+    },
+    end: () => {
+      this.stamped = null;
       this.watch.release();
       this.app.renderPause();
       this.commit(this.area.w * this.area.h > 1 ? 'Tiles pasted' : 'Tile pasted');
+    },
+    cancel: () => {
+      this.sheet.restore(this.stamped!.before);
+      this.stamped = null;
+      this.watch.release();
+      this.draw();
+    },
+    pick: () => {},
+  });
+  private stamp(a: { x: number; y: number }, tileAt: (e: MouseEvent) => { x: number; y: number }): void {
+    if (!this.canWrite()) return;
+    this.dropFloat();
+    this.stamped = { brush: this.sheet.brush(), before: this.sheet.snapshot() };
+    this.watch.hold();
+    this.stampDrag.startPaint(a);
+    const move = (ev: MouseEvent) => { this.stampDrag.move(tileAt(ev)); };
+    const up = () => {
+      window.removeEventListener('mousemove', move);
+      window.removeEventListener('mouseup', up);
+      this.stampDrag.up();
     };
     window.addEventListener('mousemove', move);
     window.addEventListener('mouseup', up);
@@ -1319,6 +1338,8 @@ export class GfxTab implements WsPanel {
   key(e: KeyboardEvent): boolean {
     const ctrl = e.ctrlKey || e.metaKey;
     const k = e.key.toLowerCase();
+    // (a stamp stroke on the sheet under way: cancelled, nothing stored)
+    if (e.key === 'Escape' && this.stampDrag.cancel()) return true;
     if (ctrl && k === 'c') { this.copySel(); return true; }
     if (ctrl && k === 'v') { this.pasteSel(); return true; }
     if (ctrl || e.altKey) return false;
