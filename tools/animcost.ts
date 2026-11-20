@@ -1,4 +1,4 @@
-// Cost of the level view's render and of its animation slices (App.refresh, App.startAnimation), on the main thread
+// Cost of the level view's render and of its animation slices (App.refresh, LevelAnimPlayer), on the main thread
 // today (#186): per level the load and draw at once, then per background slice one animation step – 8 game frames
 // emulated (LevelAnimSteps.next) and drawn as the pixels it changes (animatedPixels, or the whole level
 // drawn again when the step changes the backdrop). Reports the slices' time per level and over all levels: a slice

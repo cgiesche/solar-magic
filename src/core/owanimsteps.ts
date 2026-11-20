@@ -1,5 +1,5 @@
 // The overworld's animation on the map and its pickers (#420), the overworld's counterpart of the level view's
-// (App.startAnimation): what the game keeps rewriting in 8x8 tiles and colors on a submap – its water and waves, the
+// (levelanimplayer.ts): what the game keeps rewriting in 8x8 tiles and colors on a submap – its water and waves, the
 // ExAnimation slots (the submap's list and the global one, their event triggers as the save shown has them), the color
 // rotations (the level dots, the lightning, …) – as steps of ANIM_STEP_FRAMES frames each, played in the game's
 // rhythm. Found by emulation, no tables: the overworld loaded at the event progress shown, run on MAX_ANIM_STEPS steps,
@@ -12,7 +12,7 @@ import type { EventProgress } from './eventset.ts';
 import { blit8, clearCell, drawMap16, stepChanges, MAX_ANIM_STEPS, type AnimStep, type PictureAnimation, type TilePixels } from './render.ts';
 import type { RomRead } from './exanim.ts';
 
-export const ANIM_STEP_FRAMES = 8; // the frames of a step: the level animation's (App.startAnimation)
+export const ANIM_STEP_FRAMES = 8; // the frames of a step: the level animation's (levelanimplayer.ts)
 const BG_COLORS = 128; // the colors layers 1 and 2 draw with: 8 palettes of 16 (4bpp)
 const CHAR_BYTES = 0x400 * 32; // a layer's 8x8 tiles (4bpp, tile numbers 000–3FF)
 
