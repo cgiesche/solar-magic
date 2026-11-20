@@ -330,6 +330,12 @@ _Avoid_: background package, graphics import
 **Anim graphic**: one of four graphics A–D (Lunar Magic's ExGFX 60–63), the only source of animation frames; other sources are copied in on import (ADR 0003).
 _Avoid_: AN2, alternative file, animation ExGFX
 
+**Level animation**: the open level shown in the editor as the game goes on showing it after its load – its animated tiles and colors – while the view setting "Animation" is on. Found by emulation; the level is still for it (no Mario, no sprites).
+_Avoid_: ExAnimation (that is what the user edits; this is what the game shows), preview
+
+**Animation step**: the level's (or a submap's) tiles and colors a fixed number of game frames after the step before; the steps repeat, and the level animation shows one after the other in the game's rhythm.
+_Avoid_: frame (a game frame, or an animation slot's frame), phase
+
 **Color rotation**: animation slot types 18–1B rotating a palette range; colors the game sets itself every frame don't rotate (found by emulation).
 _Avoid_: palette rotate, palette cycling
 
